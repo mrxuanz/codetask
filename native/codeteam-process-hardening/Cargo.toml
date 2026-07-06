@@ -1,0 +1,16 @@
+﻿[package]
+name = "codeteam-process-hardening"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "codeteam_process_hardening"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

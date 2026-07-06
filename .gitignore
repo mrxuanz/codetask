@@ -1,0 +1,73 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+release/
+
+# Rust / Cargo
+target/
+**/target/
+
+# Local app data & databases
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs & caches
+*.log*
+.eslintcache
+.prettiercache
+.cache/
+.parcel-cache/
+.turbo/
+.vite/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors / IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Test / coverage
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+
+# Electron / tooling
+.codegraph/
+.cursor/
+.agents/
+.codex/
+native/codeteam-sandbox/node_modules/
+native/codeteam-sandbox/*.node
+native/codeteam-sandbox/helpers/
+*.local
+
+# Windows debug symbols (accidental copy into repo)
+*.pdb

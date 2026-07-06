@@ -1,0 +1,568 @@
+import { turnErrorsEn } from '@shared/turn-errors'
+
+export default {
+  common: {
+    username: 'Username',
+    password: 'Password',
+    usernamePlaceholder: 'Enter username',
+    passwordPlaceholder: 'Enter password',
+    unknown: 'unknown',
+    admin: 'Administrator',
+    operationFailed: 'Operation failed',
+    cancel: 'Cancel',
+    back: 'Back',
+    save: 'Save',
+    preview: 'Preview',
+    delete: 'Delete',
+    loading: 'Loading',
+    captchaLabel: 'Verification code',
+    captchaPlaceholder: 'Enter code',
+    captchaLoadFailed: 'Failed to load verification code',
+    captchaLoading: 'Loading verification code…',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password'
+  },
+  login: {
+    title: 'Sign in',
+    description: 'Sign in with your administrator account',
+    submit: 'Sign in',
+    submitting: 'Signing in…',
+    captchaRequired: 'Please enter the verification code',
+    accountLocked: 'Account temporarily locked until'
+  },
+  setup: {
+    title: 'Setup',
+    description: 'First-time setup — create an administrator account',
+    submit: 'Complete setup',
+    submitting: 'Submitting…',
+    setupTokenLabel: 'Setup token (from server console)',
+    setupTokenPlaceholder: 'Enter the setup token printed in the server console',
+    credentialsHint:
+      'Username: 4-32 chars, starts with a letter, letters/numbers/_/- only; reserved names like admin/root are blocked. Password: 8+ chars with upper, lower, digit, and symbol.',
+    confirmPassword: 'Confirm password',
+    confirmPasswordPlaceholder: 'Enter password again',
+    passwordMismatch: 'Passwords do not match'
+  },
+  bootstrap: {
+    connectionError: 'Cannot connect to service: {error}',
+    bootstrapFailed: 'Failed to connect to service'
+  },
+  errors: {
+    emptyCredentials: 'Username and password are required',
+    alreadyInitialized: 'The system is already initialized',
+    setupRequired: 'Please complete setup first',
+    invalidCredentials: 'Invalid username or password',
+    requestFailed: 'Request failed',
+    unauthorized: 'Not signed in',
+    sessionExpired: 'Session expired',
+    projectNotFound: 'Project not found',
+    threadNotFound: 'Thread not found'
+  },
+  language: {
+    label: 'Language',
+    zh: '中文',
+    ja: '日本語',
+    en: 'English'
+  },
+  folderPicker: {
+    close: 'Close',
+    pathPlaceholder: 'Enter a path, e.g. ~ or E:\\projects',
+    select: 'Select',
+    newFolderPlaceholder: 'New folder name',
+    createAndAdd: 'Create and add',
+    currentDirectory: 'Current directory: {path}',
+    selectCurrent: 'Select current directory',
+    adding: 'Adding…',
+    selectRequired: 'Please select a directory',
+    folderNameRequired: 'Enter a folder name to create',
+    browseFailed: 'Failed to browse directory',
+    parentFailed: 'Failed to open parent directory',
+    addFailed: 'Failed to add project',
+    goParent: 'Parent directory'
+  },
+  workspace: {
+    section: {
+      workspace: 'Workspace',
+      projects: 'Projects'
+    },
+    nav: {
+      chat: 'Chat',
+      tasks: 'Tasks',
+      settings: 'Settings',
+      createTask: 'Create task'
+    },
+    addProject: 'Add local folder',
+    addProjectHint: 'Add local folder…',
+    loading: 'Loading…',
+    noThreads: 'No threads yet',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    layout: {
+      expandPanel: 'Expand {label}',
+      collapsePanel: 'Collapse {label}'
+    },
+    newThread: 'New thread',
+    newThreadInProject: 'New thread in {project}',
+    selectProject: 'Select a project on the left, or add a local folder to get started',
+    noThreadHint: 'No threads yet. Click "New thread" to start planning',
+    switchingCore: 'Switching CLI…',
+    running: 'Running…',
+    lastRunFailed: 'Last run failed',
+    coreUnavailable: 'Current CLI is unavailable. Install it and try again.',
+    loadingMessages: 'Loading messages…',
+    loadThreadFailed: 'Failed to load conversation',
+    switchCoreFailed: 'Failed to switch CLI',
+    sendFailed: 'Failed to send message',
+    relativeHours: '{n}h ago',
+    relativeMinutes: '{n}m ago',
+    sidebar: {
+      rename: 'Rename',
+      removeProject: 'Remove from workspace',
+      deleteThread: 'Delete conversation',
+      confirmRemoveProjectTitle: 'Remove project',
+      confirmRemoveProjectMessage:
+        'Remove "{name}" from the workspace? The local folder will not be deleted.',
+      confirmDeleteThreadTitle: 'Delete conversation',
+      confirmDeleteThreadMessage: 'Delete conversation "{name}"? This cannot be undone.',
+      renameThreadTitle: 'Rename conversation',
+      renamePlaceholder: 'Conversation name'
+    },
+    composer: {
+      placeholder: 'Ask for follow-up changes',
+      attachment: 'Attachment',
+      addAttachment: 'Add attachment (image or file)',
+      send: 'Send',
+      thinking: 'Thinking',
+      thinkingStreaming: 'Thinking…',
+      thinkingDone: 'Thought',
+      thinkingDoneWithDuration: 'Thought ({duration})',
+      thinkingDurationSeconds: '{n}s'
+    },
+    core: {
+      claude: 'Claude',
+      claudeCode: 'Claude Code',
+      codex: 'Codex'
+    },
+    demo: {
+      userMessage:
+        'Help me build a simple Vue 3 + Vite blog project. No backend API — use local Markdown files as the data source.',
+      assistantMessage:
+        '## Scope\n\n- Scaffold a Vue 3 + Vite project\n- Build Markdown article list and detail pages\n- Use local files as the data source — no backend API\n\n## Architecture\n\n- Routes: home list + article detail\n- Data: read Markdown from a `content/` directory at build or runtime\n\n## Error handling\n\n- Friendly message when a file is missing\n- 404 page for unknown routes\n\n## Quality bar\n\n- TypeScript strict mode\n- Clear component boundaries and readable styling'
+    },
+    tasks: {
+      title: 'Task list',
+      total: '{count} major task(s)',
+      empty: 'No tasks in this filter',
+      searchPlaceholder: 'Search tasks…',
+      searchEmpty: 'No matching tasks',
+      lifecycle: {
+        inProgress: 'In progress',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled'
+      },
+      selectHint: 'Select a task on the left to view the execution tree and parameters',
+      backToList: 'Back to task list',
+      loadFailed: 'Failed to load task list',
+      detailFailed: 'Failed to load task detail',
+      executionTree: 'Execution tree',
+      taskParameters: 'Task parameters',
+      runHistory: 'Run history',
+      cliLabel: 'CLI: {summary}',
+      filters: {
+        all: 'All',
+        pending: 'Queued',
+        planning: 'Planning',
+        planReady: 'Plan ready',
+        planConfirmed: 'Plan confirmed',
+        running: 'Running',
+        paused: 'Paused',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled'
+      },
+      actions: {
+        pause: 'Pause',
+        resume: 'Resume',
+        continue: 'Continue',
+        retryTask: 'Retry task',
+        restart: 'Restart',
+        cancel: 'Cancel',
+        delete: 'Delete'
+      },
+      actionFailed: 'Task action failed',
+      progress: {
+        label: 'Completion',
+        planLabel: 'Plan generation',
+        executionLabel: 'Execution',
+        waiting: 'Waiting to start',
+        planningFailed: 'Plan generation failed',
+        needsAuth: 'CLI not authenticated on this machine — log in locally first',
+        cleanupFailed: 'Sandbox crashed — restart the app and try again',
+        planReady: 'Plan generated',
+        planStepsDone: 'Plan {done}/{total} steps',
+        stepsDone: 'Completed {done}/{total} sub-tasks',
+        planning: 'Generating plan {done}/{total}',
+        planningPartial: 'Generating plan · {done} steps done',
+        planningRunning: 'Generating plan…',
+        planFinalizing: 'Plan structure ready, finalizing…',
+        executionDone: 'Completed {done}/{total}',
+        executionFailed: 'Execution failed',
+        executionPaused: 'Paused · {done}/{total}',
+        executionRunning: 'Running {done}/{total}',
+        executionStarting: 'Starting execution…',
+        code: {
+          'plan.pending': 'Queued, waiting for the previous task to finish or pause…',
+          'plan.planning': 'Generating plan…',
+          'plan.planning_partial': 'Generating plan · {done} steps done',
+          'plan.planning_failed': 'Plan generation failed',
+          'plan.needs_auth': 'CLI not authenticated on this machine — log in locally first',
+          'plan.cleanup_failed': 'Sandbox crashed — restart the app and try again',
+          'plan.plan_ready': 'Plan generated',
+          'plan.draft_unlocked': 'Draft unlocked; execution tree cleared',
+          'plan.tree_not_ready': 'Execution tree not ready yet',
+          'plan.regenerating': 'Regenerating execution plan…',
+          'execution.pending': 'Queued, waiting for the previous task to finish or pause…',
+          'execution.starting': 'Starting execution…',
+          'execution.resuming': 'Resuming execution…',
+          'execution.stale_running':
+            'Execution was paused after app restart; click resume to continue',
+          'execution.completed': 'Execution completed',
+          'execution.failed': 'Execution failed',
+          'execution.running_task': 'Running {id}',
+          'execution.verifying_slice': 'Verifying slice {id}',
+          'execution.verifying_milestone': 'Verifying milestone {id}',
+          'execution.slice_accepted': 'Slice {id} accepted',
+          'execution.milestone_accepted': 'Milestone {id} accepted',
+          'execution.slice_blocked': 'Slice {id} verification blocked',
+          'execution.milestone_blocked': 'Milestone {id} verification blocked',
+          'execution.slice_inconclusive_exhausted':
+            'Slice {id} verification inconclusive after {maxAttempts} attempts',
+          'execution.milestone_inconclusive_exhausted':
+            'Milestone {id} verification inconclusive after {maxAttempts} attempts',
+          'execution.evidence_incomplete': 'Task evidence chain incomplete',
+          'execution.evidence_missing': 'Structured evidence package missing',
+          'execution.recovery_infra_retry': 'Retrying {id}',
+          'execution.recovery_prep_injected': 'Evidence repair task injected',
+          'execution.recovery_repair_injected': 'Repair task injected',
+          'execution.continuing_task': 'Continuing from {id}',
+          'execution.workflow_deadlock': 'No ready subtasks; workflow blocked',
+          'execution.workflow_failed_block': 'Failed subtasks present; workflow blocked'
+        }
+      },
+      status: {
+        pending: 'Queued',
+        planning: 'Planning',
+        plan_editing: 'Reviewing plan',
+        plan_confirmed: 'Confirmed',
+        plan_ready: 'Plan ready',
+        running: 'Running',
+        paused: 'Paused',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled'
+      },
+      tree: {
+        empty: 'No plan data yet',
+        planned: 'Planned',
+        queued: 'Queued',
+        pending: 'Pending plan',
+        cli: 'CLI: {name}',
+        milestoneFallback: 'Milestone {n}',
+        sliceFallback: 'Slice {n}',
+        exec: {
+          completed: 'Completed',
+          in_progress: 'Running',
+          failed: 'Failed',
+          pending: 'Waiting',
+          queued: 'Queued',
+          skipped: 'Skipped',
+          'retry-queued': 'Retry queued',
+          'waiting-on-dependency': 'Waiting on prep',
+          blocked: 'Blocked'
+        },
+        statusIconHint: 'Task status (○ waiting · ◉ running · ✓ done)',
+        referenceCount: 'Refs ×{count}'
+      },
+      planNode: {
+        clickHint:
+          'Click a milestone, slice, or task row to view details and verification info below',
+        accordionHint:
+          'Expand milestones, slices, or tasks with the chevron to view details and edit CLI',
+        detailTitle: 'Node details',
+        selectHint: 'Click a milestone, slice, or task in the execution tree',
+        milestone: 'Milestone',
+        slice: 'Slice',
+        successCriteria: 'Success criteria',
+        acceptanceSignals: 'Acceptance signals',
+        noAcceptanceSignals: 'No acceptance signals',
+        expectedArtifacts: 'Expected artifacts',
+        noExpectedArtifacts: 'No expected artifacts',
+        verificationStatus: 'Verification status',
+        runtimeStatus: 'Runtime status',
+        taskCliHint: 'Assign the execution CLI for this sub-task only'
+      },
+      parameters: {
+        selectHint: 'Click a task in the execution tree to view parameters',
+        title: 'Task title',
+        kind: 'Task kind',
+        abilityCli: 'Ability / CLI',
+        description: 'Description',
+        noDescription: 'No description',
+        context: 'Execution context',
+        contextPlaceholder: 'Full context will appear here after the planner generates the plan.',
+        references: 'References',
+        referenceReason: 'Assignment note: {reason}',
+        noReferenceDescription: 'No reference description',
+        referencesEditHint: 'Select references this task should use and explain why.',
+        referenceReasonLabel: 'Assignment note',
+        referenceReasonPlaceholder: 'Explain how these references apply to this task…',
+        referenceRequired: 'required',
+        saveReferences: 'Save references',
+        executionOutcome: 'Execution outcome',
+        recoveryKind: 'Classification',
+        recoveryAction: 'Recovery action',
+        recoveryAttempt: 'Attempt',
+        evidenceDetail: 'Evidence detail',
+        evidenceLoading: 'Loading full evidence…',
+        evidenceLoadFailed: 'Could not load evidence detail',
+        evidenceUnavailable: 'Evidence detail is not available (expired or not yet submitted)',
+        evidenceExpand: 'Show all',
+        evidenceCollapse: 'Show less'
+      },
+      history: {
+        empty: 'No run history yet'
+      }
+    },
+    draftPanel: {
+      title: 'Drafts & execution tree',
+      empty: 'No drafts yet — describe requirements in the chat to generate one',
+      chatNotice: 'Draft',
+      untitled: 'Untitled draft',
+      statusEditing: 'Editing',
+      statusConfirmed: 'Confirmed',
+      statusArchived: 'Archived',
+      executionTree: 'Execution tree',
+      editArea: 'Editor',
+      editDraft: 'Edit draft',
+      centerEmpty:
+        'Describe requirements in the chat on the left, or wait for a draft to be generated',
+      planNotReady: 'Execution tree not ready yet. Confirm the draft in step 2 first.',
+      confirmPlan: 'Confirm plan and queue task',
+      launchPlan: 'Launch and queue',
+      launchRequiresDesignSession:
+        'Launch via design session (ds-*); legacy job confirm is disabled',
+      confirmDraft: 'Confirm draft and generate plan',
+      confirmedHint: 'Draft confirmed. Review the execution tree below.',
+      unlockDraft: 'Unlock draft',
+      unlockDraftTitle: 'Unlock draft and clear execution tree',
+      unlockDraftMessage:
+        'Unlocking clears the current execution tree and makes the draft editable again. You will need to confirm the draft and regenerate the plan. This cannot be undone.',
+      unlockDraftConfirm: 'Unlock',
+      referenceManifestStaleHint:
+        'Reference corpus changed since the last freeze. Re-freeze before launch.',
+      refreezeCorpus: 'Re-freeze reference corpus',
+      refreezingCorpus: 'Freezing…',
+      refreezeSuccess: 'Reference corpus re-frozen. You can launch and queue now.',
+      corpusPlanEditHint: 'Corpus changes during planning require re-freeze before launch.',
+      corpusLoading: 'Loading corpus…'
+    },
+    create: {
+      selectProjectTitle: 'Select project folder',
+      selectProjectHint:
+        'Choose an existing project or add a local folder to start creating a task.',
+      projectDialogTitle: 'New task',
+      projectDialogHint: 'Pick a workspace directory to start a new task draft.',
+      tabBrowseDirectory: 'Choose directory',
+      tabRecentDirectories: 'Recent directories',
+      recentDirectoriesEmpty: 'No recent projects yet. Add a folder under Choose directory first.',
+      existingProjects: 'Existing projects',
+      addFolder: 'Add local folder',
+      newDraftThread: 'New task thread',
+      draftListTitle: 'Draft list',
+      draftListHint:
+        'All create-task drafts live here. Resume in-progress work or open completed archives.',
+      startNew: 'New task',
+      backToDraftList: 'Back to draft list',
+      draftListEmpty: 'No drafts yet',
+      draftIncompleteEmpty: 'No in-progress drafts',
+      draftSearchPlaceholder: 'Search title, project…',
+      draftSearchEmpty: 'No matching drafts',
+      draftFilterAll: 'All',
+      draftFilterIncomplete: 'In progress',
+      draftFilterComplete: 'Completed',
+      draftStatusLaunched: 'Completed',
+      draftStatusInProgress: 'In progress',
+      draftStatusCollecting: 'Collecting requirements',
+      draftStatusPlanningFailed: 'Planning failed',
+      planningFailedTitle: 'Execution tree generation interrupted',
+      retryPlanning: 'Retry plan generation',
+      retryingPlanning: 'Retrying…',
+      completedTitle: 'Task submitted',
+      completedHint: 'Draft and execution tree are locked. Track progress in the task list.',
+      completedDraftTag: 'Draft',
+      completedPlanTag: 'Execution tree',
+      completedDraftMissing: 'Draft content not found',
+      viewTask: 'View task',
+      step0Hint:
+        'Describe the task requirements, scope, and constraints in the chat on the left. When enough information is collected, a draft will be generated via MCP and you will move to step 2.',
+      prevStep: 'Previous',
+      nextStep: 'Next',
+      stepProgress: 'Step {current}/{total}',
+      queuedSuccess: 'Execution tree confirmed. Task added to the queue.',
+      steps: {
+        collect: 'Requirements',
+        draft: 'Draft review',
+        executionTree: 'Execution tree'
+      },
+      rollbackToCollect: 'Back to requirements',
+      rollbackToDraft: 'Back to draft review',
+      rollbackReason: 'User requested phase rollback from UI'
+    },
+    draft: {
+      badge: 'Task Launch Draft',
+      statusLaunched: 'Launched',
+      statusPending: 'Pending',
+      requirementsContract: 'Requirements contract',
+      confirmed: 'Confirmed',
+      pendingConfirm: 'Pending',
+      confirmedAt: 'Confirmed at {time}',
+      confirming: 'Confirming…',
+      confirmContract: 'Confirm requirements contract',
+      unlockContract: 'Unlock contract',
+      unlockingContract: 'Unlocking…',
+      unlockContractFailed: 'Failed to unlock contract',
+      markdownEdit: 'Edit',
+      markdownPreview: 'Preview',
+      markdownEmpty: 'No content',
+      saving: 'Saving…',
+      contractSaveFailed: 'Failed to save requirements contract',
+      abilitiesCli: 'Abilities / CLI',
+      selectCli: 'Select CLI',
+      cliUnavailable: 'unavailable',
+      references: 'References',
+      referencesHint:
+        'Upload attachments or link a local corpus directory. Images, directories, and non-text files need a plan reference note for the planner.',
+      localCorpusAdd: 'Add local corpus',
+      localCorpusDialogTitle: 'Select local corpus directory',
+      localCorpusDialogHint:
+        'Browse directories accessible to the server, then describe how the corpus should be used.',
+      localCorpusSelectDirectory: 'Select this directory',
+      localCorpusPathLabel: 'Directory path',
+      localCorpusNameLabel: 'Display name',
+      localCorpusNamePlaceholder: 'e.g. Auth service docs',
+      localCorpusDescriptionPlaceholder:
+        'Describe what this corpus is for — error codes, middleware, routing patterns…',
+      localCorpusDescriptionRequired: 'Enter a description for this local corpus',
+      localCorpusAddFailed: 'Failed to add local corpus',
+      localCorpusAdding: 'Adding…',
+      localCorpusBadge: 'Local corpus',
+      referenceDescriptionLabel: 'Plan reference note',
+      referenceDescriptionPlaceholder:
+        'Which page or feature does this show? Layout, copy, and interaction details to match…',
+      referenceDescriptionRequired:
+        'Fill plan reference notes for all image/file attachments before generating the plan.',
+      referenceUploadDialogTitle: 'Describe reference files',
+      referenceUploadDialogHint:
+        'These attachments will be added to the reference corpus. Describe how the planner and tasks should use them.',
+      referenceSaveFailed: 'Failed to save reference note',
+      uploadReferences: 'Upload references',
+      uploadingReferences: 'Uploading…',
+      importFromChat: 'Import from conversation',
+      noReferences:
+        'No references yet. Upload attachments, link a local directory, or import from chat.',
+      importDialogTitle: 'Import attachments from conversation',
+      importDialogEmpty: 'No importable attachments in this conversation',
+      importing: 'Importing…',
+      importSelected: 'Import selected',
+      launchedHint: 'Plan submitted. Open Tasks in the sidebar to track progress.',
+      readyHint: 'Requirements confirmed. Select a CLI for each ability, then generate the plan.',
+      pendingHint: 'Confirm the requirements contract, select CLIs, then generate the plan.',
+      generatePlan: 'Generate plan',
+      submitting: 'Submitting…',
+      uploadFailed: 'Upload failed',
+      deleteFailed: 'Delete failed',
+      importFailed: 'Import failed',
+      confirmFailed: 'Confirmation failed',
+      launchFailed: 'Failed to start',
+      unlockFailed: 'Failed to unlock draft'
+    },
+    settings: {
+      title: 'Settings',
+      sidebar: 'SETTINGS',
+      loading: 'Loading settings…',
+      saving: 'Saving…',
+      save: 'Save',
+      loadFailed: 'Failed to load settings',
+      saveFailed: 'Failed to save settings',
+      sections: {
+        language: 'Language',
+        sandbox: 'Sandbox',
+        controlPlane: 'Control Plane',
+        mcp: 'MCP',
+        prompts: 'Prompts'
+      },
+      sandbox: {
+        title: 'Sandbox',
+        description: 'Outer sandbox health status and runtime dependency checks.',
+        loading: 'Loading sandbox status…',
+        native: 'Native module',
+        platformRuntime: 'Platform runtime',
+        supervisor: 'Supervisor',
+        windowsSetup: 'Windows setup',
+        checkOk: 'OK',
+        unknown: 'Unknown',
+        status: {
+          ready: 'Ready',
+          degraded: 'Degraded',
+          unavailable: 'Unavailable',
+          disabled: 'Disabled'
+        }
+      },
+      languageSection: {
+        title: 'Language',
+        description: 'Choose the display language for the application.'
+      },
+      controlPlane: {
+        title: 'Control Plane Cores',
+        description:
+          'Assign default CLIs for planner and verifier roles, separate from the conversation thread CLI.',
+        planner: 'Planner',
+        sliceVerifier: 'Slice Verifier',
+        milestoneVerifier: 'Milestone Verifier',
+        unavailable: 'unavailable'
+      },
+      prompts: {
+        title: 'Prompt Policies',
+        description:
+          'Configure system prompts for conversation, Planner, Slice Verifier, and Milestone Verifier.',
+        conversation: 'Conversation (Main Agent)',
+        planner: 'Planner',
+        sliceVerifier: 'Slice Verifier',
+        milestoneVerifier: 'Milestone Verifier',
+        useDefault: 'Use default prompt',
+        systemPrompt: 'System Prompt',
+        resetDefault: 'Reset to default'
+      },
+      mcp: {
+        title: 'Supplementary MCP',
+        description:
+          'Configure user extension MCP per role and CLI. Controlled system MCP is injected at runtime and merged.',
+        mergeHint:
+          'Only user extension MCP belongs here. Controlled role MCP is injected per session at runtime and merged without exposing either side.',
+        roles: {
+          conversation: 'Conversation',
+          task: 'Task execution',
+          verification: 'Verification (Planner / Verifier)'
+        },
+        rootKey: 'Root key: {key}',
+        resetCli: 'Clear',
+        invalidJson: 'Invalid JSON',
+        constraintsTitle: 'Managed Constraints',
+        reservedNames: 'RESERVED SERVER NAMES',
+        rootKeys: 'ROOT KEYS'
+      }
+    }
+  },
+  turnErrors: turnErrorsEn
+} as const

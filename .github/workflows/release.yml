@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Ensure release exists
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+
+  build-and-upload:
+    name: ${{ matrix.name }}
+    needs: prepare-release
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            runner: macos-15
+            build_command: npm run build:sandbox && npm run build && node scripts/electron-mirror-env.mjs electron-builder --mac dmg zip --arm64 --publish never
+            release_files: |
+              *-macos-arm64.dmg
+              *-macos-arm64.zip
+          - name: Windows x64
+            runner: windows-2025
+            build_command: npm run build:sandbox && npm run build && node scripts/electron-mirror-env.mjs electron-builder --win nsis zip portable --x64 --publish never
+            release_files: |
+              *-windows-x64-setup.exe
+              *-windows-x64-setup.exe.blockmap
+              *-windows-x64.zip
+              *-windows-x64-portable.exe
+          - name: Linux x64
+            runner: ubuntu-24.04
+            build_command: npm run build:sandbox && npm run build && node scripts/electron-mirror-env.mjs electron-builder --linux AppImage deb --x64 --publish never
+            release_files: |
+              *-linux-x86_64.AppImage
+              *-linux-amd64.deb
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            build_command: npm run build:sandbox && npm run build && node scripts/electron-mirror-env.mjs electron-builder --linux AppImage deb --arm64 --publish never
+            release_files: |
+              *-linux-arm64.AppImage
+              *-linux-arm64.deb
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build release assets
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: ${{ matrix.build_command }}
+
+      - name: Normalize Windows portable asset name
+        if: matrix.name == 'Windows x64'
+        shell: pwsh
+        run: |
+          $portable = Get-ChildItem -Path dist -Filter '*-windows-x64*.exe' |
+            Where-Object { $_.Name -notlike '*-setup.exe' -and $_.Name -notlike '*-setup.__uninstaller.exe' } |
+            Select-Object -First 1
+
+          if (-not $portable) {
+            Write-Error 'Windows portable artifact was not produced.'
+            exit 1
+          }
+
+          if ($portable.Name -like '*-portable.exe') {
+            Write-Host "Windows portable artifact already normalized: $($portable.Name)"
+            exit 0
+          }
+
+          $targetName = $portable.Name -replace '\.exe$', '-portable.exe'
+          Rename-Item -LiteralPath $portable.FullName -NewName $targetName
+          Write-Host "Renamed Windows portable artifact: $($portable.Name) -> $targetName"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          working_directory: dist
+          files: ${{ matrix.release_files }}
+          fail_on_unmatched_files: true
+          overwrite_files: true

@@ -1,0 +1,41 @@
+{
+  "milestones": [
+    {
+      "title": "Smoke 探针",
+      "description": "在工作区创建一个探针文件，用于快速验证 CLI 执行链路",
+      "successCriteria": "工作区根目录存在 SMOKE.txt，内容为 ok",
+      "slices": [
+        {
+          "title": "写入探针",
+          "description": "创建单个探针文件",
+          "successCriteria": "SMOKE.txt 存在且内容为 ok",
+          "dependsOnSliceRefs": [],
+          "tasks": [
+            {
+              "title": "创建 SMOKE.txt",
+              "description": "在工作区根目录写入探针文件",
+              "taskKind": "project-setup",
+              "abilityCode": "project-setup",
+              "successCriteria": "SMOKE.txt 内容为 ok（单行）"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "m1-s1-t1",
+      "milestoneIndex": 1,
+      "sliceIndex": 1,
+      "taskIndex": 1,
+      "title": "创建 SMOKE.txt",
+      "description": "在工作区根目录写入探针文件",
+      "taskKind": "project-setup",
+      "abilityCode": "project-setup",
+      "contextMarkdown": "### Read First\n- 工作区: {{WORKSPACE}}\n- 空目录即可\n\n### Files\n- SMOKE.txt\n\n### Constraints\n- 只创建这一个文件\n- 不要初始化框架或安装依赖\n\n### Do\n1. 在工作区根目录创建 SMOKE.txt\n2. 文件内容仅为一行: ok\n\n### Done When\n- SMOKE.txt 存在，内容为 ok",
+      "successCriteria": "SMOKE.txt 内容为 ok（单行）",
+      "coreCode": "codex"
+    }
+  ]
+}
