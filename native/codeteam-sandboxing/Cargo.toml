@@ -1,0 +1,27 @@
+﻿[package]
+name = "codeteam-sandboxing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "codeteam_sandboxing"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+codeteam-network-proxy = { workspace = true }
+codeteam-sandbox-policy = { workspace = true }
+codeteam-utils-absolute-path = { workspace = true }
+dunce = { workspace = true }
+libc = { workspace = true }
+serde_json = { workspace = true }
+regex-lite = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+url = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

@@ -1,0 +1,59 @@
+[workspace]
+members = [
+    "codeteam-sandbox",
+    "codeteam-sandbox-adapter",
+    "codeteam-sandbox-policy",
+    "codeteam-sandboxing",
+    "codeteam-linux-sandbox",
+    "codeteam-windows-sandbox",
+    "codeteam-process-hardening",
+    "codeteam-network-proxy",
+    "codeteam-otel",
+    "codeteam-utils-absolute-path",
+    "codeteam-utils-string",
+    "codeteam-utils-pty",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+codeteam-network-proxy = { path = "codeteam-network-proxy" }
+codeteam-otel = { path = "codeteam-otel" }
+codeteam-process-hardening = { path = "codeteam-process-hardening" }
+codeteam-sandbox-policy = { path = "codeteam-sandbox-policy" }
+codeteam-sandboxing = { path = "codeteam-sandboxing" }
+codeteam-utils-absolute-path = { path = "codeteam-utils-absolute-path" }
+codeteam-utils-pty = { path = "codeteam-utils-pty" }
+codeteam-utils-string = { path = "codeteam-utils-string" }
+dunce = "1.0"
+dirs = "6"
+glob = "0.3"
+globset = "0.4"
+landlock = "0.4.4"
+libc = "0.2"
+pretty_assertions = "1.4"
+rand = { version = "0.8", default-features = false, features = ["std", "small_rng"] }
+regex-lite = "0.1"
+seccompiler = "0.5.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+strum = "0.27"
+strum_macros = "0.28"
+tempfile = "3"
+thiserror = "1.0"
+tokio = { version = "1", features = ["sync", "rt", "macros", "io-util", "time", "process"] }
+tracing = "0.1"
+url = "2"
+which = "8"
+portable-pty = "0.9"
+lazy_static = "1.4"
+log = "0.4"

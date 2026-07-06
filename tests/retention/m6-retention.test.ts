@@ -1,0 +1,321 @@
+import assert from 'node:assert/strict'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import test from 'node:test'
+import { eq } from 'drizzle-orm'
+import { JobEventBus } from '../../src/server/context/event-bus'
+import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
+import {
+  designSessions,
+  draftReferences,
+  jobArtifacts,
+  projects,
+  threadJobs,
+  threadMessages,
+  threads
+} from '../../src/server/db/schema'
+import { SettingsStore } from '../../src/server/context/settings-store'
+import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
+import {
+  pruneOrphanDesignArtifactDirs,
+  pruneOrphanJobArtifactDirs,
+  pruneStaleThreadAttachmentDirs
+} from '../../src/server/retention/janitor'
+import {
+  collectThreadPurgeTargets,
+  purgeJobFilesystem,
+  purgeThreadFilesystem
+} from '../../src/server/retention/purge'
+import {
+  runSqliteMaintenance,
+  runSqliteMaintenanceIfDue,
+  shouldRunSqliteMaintenance
+} from '../../src/server/retention/maintenance'
+import { putJobArtifact } from '../../src/server/retention/artifacts'
+import { seedMinimalJob } from '../helpers/seed-minimal-job'
+
+async function seedThreadGraph(
+  db: ReturnType<typeof createIsolatedTestDatabase>,
+  input: {
+    threadId?: string
+    designSessionId?: string
+    messageId?: string
+    jobId?: string
+    attachmentId?: string
+  } = {}
+): Promise<{
+  threadId: string
+  designSessionId: string
+  messageId: string
+  jobId: string
+  attachmentId: string
+}> {
+  const now = Math.floor(Date.now() / 1000)
+  const threadId = input.threadId ?? 'thread-1'
+  const designSessionId = input.designSessionId ?? 'ds-1'
+  const messageId = input.messageId ?? 'draft-1'
+  const jobId = input.jobId ?? 'job-1'
+  const attachmentId = input.attachmentId ?? 'att-1'
+
+  await db.insert(projects).values({
+    id: 'proj-1',
+    username: 'user',
+    title: 'P',
+    workspaceRoot: '/tmp/ws',
+    createdAt: now,
+    updatedAt: now
+  })
+
+  await db.insert(threads).values({
+    id: threadId,
+    username: 'user',
+    projectId: 'proj-1',
+    title: 'T',
+    status: 'draft',
+    conversationId: 'conv-1',
+    coreCode: 'cursor',
+    runtimeStatus: 'idle',
+    coreRuntimeJson: '{}',
+    createdAt: now,
+    updatedAt: now
+  })
+
+  await db.insert(threadMessages).values({
+    id: messageId,
+    threadId,
+    username: 'user',
+    role: 'assistant',
+    kind: 'task-launch-draft',
+    content: '{}',
+    coreCode: 'cursor',
+    conversationId: 'conv-1',
+    attachmentsJson: JSON.stringify([{ id: attachmentId, name: 'ref.png' }]),
+    createdAt: new Date().toISOString()
+  })
+
+  await db.insert(designSessions).values({
+    id: designSessionId,
+    threadId,
+    username: 'user',
+    draftMessageId: messageId,
+    title: 'Design',
+    summary: '',
+    workspaceRoot: '/tmp/ws',
+    phase: 'draft_review',
+    draftRevision: 1,
+    planRevision: 0,
+    status: 'draft_editing',
+    createdAt: now,
+    updatedAt: now
+  })
+
+  await db.insert(draftReferences).values({
+    id: 'ref-1',
+    designSessionId,
+    source: 'attachment',
+    name: 'ref',
+    kind: 'image',
+    description: 'layout',
+    attachmentId,
+    sortOrder: 0,
+    createdAt: now,
+    updatedAt: now
+  })
+
+  await db.insert(threadJobs).values({
+    id: jobId,
+    threadId,
+    username: 'user',
+    draftMessageId: messageId,
+    title: 'Job',
+    summary: '',
+    status: 'completed',
+    workspacePath: '/tmp/ws',
+    createdAt: now,
+    updatedAt: now
+  })
+
+  return { threadId, designSessionId, messageId, jobId, attachmentId }
+}
+
+test('purgeJobFilesystem removes job artifacts and runtime tree', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-job-purge-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    const { threadId, jobId } = await seedThreadGraph(db)
+    await putJobArtifact({
+      db,
+      dataDir,
+      jobId,
+      taskId: 't1',
+      kind: 'task_evidence',
+      payload: {
+        status: 'completed',
+        summary: 'ok',
+        changedFiles: [],
+        evidence: [],
+        validation: { ran: true, outcome: 'passed' }
+      },
+      settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 16 }
+    })
+
+    const runtimeDir = join(dataDir, 'runtimes', threadId, 'jobs', jobId)
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(join(runtimeDir, 'state.json'), '{}')
+
+    await purgeJobFilesystem(dataDir, threadId, jobId)
+
+    assert.equal(existsSync(join(dataDir, 'artifacts', jobId)), false)
+    assert.equal(existsSync(runtimeDir), false)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('purgeThreadFilesystem removes attachments, design artifacts, and message artifacts', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-thread-purge-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    const { threadId, designSessionId, messageId, attachmentId } = await seedThreadGraph(db)
+    const targets = await collectThreadPurgeTargets(db, threadId)
+
+    mkdirSync(join(dataDir, 'attachments', threadId, attachmentId), { recursive: true })
+    writeFileSync(join(dataDir, 'attachments', threadId, attachmentId, 'ref.png'), 'png')
+    mkdirSync(join(dataDir, 'artifacts', 'designs', designSessionId), { recursive: true })
+    writeFileSync(join(dataDir, 'artifacts', 'designs', designSessionId, 'plan-v1.json.gz'), 'gz')
+    mkdirSync(join(dataDir, 'artifacts', 'messages', messageId), { recursive: true })
+    writeFileSync(join(dataDir, 'artifacts', 'messages', messageId, 'payload.json.gz'), 'gz')
+    mkdirSync(join(dataDir, 'runtimes', threadId), { recursive: true })
+
+    await purgeThreadFilesystem(dataDir, threadId, targets)
+
+    assert.equal(existsSync(join(dataDir, 'attachments', threadId)), false)
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'designs', designSessionId)), false)
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'messages', messageId)), false)
+    assert.equal(existsSync(join(dataDir, 'runtimes', threadId)), false)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('janitor prunes orphan job/design artifacts and stale attachment dirs', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-janitor-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    const { threadId, designSessionId, attachmentId } = await seedThreadGraph(db)
+
+    mkdirSync(join(dataDir, 'artifacts', 'orphan-job'), { recursive: true })
+    mkdirSync(join(dataDir, 'artifacts', 'designs', 'orphan-design'), { recursive: true })
+    mkdirSync(join(dataDir, 'artifacts', 'designs', designSessionId), { recursive: true })
+    mkdirSync(join(dataDir, 'attachments', threadId, attachmentId), { recursive: true })
+    mkdirSync(join(dataDir, 'attachments', threadId, 'att-stale'), { recursive: true })
+
+    const [jobResult, designResult, attachmentResult] = await Promise.all([
+      pruneOrphanJobArtifactDirs(dataDir, db),
+      pruneOrphanDesignArtifactDirs(dataDir, db),
+      pruneStaleThreadAttachmentDirs(dataDir, db)
+    ])
+
+    assert.equal(jobResult.removed, 1)
+    assert.equal(designResult.removed, 1)
+    assert.equal(attachmentResult.removed, 1)
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'orphan-job')), false)
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'designs', 'orphan-design')), false)
+    assert.equal(existsSync(join(dataDir, 'attachments', threadId, 'att-stale')), false)
+    assert.equal(existsSync(join(dataDir, 'attachments', threadId, attachmentId)), true)
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'designs', designSessionId)), true)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('sqlite maintenance runs incrementally and respects throttle', () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-sqlite-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  const store = new SettingsStore(dataDir)
+  try {
+    const maintenance = runSqliteMaintenance(db)
+    assert.equal(maintenance.checkpointed, true)
+
+    const now = Math.floor(Date.now() / 1000)
+    assert.equal(
+      shouldRunSqliteMaintenance(
+        store,
+        { ...DEFAULT_RETENTION_SETTINGS, sqliteMaintenanceIntervalHours: 24 },
+        now
+      ),
+      true
+    )
+
+    const first = runSqliteMaintenanceIfDue({
+      db,
+      store,
+      settings: { ...DEFAULT_RETENTION_SETTINGS, sqliteMaintenanceIntervalHours: 24 }
+    })
+    assert.equal(first.ran, true)
+
+    const second = runSqliteMaintenanceIfDue({
+      db,
+      store,
+      settings: { ...DEFAULT_RETENTION_SETTINGS, sqliteMaintenanceIntervalHours: 24 }
+    })
+    assert.equal(second.ran, false)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('JobEventBus clearJob drops SSE listeners', () => {
+  const bus = new JobEventBus()
+  let hits = 0
+  const unsubscribe = bus.subscribe('job-1', () => {
+    hits += 1
+  })
+
+  bus.emit('job-1', { event: 'task_progress', data: { taskProgress: {} as never } })
+  assert.equal(hits, 1)
+
+  unsubscribe()
+  bus.clearJob('job-1')
+  bus.emit('job-1', { event: 'task_progress', data: { taskProgress: {} as never } })
+  assert.equal(hits, 1)
+})
+
+test('deleting job row cascades artifact metadata while filesystem purge is explicit', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-cascade-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    await seedMinimalJob(db, 'job-cascade', 'completed')
+    await putJobArtifact({
+      db,
+      dataDir,
+      jobId: 'job-cascade',
+      taskId: 't1',
+      kind: 'task_evidence',
+      payload: {
+        status: 'completed',
+        summary: 'done',
+        changedFiles: [],
+        evidence: ['line'],
+        validation: { ran: true, outcome: 'passed' }
+      },
+      settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 16 }
+    })
+
+    await db.delete(threadJobs).where(eq(threadJobs.id, 'job-cascade'))
+    const rows = await db.select().from(jobArtifacts)
+    assert.equal(rows.length, 0)
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'job-cascade')), true)
+
+    await purgeJobFilesystem(dataDir, 'thread-1', 'job-cascade')
+    assert.equal(existsSync(join(dataDir, 'artifacts', 'job-cascade')), false)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})

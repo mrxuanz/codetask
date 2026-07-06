@@ -1,0 +1,13 @@
+[package]
+name = "codeteam-otel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "codeteam_otel"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }

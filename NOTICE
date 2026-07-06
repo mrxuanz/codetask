@@ -1,0 +1,32 @@
+Third-Party Notice
+==================
+
+This repository includes third-party code derived from the OpenAI Codex project.
+
+Included upstream source
+- Project: OpenAI Codex
+- Repository: https://github.com/openai/codex
+- Component: `codex-rs`
+- Upstream license: Apache License 2.0
+
+Local paths
+- `native/vendor/codex-rs`
+- `native/codeteam-sandbox*`
+- `native/codeteam-sandbox-policy`
+- `native/codeteam-process-hardening`
+- `native/codeteam-sandboxing`
+- `native/codeteam-network-proxy`
+- `native/codeteam-utils-*`
+
+Local modifications include
+- renaming crates from `codex-*` to `codeteam-*`
+- adapting sandbox integration to this application's runtime and policy model
+- packaging and launcher changes for the desktop app
+
+For the upstream license and notice text, see:
+- `native/vendor/codex-rs/LICENSE`
+- `native/vendor/codex-rs/NOTICE`
+
+Additional third-party notices
+- `native/codeteam-utils-absolute-path/src/absolutize.rs` retains notice for code derived from magiclen.org / Ron Li under the MIT License.
+- `native/codeteam-utils-pty/src/win/*` retains notices for code derived from WezTerm / Wez Furlong under the MIT License.

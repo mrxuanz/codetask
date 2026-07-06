@@ -1,0 +1,10 @@
+export const MAX_INFRA_RETRIES = 3
+export const MAX_TASK_PREP_GENERATIONS = 3
+export const MAX_TASK_REPAIR_GENERATIONS = 3
+export const MAX_VERIFIER_INFRA_RETRIES = 3
+export const MAX_SM_REPAIR_GENERATIONS = 3
+
+export const TASK_EVIDENCE_GRACE_MS = 3 * 60 * 1000
+export const VERIFIER_VERDICT_GRACE_MS = 3 * 60 * 1000
+
+export const TASK_EVIDENCE_WAIT_FULL_MS = 45 * 60 * 1000

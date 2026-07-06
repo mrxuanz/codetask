@@ -1,0 +1,19 @@
+(version 1)
+
+(deny default)
+
+(allow process-exec)
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+
+(allow file-write-data
+  (require-all
+    (path "/dev/null")
+    (vnode-type CHARACTER-DEVICE)))
+
+(allow sysctl-read)
+(allow network-outbound)
+(allow mach-lookup)
+(allow ipc-posix-sem)
+(allow pseudo-tty)

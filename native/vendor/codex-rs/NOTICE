@@ -1,0 +1,14 @@
+# Codex / OpenAI codex-rs vendored components
+
+This directory contains Apache-2.0 licensed sandbox components vendored from
+the OpenAI Codex project (codex-rs), adapted for Codeteam as `codeteam-*` crates.
+
+See LICENSE in this directory for the full Apache License 2.0 text.
+
+Modifications include:
+- Crate renaming (`codex-*` → `codeteam-*`)
+- Integration with Codeteam `SandboxPolicy` / NAPI launcher
+- Slimmed `codeteam-sandbox-policy` for task-level policy compilation
+
+Original source reference:
+`https://github.com/openai/codex`

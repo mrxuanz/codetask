@@ -1,0 +1,43 @@
+﻿[package]
+name = "codeteam-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Node native addon (.node) — OS sandbox for Codeteam"
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi4", "serde-json"] }
+napi-derive = "2"
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+codeteam-sandbox-adapter = { path = "../codeteam-sandbox-adapter" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy" }
+codeteam-sandboxing = { path = "../codeteam-sandboxing" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy" }
+codeteam-sandboxing = { path = "../codeteam-sandboxing" }
+codeteam-utils-absolute-path = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+base64 = "0.22"
+codeteam-windows-sandbox = { path = "../codeteam-windows-sandbox" }
+codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy" }
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }
+
+[build-dependencies]
+napi-build = "2"
+winres = "0.1"
