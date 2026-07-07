@@ -21,7 +21,7 @@ import {
   getExecutionRunContext,
   runWithExecutionRunContext
 } from './execution-run-context'
-import { updateJobRowFenced } from './repository'
+import { updateJobRowFenced, updateJobRowForSnapshotFenced } from './repository'
 import {
   emitJobError,
   emitJobProgressAfterPersist,
@@ -221,8 +221,8 @@ async function updateExecutionJobRow(
 ): Promise<ThreadJobDto | null> {
   const ctx = getExecutionRunContext()
   if (ctx?.runId) {
-    const { assertRunActive } = await import('./workload-slot-store')
-    if (!(await assertRunActive('thread_job', jobId, ctx.runId))) return null
+    const { assertRunWritable } = await import('./workload-slot-store')
+    if (!(await assertRunWritable('thread_job', jobId, ctx.runId))) return null
     return updateJobRowFenced(jobId, ctx.runId, patch)
   }
   const { getActiveRun } = await import('./workload-slot-store')
@@ -240,8 +240,8 @@ async function persistTaskProgress(
   const ctx = getExecutionRunContext()
   const expectedRunId = ctx?.runId
   if (expectedRunId) {
-    const { assertRunActive } = await import('./workload-slot-store')
-    if (!(await assertRunActive('thread_job', jobId, expectedRunId))) {
+    const { assertRunWritable } = await import('./workload-slot-store')
+    if (!(await assertRunWritable('thread_job', jobId, expectedRunId))) {
       memoryDebug('persistTaskProgress: stale execution run ignored', { jobId, expectedRunId })
       return null
     }
@@ -567,8 +567,8 @@ async function persistPlanAndProgress(
   const ctx = getExecutionRunContext()
   const expectedRunId = ctx?.runId
   if (expectedRunId) {
-    const { assertRunActive } = await import('./workload-slot-store')
-    if (!(await assertRunActive('thread_job', jobId, expectedRunId))) {
+    const { assertRunWritable } = await import('./workload-slot-store')
+    if (!(await assertRunWritable('thread_job', jobId, expectedRunId))) {
       memoryDebug('persistPlanAndProgress: stale execution run ignored', { jobId, expectedRunId })
       return null
     }
@@ -2300,11 +2300,14 @@ export function scheduleJobExecution(username: string, jobId: string): void {
       const taskProgress = existing
         ? syncTaskProgressForJobFailure(existing.taskProgress, error)
         : undefined
-      const job = await updateJobRowForSnapshot(jobId, {
-        status: 'failed',
+      const failurePatch = {
+        status: 'failed' as const,
         lastError: turnError,
         ...(taskProgress ? { taskProgress } : {})
-      })
+      }
+      const job = executionRunId
+        ? await updateJobRowForSnapshotFenced(jobId, executionRunId, failurePatch)
+        : await updateJobRowForSnapshot(jobId, failurePatch)
       if (job) {
         emitJobError(jobId, turnError)
         emitJobProgressAfterPersist(jobId, 'terminal', {

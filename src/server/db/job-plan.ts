@@ -265,20 +265,100 @@ export async function loadJobPlan(db: AppDatabase, jobId: string): Promise<Saved
   }
 }
 
+function savePlanMilestonesInTx(
+  db: AppDatabase,
+  jobId: string,
+  milestones: PlannerRegisteredMilestone[]
+): void {
+  db.delete(jobPlanSlices).where(eq(jobPlanSlices.jobId, jobId)).run()
+  db.delete(jobPlanMilestones).where(eq(jobPlanMilestones.jobId, jobId)).run()
+
+  for (const [mIdx, milestone] of milestones.entries()) {
+    db.insert(jobPlanMilestones)
+      .values({
+        jobId,
+        milestoneIndex: mIdx,
+        sortOrder: mIdx,
+        title: milestone.title ?? '',
+        description: milestone.description ?? '',
+        successCriteria: milestone.successCriteria ?? '',
+        confirmed: milestone.confirmed === undefined ? null : milestone.confirmed ? 1 : 0
+      })
+      .run()
+
+    for (const [sIdx, slice] of milestone.slices.entries()) {
+      db.insert(jobPlanSlices)
+        .values({
+          jobId,
+          milestoneIndex: mIdx,
+          sliceIndex: sIdx,
+          sortOrder: mIdx * 1000 + sIdx,
+          title: slice.title ?? '',
+          description: slice.description ?? '',
+          successCriteria: slice.successCriteria,
+          dependsOnSliceRefsJson: slice.dependsOnSliceRefs?.length
+            ? JSON.stringify(slice.dependsOnSliceRefs)
+            : null,
+          confirmed: slice.confirmed === undefined ? null : slice.confirmed ? 1 : 0
+        })
+        .run()
+    }
+  }
+}
+
+function savePlanTasksInTx(db: AppDatabase, jobId: string, tasks: FlatTaskPlan[]): void {
+  db.delete(jobPlanTasks).where(eq(jobPlanTasks.jobId, jobId)).run()
+
+  for (const [index, task] of tasks.entries()) {
+    db.insert(jobPlanTasks)
+      .values({
+        jobId,
+        taskId: task.id,
+        sortOrder: index,
+        milestoneIndex: task.milestoneIndex,
+        sliceIndex: task.sliceIndex,
+        taskIndex: task.taskIndex,
+        title: task.title,
+        description: task.description,
+        taskKind: task.taskKind,
+        abilityCode: task.abilityCode,
+        contextMarkdown: task.contextMarkdown,
+        coreCode: task.coreCode ?? null,
+        successCriteria: task.successCriteria,
+        referenceIdsJson: task.referenceIds?.length ? JSON.stringify(task.referenceIds) : null,
+        referenceReason: task.referenceReason ?? null,
+        dependsOnTaskRefsJson: task.dependsOnTaskRefs?.length
+          ? JSON.stringify(task.dependsOnTaskRefs)
+          : null,
+        canRunInParallel: task.canRunInParallel ? 1 : 0,
+        confirmed: task.confirmed === undefined ? null : task.confirmed ? 1 : 0
+      })
+      .run()
+  }
+}
+
+export function saveJobPlanInTx(
+  db: AppDatabase,
+  jobId: string,
+  plan: SavedJobPlan | null
+): void {
+  if (!plan) {
+    db.delete(jobPlanSlices).where(eq(jobPlanSlices.jobId, jobId)).run()
+    db.delete(jobPlanMilestones).where(eq(jobPlanMilestones.jobId, jobId)).run()
+    db.delete(jobPlanTasks).where(eq(jobPlanTasks.jobId, jobId)).run()
+    return
+  }
+
+  savePlanMilestonesInTx(db, jobId, plan.milestones)
+  savePlanTasksInTx(db, jobId, plan.tasks)
+}
+
 export async function saveJobPlan(
   db: AppDatabase,
   jobId: string,
   plan: SavedJobPlan | null
 ): Promise<void> {
-  if (!plan) {
-    await db.delete(jobPlanSlices).where(eq(jobPlanSlices.jobId, jobId))
-    await db.delete(jobPlanMilestones).where(eq(jobPlanMilestones.jobId, jobId))
-    await db.delete(jobPlanTasks).where(eq(jobPlanTasks.jobId, jobId))
-    return
-  }
-
-  await savePlanMilestones(db, jobId, plan.milestones)
-  await savePlanTasks(db, jobId, plan.tasks)
+  saveJobPlanInTx(db, jobId, plan)
 }
 
 export async function loadPlanProgress(db: AppDatabase, jobId: string): Promise<PlanProgressDto> {

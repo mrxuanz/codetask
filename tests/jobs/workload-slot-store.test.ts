@@ -12,6 +12,8 @@ import {
   releaseWorkloadSlot,
   getActiveRun,
   assertRunActive,
+  assertRunWritable,
+  markRunCancelling,
   workloadPoolCapacity,
   resetWorkloadRunControllersForTests
 } from '../../src/server/jobs/workload-slot-store'
@@ -268,6 +270,30 @@ test('assertRunActive is false after release', async () => {
 
     await releaseWorkloadSlot(run.runId, { reason: 'test' })
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), false)
+  } finally {
+    teardownDb()
+  }
+})
+
+test('assertRunWritable is false while run is cancelling', async () => {
+  setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-1', 'planning')
+
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-1',
+      kind: 'planning'
+    })
+    assert.ok(run)
+    assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), true)
+    assert.equal(await assertRunWritable('thread_job', 'job-1', run.runId), true)
+
+    await markRunCancelling(run.runId, 'user_stop')
+    assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), true)
+    assert.equal(await assertRunWritable('thread_job', 'job-1', run.runId), false)
   } finally {
     teardownDb()
   }

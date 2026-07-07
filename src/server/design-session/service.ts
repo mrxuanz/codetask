@@ -11,6 +11,7 @@ import {
   loadDesignPlan,
   loadDesignPlanProgress,
   saveDesignPlan,
+  saveDesignPlanInTx,
   saveDesignPlanProgress
 } from '../db/design-plan'
 import { savePlanProgress } from '../db/job-plan'
@@ -216,15 +217,81 @@ export async function updateDesignSessionRowFenced(
   options?: { includePlan?: boolean }
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
-  const existing = await db
-    .select({ activeRunId: designSessions.activeRunId })
-    .from(designSessions)
-    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.activeRunId, runId)))
-    .limit(1)
-    .then((rows) => rows[0])
+  const fence = and(
+    eq(designSessions.id, designSessionId),
+    eq(designSessions.activeRunId, runId)
+  )!
 
-  if (!existing) return null
-  return updateDesignSessionRow(designSessionId, patch, options)
+  const applied = db.transaction((tx) => {
+    const existing = tx.select().from(designSessions).where(fence).limit(1).all()[0]
+    if (!existing) return false
+
+    const now = nowSec()
+    const { plan, planProgress, taskProgress, lastError, ...rowPatch } = patch
+
+    const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
+    if (lastError !== undefined) {
+      dbPatch.lastError = coercePersistedTurnError(lastError)
+    }
+
+    if (Object.keys(dbPatch).length > 1) {
+      const result = tx.update(designSessions).set(dbPatch).where(fence).run()
+      if (result.changes === 0) return false
+    }
+
+    if (plan !== undefined) {
+      saveDesignPlanInTx(tx, designSessionId, plan)
+      tx.update(designSessions).set({ updatedAt: now }).where(fence).run()
+    }
+
+    if (planProgress) {
+      const counts = {
+        milestones: planProgress.milestones,
+        slices: planProgress.slices,
+        tasks: planProgress.tasks
+      }
+      tx.update(designSessions)
+        .set({
+          planPhase: planProgress.phase,
+          planStatus: planProgress.status,
+          planContextsRegistered: planProgress.contextsRegistered,
+          planContextsTotal: planProgress.contextsTotal,
+          planMessage: planProgress.message ?? null,
+          planCountsJson: JSON.stringify(counts)
+        })
+        .where(fence)
+        .run()
+      tx.update(designSessions).set({ updatedAt: now }).where(fence).run()
+    }
+
+    if (taskProgress) {
+      tx.update(designSessions)
+        .set({
+          taskPhase: taskProgress.phase,
+          taskStatus: taskProgress.status,
+          taskCurrentIndex: taskProgress.currentIndex,
+          taskTotal: taskProgress.total,
+          taskCurrentTaskId: taskProgress.currentTaskId ?? null,
+          taskMessage: taskProgress.message ?? null,
+          updatedAt: now
+        })
+        .where(fence)
+        .run()
+    }
+
+    return tx.select().from(designSessions).where(fence).limit(1).all()[0] != null
+  })
+
+  if (!applied) return null
+
+  const rows = await db
+    .select()
+    .from(designSessions)
+    .where(eq(designSessions.id, designSessionId))
+    .limit(1)
+  return rows[0]
+    ? mapDesignSessionToJobDto(rows[0], { includePlan: options?.includePlan ?? true })
+    : null
 }
 
 export async function createPlannerRun(input: {
