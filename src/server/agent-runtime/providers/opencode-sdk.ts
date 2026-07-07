@@ -11,7 +11,9 @@ import { createTurnError, TURN_CANCELLED, type TurnError } from '../../../shared
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
-import { TurnWatchdog, assertRoleTurnReply } from '../turn-watchdog'
+import { TurnScope, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import { getExecutionRunContext } from '../../jobs/execution-run-context'
+import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
 
 type NodeSpawn = typeof import('child_process').spawn
 
@@ -21,6 +23,7 @@ const crossSpawn = nodeRequire('cross-spawn') as NodeSpawn
 interface OpencodeServerHandle {
   url: string
   close(): void
+  processExit: Promise<never>
 }
 
 function buildOpencodeConfig(input: AgentTurnInput): Config {
@@ -222,12 +225,22 @@ async function startOpencodeServer(options: {
     })
   })
 
+  const processExit = new Promise<never>((_, reject) => {
+    proc.on('exit', (code) => {
+      reject(formatServerStartFailure(`OpenCode server exited with code ${code}`, output, env))
+    })
+    proc.on('error', (error) => {
+      reject(formatServerStartFailure(error.message, output, env))
+    })
+  })
+
   return {
     url,
     close() {
       clearAbort()
       stopProcessTree(proc)
-    }
+    },
+    processExit
   }
 }
 
@@ -320,17 +333,34 @@ export async function* streamOpencodeTurn(
   options?.signal?.addEventListener('abort', abortTurn, { once: true })
   if (options?.signal?.aborted) abortTurn()
 
-  const watchdog = new TurnWatchdog({
+  const turnScope = new TurnScope({
     role: input.role,
     externalSignal: options?.signal,
-    onAbort: abortTurn
+    processExit: server.processExit,
+    onKeepAlive: () => {
+      const ctx = getExecutionRunContext()
+      if (ctx?.runId) {
+        void refreshWorkloadLease(ctx.runId)
+      }
+    },
+    onCancel: async (mode) => {
+      if (mode === 'soft') {
+        abortTurn()
+      } else {
+        server.close()
+      }
+    }
   })
-  watchdog.arm()
+  turnScope.arm()
+
+  let sessionId = input.runtimeSessionId ?? ''
+  let reply = ''
+  let thinking = ''
 
   try {
-    const sessionId = await ensureOpencodeSession(client, input.cwd, input.runtimeSessionId)
-    let reply = ''
-    let thinking = ''
+    sessionId = await ensureOpencodeSession(client, input.cwd, input.runtimeSessionId)
+    reply = ''
+    thinking = ''
 
     const subscription = await client.event.subscribe(
       {
@@ -366,13 +396,13 @@ export async function* streamOpencodeTurn(
       if (!nextThinking || nextThinking === thinking) return
       const advanced = advanceTextSnapshot(thinking, nextThinking)
       thinking = advanced.text
-      watchdog.recordActivity('thinking_delta')
+      turnScope.recordProgress('thinking_delta')
       if (advanced.delta) yield { type: 'thinking_delta', content: advanced.delta }
     }
 
     try {
       while (promptResult === undefined) {
-        const winner = await watchdog.race(
+        const winner = await turnScope.race(
           Promise.race([
             eventIterator.next().then((next) => ({ kind: 'event' as const, next })),
             promptPromise.then((result) => ({ kind: 'prompt' as const, result }))
@@ -387,7 +417,7 @@ export async function* streamOpencodeTurn(
         if (winner.next.done) break
 
         const event = winner.next.value as Event
-        watchdog.recordActivity('provider_event')
+        turnScope.recordProgress('provider_event')
         if (!isSessionEvent(event, sessionId)) continue
 
         if (event.type === 'message.part.updated') {
@@ -406,7 +436,7 @@ export async function* streamOpencodeTurn(
             if (typeof part.text === 'string' && part.text !== reply) {
               const advanced = advanceTextSnapshot(reply, part.text)
               reply = advanced.text
-              watchdog.recordActivity('text_delta')
+              turnScope.recordProgress('text_delta')
               if (advanced.delta) yield { type: 'delta', content: advanced.delta }
             }
           }
@@ -427,7 +457,7 @@ export async function* streamOpencodeTurn(
           ) {
             const advanced = appendTextPiece(reply, props.delta)
             reply = advanced.text
-            watchdog.recordActivity('text_delta')
+            turnScope.recordProgress('text_delta')
             if (advanced.delta) yield { type: 'delta', content: advanced.delta }
           } else if (
             (props.field === 'text' || props.field === 'reasoning' || props.field === 'thinking') &&
@@ -437,7 +467,7 @@ export async function* streamOpencodeTurn(
           ) {
             const advanced = appendTextPiece(thinking, props.delta)
             thinking = advanced.text
-            watchdog.recordActivity('thinking_delta')
+            turnScope.recordProgress('thinking_delta')
             if (advanced.delta) yield { type: 'thinking_delta', content: advanced.delta }
           }
           continue
@@ -451,7 +481,7 @@ export async function* streamOpencodeTurn(
             assistantMessageIds.add(props.info.id)
           }
           if (props.info?.role === 'assistant' && isTerminalAssistantFinish(props.info.finish)) {
-            watchdog.recordActivity('tool_completed')
+            turnScope.recordProgress('tool_completed')
             break
           }
           continue
@@ -462,7 +492,7 @@ export async function* streamOpencodeTurn(
           if (props.delta) {
             const advanced = appendTextPiece(reply, props.delta)
             reply = advanced.text
-            watchdog.recordActivity('text_delta')
+            turnScope.recordProgress('text_delta')
             if (advanced.delta) yield { type: 'delta', content: advanced.delta }
           }
           continue
@@ -473,7 +503,7 @@ export async function* streamOpencodeTurn(
           if (props.text) {
             const advanced = advanceTextSnapshot(reply, props.text)
             reply = advanced.text
-            watchdog.recordActivity('text_delta')
+            turnScope.recordProgress('text_delta')
             if (advanced.delta) yield { type: 'delta', content: advanced.delta }
           }
           continue
@@ -488,7 +518,7 @@ export async function* streamOpencodeTurn(
 
         if (event.type === 'session.idle') {
           idle = true
-          watchdog.recordActivity('heartbeat')
+          turnScope.recordProgress('heartbeat')
           break
         }
 
@@ -496,7 +526,7 @@ export async function* streamOpencodeTurn(
           const props = event.properties as { status?: { type?: string } }
           if (props.status?.type === 'idle') {
             idle = true
-            watchdog.recordActivity('heartbeat')
+            turnScope.recordProgress('heartbeat')
             break
           }
         }
@@ -510,7 +540,7 @@ export async function* streamOpencodeTurn(
     }
 
     if (promptResult === undefined) {
-      promptResult = await watchdog.race(promptPromise)
+      promptResult = await turnScope.race(promptPromise)
     }
     if (promptResult?.error) {
       throw createTurnError('provider.opencode.session_error', {
@@ -524,7 +554,7 @@ export async function* streamOpencodeTurn(
         reply = await loadLatestAssistantText(client, input.cwd, sessionId)
       }
       if (reply) {
-        watchdog.recordActivity('text_delta')
+        turnScope.recordProgress('text_delta')
         const advanced = advanceTextSnapshot('', reply)
         reply = advanced.text
         if (advanced.delta) yield { type: 'delta', content: advanced.delta }
@@ -539,9 +569,18 @@ export async function* streamOpencodeTurn(
       runtimeSessionId: sessionId
     }
   } catch (error) {
+    const partial = partialCompletedChunk({
+      reply,
+      runtimeSessionId: sessionId,
+      graceCancelled: turnScope.graceCancelled
+    })
+    if (partial) {
+      yield partial
+      return
+    }
     throwOpencodeError(error)
   } finally {
-    watchdog.dispose()
+    turnScope.dispose()
     options?.signal?.removeEventListener('abort', abortTurn)
     abortTurn()
     server.close()

@@ -78,7 +78,7 @@ export function workloadLeaseTtlSec(): number {
     const parsed = Number(env)
     if (!Number.isNaN(parsed) && parsed > 0) return parsed
   }
-  return 30 * 60
+	  return 90 * 60
 }
 
 function ownerTable(ownerKind: WorkloadOwnerKind) {

@@ -5,7 +5,10 @@ import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot } from '../delta-emit'
 import { extractCodexReasoningText } from '../reasoning-text'
-import { TurnWatchdog, assertRoleTurnReply, recordCodexThreadItemActivity } from '../turn-watchdog'
+import { TurnScope, recordCodexThreadItemActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import { ProgressGuard } from '../progress-guard'
+import { getExecutionRunContext } from '../../jobs/execution-run-context'
+import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
 
 function extractAgentText(item: { type?: string; text?: string }): string | null {
   if (item.type === 'agent_message' && item.text) {
@@ -84,12 +87,25 @@ export async function* streamCodexTurn(
   }
   externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
 
-  const watchdog = new TurnWatchdog({
+  const progressGuard = new ProgressGuard(input.role)
+
+  const turnScope = new TurnScope({
     role: input.role,
     externalSignal,
-    onAbort: () => turnAbort.abort()
+    progressGuard,
+    onCancel: async (mode) => {
+      if (mode === 'soft') {
+        turnAbort.abort()
+      }
+    },
+    onKeepAlive: () => {
+      const ctx = getExecutionRunContext()
+      if (ctx?.runId) {
+        void refreshWorkloadLease(ctx.runId)
+      }
+    }
   })
-  watchdog.arm()
+  turnScope.arm()
 
   const streamed = await thread.runStreamed(prompt, { signal: turnAbort.signal })
   let reply = ''
@@ -112,11 +128,11 @@ export async function* streamCodexTurn(
 
   try {
     while (true) {
-      const next = await watchdog.race(eventIterator.next())
+      const next = await turnScope.race(eventIterator.next())
       if (next.done) break
 
       const event = next.value
-      watchdog.recordActivity('provider_event')
+      turnScope.recordProgress('provider_event')
 
       if (
         event.type === 'item.updated' ||
@@ -124,7 +140,7 @@ export async function* streamCodexTurn(
         event.type === 'item.completed'
       ) {
         logCodexMcpItem(event.item)
-        recordCodexThreadItemActivity(event.item, watchdog)
+        recordCodexThreadItemActivity(event.item, turnScope)
       }
 
       if (event.type === 'item.updated' || event.type === 'item.completed') {
@@ -132,7 +148,7 @@ export async function* streamCodexTurn(
         if (reasoning && reasoning !== thinking) {
           const advanced = advanceTextSnapshot(thinking, reasoning)
           thinking = advanced.text
-          watchdog.recordActivity('thinking_delta')
+          turnScope.recordProgress('thinking_delta')
           if (advanced.delta) yield { type: 'thinking_delta', content: advanced.delta }
         }
 
@@ -140,7 +156,7 @@ export async function* streamCodexTurn(
         if (text && text !== reply) {
           const advanced = advanceTextSnapshot(reply, text)
           reply = advanced.text
-          watchdog.recordActivity('text_delta')
+          turnScope.recordProgress('text_delta')
           if (advanced.delta) yield { type: 'delta', content: advanced.delta }
         }
         continue
@@ -151,7 +167,7 @@ export async function* streamCodexTurn(
         if (reasoning && reasoning !== thinking) {
           const advanced = advanceTextSnapshot(thinking, reasoning)
           thinking = advanced.text
-          watchdog.recordActivity('thinking_delta')
+          turnScope.recordProgress('thinking_delta')
           if (advanced.delta) yield { type: 'thinking_delta', content: advanced.delta }
         }
         continue
@@ -172,6 +188,19 @@ export async function* streamCodexTurn(
     }
   } catch (error) {
     if (turnFinished) return
+    const partial = partialCompletedChunk({
+      reply,
+      runtimeSessionId: thread.id,
+      graceCancelled: turnScope.graceCancelled
+    })
+    if (partial) {
+      sandboxTurnDebug('codex: partial turn completed after grace cancel', {
+        role: plan.role,
+        replyChars: reply.length
+      })
+      yield partial
+      return
+    }
     if (turnAbort.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
       sandboxTurnDebug('codex: turn aborted', {
         role: plan.role,
@@ -187,7 +216,7 @@ export async function* streamCodexTurn(
     })
     throwSdkTurnError(error)
   } finally {
-    watchdog.dispose()
+    turnScope.dispose()
     await eventIterator.return?.(undefined).catch(() => {})
   }
 

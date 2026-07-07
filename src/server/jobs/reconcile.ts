@@ -292,3 +292,24 @@ export async function reconcileOrphanWorkloadSlotsOnStartupOnce(): Promise<void>
   startupWorkloadSlotsReconciled = true
   await reconcileOrphanWorkloadSlotsOnStartup()
 }
+
+let reconcilerTimer: ReturnType<typeof setInterval> | null = null
+
+export function startWorkloadReconciler(): void {
+  if (reconcilerTimer) return
+  const intervalMs = 5 * 60_000
+
+  reconcilerTimer = setInterval(() => {
+    void reconcileOrphanWorkloadSlotsOnStartup().catch((error) => {
+      console.warn('[reconcile] periodic workload reconciler failed', error)
+    })
+  }, intervalMs)
+  reconcilerTimer.unref?.()
+}
+
+export function stopWorkloadReconcilerForTests(): void {
+  if (reconcilerTimer) {
+    clearInterval(reconcilerTimer)
+    reconcilerTimer = null
+  }
+}
