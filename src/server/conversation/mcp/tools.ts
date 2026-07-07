@@ -1,6 +1,6 @@
 import { SUPPORTED_CORE_CODES } from '../cores'
-import type { WizardPhase } from '../../wizard/types'
-import { allCreateTaskMcpToolNames } from '../../wizard/tools'
+import { isWizardPhase, type WizardPhase } from '../../wizard/types'
+import { allCreateTaskMcpToolNames, toolsForWizardPhase } from '../../wizard/tools'
 
 export function proposeTaskDraftToolDefinition(): Record<string, unknown> {
   return {
@@ -360,10 +360,8 @@ const TOOL_BY_NAME = new Map(
 export function conversationMcpToolDefinitionsForPhase(
   phase: WizardPhase | null
 ): Record<string, unknown>[] {
-  if (phase) {
-    return allCreateTaskMcpToolNames()
-      .map((name) => TOOL_BY_NAME.get(name))
-      .filter((tool): tool is Record<string, unknown> => Boolean(tool))
-  }
-  return conversationMcpToolDefinitions()
+  const names = isWizardPhase(phase) ? toolsForWizardPhase(phase) : allCreateTaskMcpToolNames()
+  return names
+    .map((name) => TOOL_BY_NAME.get(name))
+    .filter((tool): tool is Record<string, unknown> => Boolean(tool))
 }
