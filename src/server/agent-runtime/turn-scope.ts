@@ -1,0 +1,366 @@
+import type { ConversationRole } from './roles'
+import { roleRequiresOuterSandbox } from './roles'
+import { createTurnError, TURN_CANCELLED } from '../../shared/turn-errors.ts'
+import { sandboxTurnDebug } from '../debug/sandbox-turn'
+import type { ProgressGuard } from './progress-guard'
+import type { AgentTurnChunk } from './types'
+
+export type TurnActivityKind =
+  | 'provider_event'
+  | 'text_delta'
+  | 'thinking_delta'
+  | 'tool_started'
+  | 'tool_updated'
+  | 'tool_completed'
+  | 'mcp_call'
+  | 'shell_running'
+  | 'heartbeat'
+
+const NO_FIRST_SIGNAL_MS = 120_000
+const KEEPALIVE_INTERVAL_MS = 60_000
+
+function softGraceMs(): number {
+  const parsed = Number(process.env.CODETASK_TURN_SOFT_GRACE_MS)
+  if (Number.isFinite(parsed) && parsed > 0) return parsed
+  return 30_000
+}
+
+export interface TurnScopeInput {
+  role: ConversationRole
+  externalSignal?: AbortSignal
+  processExit?: Promise<never>
+  progressGuard?: ProgressGuard
+  onKeepAlive?: () => void
+  onCancel?: (mode: 'soft' | 'hard') => Promise<void> | void
+}
+
+export class TurnScope {
+  readonly role: ConversationRole
+  readonly signal: AbortSignal
+
+  private readonly _abort = new AbortController()
+  private readonly _processExit?: Promise<never>
+  private readonly _onKeepAlive?: () => void
+  private readonly _onCancel?: (mode: 'soft' | 'hard') => Promise<void> | void
+  private readonly _progressGuard?: ProgressGuard
+
+  private _disposed = false
+  private _sawFirstSignal = false
+  private _noFirstTimer: ReturnType<typeof setTimeout> | null = null
+  private _keepaliveTimer: ReturnType<typeof setInterval> | null = null
+  private _lastKeepAlive = 0
+  private _abortError: Error | null = null
+  private _graceCancelled = false
+
+  constructor(input: TurnScopeInput) {
+    this.role = input.role
+    this.signal = this._abort.signal
+    this._processExit = input.processExit
+    this._onKeepAlive = input.onKeepAlive
+    this._onCancel = input.onCancel
+    this._progressGuard = input.progressGuard
+
+    if (input.externalSignal?.aborted) {
+      this._abortExternal()
+    } else if (input.externalSignal) {
+      input.externalSignal.addEventListener('abort', () => this._abortExternal(), { once: true })
+    }
+
+    if (this._processExit) {
+      this._processExit.catch(() => {})
+    }
+  }
+
+  arm(): void {
+    if (!this._processExit) {
+      this._scheduleNoFirstSignal()
+    }
+    this._startKeepalive()
+    this._progressGuard?.start()
+
+    if (this._progressGuard) {
+      this._progressGuard.on('stalled', () => {
+        void this._failWithGrace('stalled')
+      })
+    }
+  }
+
+  recordProgress(kind: TurnActivityKind): void {
+    if (this._disposed || this.signal.aborted) return
+    this._sawFirstSignal = true
+    this._clearNoFirstSignalTimer()
+    this._tryKeepAlive()
+    this._progressGuard?.recordActivity(kind)
+  }
+
+  enterLongRunningTool(command?: string | null): void {
+    this._progressGuard?.enterLongRunningTool(command)
+  }
+
+  exitLongRunningTool(): void {
+    this._progressGuard?.exitLongRunningTool()
+  }
+
+  async race<T>(prompt: Promise<T>): Promise<T> {
+    if (this._abortError) throw this._abortError
+    if (this.signal.aborted) {
+      throw this._abortError ?? TURN_CANCELLED
+    }
+
+    return await this._raceImpl(prompt)
+  }
+
+  dispose(): void {
+    if (this._disposed) return
+    this._disposed = true
+    this._clearNoFirstSignalTimer()
+    this._stopKeepalive()
+    this._progressGuard?.dispose()
+  }
+
+  get graceCancelled(): boolean {
+    return this._graceCancelled
+  }
+
+  private _raceImpl<T>(prompt: Promise<T>): Promise<T> {
+    if (this._processExit) {
+      const abortPromise = new Promise<never>((_, reject) => {
+        const onAbort = (): void => {
+          reject(this._abortError ?? TURN_CANCELLED)
+        }
+        if (this.signal.aborted) {
+          onAbort()
+          return
+        }
+        this.signal.addEventListener('abort', onAbort, { once: true })
+      })
+
+      return Promise.race([prompt, this._processExit, abortPromise])
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = (): void => {
+        cleanup()
+        reject(this._abortError ?? TURN_CANCELLED)
+      }
+      const cleanup = (): void => {
+        this.signal.removeEventListener('abort', onAbort)
+      }
+      this.signal.addEventListener('abort', onAbort, { once: true })
+      prompt.then(
+        (value) => {
+          cleanup()
+          if (this.signal.aborted) {
+            reject(this._abortError ?? TURN_CANCELLED)
+            return
+          }
+          resolve(value)
+        },
+        (error) => {
+          cleanup()
+          reject(error)
+        }
+      )
+    })
+  }
+
+  private _tryKeepAlive(): void {
+    if (!this._onKeepAlive) return
+    const now = Date.now()
+    if (now - this._lastKeepAlive < KEEPALIVE_INTERVAL_MS) return
+    this._lastKeepAlive = now
+    try {
+      this._onKeepAlive()
+    } catch {
+      // best-effort
+    }
+  }
+
+  private _startKeepalive(): void {
+    if (!this._onKeepAlive || !this._processExit) return
+    this._keepaliveTimer = setInterval(() => {
+      if (this._disposed || this.signal.aborted) {
+        this._stopKeepalive()
+        return
+      }
+      const now = Date.now()
+      if (now - this._lastKeepAlive >= KEEPALIVE_INTERVAL_MS) {
+        this._lastKeepAlive = now
+        try {
+          this._onKeepAlive?.()
+        } catch {
+          // best-effort
+        }
+      }
+    }, KEEPALIVE_INTERVAL_MS)
+    this._keepaliveTimer?.unref?.()
+  }
+
+  private _stopKeepalive(): void {
+    if (this._keepaliveTimer) {
+      clearInterval(this._keepaliveTimer)
+      this._keepaliveTimer = null
+    }
+  }
+
+  private _scheduleNoFirstSignal(): void {
+    this._clearNoFirstSignalTimer()
+    this._noFirstTimer = setTimeout(() => {
+      if (!this._sawFirstSignal) {
+        void this._failWithGrace('no_first_signal')
+      }
+    }, NO_FIRST_SIGNAL_MS)
+  }
+
+  private _clearNoFirstSignalTimer(): void {
+    if (!this._noFirstTimer) return
+    clearTimeout(this._noFirstTimer)
+    this._noFirstTimer = null
+  }
+
+  private _abortExternal(): void {
+    if (this.signal.aborted) return
+    this._abortError = TURN_CANCELLED
+    this._abort.abort()
+    this.dispose()
+  }
+
+  private async _failWithGrace(reason: 'no_first_signal' | 'stalled'): Promise<void> {
+    if (this._disposed || this.signal.aborted) return
+    this._graceCancelled = true
+
+    sandboxTurnDebug('turn-scope: soft cancel', { reason })
+
+    this._abortError =
+      reason === 'no_first_signal'
+        ? createTurnError('turn.watchdog_no_signal', {
+            params: { seconds: Math.max(1, Math.round(NO_FIRST_SIGNAL_MS / 1000)) }
+          })
+        : createTurnError('turn.timed_out')
+
+    if (this._onCancel) {
+      try {
+        await this._onCancel('soft')
+      } catch {
+        // best-effort
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, softGraceMs()))
+
+    if (!this._disposed && !this.signal.aborted) {
+      sandboxTurnDebug('turn-scope: hard cancel', { reason })
+      if (this._onCancel) {
+        try {
+          await this._onCancel('hard')
+        } catch {
+          // best-effort
+        }
+      }
+      this._abort.abort()
+      this.dispose()
+    }
+  }
+}
+
+export function assertRoleTurnReply(input: {
+  role: ConversationRole
+  reply: string
+  providerLabel: string
+  partial?: true
+}): void {
+  if (!roleRequiresOuterSandbox(input.role)) return
+  if (input.partial) return
+  const trimmed = input.reply.trim()
+  if (!trimmed) {
+    throw createTurnError('turn.empty_reply', {
+      detail: `${input.providerLabel} task turn produced no valid output`
+    })
+  }
+}
+
+export function partialCompletedChunk(input: {
+  reply: string
+  runtimeSessionId: string | null
+  graceCancelled: boolean
+}): Extract<AgentTurnChunk, { type: 'completed' }> | null {
+  if (!input.graceCancelled || !input.reply.trim()) return null
+  return {
+    type: 'completed',
+    reply: input.reply.trim(),
+    runtimeSessionId: input.runtimeSessionId,
+    partial: true
+  }
+}
+
+export function recordClaudeStreamActivity(message: unknown, scope: TurnScope): void {
+  scope.recordProgress('provider_event')
+  const typed = message as {
+    type?: string
+    event?: { type?: string; content_block?: { type?: string; name?: string } }
+    message?: { content?: Array<{ type?: string; name?: string; input?: { command?: string } }> }
+  }
+
+  if (typed.type === 'stream_event') {
+    const blockType = typed.event?.content_block?.type
+    if (blockType === 'tool_use') {
+      scope.recordProgress('tool_started')
+    }
+    return
+  }
+
+  const blocks = typed.message?.content
+  if (!blocks?.length) return
+
+  for (const block of blocks) {
+    if (block.type === 'tool_use') {
+      scope.recordProgress('tool_started')
+      const command =
+        typeof block.input === 'object' && block.input && 'command' in block.input
+          ? String((block.input as { command?: string }).command ?? '')
+          : block.name === 'Bash'
+            ? String((block.input as { command?: string } | undefined)?.command ?? '')
+            : ''
+      if (command) {
+        scope.enterLongRunningTool(command)
+      }
+    }
+    if (block.type === 'tool_result') {
+      scope.exitLongRunningTool()
+      scope.recordProgress('tool_completed')
+    }
+  }
+}
+
+export function recordCodexThreadItemActivity(
+  item: {
+    type?: string
+    status?: string
+    command?: string
+    tool?: string
+    server?: string
+  },
+  scope: TurnScope
+): void {
+  scope.recordProgress('provider_event')
+
+  if (item.type === 'command_execution') {
+    scope.recordProgress('tool_started')
+    if (item.status === 'in_progress') {
+      scope.enterLongRunningTool(item.command)
+    } else {
+      scope.exitLongRunningTool()
+      scope.recordProgress('tool_completed')
+    }
+    return
+  }
+
+  if (item.type === 'mcp_tool_call') {
+    scope.recordProgress('mcp_call')
+    if (item.status === 'in_progress') {
+      scope.recordProgress('tool_started')
+    } else {
+      scope.recordProgress('tool_completed')
+    }
+  }
+}

@@ -6,7 +6,10 @@ import { CLI_FULL_ACCESS_BUILTINS } from '../roles'
 import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
-import { TurnWatchdog, assertRoleTurnReply, recordClaudeStreamActivity } from '../turn-watchdog'
+import { TurnScope, recordClaudeStreamActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import { ProgressGuard } from '../progress-guard'
+import { getExecutionRunContext } from '../../jobs/execution-run-context'
+import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
@@ -35,15 +38,24 @@ export async function* streamClaudeTurn(
   }
   externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
 
-  const watchdog = new TurnWatchdog({
+  const progressGuard = new ProgressGuard(input.role)
+
+  const turnScope = new TurnScope({
     role: input.role,
     externalSignal,
-    onAbort: () => {
+    progressGuard,
+    onCancel: async () => {
       turnAbort.abort()
       queryHandle?.close()
+    },
+    onKeepAlive: () => {
+      const ctx = getExecutionRunContext()
+      if (ctx?.runId) {
+        void refreshWorkloadLease(ctx.runId)
+      }
     }
   })
-  watchdog.arm()
+  turnScope.arm()
 
   let queryHandle: ReturnType<typeof query> | null = null
 
@@ -83,14 +95,14 @@ export async function* streamClaudeTurn(
 
   try {
     while (true) {
-      const next = await watchdog.race(messageIterator.next())
+      const next = await turnScope.race(messageIterator.next())
       if (next.done) {
         streamEndedNormally = true
         break
       }
 
       const message = next.value
-      recordClaudeStreamActivity(message, watchdog)
+      recordClaudeStreamActivity(message, turnScope)
 
       const typed = message as {
         type?: string
@@ -114,7 +126,7 @@ export async function* streamClaudeTurn(
         ) {
           const advanced = appendTextPiece(thinking, delta.thinking)
           thinking = advanced.text
-          watchdog.recordActivity('thinking_delta')
+          turnScope.recordProgress('thinking_delta')
           if (advanced.delta) yield { type: 'thinking_delta', content: advanced.delta }
           continue
         }
@@ -125,7 +137,7 @@ export async function* streamClaudeTurn(
         ) {
           const advanced = appendTextPiece(reply, delta.text)
           reply = advanced.text
-          watchdog.recordActivity('text_delta')
+          turnScope.recordProgress('text_delta')
           if (advanced.delta) yield { type: 'delta', content: advanced.delta }
         }
         continue
@@ -134,7 +146,7 @@ export async function* streamClaudeTurn(
       if (typed.type === 'result' && typed.result) {
         const advanced = advanceTextSnapshot(reply, typed.result)
         reply = advanced.text
-        watchdog.recordActivity('text_delta')
+        turnScope.recordProgress('text_delta')
         if (advanced.delta) yield { type: 'delta', content: advanced.delta }
         continue
       }
@@ -150,7 +162,7 @@ export async function* streamClaudeTurn(
         ) {
           const advanced = advanceTextSnapshot(thinking, block.thinking)
           thinking = advanced.text
-          watchdog.recordActivity('thinking_delta')
+          turnScope.recordProgress('thinking_delta')
           if (advanced.delta) yield { type: 'thinking_delta', content: advanced.delta }
         }
       }
@@ -164,17 +176,26 @@ export async function* streamClaudeTurn(
       if (text) {
         const advanced = advanceTextSnapshot(reply, text)
         reply = advanced.text
-        watchdog.recordActivity('text_delta')
+        turnScope.recordProgress('text_delta')
         if (advanced.delta) yield { type: 'delta', content: advanced.delta }
       }
     }
   } catch (error) {
+    const partial = partialCompletedChunk({
+      reply,
+      runtimeSessionId: sessionId,
+      graceCancelled: turnScope.graceCancelled
+    })
+    if (partial) {
+      yield partial
+      return
+    }
     if (turnAbort.signal.aborted || options?.signal?.aborted) {
       throw TURN_CANCELLED
     }
     throwSdkTurnError(error)
   } finally {
-    watchdog.dispose()
+    turnScope.dispose()
     await messageIterator.return?.(undefined).catch(() => {})
   }
 

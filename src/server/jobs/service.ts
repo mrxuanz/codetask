@@ -56,6 +56,7 @@ import {
 import { loadJobReferenceManifest } from './reference-manifest'
 import { enqueueJobSseEvent } from '../context/event-bus'
 import { getRunController } from './workload-slot-store'
+import { runWithExecutionRunContext } from './execution-run-context'
 
 export function initJobService(): void {
   getAppContext()
@@ -732,30 +733,32 @@ async function runJob(
 
     try {
       let chunkCount = 0
-      for await (const chunk of streamAgentTurn({
-        role: 'planner',
-        provider: core.code as SupportedCoreCode,
-        workspaceRoot: workspacePath,
-        runtimeRoot,
-        prompt: buildPlannerUserMessage({ draft: planningDraft, workspacePath, threadId }),
-        model,
-        systemPrompt: resolvePlannerPromptBody(),
-        mcpUrl,
-        readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-        signal: run.signal,
-        jobId: plannerScopeId
-      })) {
-        chunkCount += 1
-        if (chunkCount <= 5 || chunk.type === 'completed') {
-          plannerSandboxDebug('runJob: planner chunk', {
-            chunkCount,
-            type: chunk.type
-          })
+      await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
+        for await (const chunk of streamAgentTurn({
+          role: 'planner',
+          provider: core.code as SupportedCoreCode,
+          workspaceRoot: workspacePath,
+          runtimeRoot,
+          prompt: buildPlannerUserMessage({ draft: planningDraft, workspacePath, threadId }),
+          model,
+          systemPrompt: resolvePlannerPromptBody(),
+          mcpUrl,
+          readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
+          signal: run.signal,
+          jobId: plannerScopeId
+        })) {
+          chunkCount += 1
+          if (chunkCount <= 5 || chunk.type === 'completed') {
+            plannerSandboxDebug('runJob: planner chunk', {
+              chunkCount,
+              type: chunk.type
+            })
+          }
+          if (chunk.type === 'completed') {
+            break
+          }
         }
-        if (chunk.type === 'completed') {
-          break
-        }
-      }
+      })
       plannerSandboxDebug('runJob: streamAgentTurn finished', { chunkCount })
     } finally {
       unregisterPlannerMcpSession(mcpSessionId)
