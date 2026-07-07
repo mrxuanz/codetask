@@ -67,6 +67,7 @@ export async function putJobArtifact(input: {
   payload: unknown
   expiresAt?: number | null
   settings?: RetentionSettings
+  replaceExisting?: boolean
 }): Promise<string> {
   const settings = input.settings ?? DEFAULT_RETENTION_SETTINGS
   const tier = input.tier ?? 'working'
@@ -89,7 +90,7 @@ export async function putJobArtifact(input: {
     await writeArtifactFile(input.dataDir, input.jobId, id, raw)
   }
 
-  if (input.taskId) {
+  if (input.taskId && input.replaceExisting !== false) {
     const existing = await input.db
       .select()
       .from(jobArtifacts)
@@ -134,6 +135,29 @@ export async function putJobArtifact(input: {
   })
 
   return id
+}
+
+export async function deleteJobArtifact(input: {
+  db: AppDatabase
+  dataDir: string
+  artifactId: string
+}): Promise<boolean> {
+  const rows = await input.db
+    .select()
+    .from(jobArtifacts)
+    .where(eq(jobArtifacts.id, input.artifactId))
+    .limit(1)
+  const row = rows[0]
+  if (!row) return false
+
+  if (row.storage === 'file' && row.contentPath) {
+    await rm(join(input.dataDir, row.contentPath.replace(/\\/g, '/')), { force: true }).catch(
+      () => {}
+    )
+  }
+
+  await input.db.delete(jobArtifacts).where(eq(jobArtifacts.id, input.artifactId))
+  return true
 }
 
 export async function getJobArtifactPayload<T = unknown>(

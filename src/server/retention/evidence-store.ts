@@ -15,6 +15,8 @@ export async function storeTaskEvidenceArtifact(input: {
   dataDir: string
   settings?: RetentionSettings
   db?: ReturnType<typeof getDb>
+  expiresAt?: number | null
+  replaceExisting?: boolean
 }): Promise<{ artifactId: string; slim: TaskEvidenceDto }> {
   const settings = input.settings ?? DEFAULT_RETENTION_SETTINGS
   const db = input.db ?? getDb()
@@ -26,8 +28,9 @@ export async function storeTaskEvidenceArtifact(input: {
     taskId: input.taskId,
     kind: 'task_evidence',
     payload: input.evidence,
-    expiresAt: null,
-    settings
+    expiresAt: input.expiresAt ?? null,
+    settings,
+    replaceExisting: input.replaceExisting
   })
 
   return { artifactId, slim: slimEvidenceForState(input.evidence) }
@@ -40,6 +43,8 @@ export async function storeSliceVerdictArtifact(input: {
   dataDir: string
   settings?: RetentionSettings
   db?: ReturnType<typeof getDb>
+  expiresAt?: number | null
+  replaceExisting?: boolean
 }): Promise<{ artifactId: string; slim: SliceVerificationRecordDto }> {
   const artifactId = await putJobArtifact({
     db: input.db ?? getDb(),
@@ -48,8 +53,9 @@ export async function storeSliceVerdictArtifact(input: {
     taskId: input.sliceId,
     kind: 'slice_verdict',
     payload: input.verdict,
-    expiresAt: null,
-    settings: input.settings ?? DEFAULT_RETENTION_SETTINGS
+    expiresAt: input.expiresAt ?? null,
+    settings: input.settings ?? DEFAULT_RETENTION_SETTINGS,
+    replaceExisting: input.replaceExisting
   })
 
   return { artifactId, slim: slimSliceVerdict(input.verdict) }

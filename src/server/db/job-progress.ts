@@ -22,7 +22,6 @@ import {
 } from '../jobs/evidence/store'
 import {
   loadJobCountersIntoProgress,
-  syncJobCountersFromProgress,
   syncJobCountersFromProgressInTx,
   summarizeEvidence
 } from '../retention'
@@ -190,7 +189,7 @@ export function saveTaskProgressInTx(
         evidenceStatus: task.evidenceStatus ?? null,
         evidenceJson: evidence ? JSON.stringify(evidence) : null,
         evidenceArtifactId: task.evidenceArtifactId ?? null,
-        evidenceSummary: task.evidenceSummary ?? summarizeEvidence(evidence) ?? null,
+        evidenceSummary: task.evidenceSummary ?? (evidence ? summarizeEvidence(evidence) : null),
         blockerKind: task.blockerKind ?? null,
         recoveryAction: task.recoveryAction ?? null,
         errorMessage: resolveStoredTaskError(task),
