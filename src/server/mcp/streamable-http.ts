@@ -1,6 +1,9 @@
 import type { McpDispatchResult } from '../conversation/mcp/handler'
+import { createBoundedBuffer, type BoundedBuffer } from '../shared/bounded-buffer.ts'
 
 type JsonRpcId = string | number | null
+
+export const MAX_MCP_SSE_QUEUE = 256
 
 export interface McpJsonRpcBody {
   jsonrpc?: string
@@ -133,20 +136,29 @@ export async function* streamMcpSseEvents(
   const transport = getOrCreateTransport(options.urlSessionId, options.mcpSessionId)
   if (transport.closed) return
 
-  const queue: Array<{ event: string; id: string; data: string }> = []
+  const queue: BoundedBuffer<{ event: string; id: string; data: string }> = createBoundedBuffer({
+    max: MAX_MCP_SSE_QUEUE,
+    policy: 'close'
+  })
   let notify: (() => void) | undefined
   let closed = false
 
   const subscriber: StreamSubscriber = {
     lastEventId: Number.parseInt(options.lastEventIdHeader ?? '0', 10) || 0,
     push: (eventId, body) => {
+      if (closed) return
       if (eventId <= subscriber.lastEventId) return
       subscriber.lastEventId = eventId
-      queue.push({
+      const result = queue.push({
         event: 'message',
         id: String(eventId),
         data: JSON.stringify(body)
       })
+      if (result === 'overflow') {
+        closed = true
+        notify?.()
+        return
+      }
       notify?.()
     },
     close: () => {
@@ -167,7 +179,7 @@ export async function* streamMcpSseEvents(
     yield { event: 'endpoint', id: '0', data: JSON.stringify({ sessionId: options.urlSessionId }) }
 
     while (!closed) {
-      while (queue.length > 0) {
+      while (queue.size() > 0) {
         yield queue.shift()!
       }
       if (closed) break
@@ -175,7 +187,7 @@ export async function* streamMcpSseEvents(
         notify = resolve
         setTimeout(resolve, 25_000)
       })
-      if (!closed && queue.length === 0) {
+      if (!closed && queue.size() === 0) {
         yield { event: 'ping', id: String(Date.now()), data: '{}' }
       }
     }
