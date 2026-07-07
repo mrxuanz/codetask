@@ -23,7 +23,7 @@ import { mapJob } from '../jobs/repository'
 import { AppError } from '../error'
 import { ReferenceFileMissingError } from '../jobs/reference-paths'
 import { buildJobSnapshot, parseSessionManifest, validateLaunchPreconditions } from './launch'
-import { advanceJobQueue } from '../jobs/job-queue'
+import { advanceWorkloadQueue } from '../jobs/workload-slot-store'
 import { emitJobEvent } from '../jobs/service'
 import { DESIGN_SESSION_WORKSPACE_STATUSES } from '@shared/design-session'
 import { isManifestFresh } from '../reference-corpus/corpus-sync'
@@ -207,6 +207,24 @@ export async function updateDesignSessionRow(
   return rows[0]
     ? mapDesignSessionToJobDto(rows[0], { includePlan: options?.includePlan ?? true })
     : null
+}
+
+export async function updateDesignSessionRowFenced(
+  designSessionId: string,
+  runId: string,
+  patch: DesignSessionRowPatch,
+  options?: { includePlan?: boolean }
+): Promise<ThreadJobDto | null> {
+  const db = getDb()
+  const existing = await db
+    .select({ activeRunId: designSessions.activeRunId })
+    .from(designSessions)
+    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.activeRunId, runId)))
+    .limit(1)
+    .then((rows) => rows[0])
+
+  if (!existing) return null
+  return updateDesignSessionRow(designSessionId, patch, options)
 }
 
 export async function createPlannerRun(input: {
@@ -404,7 +422,7 @@ export async function launchJobFromDesignSession(
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job } })
 
   if (!options?.skipQueueAdvance) {
-    await advanceJobQueue(username)
+    await advanceWorkloadQueue(username)
   }
   return job
 }

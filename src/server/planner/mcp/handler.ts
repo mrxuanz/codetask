@@ -12,6 +12,7 @@ import {
 import { validatePlanAbilityCodes } from '../plan-ability-validation'
 import { plannerMcpToolDefinitions } from './tools'
 import { getPlannerMcpSession } from './session'
+import { assertRunActive } from '../../jobs/workload-slot-store'
 
 type JsonRpcId = string | number | null
 
@@ -57,6 +58,16 @@ function toolTextResult(text: string): Record<string, unknown> {
   return {
     content: [{ type: 'text', text }],
     structuredContent: { message: text }
+  }
+}
+
+async function requireActiveRun(
+  session: NonNullable<ReturnType<typeof getPlannerMcpSession>>
+): Promise<void> {
+  if (
+    !(await assertRunActive(session.ownerKind, session.ownerId, session.runId))
+  ) {
+    throw AppError.badRequest('Plan session closed or stale run', 'plan.stale_run')
   }
 }
 
@@ -116,6 +127,7 @@ function registerTaskContext(
 
   plannerSandboxDebug('planner-mcp: register_task_context ok', {
     jobId: session.jobId,
+    runId: session.runId,
     key,
     taskTitle,
     contentChars: content.length,
@@ -156,6 +168,7 @@ function updateTaskContext(
   session.onTaskContextRegistered?.(key, session.taskContexts.size)
   plannerSandboxDebug('planner-mcp: update_task_context ok', {
     jobId: session.jobId,
+    runId: session.runId,
     key,
     taskTitle,
     contentChars: content.length,
@@ -170,6 +183,7 @@ function registerPlan(
 ): Record<string, unknown> {
   plannerSandboxDebug('planner-mcp: register_plan begin', {
     jobId: session.jobId,
+    runId: session.runId,
     contextsRegistered: session.taskContexts.size,
     contextKeys: [...session.taskContexts.keys()],
     allowedAbilityCodes: session.allowedAbilityCodes
@@ -181,6 +195,7 @@ function registerPlan(
   } catch (error) {
     plannerSandboxDebug('planner-mcp: register_plan rejected (normalize)', {
       jobId: session.jobId,
+      runId: session.runId,
       error: error instanceof Error ? error.message : String(error)
     })
     throw error
@@ -189,6 +204,7 @@ function registerPlan(
   const counts = countPlanUnits(plan)
   plannerSandboxDebug('planner-mcp: register_plan normalized', {
     jobId: session.jobId,
+    runId: session.runId,
     milestones: counts.milestones,
     slices: counts.slices,
     tasks: counts.tasks
@@ -198,6 +214,7 @@ function registerPlan(
   if (missing.length > 0) {
     plannerSandboxDebug('planner-mcp: register_plan rejected (missing contexts)', {
       jobId: session.jobId,
+      runId: session.runId,
       missing,
       contextsRegistered: session.taskContexts.size
     })
@@ -213,6 +230,7 @@ function registerPlan(
   } catch (error) {
     plannerSandboxDebug('planner-mcp: register_plan rejected (validation)', {
       jobId: session.jobId,
+      runId: session.runId,
       error: error instanceof Error ? error.message : String(error)
     })
     throw error
@@ -224,24 +242,114 @@ function registerPlan(
     const message = error instanceof Error ? error.message : 'Reference validation failed'
     plannerSandboxDebug('planner-mcp: register_plan rejected (references)', {
       jobId: session.jobId,
+      runId: session.runId,
       error: message
     })
     throw AppError.badRequest(message, 'draft.reference_invalid')
   }
 
   session.registeredPlan = plan
-  session.onPlanRegistered?.(counts)
+  session.finalizerPromise = finalizePlan(session, counts)
 
-  plannerSandboxDebug('planner-mcp: register_plan ok', {
+  plannerSandboxDebug('planner-mcp: register_plan accepted', {
     jobId: session.jobId,
+    runId: session.runId,
     milestones: counts.milestones,
     slices: counts.slices,
     tasks: counts.tasks
   })
 
   return toolTextResult(
-    `Registered structured plan (${counts.milestones} milestones, ${counts.slices} slices, ${counts.tasks} tasks)`
+    `Plan accepted for commit (${counts.milestones} milestones, ${counts.slices} slices, ${counts.tasks} tasks)`
   )
+}
+
+async function finalizePlan(
+  session: NonNullable<ReturnType<typeof getPlannerMcpSession>>,
+  counts: { milestones: number; slices: number; tasks: number }
+): Promise<void> {
+  try {
+    if (!(await assertRunActive(session.ownerKind, session.ownerId, session.runId))) {
+      const activeRun = await import('../../jobs/workload-slot-store').then(
+        (m) => m.getActiveRun(session.ownerKind, session.ownerId)
+      )
+      logStructured('planner.finalizer.stale', {
+        runId: session.runId,
+        ownerKind: session.ownerKind,
+        ownerId: session.ownerId,
+        reason: 'run_no_longer_active',
+        currentRunId: activeRun?.runId ?? null
+      })
+      return
+    }
+
+    if (session.planCommitted || session.planCommitting) {
+      return
+    }
+    session.planCommitting = true
+
+    const commitOk = await invokePlanCommit(session, counts)
+    if (!commitOk) {
+      const stillActive = await assertRunActive(session.ownerKind, session.ownerId, session.runId)
+      const activeRun = await import('../../jobs/workload-slot-store').then(
+        (m) => m.getActiveRun(session.ownerKind, session.ownerId)
+      )
+      logStructured('planner.finalizer.rejected', {
+        runId: session.runId,
+        ownerId: session.ownerId,
+        reason: stillActive ? 'fenced_update_failed' : 'run_no_longer_active',
+        currentRunId: activeRun?.runId ?? null
+      })
+      return
+    }
+
+    session.planCommitted = true
+    session.abortTurn?.()
+
+    logStructured('planner.finalizer.committed', {
+      runId: session.runId,
+      ownerId: session.ownerId,
+      milestones: counts.milestones,
+      slices: counts.slices,
+      tasks: counts.tasks
+    })
+  } catch (error) {
+    logStructured('planner.finalizer.failed', {
+      runId: session.runId,
+      ownerId: session.ownerId,
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
+async function invokePlanCommit(
+  session: NonNullable<ReturnType<typeof getPlannerMcpSession>>,
+  counts: { milestones: number; slices: number; tasks: number }
+): Promise<boolean> {
+  const { flattenRegisteredPlan } = await import('../save-plan')
+  const saved = flattenRegisteredPlan(session.registeredPlan!, session.taskContexts)
+
+  if (session.ownerKind === 'thread_job') {
+    const { commitPlanReadyFenced } = await import('../../jobs/service')
+    return commitPlanReadyFenced(session.ownerId, session.runId, saved, counts)
+  }
+
+  const { commitDesignPlanReady } = await import('../../design-session/planner')
+  return commitDesignPlanReady(
+    session.ownerId,
+    session.runId,
+    saved,
+    counts,
+    session.phaseAdvance,
+    {
+      planRevision: session.planRevision,
+      clearConfirmed: session.clearConfirmed
+    }
+  )
+}
+
+function logStructured(step: string, detail: Record<string, unknown>): void {
+  plannerSandboxDebug(step, detail)
 }
 
 export async function handlePlannerMcpJsonRpc(
@@ -287,6 +395,10 @@ export async function handlePlannerMcpJsonRpc(
   const toolArguments = request.params?.arguments ?? {}
 
   try {
+    const session = getPlannerMcpSession(sessionId)
+    if (session) {
+      await requireActiveRun(session)
+    }
     const value = dispatchTool(sessionId, toolName, toolArguments)
     return jsonRpcOk(id, value)
   } catch (error) {

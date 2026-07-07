@@ -12,7 +12,7 @@ import type { TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import { emitJobEvent, getUserJob, updateJobRowForSnapshot } from './service'
-import { advanceJobQueue, claimJobSlotOrEnqueue, findOccupyingJobId } from './job-queue'
+import { claimJobSlotOrEnqueue, findOccupyingJobId } from './job-queue'
 import { acquireExecutionLease, clearExecutionLease } from './repository'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { prepareContinueFailedExecution } from './continue-failed-job'
@@ -82,6 +82,9 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
     getAppContext().runtimeRegistry.endJobPlanning(jobId)
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     emitJobEvent(jobId, { event: 'job_done', data: { job: updated } })
+
+    const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+    await stopAndReleaseActiveRun('design_session', jobId, 'paused')
     return updated
   }
 
@@ -110,6 +113,9 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
   const updated = await updateJobRowForSnapshot(jobId, { status: 'paused' })
   if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
+
+  const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+  await stopAndReleaseActiveRun('thread_job', jobId, 'paused')
   return updated
 }
 
@@ -345,7 +351,8 @@ async function continueJobExecution(
   const updated = await updateJobRowForSnapshot(jobId, { status: 'pending' })
   if (!updated) throw AppError.internal('Failed to resume job', 'job.invalid_status')
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-  await advanceJobQueue(username)
+  const { releaseActiveRunOrAdvanceQueue } = await import('./workload-slot-store')
+  await releaseActiveRunOrAdvanceQueue(username, 'thread_job', jobId, 'resumed')
   return (await getUserJob(username, jobId)) ?? updated
 }
 
@@ -466,6 +473,9 @@ export async function cancelJob(username: string, jobId: string): Promise<Thread
     emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     emitJobEvent(jobId, { event: 'job_done', data: { job: updated } })
+
+    const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+    await stopAndReleaseActiveRun('design_session', jobId, 'cancelled')
     return updated
   }
 
@@ -503,9 +513,8 @@ export async function cancelJob(username: string, jobId: string): Promise<Thread
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
   emitJobEvent(jobId, { event: 'job_done', data: { job: updated } })
 
-  if (job.status === 'pending' || job.status === 'running') {
-    await advanceJobQueue(username)
-  }
+  const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+  await stopAndReleaseActiveRun('thread_job', jobId, 'cancelled')
   return updated
 }
 
@@ -613,19 +622,17 @@ export async function deleteJob(username: string, jobId: string): Promise<void> 
     console.warn('[jobs] failed to purge job filesystem state', jobId, error)
   })
 
-  if (!['planning', 'running'].includes(job.status)) {
-    await advanceJobQueue(username)
-  }
+  const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+  await stopAndReleaseActiveRun('thread_job', jobId, 'deleted')
 }
 
 export function markJobExecuting(jobId: string, username?: string): boolean {
   return executionRuntime().tryStartLoop(jobId, username)
 }
 
-export async function markJobExecutionDone(jobId: string, username: string): Promise<void> {
+export async function markJobExecutionDone(jobId: string, _username: string): Promise<void> {
   executionRuntime().endLoop(jobId)
   await clearExecutionLease(jobId)
-  await advanceJobQueue(username)
 }
 
 export function createExecutionAbortSignal(jobId: string): AbortSignal {

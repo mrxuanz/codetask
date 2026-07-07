@@ -7,11 +7,27 @@ export interface PlannerMcpSession {
   jobId: string
   threadId: string
 
+  runId: string
+  ownerKind: 'thread_job' | 'design_session'
+  ownerId: string
+
   allowedAbilityCodes: string[]
   validReferenceIds: string[]
   referenceManifest?: JobReferenceManifest | null
   taskContexts: Map<string, PlannerRegisteredTaskContext>
   registeredPlan: PlannerRegisteredPlan | null
+  planCommitted?: boolean
+  planCommitting?: boolean
+  finalizerPromise?: Promise<void>
+  phaseAdvance?: {
+    username: string
+    threadId: string
+    coreCode: string
+    draftMessageId: string
+  }
+  planRevision?: number
+  clearConfirmed?: boolean
+  abortTurn?: () => void
   onTaskContextRegistered?: (key: string, done: number) => void
   onPlanRegistered?: (counts: { milestones: number; slices: number; tasks: number }) => void
 }

@@ -50,7 +50,8 @@ import {
   getThreadJob as getThreadJobRow,
   getUserJob as getUserJobRow,
   mapJob,
-  updateJobRow
+  updateJobRow,
+  updateJobRowFenced
 } from './repository'
 import { loadJobReferenceManifest } from './reference-manifest'
 import { enqueueJobSseEvent } from '../context/event-bus'
@@ -549,6 +550,7 @@ export async function launchJobFromDraft(
 
 async function commitPlanReady(
   jobId: string,
+  runId: string,
   _username: string,
   savedPlan: SavedJobPlan,
   counts: { milestones: number; slices: number; tasks: number }
@@ -568,7 +570,8 @@ async function commitPlanReady(
 
   const initialTaskProgress = defaultTaskProgress(savedPlan.tasks)
 
-  const jobAfterPlan = await updateJobRow(jobId, {
+  const { updateJobRowFenced } = await import('./repository')
+  const jobAfterPlan = await updateJobRowFenced(jobId, runId, {
     status: 'plan_editing',
     plan: savedPlan,
     planProgress: planReady,
@@ -587,6 +590,15 @@ async function commitPlanReady(
   return true
 }
 
+export async function commitPlanReadyFenced(
+  jobId: string,
+  runId: string,
+  savedPlan: SavedJobPlan,
+  counts: { milestones: number; slices: number; tasks: number }
+): Promise<boolean> {
+  return commitPlanReady(jobId, runId, '', savedPlan, counts)
+}
+
 async function runJob(
   username: string,
   threadId: string,
@@ -595,13 +607,39 @@ async function runJob(
   workspacePath: string,
   coreCode: string
 ): Promise<void> {
-  const { findWorkloadOccupant } = await import('./workload-slot')
-  if (await findWorkloadOccupant(username, jobId)) return
-  if (!getAppContext().runtimeRegistry.tryStartJobPlanning(jobId, username)) return
+  const { claimWorkloadSlotTx } = await import('./workload-slot-store')
+  const run = await claimWorkloadSlotTx({
+    username,
+    ownerKind: 'thread_job',
+    ownerId: jobId,
+    kind: 'planning',
+    pool: 'default'
+  })
+  if (!run) {
+    plannerSandboxDebug('runJob: skipped (workload slot unavailable), enqueuing', { jobId })
+    const pending = await updateJobRow(jobId, {
+      status: 'pending',
+      planProgress: {
+        ...defaultPlanProgress(),
+        phase: 'idle',
+        status: 'pending',
+        progressCode: 'execution.pending',
+        progressParams: null
+      },
+      lastError: null
+    })
+    if (pending) {
+      emitJobEvent(jobId, { event: 'job_snapshot', data: { job: pending } })
+    }
+    return
+  }
+
+  getAppContext().runtimeRegistry.tryStartJobPlanning(jobId, username)
 
   const planningDraft = ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode)
   plannerSandboxDebug('runJob: start', {
     jobId,
+    runId: run.runId,
     threadId,
     workspacePath,
     coreCode,
@@ -609,6 +647,14 @@ async function runJob(
   })
 
   let planCommitted = false
+  let runOutcome: import('./run-lifecycle').PlanningRunOutcome = 'success'
+  const plannerScopeId = `${jobId}:${run.runId}`
+
+  const { registerRunRuntime } = await import('./runtime-supervisor')
+  const { buildCursorPlannerRuntimeHandle } = await import('./runtime-handle-cursor')
+  const { updateRunRuntimeRef } = await import('./workload-slot-store')
+  registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
+  await updateRunRuntimeRef(run.runId, { kind: 'cursor-acp', scopeId: plannerScopeId })
 
   try {
     plannerSandboxDebug('runJob: resolving planner core')
@@ -635,6 +681,9 @@ async function runJob(
       sessionId: mcpSessionId,
       jobId,
       threadId,
+      runId: run.runId,
+      ownerKind: 'thread_job',
+      ownerId: jobId,
       allowedAbilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode),
       validReferenceIds:
         referenceManifest?.references.map((item) => item.id) ??
@@ -642,32 +691,23 @@ async function runJob(
       referenceManifest,
       taskContexts: new Map(),
       registeredPlan: null,
+      abortTurn: () => {
+        try {
+          turnAbort.abort()
+        } catch {
+          // ignore
+        }
+      },
       onTaskContextRegistered: (_key, done) => {
         const partial = plannerSession.registeredPlan
           ? flattenRegisteredPlan(plannerSession.registeredPlan, plannerSession.taskContexts)
           : buildPartialPlanFromContexts(plannerSession.taskContexts)
-        void pushPlanningProgress(jobId, done, partial, plannerSession.registeredPlan)
-      },
-      onPlanRegistered: (counts) => {
-        if (!plannerSession.registeredPlan) return
-        const saved = flattenRegisteredPlan(
-          plannerSession.registeredPlan,
-          plannerSession.taskContexts
-        )
-        void commitPlanReady(jobId, username, saved, counts).then((ok) => {
-          if (!ok) return
-          planCommitted = true
-          plannerSandboxDebug('runJob: plan committed on register_plan', {
-            jobId,
-            tasks: counts.tasks
-          })
-          turnAbort.abort()
-        })
+        void pushPlanningProgress(jobId, run.runId, done, partial, plannerSession.registeredPlan)
       }
     }
 
     registerPlannerMcpSession(plannerSession)
-    plannerSandboxDebug('runJob: planner MCP session registered', { mcpSessionId, jobId })
+    plannerSandboxDebug('runJob: planner MCP session registered', { mcpSessionId, jobId, runId: run.runId })
 
     let mcpUrl: string | undefined
     try {
@@ -699,7 +739,8 @@ async function runJob(
         systemPrompt: resolvePlannerPromptBody(),
         mcpUrl,
         readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-        signal: turnAbort.signal
+        signal: turnAbort.signal,
+        jobId: plannerScopeId
       })) {
         chunkCount += 1
         if (chunkCount <= 5 || chunk.type === 'completed') {
@@ -718,8 +759,11 @@ async function runJob(
       plannerSandboxDebug('runJob: planner MCP session unregistered', { mcpSessionId })
     }
 
-    if (planCommitted) {
-      plannerSandboxDebug('runJob: finished after early plan commit', { jobId })
+    await plannerSession.finalizerPromise
+
+    if (plannerSession.planCommitted) {
+      planCommitted = true
+      plannerSandboxDebug('runJob: finished after plan commit', { jobId })
       return
     }
 
@@ -730,28 +774,37 @@ async function runJob(
       })
     }
 
+    plannerSession.planCommitting = true
     const savedPlan = flattenRegisteredPlan(session.registeredPlan, session.taskContexts)
     const counts = countPlanUnits(session.registeredPlan)
-    await commitPlanReady(jobId, username, savedPlan, counts)
+    const ok = await commitPlanReady(jobId, run.runId, username, savedPlan, counts)
+    if (ok) {
+      planCommitted = true
+      plannerSession.planCommitted = true
+    }
   } catch (error) {
     if (planCommitted) {
+      runOutcome = 'success'
       plannerSandboxDebug('runJob: sandbox ended after plan committed (ignored)', { jobId })
       return
     }
     const current = await getUserJob(username, jobId)
     if (current?.status === 'paused' || current?.status === 'cancelled') {
       plannerSandboxDebug('runJob: stopped by user', { jobId, status: current.status })
+      runOutcome = 'user_stopped'
       return
     }
+    runOutcome = 'failure'
     const failure = planFailureFromSandboxError(error)
     plannerSandboxDebug('runJob: failed', {
       jobId,
+      runId: run.runId,
       message: failure.lastError.message,
       code: failure.lastError.code,
       phase: failure.planProgress.phase,
       stack: error instanceof Error ? error.stack : undefined
     })
-    const job = await updateJobRow(jobId, {
+    const job = await updateJobRowFenced(jobId, run.runId, {
       status: 'failed',
       planProgress: failure.planProgress,
       lastError: failure.lastError
@@ -763,9 +816,9 @@ async function runJob(
     }
   } finally {
     getAppContext().runtimeRegistry.endJobPlanning(jobId)
-    plannerSandboxDebug('runJob: done', { jobId })
-    const { advanceJobQueue } = await import('./job-queue')
-    await advanceJobQueue(username)
+    plannerSandboxDebug('runJob: releasing slot', { jobId, runId: run.runId, outcome: runOutcome })
+    const { finishPlanningRunLifecycle } = await import('./run-lifecycle')
+    await finishPlanningRunLifecycle(run.runId, 'planning_done', runOutcome)
   }
 }
 
@@ -839,10 +892,24 @@ export async function retryJobPlanning(username: string, jobId: string): Promise
 
 async function pushPlanningProgress(
   jobId: string,
+  runId: string,
   done: number,
   partialPlan: SavedJobPlan,
   registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
 ): Promise<void> {
+  const db = getDb()
+  const fenced = await db
+    .select({ activeRunId: threadJobs.activeRunId })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, jobId), eq(threadJobs.activeRunId, runId)))
+    .limit(1)
+    .then((rows) => rows[0])
+
+  if (!fenced) {
+    plannerSandboxDebug('pushPlanningProgress: stale run ignored', { jobId, runId })
+    return
+  }
+
   const structuredTotal = registeredPlan ? countPlanUnits(registeredPlan).tasks : 0
   const partialCount = partialPlan.tasks.length
   const total =
@@ -862,7 +929,6 @@ async function pushPlanningProgress(
     message: null
   }
 
-  const db = getDb()
   await saveJobPlan(db, jobId, partialPlan)
   await savePlanProgress(db, jobId, planProgress)
   await db.update(threadJobs).set({ updatedAt: nowSec() }).where(eq(threadJobs.id, jobId))
@@ -873,6 +939,16 @@ async function pushPlanningProgress(
 
   emitJobEvent(jobId, { event: 'plan_progress', data: { planProgress, plan: partialPlan } })
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job } })
+}
+
+export async function pushPlanningProgressFenced(
+  jobId: string,
+  runId: string,
+  done: number,
+  partialPlan: SavedJobPlan,
+  registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
+): Promise<void> {
+  return pushPlanningProgress(jobId, runId, done, partialPlan, registeredPlan)
 }
 
 function shouldCloseJobStream(status: string): boolean {

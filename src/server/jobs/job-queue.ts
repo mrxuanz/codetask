@@ -79,8 +79,12 @@ async function tryResumeRestartInterruptedJob(username: string): Promise<boolean
 }
 
 async function prepareJobQueueForUser(username: string): Promise<void> {
-  const { reconcileOrphanRunningJobsForUser, reconcileOrphanPlanningSessionsForUser } =
-    await import('./reconcile')
+  const {
+    reconcileOrphanRunningJobsForUser,
+    reconcileOrphanPlanningSessionsForUser,
+    reconcileOrphanWorkloadSlotsForUser
+  } = await import('./reconcile')
+  await reconcileOrphanWorkloadSlotsForUser(username)
   await reconcileOrphanRunningJobsForUser(username)
   await reconcileOrphanPlanningSessionsForUser(username)
 }
