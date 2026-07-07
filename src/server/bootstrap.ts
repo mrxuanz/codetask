@@ -4,7 +4,9 @@ import { createDatabase, closeDatabaseForTests } from './db'
 import {
   reconcileOrphanRunningJobsOnStartupOnce,
   reconcileOrphanPlanningSessionsOnStartupOnce,
-  reconcileOrphanWorkloadSlotsOnStartupOnce
+  reconcileOrphanWorkloadSlotsOnStartupOnce,
+  startWorkloadReconciler,
+  stopWorkloadReconcilerForTests
 } from './jobs/reconcile'
 import { bindStartupWorkloadGate } from './jobs/workload-slot'
 import { reconcileOnStartupOnce } from './conversation/service'
@@ -136,6 +138,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
   startRetentionJanitor()
   startAuthJanitor()
+  startWorkloadReconciler()
 
   trackStartupTask(
     import('./agent-runtime/cursor-acp/conversation-cursor-reaper')
@@ -164,6 +167,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 export async function resetAppContextForTests(): Promise<void> {
   stopAuthJanitor()
   stopRetentionJanitor()
+  stopWorkloadReconcilerForTests()
 
   const ctx = appContext
   if (ctx) {

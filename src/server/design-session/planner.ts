@@ -48,6 +48,7 @@ import { advanceWizardPhase, buildDraftToPlanHandoff } from '../wizard/phase'
 import { WIZARD_PHASE_PLAN_EDIT } from '../wizard/types'
 import type { PlanningRunOutcome } from '../jobs/run-lifecycle'
 import { getRunController } from '../jobs/workload-slot-store'
+import { runWithExecutionRunContext } from '../jobs/execution-run-context'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -461,30 +462,32 @@ async function runDesignPlanner(
       })
 
       let chunkCount = 0
-      for await (const chunk of streamAgentTurn({
-        role: 'planner',
-        provider: core.code as SupportedCoreCode,
-        workspaceRoot: workspacePath,
-        runtimeRoot,
-        prompt: plannerPrompt + regenerationSection,
-        model,
-        systemPrompt: resolvePlannerPromptBody(),
-        mcpUrl,
-        readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-        signal: run.signal,
-        jobId: plannerScopeId
-      })) {
-        chunkCount += 1
-        if (chunk.type !== 'thinking_delta' && chunk.type !== 'delta') {
-          plannerSandboxDebug('runDesignPlanner: turn chunk', {
-            designSessionId,
-            runId: run.runId,
-            chunkType: chunk.type,
-            chunkCount
-          })
+      await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
+        for await (const chunk of streamAgentTurn({
+          role: 'planner',
+          provider: core.code as SupportedCoreCode,
+          workspaceRoot: workspacePath,
+          runtimeRoot,
+          prompt: plannerPrompt + regenerationSection,
+          model,
+          systemPrompt: resolvePlannerPromptBody(),
+          mcpUrl,
+          readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
+          signal: run.signal,
+          jobId: plannerScopeId
+        })) {
+          chunkCount += 1
+          if (chunk.type !== 'thinking_delta' && chunk.type !== 'delta') {
+            plannerSandboxDebug('runDesignPlanner: turn chunk', {
+              designSessionId,
+              runId: run.runId,
+              chunkType: chunk.type,
+              chunkCount
+            })
+          }
+          if (chunk.type === 'completed') break
         }
-        if (chunk.type === 'completed') break
-      }
+      })
 
       plannerSandboxDebug('runDesignPlanner: streamAgentTurn finished', {
         designSessionId,

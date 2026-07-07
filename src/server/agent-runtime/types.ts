@@ -23,7 +23,7 @@ export type RoleWorkerInput = AgentTurnInput
 export type AgentTurnChunk =
   | { type: 'delta'; content: string }
   | { type: 'thinking_delta'; content: string }
-  | { type: 'completed'; reply: string; runtimeSessionId: string | null }
+  | { type: 'completed'; reply: string; runtimeSessionId: string | null; partial?: true }
   | { type: 'error'; message: string; error?: TurnErrorDto; code?: TurnErrorDto['code'] }
 
 export type SdkTurnChunk = AgentTurnChunk

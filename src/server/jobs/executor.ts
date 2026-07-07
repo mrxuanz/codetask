@@ -1411,6 +1411,13 @@ async function executeSingleTask(
     })) {
       if (chunk.type === 'completed') {
         evidenceWait.resetTimeout(getTaskEvidenceWaitTimeoutForTests() ?? TASK_EVIDENCE_GRACE_MS)
+        if (chunk.partial) {
+          memoryDebug('executeSingleTask: partial turn completed, preserving evidence wait', {
+            jobId: job.id,
+            taskId,
+            replyChars: chunk.reply.length
+          })
+        }
         break
       }
       if (shouldStopExecution(job.id) === 'cancel') {

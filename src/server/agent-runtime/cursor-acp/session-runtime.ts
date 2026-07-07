@@ -6,7 +6,9 @@ import type { AgentTurnChunk } from '../types'
 import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { TurnErrorCode } from '../../../shared/turn-errors/codes.ts'
 import { classifyCursorAcpError } from './errors'
-import { TurnWatchdog } from '../turn-watchdog'
+import { TurnScope } from '../turn-scope'
+import { getExecutionRunContext } from '../../jobs/execution-run-context'
+import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
 import { createAsyncQueue } from './async-queue'
 import {
   applyCursorModel,
@@ -316,12 +318,44 @@ export class CursorAcpSessionRuntime {
       }
     }
 
-    const watchdog = new TurnWatchdog({
+    let detachExitListener: (() => void) | undefined
+    const exitPromise = new Promise<never>((_, reject) => {
+      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        const dto = classifyCursorAcpError(
+          new Error(`Cursor Agent process exited mid-turn${signal ? ` (signal=${signal})` : ''}`),
+          {
+            exitCode: code,
+            stderr: diagnostics.getStderrTail(),
+            command: this.executable
+          }
+        )
+        reject(createTurnError(dto.code, { params: dto.params, detail: dto.detail ?? undefined }))
+      }
+      detachExitListener = diagnostics.onExit(onExit)
+      child.once('exit', onExit)
+    })
+
+    const turnScope = new TurnScope({
       role: input.role,
       externalSignal: input.signal,
-      onAbort
+      processExit: exitPromise,
+      onKeepAlive: () => {
+        const ctx = getExecutionRunContext()
+        if (ctx?.runId) {
+          void refreshWorkloadLease(ctx.runId)
+        }
+      },
+      onCancel: async (mode) => {
+        if (mode === 'soft') {
+          if (this.activeTaskSession) {
+            await cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
+          }
+        } else {
+          killChildTree(child)
+        }
+      }
     })
-    watchdog.arm()
+    turnScope.arm()
 
     input.signal?.addEventListener('abort', onAbort, { once: true })
     if (input.signal?.aborted) {
@@ -354,29 +388,12 @@ export class CursorAcpSessionRuntime {
       }
     )
 
-    let detachExitListener: (() => void) | undefined
-    const exitPromise = new Promise<never>((_, reject) => {
-      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-        const dto = classifyCursorAcpError(
-          new Error(`Cursor Agent process exited mid-turn${signal ? ` (signal=${signal})` : ''}`),
-          {
-            exitCode: code,
-            stderr: diagnostics.getStderrTail(),
-            command: this.executable
-          }
-        )
-        reject(createTurnError(dto.code, { params: dto.params, detail: dto.detail ?? undefined }))
-      }
-      detachExitListener = diagnostics.onExit(onExit)
-      child.once('exit', onExit)
-    })
-
     const pumpUpdates = async (): Promise<void> => {
       while (!promptSettled && !aborted) {
-        const message = await watchdog.race(Promise.race([session.nextUpdate(), exitPromise]))
+        const message = await turnScope.race(session.nextUpdate())
 
         if (message.kind === 'session_update') {
-          watchdog.recordActivity('provider_event')
+          turnScope.recordProgress('provider_event')
           const update = message.update
           if (
             update.sessionUpdate === 'agent_thought_chunk' &&
@@ -385,7 +402,7 @@ export class CursorAcpSessionRuntime {
           ) {
             const advanced = appendTextPiece(thinking, update.content.text)
             thinking = advanced.text
-            watchdog.recordActivity('thinking_delta')
+            turnScope.recordProgress('thinking_delta')
             if (advanced.delta) emit({ type: 'thinking_delta', content: advanced.delta })
             continue
           }
@@ -397,14 +414,14 @@ export class CursorAcpSessionRuntime {
           ) {
             const advanced = appendTextPiece(reply, update.content.text)
             reply = advanced.text
-            watchdog.recordActivity('text_delta')
+            turnScope.recordProgress('text_delta')
             if (advanced.delta) emit({ type: 'delta', content: advanced.delta })
           }
           continue
         }
 
         if (message.kind === 'stop') {
-          watchdog.recordActivity('heartbeat')
+          turnScope.recordProgress('heartbeat')
           debugCursor('runtime stop event (ignored for completion)', {
             stopReason: message.stopReason,
             replyChars: reply.length
@@ -416,6 +433,15 @@ export class CursorAcpSessionRuntime {
     try {
       await Promise.all([pumpUpdates(), promptPromise])
     } catch (error) {
+      if (turnScope.graceCancelled && reply.trim()) {
+        emit({
+          type: 'completed',
+          reply: reply.trim(),
+          runtimeSessionId: session.sessionId,
+          partial: true
+        })
+        return
+      }
       if (aborted) {
         throw TURN_CANCELLED
       }
@@ -429,10 +455,10 @@ export class CursorAcpSessionRuntime {
     } finally {
       detachExitListener?.()
       input.signal?.removeEventListener('abort', onAbort)
-      watchdog.dispose()
+      turnScope.dispose()
     }
 
-    assertTaskWorkerAcpCompletion({
+    const completionCheck = assertTaskWorkerAcpCompletion({
       role: input.role,
       reply,
       stderrTail: diagnostics.getStderrTail(),
@@ -447,7 +473,8 @@ export class CursorAcpSessionRuntime {
     emit({
       type: 'completed',
       reply: reply.trim() || '',
-      runtimeSessionId: session.sessionId
+      runtimeSessionId: session.sessionId,
+      ...(completionCheck.partial ? { partial: true as const } : {})
     })
   }
 
