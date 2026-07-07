@@ -35,7 +35,8 @@ function defaultSleep(ms: number): Promise<void> {
 export async function stopRunLifecycle(
   runId: string,
   reason: string,
-  deps: RunLifecycleDependencies = {}
+  deps: RunLifecycleDependencies = {},
+  options: { skipRelease?: boolean } = {}
 ): Promise<void> {
   const config = runLifecycleConfig()
   const doCancel = deps.cancelRun ?? cancelRun
@@ -84,9 +85,11 @@ export async function stopRunLifecycle(
   })
 
   await closeRunRuntime(runId).catch(() => {})
-  await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch((error) => {
-    console.warn('[run-lifecycle] release slot failed', runId, error)
-  })
+  if (!options.skipRelease) {
+    await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch((error) => {
+      console.warn('[run-lifecycle] release slot failed', runId, error)
+    })
+  }
 }
 
 export function scheduleStopRunLifecycle(runId: string, reason: string): void {
@@ -117,6 +120,54 @@ export async function stopAndReleaseWorkloadSlot(
   deps?: RunLifecycleDependencies
 ): Promise<void> {
   await stopRunLifecycle(runId, reason, deps)
+}
+
+export type ExecutionRunOutcome = 'success' | 'failure'
+
+export interface ExecutionRunLifecycleDependencies extends RunLifecycleDependencies {
+  finalizeExecution?: (input: { username: string; jobId: string }) => Promise<void>
+}
+
+export async function finishExecutionRunLifecycle(
+  runId: string,
+  input: {
+    username: string
+    jobId: string
+    reason: string
+    outcome: ExecutionRunOutcome
+  },
+  deps: ExecutionRunLifecycleDependencies = {}
+): Promise<void> {
+  const { clearExecutionRunId, isRunActive, releaseWorkloadSlot } = await import(
+    './workload-slot-store'
+  )
+  const finalizeExecution =
+    deps.finalizeExecution ??
+    (async (payload: { username: string; jobId: string }) => {
+      const { finalizeJobExecution } = await import('./finalize-execution')
+      await finalizeJobExecution(payload)
+    })
+
+  clearExecutionRunId(input.jobId)
+
+  const active = await isRunActive(runId)
+  if (active) {
+    if (input.outcome === 'failure') {
+      await stopRunLifecycle(runId, input.reason, deps, { skipRelease: true })
+    } else {
+      await closeRunRuntime(runId).catch(() => {})
+    }
+  } else {
+    await closeRunRuntime(runId).catch(() => {})
+  }
+
+  await finalizeExecution({ username: input.username, jobId: input.jobId })
+
+  if (active) {
+    await releaseWorkloadSlot(runId, { reason: input.reason }).catch((error) => {
+      console.warn('[run-lifecycle] execution release slot failed', runId, error)
+    })
+  }
 }
 
 export type PlanningRunOutcome = 'success' | 'failure' | 'user_stopped'

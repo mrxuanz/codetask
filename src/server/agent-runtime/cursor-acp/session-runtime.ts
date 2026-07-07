@@ -18,6 +18,7 @@ import {
   debugCursor,
   formatAcpError,
   killChildTree,
+  waitForChildExit,
   openCursorAcpSession,
   spawnCursorAcpProcess,
   type ChildDiagnostics
@@ -475,8 +476,10 @@ export class CursorAcpSessionRuntime {
       await this.connectionDone.catch(() => {})
     }
     if (this.child) {
-      killChildTree(this.child)
+      const child = this.child
       this.child = null
+      killChildTree(child)
+      await waitForChildExit(child, 10_000)
     }
     this.ctx = null
     this.diagnostics = null
