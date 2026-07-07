@@ -1,3 +1,6 @@
+/** Upper bound for reply/thinking text accumulated in a single agent turn. */
+export const MAX_TURN_TEXT_CHARS = 1_048_576
+
 export function advanceTextSnapshot(
   previous: string,
   next: string
@@ -12,8 +15,19 @@ export function advanceTextSnapshot(
 
 export function appendTextPiece(
   previous: string,
-  piece: string
+  piece: string,
+  options?: { maxChars?: number }
 ): { text: string; delta: string | null } {
   if (!piece) return { text: previous, delta: null }
-  return { text: previous + piece, delta: piece }
+
+  const maxChars = options?.maxChars
+  let accepted = piece
+  if (maxChars !== undefined) {
+    const remaining = maxChars - previous.length
+    if (remaining <= 0) return { text: previous, delta: null }
+    if (accepted.length > remaining) accepted = accepted.slice(0, remaining)
+  }
+
+  if (!accepted) return { text: previous, delta: null }
+  return { text: previous + accepted, delta: accepted }
 }

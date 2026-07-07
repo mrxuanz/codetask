@@ -48,6 +48,7 @@ import type { TaskLaunchDraftPayload } from './draft/types'
 import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
 import { ensureRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
 import { buildConversationCursorRuntimeScope } from '../agent-runtime/cursor-acp/runtime-registry'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
 import type {
@@ -471,15 +472,24 @@ export async function* streamSendMessage(
 
         if (chunk.type === 'thinking_delta') {
           if (thinkingStartedAt == null) thinkingStartedAt = Date.now()
-          thinking += chunk.content
-          yield { event: 'thinking_delta', data: { content: chunk.content } }
+          const advanced = appendTextPiece(thinking, chunk.content, { maxChars: MAX_TURN_TEXT_CHARS })
+          thinking = advanced.text
+          if (advanced.delta) {
+            yield { event: 'thinking_delta', data: { content: advanced.delta } }
+          }
         } else if (chunk.type === 'delta') {
-          reply += chunk.content
-          yield { event: 'delta', data: { content: chunk.content } }
+          const advanced = appendTextPiece(reply, chunk.content, { maxChars: MAX_TURN_TEXT_CHARS })
+          reply = advanced.text
+          if (advanced.delta) {
+            yield { event: 'delta', data: { content: advanced.delta } }
+          }
         } else if (chunk.type === 'error') {
           throw new Error(chunk.message)
         } else if (chunk.type === 'completed') {
-          reply = chunk.reply
+          reply =
+            chunk.reply.length > MAX_TURN_TEXT_CHARS
+              ? chunk.reply.slice(0, MAX_TURN_TEXT_CHARS)
+              : chunk.reply
           runtimeSessionId = chunk.runtimeSessionId
         }
       }

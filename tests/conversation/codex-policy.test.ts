@@ -74,3 +74,23 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.equal(task.sdkConfig?.sandbox_mode, 'danger-full-access')
   assert.ok(task.mcpToolNames?.includes('report_task_result'))
 })
+
+test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {
+  const conversation = buildCodexTurnPlan(
+    { ...baseInput('conversation'), mcpUrl: 'http://127.0.0.1:9/mcp' },
+    { outerSandbox: false }
+  )
+  const tools =
+    conversation.sdkConfig?.mcp_servers &&
+    'codeteam-manager' in conversation.sdkConfig.mcp_servers
+      ? (
+          conversation.sdkConfig.mcp_servers['codeteam-manager'] as {
+            tools?: Record<string, unknown>
+          }
+        ).tools
+      : undefined
+  assert.ok(tools)
+  assert.ok('rename_thread' in tools)
+  assert.ok('list_reference_corpus' in tools)
+  assert.ok('propose_task_draft' in tools)
+})

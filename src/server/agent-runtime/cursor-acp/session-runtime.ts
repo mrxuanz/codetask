@@ -25,7 +25,7 @@ import {
   spawnCursorAcpProcess,
   type ChildDiagnostics
 } from './acp-shared'
-import { appendTextPiece } from '../delta-emit'
+import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../delta-emit'
 import { assertTaskWorkerAcpCompletion } from './turn-guards'
 
 export interface CursorPromptInput {
@@ -247,7 +247,13 @@ export class CursorAcpSessionRuntime {
     }
     this.promptInFlight = true
 
-    const queue = createAsyncQueue<AgentTurnChunk>()
+    const queue = createAsyncQueue<AgentTurnChunk>({
+      softMax: 2048,
+      hardMax: 8192,
+      onHighWater: () => {
+        debugCursor('async queue high water', { softMax: 2048, hardMax: 8192 })
+      }
+    })
     const run = this.runPrompt(input, (chunk) => queue.push(chunk))
       .then(() => queue.close())
       .catch((error) => {
@@ -400,7 +406,9 @@ export class CursorAcpSessionRuntime {
             update.content.type === 'text' &&
             update.content.text
           ) {
-            const advanced = appendTextPiece(thinking, update.content.text)
+            const advanced = appendTextPiece(thinking, update.content.text, {
+              maxChars: MAX_TURN_TEXT_CHARS
+            })
             thinking = advanced.text
             turnScope.recordProgress('thinking_delta')
             if (advanced.delta) emit({ type: 'thinking_delta', content: advanced.delta })
@@ -412,7 +420,9 @@ export class CursorAcpSessionRuntime {
             update.content.type === 'text' &&
             update.content.text
           ) {
-            const advanced = appendTextPiece(reply, update.content.text)
+            const advanced = appendTextPiece(reply, update.content.text, {
+              maxChars: MAX_TURN_TEXT_CHARS
+            })
             reply = advanced.text
             turnScope.recordProgress('text_delta')
             if (advanced.delta) emit({ type: 'delta', content: advanced.delta })
