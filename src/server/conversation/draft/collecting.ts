@@ -6,7 +6,9 @@ import type { ConversationMessageDto } from '../types'
 import { getMessage, insertMessage, listMessages } from '../messages'
 import { bindPayloadWorkspace, draftPayloadToClientJson } from './normalize'
 import type { TaskLaunchDraftPayload } from './types'
-import { WIZARD_PHASE_COLLECT } from '../../wizard/types'
+import { resolveThreadWizardPhaseWrite } from '../../wizard/phase'
+import { getThreadRow } from '../../threads/service'
+import type { Thread } from '../../db/schema'
 
 export function isCollectingDraftPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') return false
@@ -87,6 +89,12 @@ export async function ensureCollectingDraft(input: {
   coreCode: string
   conversationId: string
 }): Promise<{ message: ConversationMessageDto; created: boolean }> {
+  const threadRow = await getThreadRow(input.username, input.threadId)
+  const collectingPhase = resolveThreadWizardPhaseWrite(
+    threadRow ?? ({ activePlanId: null } as Thread),
+    { type: 'collecting_draft' }
+  )!
+
   const existing = await findCollectingDraftMessage(input.username, input.threadId)
   if (existing) {
     const db = getDb()
@@ -94,7 +102,7 @@ export async function ensureCollectingDraft(input: {
       .update(threads)
       .set({
         activeDraftId: existing.id,
-        wizardPhase: WIZARD_PHASE_COLLECT,
+        wizardPhase: collectingPhase,
         updatedAt: nowSec()
       })
       .where(and(eq(threads.username, input.username), eq(threads.id, input.threadId)))
@@ -117,7 +125,7 @@ export async function ensureCollectingDraft(input: {
     coreCode: input.coreCode,
     conversationId: input.conversationId,
     runtimeSessionId: null,
-    wizardPhase: WIZARD_PHASE_COLLECT,
+    wizardPhase: collectingPhase,
     payload: draftPayloadToClientJson(payload)
   })
 
@@ -126,7 +134,7 @@ export async function ensureCollectingDraft(input: {
     .update(threads)
     .set({
       activeDraftId: message.id,
-      wizardPhase: WIZARD_PHASE_COLLECT,
+      wizardPhase: collectingPhase,
       updatedAt: nowSec()
     })
     .where(and(eq(threads.username, input.username), eq(threads.id, input.threadId)))

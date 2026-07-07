@@ -32,12 +32,8 @@ import {
   type CoreRuntimeMap
 } from '../wizard/core-runtime'
 import { isCollectingDraftPayload } from '../conversation/draft/collecting'
-import { resolveWizardPhase } from '../wizard/phase'
-import {
-  WIZARD_PHASE_DRAFT_REVIEW,
-  WIZARD_PHASE_PLAN_EDIT,
-  type WizardPhase
-} from '../wizard/types'
+import { applyThreadWizardPhaseWrite, resolveWizardPhase } from '../wizard/phase'
+import { WIZARD_PHASE_COLLECT, type WizardPhase } from '../wizard/types'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -189,7 +185,7 @@ export async function createThread(
     titleSource: TITLE_SOURCE_AUTO,
     activeDraftId: null,
     activePlanId: null,
-    wizardPhase: 'collect',
+    wizardPhase: WIZARD_PHASE_COLLECT,
     threadKind,
     createdAt: now,
     updatedAt: now
@@ -270,21 +266,25 @@ export async function updateThreadContext(
   const update: Partial<Thread> = { updatedAt: now }
   if (patch.activeDraftId !== undefined) update.activeDraftId = patch.activeDraftId
   if (patch.activePlanId !== undefined) update.activePlanId = patch.activePlanId
-  if (patch.activePlanId) {
-    update.wizardPhase = WIZARD_PHASE_PLAN_EDIT
-  } else if (patch.activeDraftId && !existing.activePlanId) {
+
+  let draftIsPlaceholder: boolean | undefined
+  if (!patch.activePlanId && patch.activeDraftId && !existing.activePlanId) {
     const { getMessage } = await import('../conversation/messages')
     const draftMessage = await getMessage(username, threadId, patch.activeDraftId, {
       signAssets: false
     })
-    const isPlaceholder =
+    draftIsPlaceholder =
       !draftMessage ||
       draftMessage.kind !== 'task-launch-draft' ||
       isCollectingDraftPayload(draftMessage.payload)
-    if (!isPlaceholder) {
-      update.wizardPhase = WIZARD_PHASE_DRAFT_REVIEW
-    }
   }
+
+  applyThreadWizardPhaseWrite(update, existing, {
+    type: 'infer_from_context',
+    activeDraftId: patch.activeDraftId,
+    activePlanId: patch.activePlanId,
+    draftIsPlaceholder
+  })
 
   await db
     .update(threads)
