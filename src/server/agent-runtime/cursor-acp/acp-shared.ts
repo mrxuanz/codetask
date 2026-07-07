@@ -131,6 +131,23 @@ export function killChildTree(child: ChildProcess): void {
   child.kill()
 }
 
+export function waitForChildExit(child: ChildProcess, timeoutMs = 10_000): Promise<void> {
+  if (!child.pid || child.killed || child.exitCode !== null) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit)
+      resolve()
+    }, timeoutMs)
+    const onExit = (): void => {
+      clearTimeout(timer)
+      resolve()
+    }
+    child.once('exit', onExit)
+  })
+}
+
 type AttachableClientContext = {
   attachSession(response: NewSessionResponse): ActiveSession
 }

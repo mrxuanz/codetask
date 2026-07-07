@@ -55,6 +55,7 @@ import {
 } from './repository'
 import { loadJobReferenceManifest } from './reference-manifest'
 import { enqueueJobSseEvent } from '../context/event-bus'
+import { getRunController } from './workload-slot-store'
 
 export function initJobService(): void {
   getAppContext()
@@ -674,7 +675,6 @@ async function runJob(
     })
 
     const mcpSessionId = `plan-mcp-${randomUUID()}`
-    const turnAbort = new AbortController()
     const referenceManifest = await loadJobReferenceManifest(jobId)
 
     const plannerSession: PlannerMcpSession = {
@@ -692,10 +692,13 @@ async function runJob(
       taskContexts: new Map(),
       registeredPlan: null,
       abortTurn: () => {
-        try {
-          turnAbort.abort()
-        } catch {
-          // ignore
+        const controller = getRunController(run.runId)
+        if (controller && !controller.signal.aborted) {
+          try {
+            controller.abort('register_plan')
+          } catch {
+            // ignore
+          }
         }
       },
       onTaskContextRegistered: (_key, done) => {
@@ -739,7 +742,7 @@ async function runJob(
         systemPrompt: resolvePlannerPromptBody(),
         mcpUrl,
         readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-        signal: turnAbort.signal,
+        signal: run.signal,
         jobId: plannerScopeId
       })) {
         chunkCount += 1

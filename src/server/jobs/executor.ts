@@ -18,6 +18,11 @@ import { memoryDebug } from '../debug/memory'
 import { slimTaskProgressItemsForRuntime } from './evidence/store'
 import { finalizeJobExecution } from './finalize-execution'
 import {
+  getExecutionRunContext,
+  runWithExecutionRunContext
+} from './execution-run-context'
+import { updateJobRowFenced } from './repository'
+import {
   emitJobError,
   emitJobProgressAfterPersist,
   type JobProgressEmitMode
@@ -201,6 +206,30 @@ function taskItemsFromProgress(taskProgress: TaskProgressDto): TaskProgressItemD
   return taskProgress.tasks.map((item) => ({ ...item }))
 }
 
+function executionAbortSignal(jobId: string): AbortSignal {
+  const ctx = getExecutionRunContext()
+  const jobSignal = createExecutionAbortSignal(jobId)
+  if (ctx?.signal) {
+    return mergeAbortSignals(ctx.signal, jobSignal)
+  }
+  return jobSignal
+}
+
+async function updateExecutionJobRow(
+  jobId: string,
+  patch: Parameters<typeof updateJobRow>[1]
+): Promise<ThreadJobDto | null> {
+  const ctx = getExecutionRunContext()
+  if (ctx?.runId) {
+    const { assertRunActive } = await import('./workload-slot-store')
+    if (!(await assertRunActive('thread_job', jobId, ctx.runId))) return null
+    return updateJobRowFenced(jobId, ctx.runId, patch)
+  }
+  const { getActiveRun } = await import('./workload-slot-store')
+  if (await getActiveRun('thread_job', jobId)) return null
+  return updateJobRow(jobId, patch)
+}
+
 async function persistTaskProgress(
   jobId: string,
   taskProgress: TaskProgressDto,
@@ -208,12 +237,18 @@ async function persistTaskProgress(
   gate?: ReturnType<typeof buildGateStates>,
   emit: JobProgressEmitMode = 'delta'
 ): Promise<ThreadJobDto | null> {
-  const { getExecutionRunId } = await import('./workload-slot-store')
-  const expectedRunId = getExecutionRunId(jobId)
+  const ctx = getExecutionRunContext()
+  const expectedRunId = ctx?.runId
   if (expectedRunId) {
     const { assertRunActive } = await import('./workload-slot-store')
     if (!(await assertRunActive('thread_job', jobId, expectedRunId))) {
       memoryDebug('persistTaskProgress: stale execution run ignored', { jobId, expectedRunId })
+      return null
+    }
+  } else {
+    const { getActiveRun } = await import('./workload-slot-store')
+    if (await getActiveRun('thread_job', jobId)) {
+      memoryDebug('persistTaskProgress: missing run context with active run', { jobId })
       return null
     }
   }
@@ -227,14 +262,24 @@ async function persistTaskProgress(
       }
     : taskProgress
   const includePlan = emit === 'snapshot' || emit === 'terminal'
-  const job = await updateJobRow(
-    jobId,
-    {
-      taskProgress: progress,
-      ...patch
-    },
-    { includePlan, hydrateEvidence: false }
-  )
+  const job = expectedRunId
+    ? await updateJobRowFenced(
+        jobId,
+        expectedRunId,
+        {
+          taskProgress: progress,
+          ...patch
+        },
+        { includePlan, hydrateEvidence: false }
+      )
+    : await updateJobRow(
+        jobId,
+        {
+          taskProgress: progress,
+          ...patch
+        },
+        { includePlan, hydrateEvidence: false }
+      )
   emitJobProgressAfterPersist(jobId, emit, { taskProgress: progress, job })
   memoryDebug('persistTaskProgress', {
     jobId,
@@ -519,6 +564,22 @@ async function persistPlanAndProgress(
   gate?: ReturnType<typeof buildGateStates>,
   emit: JobProgressEmitMode = 'snapshot'
 ): Promise<ThreadJobDto | null> {
+  const ctx = getExecutionRunContext()
+  const expectedRunId = ctx?.runId
+  if (expectedRunId) {
+    const { assertRunActive } = await import('./workload-slot-store')
+    if (!(await assertRunActive('thread_job', jobId, expectedRunId))) {
+      memoryDebug('persistPlanAndProgress: stale execution run ignored', { jobId, expectedRunId })
+      return null
+    }
+  } else {
+    const { getActiveRun } = await import('./workload-slot-store')
+    if (await getActiveRun('thread_job', jobId)) {
+      memoryDebug('persistPlanAndProgress: missing run context with active run', { jobId })
+      return null
+    }
+  }
+
   const progress: TaskProgressDto = gate
     ? {
         ...taskProgress,
@@ -529,15 +590,26 @@ async function persistPlanAndProgress(
       }
     : { ...taskProgress, total: taskProgress.tasks.length }
 
-  const job = await updateJobRow(
-    jobId,
-    {
-      plan,
-      taskProgress: progress,
-      ...patch
-    },
-    { includePlan: true, hydrateEvidence: false }
-  )
+  const job = expectedRunId
+    ? await updateJobRowFenced(
+        jobId,
+        expectedRunId,
+        {
+          plan,
+          taskProgress: progress,
+          ...patch
+        },
+        { includePlan: true, hydrateEvidence: false }
+      )
+    : await updateJobRow(
+        jobId,
+        {
+          plan,
+          taskProgress: progress,
+          ...patch
+        },
+        { includePlan: true, hydrateEvidence: false }
+      )
   emitJobProgressAfterPersist(jobId, emit, { taskProgress: progress, job })
   memoryDebug('persistPlanAndProgress', { jobId, emit, taskCount: progress.tasks.length })
   return job
@@ -1235,7 +1307,7 @@ async function executeSingleTask(
   const model = resolveCoreModel(core.code as SupportedCoreCode)
 
   const sessionId = `task-mcp-${randomUUID()}`
-  const jobSignal = createExecutionAbortSignal(job.id)
+  const jobSignal = executionAbortSignal(job.id)
   const turnAbort = new AbortController()
   const signal = mergeAbortSignals(jobSignal, turnAbort.signal)
 
@@ -1452,7 +1524,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
 
   if (job.status === 'paused' || job.status === 'cancelled') return
 
-  await updateJobRow(jobId, { status: 'running' })
+  await updateExecutionJobRow(jobId, { status: 'running' })
   refreshExecutionLease(jobId)
   job = (await getUserJob(username, jobId)) ?? job
 
@@ -1505,7 +1577,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       return
     }
     if (stop === 'pause') {
-      await updateJobRow(jobId, { status: 'paused' })
+      await updateExecutionJobRow(jobId, { status: 'paused' })
       return
     }
 
@@ -1598,7 +1670,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         return
       }
 
-      const signal = createExecutionAbortSignal(jobId)
+      const signal = executionAbortSignal(jobId)
       sliceToVerify.runtimeStatus = 'verifying'
       await persistTaskProgress(
         jobId,
@@ -1853,7 +1925,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         return
       }
 
-      const signal = createExecutionAbortSignal(jobId)
+      const signal = executionAbortSignal(jobId)
       milestoneToVerify.verificationStatus = 'verifying'
       await persistTaskProgress(
         jobId,
@@ -2173,6 +2245,7 @@ export function scheduleJobExecution(username: string, jobId: string): void {
   if (!markJobExecuting(jobId, username)) return
   void (async () => {
     let executionRunId: string | undefined
+    let executionOutcome: import('./run-lifecycle').ExecutionRunOutcome = 'success'
     try {
       const { claimExecutionWorkloadSlot } = await import('./workload-slot-store')
       const slot = await claimExecutionWorkloadSlot(username, jobId)
@@ -2189,6 +2262,12 @@ export function scheduleJobExecution(username: string, jobId: string): void {
       }
       executionRunId = slot.runId
 
+      const { registerRunRuntime } = await import('./runtime-supervisor')
+      const { buildCursorJobRuntimeHandle } = await import('./runtime-handle-cursor')
+      const { updateRunRuntimeRef } = await import('./workload-slot-store')
+      registerRunRuntime(slot.runId, buildCursorJobRuntimeHandle(jobId))
+      await updateRunRuntimeRef(slot.runId, { kind: 'cursor-acp', scopeId: jobId })
+
       const { preflightSandbox, isOuterSandboxEnabled } = await import('../sandbox')
       const { isTestFakeAgentModeActive } =
         await import('../agent-runtime/providers/test-overrides')
@@ -2200,8 +2279,12 @@ export function scheduleJobExecution(username: string, jobId: string): void {
         }
         preflightSandbox()
       }
-      await runExecutionLoop(username, jobId)
+      await runWithExecutionRunContext(
+        { runId: slot.runId, signal: slot.signal },
+        () => runExecutionLoop(username, jobId)
+      )
     } catch (error) {
+      executionOutcome = 'failure'
       const turnError = normalizeTurnError(error)
       const existing = await getUserJob(username, jobId)
       if (isExecutionInfraNotReadyError(error)) {
@@ -2233,10 +2316,16 @@ export function scheduleJobExecution(username: string, jobId: string): void {
     } finally {
       await markJobExecutionDone(jobId, username)
       if (executionRunId) {
-        const { releaseExecutionWorkloadSlot } = await import('./workload-slot-store')
-        await releaseExecutionWorkloadSlot(jobId, 'execution_done')
+        const { finishExecutionRunLifecycle } = await import('./run-lifecycle')
+        await finishExecutionRunLifecycle(executionRunId, {
+          username,
+          jobId,
+          reason: executionOutcome === 'failure' ? 'execution_failed' : 'execution_done',
+          outcome: executionOutcome
+        })
+      } else {
+        await finalizeJobExecution({ username, jobId })
       }
-      await finalizeJobExecution({ username, jobId })
     }
   })().catch(() => {})
 }

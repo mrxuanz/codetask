@@ -47,6 +47,7 @@ import {
 import { advanceWizardPhase, buildDraftToPlanHandoff } from '../wizard/phase'
 import { WIZARD_PHASE_PLAN_EDIT } from '../wizard/types'
 import type { PlanningRunOutcome } from '../jobs/run-lifecycle'
+import { getRunController } from '../jobs/workload-slot-store'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -363,7 +364,6 @@ async function runDesignPlanner(
     const model = resolveCoreModel(core.code as SupportedCoreCode)
 
     const mcpSessionId = `plan-mcp-${randomUUID()}`
-    const turnAbort = new AbortController()
     const referenceManifest = await loadDesignReferenceManifest(designSessionId)
 
     plannerSession = {
@@ -384,10 +384,13 @@ async function runDesignPlanner(
       planRevision: revisionBefore + 1,
       clearConfirmed: Boolean(options?.regenerationInstruction),
       abortTurn: () => {
-        try {
-          turnAbort.abort()
-        } catch {
-          // ignore
+        const controller = getRunController(run.runId)
+        if (controller && !controller.signal.aborted) {
+          try {
+            controller.abort('register_plan')
+          } catch {
+            // ignore
+          }
         }
       },
       onTaskContextRegistered: (_key, done) => {
@@ -468,7 +471,7 @@ async function runDesignPlanner(
         systemPrompt: resolvePlannerPromptBody(),
         mcpUrl,
         readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-        signal: turnAbort.signal,
+        signal: run.signal,
         jobId: plannerScopeId
       })) {
         chunkCount += 1

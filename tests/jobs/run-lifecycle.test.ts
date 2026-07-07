@@ -11,6 +11,7 @@ import {
   resetWorkloadRunControllersForTests
 } from '../../src/server/jobs/workload-slot-store'
 import {
+  finishExecutionRunLifecycle,
   finishPlanningRunLifecycle,
   stopRunLifecycle
 } from '../../src/server/jobs/run-lifecycle'
@@ -166,6 +167,135 @@ test('finishPlanningRunLifecycle failure runs stop lifecycle with injectable dep
 
     assert.deepEqual(events, ['cancel', 'close', 'kill', 'waitClosed', 'close'])
     assert.equal(await getActiveRun('thread_job', 'job-1'), null)
+  } finally {
+    teardownDb()
+  }
+})
+
+test('stopRunLifecycle skipRelease keeps slot until explicit release', async () => {
+  setupDb()
+  try {
+    await seedJob('job-1')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-1',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {}
+    })
+
+    await stopRunLifecycle(run.runId, 'timeout', { sleep: async () => {} }, { skipRelease: true })
+    assert.notEqual(await getActiveRun('thread_job', 'job-1'), null)
+  } finally {
+    teardownDb()
+  }
+})
+
+test('finishExecutionRunLifecycle success closes runtime before releasing slot', async () => {
+  setupDb()
+  try {
+    await seedJob('job-exec')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-exec',
+      kind: 'execution'
+    })
+    assert.ok(run)
+
+    let closed = false
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        closed = true
+      }
+    })
+
+    await finishExecutionRunLifecycle(
+      run.runId,
+      {
+        username: 'user',
+        jobId: 'job-exec',
+        reason: 'execution_done',
+        outcome: 'success'
+      },
+      { finalizeExecution: async () => {} }
+    )
+    assert.equal(closed, true)
+    assert.equal(await getActiveRun('thread_job', 'job-exec'), null)
+  } finally {
+    teardownDb()
+  }
+})
+
+test('finishExecutionRunLifecycle failure runs stop lifecycle before release', async () => {
+  setupDb()
+  try {
+    await seedJob('job-exec-fail')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-exec-fail',
+      kind: 'execution'
+    })
+    assert.ok(run)
+
+    const events: string[] = []
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      cancel: async () => {
+        events.push('cancel')
+      },
+      close: async () => {
+        events.push('close')
+      },
+      kill: async () => {
+        events.push('kill')
+      },
+      waitClosed: async () => {
+        events.push('waitClosed')
+      }
+    })
+
+    await finishExecutionRunLifecycle(
+      run.runId,
+      {
+        username: 'user',
+        jobId: 'job-exec-fail',
+        reason: 'execution_failed',
+        outcome: 'failure'
+      },
+      {
+        cancelRun: async () => {
+          events.push('cancelRun')
+        },
+        stopRun: async () => {
+          events.push('stopRun')
+        },
+        hardKill: async () => {
+          events.push('hardKill')
+        },
+        waitClosed: async () => {
+          events.push('waitClosedHook')
+        },
+        sleep: async () => {},
+        finalizeExecution: async () => {}
+      }
+    )
+
+    assert.deepEqual(events, [
+      'cancelRun',
+      'stopRun',
+      'hardKill',
+      'waitClosedHook',
+      'close'
+    ])
+    assert.equal(await getActiveRun('thread_job', 'job-exec-fail'), null)
   } finally {
     teardownDb()
   }
