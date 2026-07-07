@@ -282,22 +282,94 @@ export async function loadDesignPlan(
   }
 }
 
+export function saveDesignPlanInTx(
+  db: AppDatabase,
+  designSessionId: string,
+  plan: SavedJobPlan | null
+): void {
+  if (!plan) {
+    db.delete(designPlanSlices).where(eq(designPlanSlices.designSessionId, designSessionId)).run()
+    db
+      .delete(designPlanMilestones)
+      .where(eq(designPlanMilestones.designSessionId, designSessionId))
+      .run()
+    db.delete(designPlanTasks).where(eq(designPlanTasks.designSessionId, designSessionId)).run()
+    return
+  }
+
+  db.delete(designPlanSlices).where(eq(designPlanSlices.designSessionId, designSessionId)).run()
+  db
+    .delete(designPlanMilestones)
+    .where(eq(designPlanMilestones.designSessionId, designSessionId))
+    .run()
+
+  for (const [mIdx, milestone] of plan.milestones.entries()) {
+    db.insert(designPlanMilestones)
+      .values({
+        designSessionId,
+        milestoneIndex: mIdx,
+        sortOrder: mIdx,
+        title: milestone.title ?? '',
+        description: milestone.description ?? '',
+        successCriteria: milestone.successCriteria ?? '',
+        confirmed: milestone.confirmed === undefined ? null : milestone.confirmed ? 1 : 0
+      })
+      .run()
+
+    for (const [sIdx, slice] of milestone.slices.entries()) {
+      db.insert(designPlanSlices)
+        .values({
+          designSessionId,
+          milestoneIndex: mIdx,
+          sliceIndex: sIdx,
+          sortOrder: mIdx * 1000 + sIdx,
+          title: slice.title ?? '',
+          description: slice.description ?? '',
+          successCriteria: slice.successCriteria,
+          dependsOnSliceRefsJson: slice.dependsOnSliceRefs?.length
+            ? JSON.stringify(slice.dependsOnSliceRefs)
+            : null,
+          confirmed: slice.confirmed === undefined ? null : slice.confirmed ? 1 : 0
+        })
+        .run()
+    }
+  }
+
+  db.delete(designPlanTasks).where(eq(designPlanTasks.designSessionId, designSessionId)).run()
+  for (const [index, task] of plan.tasks.entries()) {
+    db.insert(designPlanTasks)
+      .values({
+        designSessionId,
+        taskId: task.id,
+        sortOrder: index,
+        milestoneIndex: task.milestoneIndex,
+        sliceIndex: task.sliceIndex,
+        taskIndex: task.taskIndex,
+        title: task.title,
+        description: task.description,
+        taskKind: task.taskKind,
+        abilityCode: task.abilityCode,
+        contextMarkdown: task.contextMarkdown,
+        coreCode: task.coreCode ?? null,
+        successCriteria: task.successCriteria,
+        referenceIdsJson: task.referenceIds?.length ? JSON.stringify(task.referenceIds) : null,
+        referenceReason: task.referenceReason ?? null,
+        dependsOnTaskRefsJson: task.dependsOnTaskRefs?.length
+          ? JSON.stringify(task.dependsOnTaskRefs)
+          : null,
+        canRunInParallel: task.canRunInParallel ? 1 : 0,
+        confirmed: task.confirmed === undefined ? null : task.confirmed ? 1 : 0
+      })
+      .run()
+  }
+}
+
 export async function saveDesignPlan(
   db: AppDatabase,
   designSessionId: string,
   plan: SavedJobPlan | null
 ): Promise<void> {
-  if (!plan) {
-    await db.delete(designPlanSlices).where(eq(designPlanSlices.designSessionId, designSessionId))
-    await db
-      .delete(designPlanMilestones)
-      .where(eq(designPlanMilestones.designSessionId, designSessionId))
-    await db.delete(designPlanTasks).where(eq(designPlanTasks.designSessionId, designSessionId))
-    return
-  }
-
-  await savePlanMilestones(db, designSessionId, plan.milestones)
-  await savePlanTasks(db, designSessionId, plan.tasks)
+  saveDesignPlanInTx(db, designSessionId, plan)
 }
 
 export async function loadDesignPlanProgress(

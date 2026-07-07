@@ -5,12 +5,13 @@ import { enrichJobWithRecoveryState } from '@shared/job-recovery-state'
 import { hydrateTurnErrorField, coercePersistedTurnError } from '../turn-errors/store'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
-import { loadTaskProgress, saveTaskProgress } from '../db/job-progress'
+import { loadTaskProgress, saveTaskProgress, saveTaskProgressInTx } from '../db/job-progress'
 import {
   loadJobAbilities,
   loadJobPlan,
   loadPlanProgress,
   saveJobPlan,
+  saveJobPlanInTx,
   savePlanProgress
 } from '../db/job-plan'
 import { threadJobs, type ThreadJob } from '../db/schema'
@@ -18,6 +19,8 @@ import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { getAppContext } from '../bootstrap'
 import { onJobStatusTransition } from '../retention'
+import { readRetentionSettings } from '../retention/settings'
+import { externalizeTaskProgressEvidence } from './evidence/store'
 import { slimTaskProgressForSse } from './progress-sse'
 
 export const EXECUTION_OCCUPYING_STATUSES = ['running'] as const
@@ -428,6 +431,93 @@ export async function updateJobRowForSnapshot(
   return updateJobRow(jobId, patch, { includePlan: true, hydrateEvidence: false })
 }
 
+function jobRowFence(jobId: string, runId: string): SQL {
+  return and(eq(threadJobs.id, jobId), eq(threadJobs.activeRunId, runId))!
+}
+
+type FencedJobPatchTxResult =
+  | { ok: false }
+  | { ok: true; previousStatus: string; threadId: string }
+
+function applyPlanProgressInTx(
+  tx: ReturnType<typeof getDb>,
+  jobId: string,
+  runId: string,
+  progress: PlanProgressDto
+): void {
+  const counts = {
+    milestones: progress.milestones,
+    slices: progress.slices,
+    tasks: progress.tasks
+  }
+  tx.update(threadJobs)
+    .set({
+      planPhase: progress.phase,
+      planStatus: progress.status,
+      planContextsRegistered: progress.contextsRegistered,
+      planContextsTotal: progress.contextsTotal,
+      planMessage: progress.message ?? null,
+      planCountsJson: JSON.stringify(counts)
+    })
+    .where(jobRowFence(jobId, runId))
+    .run()
+}
+
+function applyFencedJobPatchInTx(
+  tx: ReturnType<typeof getDb>,
+  jobId: string,
+  runId: string,
+  patch: JobRowPatch,
+  storedTaskProgress?: TaskProgressDto
+): FencedJobPatchTxResult {
+  const fence = jobRowFence(jobId, runId)
+  const existing = tx.select().from(threadJobs).where(fence).limit(1).all()[0]
+  if (!existing) return { ok: false }
+
+  const now = nowSec()
+  const { taskProgress, plan, planProgress, ...rowPatch } = patch
+  const progressToStore = storedTaskProgress ?? taskProgress
+  const leaseClear =
+    rowPatch.status && rowPatch.status !== 'running'
+      ? { executionLeaseOwner: null, executionLeaseExpiresAt: null }
+      : {}
+
+  const { lastError, ...restRowPatch } = rowPatch
+  const dbPatch = {
+    ...restRowPatch,
+    ...(lastError !== undefined ? { lastError: coercePersistedTurnError(lastError) } : {})
+  }
+
+  if (Object.keys(dbPatch).length > 0) {
+    const result = tx
+      .update(threadJobs)
+      .set({ ...dbPatch, ...leaseClear, updatedAt: now })
+      .where(fence)
+      .run()
+    if (result.changes === 0) return { ok: false }
+  }
+
+  if (plan !== undefined) {
+    saveJobPlanInTx(tx, jobId, plan)
+    tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
+  }
+
+  if (planProgress) {
+    applyPlanProgressInTx(tx, jobId, runId, planProgress)
+    tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
+  }
+
+  if (progressToStore) {
+    saveTaskProgressInTx(tx, jobId, progressToStore, fence)
+    tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
+  }
+
+  const stillFenced = tx.select().from(threadJobs).where(fence).limit(1).all()[0]
+  if (!stillFenced) return { ok: false }
+
+  return { ok: true, previousStatus: existing.status, threadId: existing.threadId }
+}
+
 export async function updateJobRowFenced(
   jobId: string,
   runId: string,
@@ -435,14 +525,52 @@ export async function updateJobRowFenced(
   options?: { includePlan?: boolean; hydrateEvidence?: boolean }
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
-  const existingRows = await db
-    .select()
-    .from(threadJobs)
-    .where(and(eq(threadJobs.id, jobId), eq(threadJobs.activeRunId, runId)))
-    .limit(1)
-  if (!existingRows[0]) return null
+  let storedTaskProgress: TaskProgressDto | undefined
+  if (patch.taskProgress) {
+    const dataDir = getAppContext().dataDir
+    const settings = readRetentionSettings(getAppContext().settings)
+    storedTaskProgress = await externalizeTaskProgressEvidence(
+      dataDir,
+      jobId,
+      patch.taskProgress,
+      settings
+    )
+  }
 
-  return updateJobRow(jobId, patch, options)
+  const txResult = db.transaction((tx) =>
+    applyFencedJobPatchInTx(tx, jobId, runId, patch, storedTaskProgress)
+  )
+
+  if (!txResult.ok) return null
+
+  if (
+    patch.status &&
+    txResult.previousStatus &&
+    patch.status !== txResult.previousStatus
+  ) {
+    await onJobStatusTransition({
+      jobId,
+      threadId: txResult.threadId,
+      previousStatus: txResult.previousStatus,
+      nextStatus: patch.status
+    })
+  }
+
+  const rows = await db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1)
+  return rows[0]
+    ? await mapJob(rows[0], {
+        includePlan: options?.includePlan ?? false,
+        hydrateEvidence: options?.hydrateEvidence ?? false
+      })
+    : null
+}
+
+export async function updateJobRowForSnapshotFenced(
+  jobId: string,
+  runId: string,
+  patch: JobRowPatch
+): Promise<ThreadJobDto | null> {
+  return updateJobRowFenced(jobId, runId, patch, { includePlan: true, hydrateEvidence: false })
 }
 
 export async function transitionJobStatus(

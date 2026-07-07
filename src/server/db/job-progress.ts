@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, type SQL } from 'drizzle-orm'
 import type { getDb } from './index'
 import type {
   TaskProgressDto,
@@ -23,6 +23,7 @@ import {
 import {
   loadJobCountersIntoProgress,
   syncJobCountersFromProgress,
+  syncJobCountersFromProgressInTx,
   summarizeEvidence
 } from '../retention'
 import { readRetentionSettings } from '../retention/settings'
@@ -150,6 +151,55 @@ export async function loadTaskProgress(
   return hydrateTaskProgressEvidence(dataDir, base, { hydrateEvidence: true })
 }
 
+export function saveTaskProgressInTx(
+  db: AppDatabase,
+  jobId: string,
+  progress: TaskProgressDto,
+  fence: SQL
+): void {
+  syncJobCountersFromProgressInTx(db, jobId, progress)
+
+  const meta: TaskMeta = metaForStorage(progress)
+
+  db.update(threadJobs)
+    .set({
+      taskPhase: progress.phase,
+      taskStatus: progress.status,
+      taskCurrentIndex: progress.currentIndex,
+      taskTotal: progress.total,
+      taskCurrentTaskId: progress.currentTaskId ?? null,
+      taskMessage: progress.message ?? null,
+      taskMetaJson: JSON.stringify(meta)
+    })
+    .where(fence)
+    .run()
+
+  db.delete(jobTasks).where(eq(jobTasks.jobId, jobId)).run()
+
+  for (const [index, task] of progress.tasks.entries()) {
+    const evidence = task.evidence
+    db.insert(jobTasks)
+      .values({
+        jobId,
+        taskId: task.id,
+        title: task.title,
+        sortOrder: index,
+        status: task.status,
+        abilityCode: task.abilityCode ?? null,
+        executionStatus: task.executionStatus ?? null,
+        evidenceStatus: task.evidenceStatus ?? null,
+        evidenceJson: evidence ? JSON.stringify(evidence) : null,
+        evidenceArtifactId: task.evidenceArtifactId ?? null,
+        evidenceSummary: task.evidenceSummary ?? summarizeEvidence(evidence) ?? null,
+        blockerKind: task.blockerKind ?? null,
+        recoveryAction: task.recoveryAction ?? null,
+        errorMessage: resolveStoredTaskError(task),
+        coreCode: task.coreCode ?? null
+      })
+      .run()
+  }
+}
+
 export async function saveTaskProgress(
   db: AppDatabase,
   jobId: string,
@@ -160,7 +210,7 @@ export async function saveTaskProgress(
   const settings = readRetentionSettings(getAppContext().settings)
   const stored = await externalizeTaskProgressEvidence(dataDir, jobId, progress, settings)
 
-  await syncJobCountersFromProgress(db, jobId, stored)
+  syncJobCountersFromProgressInTx(db, jobId, stored)
 
   const meta: TaskMeta = metaForStorage(stored)
 

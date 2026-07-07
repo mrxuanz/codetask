@@ -10,6 +10,7 @@ export {
 } from './artifacts'
 export {
   syncJobCountersFromProgress,
+  syncJobCountersFromProgressInTx,
   loadJobCountersIntoProgress,
   deleteJobCounters
 } from './counters'

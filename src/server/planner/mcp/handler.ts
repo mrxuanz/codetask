@@ -12,7 +12,7 @@ import {
 import { validatePlanAbilityCodes } from '../plan-ability-validation'
 import { plannerMcpToolDefinitions } from './tools'
 import { getPlannerMcpSession } from './session'
-import { assertRunActive } from '../../jobs/workload-slot-store'
+import { assertRunWritable } from '../../jobs/workload-slot-store'
 
 type JsonRpcId = string | number | null
 
@@ -61,11 +61,11 @@ function toolTextResult(text: string): Record<string, unknown> {
   }
 }
 
-async function requireActiveRun(
+async function requireWritableRun(
   session: NonNullable<ReturnType<typeof getPlannerMcpSession>>
 ): Promise<void> {
   if (
-    !(await assertRunActive(session.ownerKind, session.ownerId, session.runId))
+    !(await assertRunWritable(session.ownerKind, session.ownerId, session.runId))
   ) {
     throw AppError.badRequest('Plan session closed or stale run', 'plan.stale_run')
   }
@@ -269,7 +269,7 @@ async function finalizePlan(
   counts: { milestones: number; slices: number; tasks: number }
 ): Promise<void> {
   try {
-    if (!(await assertRunActive(session.ownerKind, session.ownerId, session.runId))) {
+    if (!(await assertRunWritable(session.ownerKind, session.ownerId, session.runId))) {
       const activeRun = await import('../../jobs/workload-slot-store').then(
         (m) => m.getActiveRun(session.ownerKind, session.ownerId)
       )
@@ -290,7 +290,7 @@ async function finalizePlan(
 
     const commitOk = await invokePlanCommit(session, counts)
     if (!commitOk) {
-      const stillActive = await assertRunActive(session.ownerKind, session.ownerId, session.runId)
+      const stillActive = await assertRunWritable(session.ownerKind, session.ownerId, session.runId)
       const activeRun = await import('../../jobs/workload-slot-store').then(
         (m) => m.getActiveRun(session.ownerKind, session.ownerId)
       )
@@ -397,7 +397,7 @@ export async function handlePlannerMcpJsonRpc(
   try {
     const session = getPlannerMcpSession(sessionId)
     if (session) {
-      await requireActiveRun(session)
+      await requireWritableRun(session)
     }
     const value = dispatchTool(sessionId, toolName, toolArguments)
     return jsonRpcOk(id, value)

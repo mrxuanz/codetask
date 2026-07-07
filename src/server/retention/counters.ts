@@ -20,21 +20,31 @@ function counterEntries(progress: TaskProgressDto): Array<{ key: string; value: 
   return entries
 }
 
+export function syncJobCountersFromProgressInTx(
+  db: AppDatabase,
+  jobId: string,
+  progress: TaskProgressDto
+): void {
+  db.delete(jobCounters).where(eq(jobCounters.jobId, jobId)).run()
+  const now = nowSec()
+  for (const entry of counterEntries(progress)) {
+    db.insert(jobCounters)
+      .values({
+        jobId,
+        counterKey: entry.key,
+        value: entry.value,
+        updatedAt: now
+      })
+      .run()
+  }
+}
+
 export async function syncJobCountersFromProgress(
   db: AppDatabase,
   jobId: string,
   progress: TaskProgressDto
 ): Promise<void> {
-  await db.delete(jobCounters).where(eq(jobCounters.jobId, jobId))
-  const now = nowSec()
-  for (const entry of counterEntries(progress)) {
-    await db.insert(jobCounters).values({
-      jobId,
-      counterKey: entry.key,
-      value: entry.value,
-      updatedAt: now
-    })
-  }
+  syncJobCountersFromProgressInTx(db, jobId, progress)
 }
 
 export async function loadJobCountersIntoProgress(

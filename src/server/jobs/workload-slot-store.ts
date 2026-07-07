@@ -346,6 +346,34 @@ export async function assertRunActive(
   return active?.runId === runId
 }
 
+export async function assertRunWritable(
+  ownerKind: WorkloadOwnerKind,
+  ownerId: string,
+  runId: string
+): Promise<boolean> {
+  const db = getDb()
+  const ownerTableRef = ownerTable(ownerKind)
+  const ownerIdCol = ownerIdColumn(ownerKind)
+
+  const ownerRow = await db
+    .select({ activeRunId: ownerTableRef.activeRunId })
+    .from(ownerTableRef)
+    .where(eq(ownerIdCol, ownerId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
+
+  if (ownerRow?.activeRunId !== runId) return false
+
+  const runRow = await db
+    .select({ status: workloadRuns.status })
+    .from(workloadRuns)
+    .where(eq(workloadRuns.id, runId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
+
+  return runRow?.status === 'active'
+}
+
 export async function clearActiveRunIfMatches(
   ownerKind: WorkloadOwnerKind,
   ownerId: string,
