@@ -50,6 +50,50 @@ export function resolveWizardPhase(row: Thread): WizardPhase {
   return inferWizardPhaseFromThread(row)
 }
 
+export type WizardPhaseWriteIntent =
+  | { type: 'set'; phase: WizardPhase }
+  | {
+      type: 'infer_from_context'
+      activeDraftId?: string | null
+      activePlanId?: string | null
+      draftIsPlaceholder?: boolean
+    }
+  | { type: 'collecting_draft' }
+
+/** Single write authority for threads.wizard_phase. Undefined means leave the column unchanged. */
+export function resolveThreadWizardPhaseWrite(
+  row: Thread,
+  intent: WizardPhaseWriteIntent
+): WizardPhase | undefined {
+  switch (intent.type) {
+    case 'set':
+      return intent.phase
+    case 'collecting_draft':
+      return WIZARD_PHASE_COLLECT
+    case 'infer_from_context': {
+      if (intent.activePlanId) {
+        return WIZARD_PHASE_PLAN_EDIT
+      }
+      if (intent.activeDraftId && !row.activePlanId) {
+        if (intent.draftIsPlaceholder) return undefined
+        return WIZARD_PHASE_DRAFT_REVIEW
+      }
+      return undefined
+    }
+  }
+}
+
+export function applyThreadWizardPhaseWrite(
+  patch: Partial<Thread>,
+  row: Thread,
+  intent: WizardPhaseWriteIntent
+): void {
+  const phase = resolveThreadWizardPhaseWrite(row, intent)
+  if (phase !== undefined) {
+    patch.wizardPhase = phase
+  }
+}
+
 export function assertWizardPhase(
   current: WizardPhase,
   expected: WizardPhase | WizardPhase[]
@@ -244,7 +288,7 @@ export async function advanceWizardPhase(
 
   const db = getDb()
   const patch: Partial<Thread> = {
-    wizardPhase: input.to,
+    wizardPhase: resolveThreadWizardPhaseWrite(row, { type: 'set', phase: input.to }),
     runtimeSessionId: null,
     runtimeStatus: RUNTIME_STATUS_IDLE,
     coreRuntimeJson: JSON.stringify(clearedMap),
