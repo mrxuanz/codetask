@@ -3,6 +3,7 @@ import {
   CODETEAM_MANAGER_MCP_SERVER,
   MCP_HTTP_ACCEPT_HEADER_VALUE
 } from '../conversation/draft/types'
+import { allCreateTaskMcpToolNames } from '../wizard/tools'
 
 export function buildHttpMcpServerConfig(url: string): {
   type: 'http'
@@ -18,25 +19,10 @@ export function buildHttpMcpServerConfig(url: string): {
   }
 }
 
-const CODEX_CONVERSATION_MCP_TOOLS = [
-  'propose_task_draft',
-  'read_reference_attachment',
-  'get_task_draft',
-  'get_execution_plan',
-  'revise_requirements_contract',
-  'confirm_requirements_contract',
-  'update_task_draft',
-  'update_execution_plan_node',
-  'replace_execution_plan',
-  'request_plan_regeneration',
-  'confirm_draft_section',
-  'request_phase_rollback'
-] as const
-
 function buildCodexMcpToolApprovals(
   toolNames?: readonly string[]
 ): Record<string, { approval_mode: 'approve' }> {
-  const names = toolNames ?? CODEX_CONVERSATION_MCP_TOOLS
+  const names = toolNames ?? allCreateTaskMcpToolNames()
   return Object.fromEntries(names.map((name) => [name, { approval_mode: 'approve' as const }]))
 }
 
