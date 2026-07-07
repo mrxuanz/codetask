@@ -41,7 +41,7 @@ import { getDesignSessionRow } from '../design-session/service'
 import { isDesignSessionId } from '@shared/design-session'
 import { getThreadPhaseRuntime, resolveWizardPhase } from '../wizard/phase'
 import { WIZARD_PHASE_COLLECT } from '../wizard/types'
-import { allCreateTaskMcpToolNames } from '../wizard/tools'
+import { toolsForWizardPhase } from '../wizard/tools'
 import type { WizardPhase } from '../wizard/types'
 import { buildWorkspaceSnapshot } from './workspace-snapshot'
 import type { TaskLaunchDraftPayload } from './draft/types'
@@ -429,7 +429,8 @@ export async function* streamSendMessage(
       : null
     const turnPrompt = augmentPromptWithHistory(turnPromptWithContext, historyBlock)
 
-    const mcpToolNames = createTaskMode && wizardStage ? allCreateTaskMcpToolNames() : undefined
+    const mcpToolNames =
+      createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
     const cursorRuntimeScope =
       core.code === 'cursorcli'
         ? buildConversationCursorRuntimeScope(thread.id, createTaskMode ? 'create_task' : 'chat')

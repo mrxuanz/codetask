@@ -31,6 +31,7 @@ import {
   setCorePhaseRuntime,
   type CoreRuntimeMap
 } from '../wizard/core-runtime'
+import { isCollectingDraftPayload } from '../conversation/draft/collecting'
 import { resolveWizardPhase } from '../wizard/phase'
 import {
   WIZARD_PHASE_DRAFT_REVIEW,
@@ -272,7 +273,17 @@ export async function updateThreadContext(
   if (patch.activePlanId) {
     update.wizardPhase = WIZARD_PHASE_PLAN_EDIT
   } else if (patch.activeDraftId && !existing.activePlanId) {
-    update.wizardPhase = WIZARD_PHASE_DRAFT_REVIEW
+    const { getMessage } = await import('../conversation/messages')
+    const draftMessage = await getMessage(username, threadId, patch.activeDraftId, {
+      signAssets: false
+    })
+    const isPlaceholder =
+      !draftMessage ||
+      draftMessage.kind !== 'task-launch-draft' ||
+      isCollectingDraftPayload(draftMessage.payload)
+    if (!isPlaceholder) {
+      update.wizardPhase = WIZARD_PHASE_DRAFT_REVIEW
+    }
   }
 
   await db
