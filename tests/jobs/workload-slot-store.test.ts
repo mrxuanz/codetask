@@ -4,7 +4,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createDatabase, closeDatabaseForTests, getDb } from '../../src/server/db'
-import { threadJobs, threadMessages, threads, projects } from '../../src/server/db/schema'
+import {
+  jobArtifacts,
+  jobTasks,
+  threadJobs,
+  threadMessages,
+  threads,
+  projects
+} from '../../src/server/db/schema'
 import { eq } from 'drizzle-orm'
 import type { createIsolatedTestDatabase } from '../../src/server/db'
 import {
@@ -18,6 +25,8 @@ import {
   resetWorkloadRunControllersForTests
 } from '../../src/server/jobs/workload-slot-store'
 import { updateJobRowFenced } from '../../src/server/jobs/repository'
+import { hydrateTaskEvidenceSync } from '../../src/server/jobs/evidence/store'
+import type { TaskProgressDto } from '../../src/server/jobs/types'
 import {
   registerPlannerMcpSession,
   unregisterPlannerMcpSession,
@@ -100,6 +109,33 @@ async function seedJob(
     createdAt: now,
     updatedAt: now
   })
+}
+
+function progressWithEvidence(summary: string): TaskProgressDto {
+  return {
+    phase: 'running',
+    status: 'running',
+    currentIndex: 0,
+    total: 1,
+    currentTaskId: 'task-1',
+    message: summary,
+    tasks: [
+      {
+        id: 'task-1',
+        title: 'Task 1',
+        status: 'running',
+        executionStatus: 'running',
+        evidenceStatus: 'ready',
+        evidence: {
+          status: 'completed',
+          summary,
+          changedFiles: ['src/a.ts'],
+          evidence: ['line'],
+          validation: { ran: true, outcome: 'passed' }
+        }
+      }
+    ]
+  }
 }
 
 test('claim capacity=1 rejects second run', async () => {
@@ -248,6 +284,58 @@ test('fenced update rejects stale run', async () => {
 
     const row = await db.select().from(threadJobs).where(eq(threadJobs.id, 'job-1')).limit(1)
     assert.notEqual(row[0]?.status, 'failed')
+  } finally {
+    teardownDb()
+  }
+})
+
+test('stale fenced update does not replace committed evidence artifacts', async () => {
+  setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-1', 'planning')
+
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-1',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    const saved = await updateJobRowFenced('job-1', run.runId, {
+      taskProgress: progressWithEvidence('committed evidence')
+    })
+    assert.ok(saved)
+
+    const taskRows = await db.select().from(jobTasks).where(eq(jobTasks.jobId, 'job-1')).limit(1)
+    const originalArtifactId = taskRows[0]?.evidenceArtifactId
+    assert.ok(originalArtifactId)
+
+    await releaseWorkloadSlot(run.runId, { reason: 'test' })
+
+    const rejected = await updateJobRowFenced('job-1', run.runId, {
+      taskProgress: progressWithEvidence('stale evidence')
+    })
+    assert.equal(rejected, null)
+
+    const afterTaskRows = await db
+      .select()
+      .from(jobTasks)
+      .where(eq(jobTasks.jobId, 'job-1'))
+      .limit(1)
+    assert.equal(afterTaskRows[0]?.evidenceArtifactId, originalArtifactId)
+
+    const artifacts = await db.select().from(jobArtifacts).where(eq(jobArtifacts.jobId, 'job-1'))
+    assert.equal(artifacts.length, 1)
+
+    const hydrated = hydrateTaskEvidenceSync(
+      dataDir,
+      afterTaskRows[0]?.evidenceJson ? JSON.parse(afterTaskRows[0].evidenceJson) : null,
+      originalArtifactId,
+      db
+    )
+    assert.equal(hydrated?.summary, 'committed evidence')
   } finally {
     teardownDb()
   }

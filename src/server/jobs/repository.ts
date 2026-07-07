@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNull, lt, or, type SQL } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNull, lt, or, type SQL } from 'drizzle-orm'
 import { isDesignSessionId } from '@shared/design-session'
 import { parseJobReferenceManifest, toPublicReferenceManifest } from '@shared/job-references'
 import { enrichJobWithRecoveryState } from '@shared/job-recovery-state'
@@ -14,17 +14,23 @@ import {
   saveJobPlanInTx,
   savePlanProgress
 } from '../db/job-plan'
-import { threadJobs, type ThreadJob } from '../db/schema'
+import { jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { getAppContext } from '../bootstrap'
 import { onJobStatusTransition } from '../retention'
 import { readRetentionSettings } from '../retention/settings'
-import { externalizeTaskProgressEvidence } from './evidence/store'
+import {
+  deleteSupersededTaskProgressEvidenceArtifacts,
+  deleteTaskProgressEvidenceArtifacts,
+  externalizeTaskProgressEvidenceForCommit,
+  type ExternalizedEvidenceArtifact
+} from './evidence/store'
 import { slimTaskProgressForSse } from './progress-sse'
 
 export const EXECUTION_OCCUPYING_STATUSES = ['running'] as const
 export const EXECUTION_LEASE_TTL_SEC = 30 * 60
+const TENTATIVE_EVIDENCE_ARTIFACT_TTL_SEC = 24 * 60 * 60
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -468,7 +474,8 @@ function applyFencedJobPatchInTx(
   jobId: string,
   runId: string,
   patch: JobRowPatch,
-  storedTaskProgress?: TaskProgressDto
+  storedTaskProgress?: TaskProgressDto,
+  artifactIdsToRetain: string[] = []
 ): FencedJobPatchTxResult {
   const fence = jobRowFence(jobId, runId)
   const existing = tx.select().from(threadJobs).where(fence).limit(1).all()[0]
@@ -509,6 +516,12 @@ function applyFencedJobPatchInTx(
 
   if (progressToStore) {
     saveTaskProgressInTx(tx, jobId, progressToStore, fence)
+    if (artifactIdsToRetain.length > 0) {
+      tx.update(jobArtifacts)
+        .set({ expiresAt: null })
+        .where(inArray(jobArtifacts.id, artifactIdsToRetain))
+        .run()
+    }
     tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
   }
 
@@ -516,6 +529,30 @@ function applyFencedJobPatchInTx(
   if (!stillFenced) return { ok: false }
 
   return { ok: true, previousStatus: existing.status, threadId: existing.threadId }
+}
+
+async function cleanupUncommittedEvidenceArtifacts(
+  dataDir: string | undefined,
+  artifactIds: string[]
+): Promise<void> {
+  if (!dataDir || artifactIds.length === 0) return
+  await deleteTaskProgressEvidenceArtifacts(dataDir, artifactIds).catch((error) => {
+    console.warn('[jobs] failed to cleanup uncommitted evidence artifacts', { artifactIds, error })
+  })
+}
+
+async function cleanupSupersededEvidenceArtifacts(
+  dataDir: string | undefined,
+  jobId: string,
+  artifacts: ExternalizedEvidenceArtifact[]
+): Promise<void> {
+  if (!dataDir || artifacts.length === 0) return
+  await deleteSupersededTaskProgressEvidenceArtifacts(dataDir, jobId, artifacts).catch((error) => {
+    console.warn('[jobs] failed to cleanup superseded evidence artifacts', {
+      artifactIds: artifacts.map((artifact) => artifact.artifactId),
+      error
+    })
+  })
 }
 
 export async function updateJobRowFenced(
@@ -526,22 +563,44 @@ export async function updateJobRowFenced(
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
   let storedTaskProgress: TaskProgressDto | undefined
+  let taskProgressDataDir: string | undefined
+  let createdArtifacts: ExternalizedEvidenceArtifact[] = []
+  let createdArtifactIds: string[] = []
   if (patch.taskProgress) {
     const dataDir = getAppContext().dataDir
+    taskProgressDataDir = dataDir
     const settings = readRetentionSettings(getAppContext().settings)
-    storedTaskProgress = await externalizeTaskProgressEvidence(
+    const externalized = await externalizeTaskProgressEvidenceForCommit(
       dataDir,
       jobId,
       patch.taskProgress,
-      settings
+      settings,
+      {
+        expiresAt: nowSec() + TENTATIVE_EVIDENCE_ARTIFACT_TTL_SEC,
+        replaceExisting: false
+      }
     )
+    storedTaskProgress = externalized.progress
+    createdArtifacts = externalized.artifacts
+    createdArtifactIds = externalized.artifactIds
   }
 
-  const txResult = db.transaction((tx) =>
-    applyFencedJobPatchInTx(tx, jobId, runId, patch, storedTaskProgress)
-  )
+  let txResult: FencedJobPatchTxResult
+  try {
+    txResult = db.transaction((tx) =>
+      applyFencedJobPatchInTx(tx, jobId, runId, patch, storedTaskProgress, createdArtifactIds)
+    )
+  } catch (error) {
+    await cleanupUncommittedEvidenceArtifacts(taskProgressDataDir, createdArtifactIds)
+    throw error
+  }
 
-  if (!txResult.ok) return null
+  if (!txResult.ok) {
+    await cleanupUncommittedEvidenceArtifacts(taskProgressDataDir, createdArtifactIds)
+    return null
+  }
+
+  await cleanupSupersededEvidenceArtifacts(taskProgressDataDir, jobId, createdArtifacts)
 
   if (
     patch.status &&
