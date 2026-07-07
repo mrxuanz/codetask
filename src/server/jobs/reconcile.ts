@@ -13,6 +13,15 @@ import {
 import { emitJobProgressAfterPersist } from './progress-emit'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { createTurnError } from '../../shared/turn-errors.ts'
+import {
+  clearActiveRunIfMatches,
+  listActiveWorkloadSlots,
+  releaseWorkloadSlot,
+  type WorkloadRunSummary
+} from './workload-slot-store'
+import { getRunRuntimeRef } from './workload-slot-store'
+import { hardKill, registerRunRuntime, unregisterRunRuntime } from './runtime-supervisor'
+import { buildCursorPlannerRuntimeHandle } from './runtime-handle-cursor'
 
 function isJobLoopActive(jobId: string): boolean {
   return getAppContext().executionRuntime.isLoopActive(jobId)
@@ -20,6 +29,14 @@ function isJobLoopActive(jobId: string): boolean {
 
 function isSessionPlanning(sessionId: string): boolean {
   return getAppContext().runtimeRegistry.isJobPlanning(sessionId)
+}
+
+function leaseOwner(): string {
+  return `pid-${process.pid}`
+}
+
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000)
 }
 
 export async function reconcileStaleJobIfNeeded(
@@ -173,4 +190,105 @@ export function resetJobReconcileForTests(): void {
   void import('./workload-slot')
     .then((module) => module.resetStartupWorkloadGateForTests())
     .catch(() => {})
+}
+
+async function killRuntimeForStaleSlot(slot: WorkloadRunSummary): Promise<void> {
+  const runtimeRef = await getRunRuntimeRef<{
+    kind?: 'cursor-acp' | 'sandbox-worker' | 'job-cursor-pool'
+    scopeId?: string
+    jobId?: string
+  }>(slot.runId)
+
+  if (runtimeRef?.scopeId) {
+    registerRunRuntime(slot.runId, buildCursorPlannerRuntimeHandle(runtimeRef.scopeId))
+  } else if (runtimeRef?.jobId) {
+    registerRunRuntime(slot.runId, buildCursorPlannerRuntimeHandle(runtimeRef.jobId))
+  } else if (slot.kind === 'planning') {
+    registerRunRuntime(slot.runId, buildCursorPlannerRuntimeHandle(slot.ownerId))
+  }
+
+  await hardKill(slot.runId).catch((error) => {
+    console.warn('[reconcile] hardKill stale slot failed', slot.runId, error)
+  })
+  unregisterRunRuntime(slot.runId)
+}
+
+export async function reconcileOrphanWorkloadSlotsForUser(username: string): Promise<void> {
+  const slots = await listActiveWorkloadSlots({ username })
+  const currentOwner = leaseOwner()
+  const now = nowSec()
+
+  for (const slot of slots) {
+    try {
+      const currentPid = slot.leaseOwner === currentOwner
+      const leaseValid = slot.leaseExpiresAt ? slot.leaseExpiresAt > now : false
+
+      if (currentPid && leaseValid) {
+        if (slot.kind === 'planning') {
+          getAppContext().runtimeRegistry.tryStartJobPlanning(slot.ownerId, username)
+        }
+        continue
+      }
+
+      console.warn('[reconcile] releasing stale workload slot', slot.runId, {
+        ownerKind: slot.ownerKind,
+        ownerId: slot.ownerId,
+        currentPid,
+        leaseValid
+      })
+
+      await killRuntimeForStaleSlot(slot)
+      await releaseWorkloadSlot(slot.runId, {
+        reason: 'startup_reconcile_stale',
+        status: 'released'
+      })
+      await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
+    } catch (error) {
+      console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)
+    }
+  }
+}
+
+export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
+  const slots = await listActiveWorkloadSlots({})
+  const currentOwner = leaseOwner()
+  const now = nowSec()
+
+  for (const slot of slots) {
+    try {
+      const currentPid = slot.leaseOwner === currentOwner
+      const leaseValid = slot.leaseExpiresAt ? slot.leaseExpiresAt > now : false
+
+      if (currentPid && leaseValid) {
+        if (slot.kind === 'planning') {
+          getAppContext().runtimeRegistry.tryStartJobPlanning(slot.ownerId, slot.username)
+        }
+        continue
+      }
+
+      console.warn('[reconcile] releasing stale workload slot', slot.runId, {
+        ownerKind: slot.ownerKind,
+        ownerId: slot.ownerId,
+        currentPid,
+        leaseValid
+      })
+
+      await killRuntimeForStaleSlot(slot)
+      await releaseWorkloadSlot(slot.runId, {
+        reason: 'startup_reconcile_stale',
+        status: 'released'
+      })
+      await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
+    } catch (error) {
+      console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)
+    }
+  }
+}
+
+let startupWorkloadSlotsReconciled = false
+
+export async function reconcileOrphanWorkloadSlotsOnStartupOnce(): Promise<void> {
+  if (startupWorkloadSlotsReconciled) return
+  startupWorkloadSlotsReconciled = true
+  await reconcileOrphanWorkloadSlotsOnStartup()
 }

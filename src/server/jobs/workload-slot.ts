@@ -1,7 +1,9 @@
-import { and, asc, eq, type SQL } from 'drizzle-orm'
+import { and, eq, type SQL } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { designSessions, threadJobs } from '../db/schema'
+import type { WorkloadOwnerKind, WorkloadRunKind, WorkloadRunSummary } from './workload-slot-store'
+import { findActiveWorkloadRunId, listActiveWorkloadSlots } from './workload-slot-store'
 
 let startupWorkloadReady: Promise<void> = Promise.resolve()
 let startupGateBound = false
@@ -48,7 +50,7 @@ export function findInMemoryPlanningOccupant(username: string, exceptId?: string
 export function isWorkloadBlockedInMemory(username: string, exceptId?: string): boolean {
   return Boolean(
     findInMemoryExecutionOccupant(username, exceptId) ||
-    findInMemoryPlanningOccupant(username, exceptId)
+      findInMemoryPlanningOccupant(username, exceptId)
   )
 }
 
@@ -60,7 +62,7 @@ export async function findDbRunningJobId(
     .select({ id: threadJobs.id })
     .from(threadJobs)
     .where(anyRunningJobClause(username))
-    .orderBy(asc(threadJobs.updatedAt))
+    .orderBy(threadJobs.updatedAt)
     .limit(1)
   const id = rows[0]?.id ?? null
   if (!id) return null
@@ -76,7 +78,7 @@ export async function findDbPlanningSessionId(
     .select({ id: designSessions.id })
     .from(designSessions)
     .where(and(eq(designSessions.username, username), eq(designSessions.status, 'planning')))
-    .orderBy(asc(designSessions.updatedAt))
+    .orderBy(designSessions.updatedAt)
     .limit(1)
   const id = rows[0]?.id ?? null
   if (!id) return null
@@ -84,7 +86,19 @@ export async function findDbPlanningSessionId(
   return id
 }
 
-/** Returns occupant id (execution job id or design session id) if user workload slot is taken. */
+export async function findActiveSlotOccupant(
+  username: string,
+  exceptId?: string
+): Promise<string | null> {
+  await ensureStartupWorkloadReady()
+  const active = await listActiveWorkloadSlots({ username })
+  for (const slot of active) {
+    if (exceptId && slot.ownerId === exceptId) continue
+    return slot.ownerId
+  }
+  return null
+}
+
 export async function findWorkloadOccupant(
   username: string,
   exceptId?: string
@@ -97,6 +111,9 @@ export async function findWorkloadOccupant(
   const memPlan = findInMemoryPlanningOccupant(username, exceptId)
   if (memPlan) return memPlan
 
+  const slotOccupant = await findActiveSlotOccupant(username, exceptId)
+  if (slotOccupant) return slotOccupant
+
   const dbExec = await findDbRunningJobId(username, exceptId)
   if (dbExec) return dbExec
 
@@ -104,4 +121,39 @@ export async function findWorkloadOccupant(
   if (dbPlan) return dbPlan
 
   return null
+}
+
+export async function findOccupyingRun(
+  username: string,
+  exceptId?: string
+): Promise<WorkloadRunSummary | null> {
+  await ensureStartupWorkloadReady()
+  const active = await listActiveWorkloadSlots({ username })
+  for (const slot of active) {
+    if (exceptId && slot.ownerId === exceptId) continue
+    return slot
+  }
+  return null
+}
+
+export async function findActiveRunForOwner(
+  ownerKind: WorkloadOwnerKind,
+  ownerId: string
+): Promise<WorkloadRunSummary | null> {
+  await ensureStartupWorkloadReady()
+  const runId = await findActiveWorkloadRunId(ownerKind, ownerId)
+  if (!runId) return null
+  const active = await listActiveWorkloadSlots({})
+  return active.find((s) => s.runId === runId) ?? null
+}
+
+export async function isOwnerRunning(
+  ownerKind: WorkloadOwnerKind,
+  ownerId: string,
+  kind?: WorkloadRunKind
+): Promise<boolean> {
+  const active = await findActiveRunForOwner(ownerKind, ownerId)
+  if (!active) return false
+  if (kind) return active.kind === kind
+  return true
 }

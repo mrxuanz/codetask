@@ -3,7 +3,8 @@ import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
 import {
   reconcileOrphanRunningJobsOnStartupOnce,
-  reconcileOrphanPlanningSessionsOnStartupOnce
+  reconcileOrphanPlanningSessionsOnStartupOnce,
+  reconcileOrphanWorkloadSlotsOnStartupOnce
 } from './jobs/reconcile'
 import { bindStartupWorkloadGate } from './jobs/workload-slot'
 import { reconcileOnStartupOnce } from './conversation/service'
@@ -86,7 +87,8 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
   const ctx = appContext
   const startupReconcile = trackStartupTask(
-    reconcileOrphanRunningJobsOnStartupOnce()
+    reconcileOrphanWorkloadSlotsOnStartupOnce()
+      .then(() => reconcileOrphanRunningJobsOnStartupOnce())
       .then(() => reconcileOrphanPlanningSessionsOnStartupOnce())
       .catch((error) => {
         console.warn('[jobs] startup reconcile failed', error)

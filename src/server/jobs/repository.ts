@@ -428,6 +428,23 @@ export async function updateJobRowForSnapshot(
   return updateJobRow(jobId, patch, { includePlan: true, hydrateEvidence: false })
 }
 
+export async function updateJobRowFenced(
+  jobId: string,
+  runId: string,
+  patch: JobRowPatch,
+  options?: { includePlan?: boolean; hydrateEvidence?: boolean }
+): Promise<ThreadJobDto | null> {
+  const db = getDb()
+  const existingRows = await db
+    .select()
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, jobId), eq(threadJobs.activeRunId, runId)))
+    .limit(1)
+  if (!existingRows[0]) return null
+
+  return updateJobRow(jobId, patch, options)
+}
+
 export async function transitionJobStatus(
   jobId: string,
   fromStatuses: string[],

@@ -20,6 +20,7 @@ import { migration019DesignPlanArtifacts } from './019_design_plan_artifacts'
 import { migration020JobSnapshot } from './020_job_snapshot'
 import { migration021CorpusRevision } from './021_corpus_revision'
 import { migration022AuthGuard } from './022_auth_guard'
+import { migration023WorkloadSlots } from './023_workload_slots'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -45,7 +46,8 @@ export const allMigrations = [
   migration019DesignPlanArtifacts,
   migration020JobSnapshot,
   migration021CorpusRevision,
-  migration022AuthGuard
+  migration022AuthGuard,
+  migration023WorkloadSlots
 ]
 
 export function applyMigrations(db: Database.Database): void {

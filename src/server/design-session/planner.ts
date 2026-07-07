@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { saveDesignPlan, saveDesignPlanProgress, saveDesignAbilities } from '../db/design-plan'
@@ -41,17 +41,20 @@ import {
   finishPlannerRun,
   loadDesignReferenceManifest,
   mapDesignSessionToJobDto,
-  updateDesignSessionRow
+  updateDesignSessionRow,
+  updateDesignSessionRowFenced
 } from './service'
 import { advanceWizardPhase, buildDraftToPlanHandoff } from '../wizard/phase'
 import { WIZARD_PHASE_PLAN_EDIT } from '../wizard/types'
+import type { PlanningRunOutcome } from '../jobs/run-lifecycle'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
-async function commitDesignPlanReady(
+export async function commitDesignPlanReady(
   designSessionId: string,
+  runId: string,
   savedPlan: SavedJobPlan,
   counts: { milestones: number; slices: number; tasks: number },
   advancePhase?: { username: string; threadId: string; coreCode: string; draftMessageId: string },
@@ -60,28 +63,6 @@ async function commitDesignPlanReady(
   const { clearPlanConfirmedFlags } = await import('@shared/plan-mutations')
   const planToSave = options?.clearConfirmed ? clearPlanConfirmedFlags(savedPlan) : savedPlan
   const planRevision = options?.planRevision ?? 1
-
-  const { getAppContext } = await import('../bootstrap')
-  const { putDesignPlanArtifact } = await import('../retention/design-plan-artifacts')
-  const { designSessions } = await import('../db/schema')
-  const { eq } = await import('drizzle-orm')
-  const artifact = await putDesignPlanArtifact({
-    dataDir: getAppContext().dataDir,
-    designSessionId,
-    planRevision,
-    plan: planToSave
-  })
-  const db = getDb()
-  await db
-    .update(designSessions)
-    .set({
-      planArtifactId: artifact.artifactId,
-      planArtifactPath: artifact.contentPath,
-      planSummaryJson: artifact.summaryJson,
-      planCountsJson: JSON.stringify(counts),
-      updatedAt: nowSec()
-    })
-    .where(eq(designSessions.id, designSessionId))
 
   const planReady: PlanProgressDto = {
     phase: 'plan_ready',
@@ -98,7 +79,8 @@ async function commitDesignPlanReady(
 
   const initialTaskProgress = defaultTaskProgress(savedPlan.tasks)
 
-  const updated = await updateDesignSessionRow(designSessionId, {
+  const { updateDesignSessionRowFenced } = await import('./service')
+  const updated = await updateDesignSessionRowFenced(designSessionId, runId, {
     status: 'plan_editing',
     phase: 'plan_edit',
     planRevision: planRevision ?? 1,
@@ -108,6 +90,26 @@ async function commitDesignPlanReady(
     lastError: null
   })
   if (!updated) return false
+
+  const { getAppContext } = await import('../bootstrap')
+  const { putDesignPlanArtifact } = await import('../retention/design-plan-artifacts')
+  const artifact = await putDesignPlanArtifact({
+    dataDir: getAppContext().dataDir,
+    designSessionId,
+    planRevision,
+    plan: planToSave
+  })
+  const db = getDb()
+  await db
+    .update(designSessions)
+    .set({
+      planArtifactId: artifact.artifactId,
+      planArtifactPath: artifact.contentPath,
+      planSummaryJson: artifact.summaryJson,
+      planCountsJson: JSON.stringify(counts),
+      updatedAt: nowSec()
+    })
+    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.activeRunId, runId)))
 
   emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress: planReady } })
   emitJobEvent(designSessionId, {
@@ -147,6 +149,15 @@ async function commitDesignPlanReady(
   return true
 }
 
+export async function commitDesignPlanReadyFenced(
+  designSessionId: string,
+  runId: string,
+  savedPlan: SavedJobPlan,
+  counts: { milestones: number; slices: number; tasks: number }
+): Promise<boolean> {
+  return commitDesignPlanReady(designSessionId, runId, savedPlan, counts)
+}
+
 function summarizePlannerSession(session: PlannerMcpSession): Record<string, unknown> {
   return {
     contextsRegistered: session.taskContexts.size,
@@ -172,10 +183,24 @@ function summarizeDraftForPlanner(draft: TaskLaunchDraftPayload): Record<string,
 
 async function pushDesignPlanningProgress(
   designSessionId: string,
+  runId: string,
   done: number,
   partialPlan: SavedJobPlan,
   registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
 ): Promise<void> {
+  const db = getDb()
+  const fenced = await db
+    .select({ activeRunId: designSessions.activeRunId })
+    .from(designSessions)
+    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.activeRunId, runId)))
+    .limit(1)
+    .then((rows) => rows[0])
+
+  if (!fenced) {
+    plannerSandboxDebug('runDesignPlanner: partial progress stale run ignored', { designSessionId, runId })
+    return
+  }
+
   const structuredTotal = registeredPlan ? countPlanUnits(registeredPlan).tasks : 0
   const partialCount = partialPlan.tasks.length
   const total =
@@ -195,7 +220,6 @@ async function pushDesignPlanningProgress(
     message: null
   }
 
-  const db = getDb()
   await saveDesignPlan(db, designSessionId, partialPlan)
   await saveDesignPlanProgress(db, designSessionId, planProgress)
   await db
@@ -219,10 +243,21 @@ async function pushDesignPlanningProgress(
 
   plannerSandboxDebug('runDesignPlanner: partial progress', {
     designSessionId,
+    runId,
     contextsRegistered: done,
     contextsTotal: total,
     partialTasks: partialPlan.tasks.length
   })
+}
+
+export async function pushDesignPlanningProgressFenced(
+  designSessionId: string,
+  runId: string,
+  done: number,
+  partialPlan: SavedJobPlan,
+  registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
+): Promise<void> {
+  return pushDesignPlanningProgress(designSessionId, runId, done, partialPlan, registeredPlan)
 }
 
 async function runDesignPlanner(
@@ -237,18 +272,38 @@ async function runDesignPlanner(
     planRevisionBefore?: number
   }
 ): Promise<void> {
-  const { findWorkloadOccupant } = await import('../jobs/workload-slot')
-  if (await findWorkloadOccupant(username, designSessionId)) {
-    plannerSandboxDebug('runDesignPlanner: skipped (workload slot busy)', { designSessionId })
-    return
-  }
-  if (!getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username)) {
-    plannerSandboxDebug('runDesignPlanner: skipped (planning slot busy)', { designSessionId })
+  const { claimWorkloadSlotTx } = await import('../jobs/workload-slot-store')
+  const run = await claimWorkloadSlotTx({
+    username,
+    ownerKind: 'design_session',
+    ownerId: designSessionId,
+    kind: 'planning',
+    pool: 'default'
+  })
+  if (!run) {
+    plannerSandboxDebug('runDesignPlanner: skipped (workload slot unavailable), waiting', {
+      designSessionId
+    })
+    const planProgress: PlanProgressDto = {
+      ...defaultPlanProgress(),
+      phase: 'idle',
+      status: 'pending',
+      progressCode: 'execution.pending',
+      progressParams: null,
+      message: null
+    }
+    const updated = await updateDesignSessionRow(designSessionId, { planProgress })
+    if (updated) {
+      emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
+      emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: updated } })
+    }
     return
   }
 
+  getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username)
+
   const revisionBefore = options?.planRevisionBefore ?? 0
-  const runId = await createPlannerRun({ designSessionId, planRevisionBefore: revisionBefore })
+  const designRunId = await createPlannerRun({ designSessionId, planRevisionBefore: revisionBefore })
   const planningDraft = ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode)
   if (planningDraft.abilities.length > 0 && draft.abilities.length === 0) {
     await saveDesignAbilities(
@@ -267,6 +322,7 @@ async function runDesignPlanner(
   }
   plannerSandboxDebug('runDesignPlanner: start', {
     designSessionId,
+    runId: run.runId,
     threadId,
     workspacePath,
     coreCode,
@@ -286,7 +342,15 @@ async function runDesignPlanner(
     : undefined
 
   let planCommitted = false
+  let runOutcome: PlanningRunOutcome = 'success'
   let plannerSession: PlannerMcpSession | null = null
+  const plannerScopeId = `${designSessionId}:${run.runId}`
+
+  const { registerRunRuntime } = await import('../jobs/runtime-supervisor')
+  const { buildCursorPlannerRuntimeHandle } = await import('../jobs/runtime-handle-cursor')
+  const { updateRunRuntimeRef } = await import('../jobs/workload-slot-store')
+  registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
+  await updateRunRuntimeRef(run.runId, { kind: 'cursor-acp', scopeId: plannerScopeId })
 
   try {
     const plannerCoreCode = await resolvePlannerCoreCode(coreCode)
@@ -306,6 +370,9 @@ async function runDesignPlanner(
       sessionId: mcpSessionId,
       jobId: designSessionId,
       threadId,
+      runId: run.runId,
+      ownerKind: 'design_session',
+      ownerId: designSessionId,
       allowedAbilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode),
       validReferenceIds:
         referenceManifest?.references.map((item) => item.id) ??
@@ -313,33 +380,27 @@ async function runDesignPlanner(
       referenceManifest,
       taskContexts: new Map(),
       registeredPlan: null,
+      phaseAdvance,
+      planRevision: revisionBefore + 1,
+      clearConfirmed: Boolean(options?.regenerationInstruction),
+      abortTurn: () => {
+        try {
+          turnAbort.abort()
+        } catch {
+          // ignore
+        }
+      },
       onTaskContextRegistered: (_key, done) => {
         const partial = plannerSession!.registeredPlan
           ? flattenRegisteredPlan(plannerSession!.registeredPlan, plannerSession!.taskContexts)
           : buildPartialPlanFromContexts(plannerSession!.taskContexts)
         void pushDesignPlanningProgress(
           designSessionId,
+          run.runId,
           done,
           partial,
           plannerSession!.registeredPlan
         )
-      },
-      onPlanRegistered: (counts) => {
-        if (!plannerSession!.registeredPlan) return
-        const saved = flattenRegisteredPlan(
-          plannerSession!.registeredPlan,
-          plannerSession!.taskContexts
-        )
-        const nextRevision = revisionBefore + 1
-        void commitDesignPlanReady(designSessionId, saved, counts, phaseAdvance, {
-          planRevision: nextRevision,
-          clearConfirmed: Boolean(options?.regenerationInstruction)
-        }).then((ok) => {
-          if (!ok) return
-          planCommitted = true
-          void finishPlannerRun(runId, { status: 'completed', planRevisionAfter: nextRevision })
-          turnAbort.abort()
-        })
       }
     }
 
@@ -347,6 +408,7 @@ async function runDesignPlanner(
 
     plannerSandboxDebug('runDesignPlanner: mcp session registered', {
       designSessionId,
+      runId: run.runId,
       mcpSessionId,
       ...summarizePlannerSession(plannerSession),
       validReferenceIds: plannerSession.validReferenceIds.length,
@@ -387,6 +449,7 @@ async function runDesignPlanner(
 
       plannerSandboxDebug('runDesignPlanner: entering streamAgentTurn', {
         designSessionId,
+        runId: run.runId,
         provider: core.code,
         model,
         promptChars: (plannerPrompt + regenerationSection).length,
@@ -405,12 +468,14 @@ async function runDesignPlanner(
         systemPrompt: resolvePlannerPromptBody(),
         mcpUrl,
         readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-        signal: turnAbort.signal
+        signal: turnAbort.signal,
+        jobId: plannerScopeId
       })) {
         chunkCount += 1
         if (chunk.type !== 'thinking_delta' && chunk.type !== 'delta') {
           plannerSandboxDebug('runDesignPlanner: turn chunk', {
             designSessionId,
+            runId: run.runId,
             chunkType: chunk.type,
             chunkCount
           })
@@ -420,6 +485,7 @@ async function runDesignPlanner(
 
       plannerSandboxDebug('runDesignPlanner: streamAgentTurn finished', {
         designSessionId,
+        runId: run.runId,
         chunkCount,
         ...summarizePlannerSession(plannerSession),
         planCommitted
@@ -432,7 +498,10 @@ async function runDesignPlanner(
       })
     }
 
-    if (planCommitted) {
+    await plannerSession.finalizerPromise
+
+    if (plannerSession.planCommitted) {
+      planCommitted = true
       plannerSandboxDebug('runDesignPlanner: done (plan committed during stream)', {
         designSessionId
       })
@@ -453,21 +522,27 @@ async function runDesignPlanner(
     const savedPlan = flattenRegisteredPlan(session.registeredPlan, session.taskContexts)
     const counts = countPlanUnits(session.registeredPlan)
     const nextRevision = revisionBefore + 1
-    const ok = await commitDesignPlanReady(designSessionId, savedPlan, counts, phaseAdvance, {
+    plannerSession.planCommitting = true
+    const ok = await commitDesignPlanReady(designSessionId, run.runId, savedPlan, counts, phaseAdvance, {
       planRevision: nextRevision,
       clearConfirmed: Boolean(options?.regenerationInstruction)
     })
     if (ok) {
+      planCommitted = true
+      plannerSession.planCommitted = true
       plannerSandboxDebug('runDesignPlanner: done (plan committed after stream)', {
         designSessionId,
         milestones: counts.milestones,
         slices: counts.slices,
         tasks: counts.tasks
       })
-      await finishPlannerRun(runId, { status: 'completed', planRevisionAfter: nextRevision })
+      await finishPlannerRun(designRunId, { status: 'completed', planRevisionAfter: nextRevision })
     }
   } catch (error) {
-    if (planCommitted) return
+    if (planCommitted) {
+      runOutcome = 'success'
+      return
+    }
 
     const turnError =
       error instanceof Error && 'code' in error
@@ -475,6 +550,7 @@ async function runDesignPlanner(
         : null
     plannerSandboxDebug('runDesignPlanner: failed', {
       designSessionId,
+      runId: run.runId,
       errorCode: turnError?.code ?? null,
       errorMessage: error instanceof Error ? error.message : String(error),
       errorDetail: turnError?.detail ?? null,
@@ -484,17 +560,19 @@ async function runDesignPlanner(
     const { getUserDesignSessionAsJob } = await import('./service')
     const current = await getUserDesignSessionAsJob(username, designSessionId)
     if (current?.status === 'cancelled') {
-      await finishPlannerRun(runId, { status: 'cancelled' })
+      await finishPlannerRun(designRunId, { status: 'cancelled' })
+      runOutcome = 'user_stopped'
       return
     }
 
+    runOutcome = 'failure'
     const failure = planFailureFromSandboxError(error)
-    const job = await updateDesignSessionRow(designSessionId, {
+    const job = await updateDesignSessionRowFenced(designSessionId, run.runId, {
       status: 'failed',
       planProgress: failure.planProgress,
       lastError: failure.lastError
     })
-    await finishPlannerRun(runId, {
+    await finishPlannerRun(designRunId, {
       status: 'failed',
       error: failure.lastError.message
     })
@@ -511,8 +589,13 @@ async function runDesignPlanner(
     }
   } finally {
     getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
-    const { advanceJobQueue } = await import('../jobs/job-queue')
-    await advanceJobQueue(username)
+    plannerSandboxDebug('runDesignPlanner: releasing slot', {
+      designSessionId,
+      runId: run.runId,
+      outcome: runOutcome
+    })
+    const { finishPlanningRunLifecycle } = await import('../jobs/run-lifecycle')
+    await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
   }
 }
 
@@ -531,6 +614,65 @@ export function scheduleDesignSessionPlanning(
     draft: summarizeDraftForPlanner(draft)
   })
   void runDesignPlanner(username, threadId, designSessionId, draft, workspacePath, coreCode)
+}
+
+export async function tryStartPendingDesignSessionPlanning(username: string): Promise<void> {
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(designSessions)
+    .where(
+      and(
+        eq(designSessions.username, username),
+        eq(designSessions.status, 'planning'),
+        eq(designSessions.planStatus, 'pending'),
+        isNull(designSessions.activeRunId)
+      )
+    )
+    .orderBy(asc(designSessions.updatedAt))
+    .limit(1)
+
+  const row = rows[0]
+  if (!row) return
+
+  const { getMessage } = await import('../conversation/messages')
+  const message = await getMessage(username, row.threadId, row.draftMessageId, {
+    signAssets: false
+  })
+  if (!message || message.kind !== 'task-launch-draft') return
+  const payload = message.payload as TaskLaunchDraftPayload | undefined
+  if (!payload?.draftId) return
+
+  const planProgress: PlanProgressDto = {
+    ...defaultPlanProgress(),
+    phase: 'planning',
+    status: 'running',
+    progressCode: 'plan.planning',
+    progressParams: null,
+    message: null
+  }
+  const updated = await updateDesignSessionRow(row.id, {
+    status: 'planning',
+    phase: 'plan_generating',
+    planProgress
+  })
+  if (updated) {
+    emitJobEvent(row.id, { event: 'plan_progress', data: { planProgress } })
+    emitJobEvent(row.id, { event: 'job_snapshot', data: { job: updated } })
+  }
+
+  const { getThreadRow } = await import('../threads/service')
+  const threadRow = await getThreadRow(username, row.threadId)
+  if (!threadRow) return
+
+  scheduleDesignSessionPlanning(
+    username,
+    row.threadId,
+    row.id,
+    payload,
+    row.workspaceRoot,
+    threadRow.coreCode
+  )
 }
 
 export function scheduleDesignSessionPlanRegeneration(

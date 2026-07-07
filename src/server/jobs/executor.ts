@@ -59,7 +59,7 @@ import {
 } from './mcp/task-session'
 import { buildTaskWorkerMcpUrl } from './mcp/task-url'
 import { buildTaskWorkerUserMessage, TASK_EXECUTION_SYSTEM_PROMPT } from './prompts'
-import { getUserJob, updateJobRow, updateJobRowForSnapshot } from './service'
+import { emitJobEvent, getUserJob, updateJobRow, updateJobRowForSnapshot } from './service'
 import {
   isExecutionInfraNotReadyError,
   revertJobAfterInfraStartupFailure
@@ -208,6 +208,16 @@ async function persistTaskProgress(
   gate?: ReturnType<typeof buildGateStates>,
   emit: JobProgressEmitMode = 'delta'
 ): Promise<ThreadJobDto | null> {
+  const { getExecutionRunId } = await import('./workload-slot-store')
+  const expectedRunId = getExecutionRunId(jobId)
+  if (expectedRunId) {
+    const { assertRunActive } = await import('./workload-slot-store')
+    if (!(await assertRunActive('thread_job', jobId, expectedRunId))) {
+      memoryDebug('persistTaskProgress: stale execution run ignored', { jobId, expectedRunId })
+      return null
+    }
+  }
+
   const progress: TaskProgressDto = gate
     ? {
         ...taskProgress,
@@ -2162,7 +2172,23 @@ export function scheduleJobExecution(username: string, jobId: string): void {
   if (username && findInMemoryPlanningOccupant(username, jobId)) return
   if (!markJobExecuting(jobId, username)) return
   void (async () => {
+    let executionRunId: string | undefined
     try {
+      const { claimExecutionWorkloadSlot } = await import('./workload-slot-store')
+      const slot = await claimExecutionWorkloadSlot(username, jobId)
+      if (!slot) {
+        memoryDebug('scheduleJobExecution: no execution slot, reverting to pending', { jobId })
+        const reverted = await updateJobRowForSnapshot(jobId, {
+          status: 'pending',
+          lastError: null
+        })
+        if (reverted) {
+          emitJobEvent(jobId, { event: 'job_snapshot', data: { job: reverted } })
+        }
+        return
+      }
+      executionRunId = slot.runId
+
       const { preflightSandbox, isOuterSandboxEnabled } = await import('../sandbox')
       const { isTestFakeAgentModeActive } =
         await import('../agent-runtime/providers/test-overrides')
@@ -2206,6 +2232,10 @@ export function scheduleJobExecution(username: string, jobId: string): void {
       throw error
     } finally {
       await markJobExecutionDone(jobId, username)
+      if (executionRunId) {
+        const { releaseExecutionWorkloadSlot } = await import('./workload-slot-store')
+        await releaseExecutionWorkloadSlot(jobId, 'execution_done')
+      }
       await finalizeJobExecution({ username, jobId })
     }
   })().catch(() => {})

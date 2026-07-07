@@ -133,6 +133,7 @@ export const threadJobs = sqliteTable(
     snapshotManifestRevision: integer('snapshot_manifest_revision'),
     executionLeaseOwner: text('execution_lease_owner'),
     executionLeaseExpiresAt: integer('execution_lease_expires_at'),
+    activeRunId: text('active_run_id'),
     terminalAt: integer('terminal_at'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
@@ -309,6 +310,7 @@ export const designSessions = sqliteTable(
     planSummaryJson: text('plan_summary_json'),
     draftConfirmedAt: integer('draft_confirmed_at'),
     launchedJobId: text('launched_job_id'),
+    activeRunId: text('active_run_id'),
     lastError: text('last_error'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
@@ -449,6 +451,43 @@ export const messageArtifacts = sqliteTable(
   (table) => [uniqueIndex('idx_message_artifacts_message_kind').on(table.messageId, table.kind)]
 )
 
+export const workloadRuns = sqliteTable('workload_runs', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull(),
+  ownerKind: text('owner_kind').notNull(),
+  ownerId: text('owner_id').notNull(),
+  kind: text('kind').notNull(),
+  pool: text('pool').notNull().default('default'),
+  status: text('status').notNull().default('active'),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: integer('lease_expires_at'),
+  cancelReason: text('cancel_reason'),
+  runtimeRefJson: text('runtime_ref_json'),
+  startedAt: integer('started_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  releasedAt: integer('released_at')
+})
+
+export const workloadSlots = sqliteTable(
+  'workload_slots',
+  {
+    runId: text('run_id')
+      .notNull()
+      .references(() => workloadRuns.id, { onDelete: 'cascade' }),
+    username: text('username').notNull(),
+    pool: text('pool').notNull().default('default'),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status').notNull().default('active'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    createdAt: integer('created_at').notNull(),
+    releasedAt: integer('released_at')
+  },
+  (table) => [uniqueIndex('idx_workload_slots_run_id').on(table.runId)]
+)
+
 export type AuthState = typeof authState.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Thread = typeof threads.$inferSelect
@@ -468,3 +507,5 @@ export type DesignAbility = typeof designAbilities.$inferSelect
 export type DesignPlanTask = typeof designPlanTasks.$inferSelect
 export type DesignPlanMilestone = typeof designPlanMilestones.$inferSelect
 export type DesignPlanSlice = typeof designPlanSlices.$inferSelect
+export type WorkloadRun = typeof workloadRuns.$inferSelect
+export type WorkloadSlot = typeof workloadSlots.$inferSelect
