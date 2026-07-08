@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, or } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { designSessions, threadJobs } from '../db/schema'
@@ -11,7 +11,7 @@ import {
   updateJobRowForSnapshot
 } from './repository'
 import { emitJobProgressAfterPersist } from './progress-emit'
-import { prepareInterruptedExecutionResume } from './execution-recovery'
+import { prepareInterruptedExecutionResume, resolveStaleExecutionJobAction } from './execution-recovery'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import {
   clearActiveRunIfMatches,
@@ -40,31 +40,62 @@ function nowSec(): number {
 }
 
 export async function reconcileStaleJobIfNeeded(
-  _username: string,
+  username: string,
   job: ThreadJobDto
 ): Promise<ThreadJobDto> {
-  if (job.status !== 'running') return job
+  const action = resolveStaleExecutionJobAction(job)
+  if (action === 'noop') return job
+
   if (isJobLoopActive(job.id)) {
     refreshExecutionLease(job.id)
     return job
   }
 
   const { progress } = prepareInterruptedExecutionResume(job.taskProgress)
+
+  if (action === 'finalize-user-pause') {
+    const taskProgress: TaskProgressDto = {
+      ...progress,
+      phase: 'running',
+      status: 'running',
+      message: null,
+      progressCode: 'execution.resuming',
+      progressParams: null
+    }
+    const pausedError = createTurnError('job.paused').toDto()
+    const updated = await updateJobRowForSnapshot(job.id, {
+      status: 'paused',
+      taskProgress,
+      lastError: pausedError
+    })
+    if (!updated) return job
+    await clearExecutionLease(job.id)
+    emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
+    return updated
+  }
+
   const taskProgress: TaskProgressDto = {
     ...progress,
+    phase: 'running',
+    status: 'running',
     message: null,
-    progressCode: 'execution.stale_running',
+    progressCode: 'execution.interrupted_resume',
     progressParams: null
   }
 
+  const { acquireExecutionLease, clearStaleExecutionLeaseIfNeeded } = await import('./repository')
+  clearStaleExecutionLeaseIfNeeded(job.id)
+  if (!acquireExecutionLease(username, job.id)) {
+    console.warn('[reconcile] could not acquire execution lease after interrupted resume', job.id)
+  }
+
   const updated = await updateJobRowForSnapshot(job.id, {
-    status: 'pending',
+    status: 'running',
     taskProgress,
     lastError: null
   })
   if (!updated) return job
 
-  await clearExecutionLease(job.id)
   emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
   return updated
 }
@@ -85,7 +116,12 @@ export async function reconcileOrphanRunningJobsForUser(username: string): Promi
   const rows = await db
     .select()
     .from(threadJobs)
-    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'running')))
+    .where(
+      and(
+        eq(threadJobs.username, username),
+        or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing'))
+      )
+    )
 
   for (const row of rows) {
     try {
@@ -99,7 +135,12 @@ export async function reconcileOrphanRunningJobsForUser(username: string): Promi
 
 export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
   const db = getDb()
-  const rows = await db.select().from(threadJobs).where(eq(threadJobs.status, 'running'))
+  const rows = await db
+    .select()
+    .from(threadJobs)
+    .where(
+      or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing'))
+    )
 
   for (const row of rows) {
     try {
@@ -183,6 +224,20 @@ export async function reconcileOrphanPlanningSessionsOnStartupOnce(): Promise<vo
   await reconcileOrphanPlanningSessionsOnStartup()
 }
 
+export async function reconcileUserPlanningState(username: string): Promise<void> {
+  await reconcileOrphanPlanningSessionsForUser(username)
+}
+
+export async function reconcileUserExecutionState(username: string): Promise<void> {
+  await reconcileOrphanRunningJobsForUser(username)
+}
+
+export async function reconcileUserWorkloadState(username: string): Promise<void> {
+  await reconcileOrphanWorkloadSlotsForUser(username)
+  await reconcileUserExecutionState(username)
+  await reconcileUserPlanningState(username)
+}
+
 export function resetJobReconcileForTests(): void {
   startupReconciled = false
   startupPlanningReconciled = false
@@ -239,9 +294,14 @@ export async function reconcileOrphanWorkloadSlotsForUser(username: string): Pro
 
       await killRuntimeForStaleSlot(slot)
       await releaseWorkloadSlot(slot.runId, {
-        reason: 'startup_reconcile_stale',
-        status: 'released'
+        reason: 'reconcile_stale',
+        status: 'released',
+        skipQueueAdvance: true
       })
+      if (slot.ownerKind === 'thread_job') {
+        const { clearStaleExecutionLeaseIfNeeded } = await import('./repository')
+        clearStaleExecutionLeaseIfNeeded(slot.ownerId)
+      }
       await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
     } catch (error) {
       console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)
@@ -276,8 +336,13 @@ export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
       await killRuntimeForStaleSlot(slot)
       await releaseWorkloadSlot(slot.runId, {
         reason: 'startup_reconcile_stale',
-        status: 'released'
+        status: 'released',
+        skipQueueAdvance: true
       })
+      if (slot.ownerKind === 'thread_job') {
+        const { clearStaleExecutionLeaseIfNeeded } = await import('./repository')
+        clearStaleExecutionLeaseIfNeeded(slot.ownerId)
+      }
       await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
     } catch (error) {
       console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)

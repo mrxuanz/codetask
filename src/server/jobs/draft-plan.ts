@@ -90,6 +90,27 @@ function resolveDraftSummaryLinkedPlanId(
 
 export { TASK_LIST_JOB_STATUSES } from './constants'
 
+function resolveDraftDesignSessionId(
+  planRow: { id: string } | undefined,
+  payload: Pick<TaskLaunchDraftPayload, 'linkedPlanId'> & { designSessionId?: string | null }
+): string | null {
+  if (planRow?.id) return planRow.id
+  const fromPayload = payload.designSessionId?.trim()
+  if (fromPayload && isDesignSessionId(fromPayload)) return fromPayload
+  const linked = payload.linkedPlanId?.trim()
+  if (linked && isDesignSessionId(linked)) return linked
+  return null
+}
+
+function resolveDraftLaunchedJobId(
+  planRow: { launchedJobId: string | null } | undefined,
+  linkedPlanId: string | null
+): string | null {
+  if (planRow?.launchedJobId) return planRow.launchedJobId
+  if (linkedPlanId && !isDesignSessionId(linkedPlanId)) return linkedPlanId
+  return null
+}
+
 export interface ThreadDraftSummary {
   messageId: string
   draftId: string
@@ -97,6 +118,8 @@ export interface ThreadDraftSummary {
   summary: string
   status: string
   linkedPlanId: string | null
+  designSessionId: string | null
+  launchedJobId: string | null
   createdAt: string
   collecting?: boolean
   plan?: {
@@ -514,9 +537,13 @@ export async function listThreadDrafts(
   const planByDraftId = new Map(designRows.map((row) => [row.draftMessageId, row]))
 
   return drafts.map((msg) => {
-    const payload = (msg.payload ?? {}) as TaskLaunchDraftPayload
+    const payload = (msg.payload ?? {}) as TaskLaunchDraftPayload & {
+      designSessionId?: string | null
+    }
     const planRow = planByDraftId.get(msg.id)
     const linkedPlanId = resolveDraftSummaryLinkedPlanId(payload, planRow)
+    const designSessionId = resolveDraftDesignSessionId(planRow, payload)
+    const launchedJobId = resolveDraftLaunchedJobId(planRow, linkedPlanId)
     return {
       messageId: msg.id,
       draftId: payload.draftId ?? msg.id,
@@ -524,10 +551,12 @@ export async function listThreadDrafts(
       summary: payload.summary ?? '',
       status: normalizeDraftStatus(payload.status),
       linkedPlanId,
+      designSessionId,
+      launchedJobId,
       createdAt: msg.createdAt,
       collecting: isCollectingDraftPayload(payload),
       plan:
-        linkedPlanId && planRow
+        designSessionId && planRow
           ? {
               id: planRow.id,
               status: planRow.status,
@@ -716,15 +745,12 @@ export async function confirmDraftAndStartPlanning(
   threadId: string,
   draftMessageId: string
 ): Promise<{ job: ThreadJobDto; draft: ConversationMessageDto }> {
-  const { ensureStartupWorkloadReady, findWorkloadOccupant } = await import('./workload-slot')
+  const { ensureStartupWorkloadReady } = await import('./workload-slot')
+  const { reconcileOrphanWorkloadSlotsForUser, reconcileUserPlanningState } =
+    await import('./reconcile')
   await ensureStartupWorkloadReady()
-  const workloadOccupier = await findWorkloadOccupant(username)
-  if (workloadOccupier) {
-    throw AppError.badRequest(
-      'Another task is executing or planning; wait for it to finish',
-      'job.slot_occupied'
-    )
-  }
+  await reconcileOrphanWorkloadSlotsForUser(username)
+  await reconcileUserPlanningState(username)
 
   await assertThreadWizardPhase(username, threadId, WIZARD_PHASE_DRAFT_REVIEW)
   await assertActiveDraft(username, threadId, draftMessageId)

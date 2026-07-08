@@ -7,6 +7,7 @@ import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { TurnErrorCode } from '../../../shared/turn-errors/codes.ts'
 import { classifyCursorAcpError } from './errors'
 import { TurnScope } from '../turn-scope'
+import { ProgressGuard } from '../progress-guard'
 import { getExecutionRunContext } from '../../jobs/execution-run-context'
 import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
 import { createAsyncQueue } from './async-queue'
@@ -341,10 +342,13 @@ export class CursorAcpSessionRuntime {
       child.once('exit', onExit)
     })
 
+    const progressGuard = new ProgressGuard(input.role)
+
     const turnScope = new TurnScope({
       role: input.role,
       externalSignal: input.signal,
       processExit: exitPromise,
+      progressGuard,
       onKeepAlive: () => {
         const ctx = getExecutionRunContext()
         if (ctx?.runId) {

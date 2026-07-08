@@ -89,7 +89,7 @@ function matchesWorkflowProgressCode(
 }
 
 function resolveLifecycle(status: ThreadJobStatus): JobLifecycle {
-  if (status === 'running') return 'running'
+  if (status === 'running' || status === 'pausing') return 'running'
   if (status === 'paused') return 'paused'
   if (status === 'completed') return 'completed'
   if (status === 'failed') return 'failed'

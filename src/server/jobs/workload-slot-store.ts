@@ -69,7 +69,7 @@ export function workloadPoolCapacity(pool = 'default'): number {
     const parsed = Number(env)
     if (!Number.isNaN(parsed) && parsed > 0) return parsed
   }
-  return pool === 'default' ? 1 : 1
+  return pool === 'execution' ? 1 : 1
 }
 
 export function workloadLeaseTtlSec(): number {
@@ -555,7 +555,7 @@ export async function claimExecutionWorkloadSlot(
     ownerKind: 'thread_job',
     ownerId: jobId,
     kind: 'execution',
-    pool: 'default'
+    pool: 'execution'
   })
   if (!run) return null
   setExecutionRunId(jobId, run.runId)
@@ -641,8 +641,6 @@ export async function releaseActiveRunOrAdvanceQueue(
 
 /** Single queue-advance exit: pending thread jobs, then slot-waiting design sessions. */
 export async function advanceWorkloadQueue(username: string): Promise<void> {
-  const { advanceJobQueue } = await import('./job-queue')
-  await advanceJobQueue(username)
-  const { tryStartPendingDesignSessionPlanning } = await import('../design-session/planner')
-  await tryStartPendingDesignSessionPlanning(username)
+  const { advanceAllQueues } = await import('./queue-coordinator')
+  await advanceAllQueues(username)
 }

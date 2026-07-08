@@ -3,6 +3,11 @@ export const MAX_TASK_PREP_GENERATIONS = 3
 export const MAX_TASK_REPAIR_GENERATIONS = 3
 export const MAX_VERIFIER_INFRA_RETRIES = 3
 export const MAX_SM_REPAIR_GENERATIONS = 3
+export const MAX_PAUSING_TURN_ATTEMPTS = 3
+
+export function pausingAttemptKey(jobId: string): string {
+  return `pausing:${jobId}`
+}
 
 export const TASK_EVIDENCE_GRACE_MS = 3 * 60 * 1000
 export const VERIFIER_VERDICT_GRACE_MS = 3 * 60 * 1000

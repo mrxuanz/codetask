@@ -8,9 +8,21 @@ import { findActiveWorkloadRunId, listActiveWorkloadSlots } from './workload-slo
 let startupWorkloadReady: Promise<void> = Promise.resolve()
 let startupGateBound = false
 
+const STARTUP_GATE_TIMEOUT_MS = 30_000
+
 export function bindStartupWorkloadGate(promise: Promise<void>): void {
   if (!startupGateBound) {
-    startupWorkloadReady = promise
+    startupWorkloadReady = Promise.race([
+      promise,
+      new Promise<void>((_, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`startup workload reconcile exceeded ${STARTUP_GATE_TIMEOUT_MS}ms`))
+        }, STARTUP_GATE_TIMEOUT_MS)
+        timer.unref?.()
+      })
+    ]).catch((error) => {
+      console.warn('[workload-slot] startup gate released after error', error)
+    })
     startupGateBound = true
   }
 }
@@ -86,6 +98,20 @@ export async function findDbPlanningSessionId(
   return id
 }
 
+export function workloadLeaseOwner(): string {
+  return `pid-${process.pid}`
+}
+
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000)
+}
+
+export function isWorkloadSlotLeaseLive(slot: WorkloadRunSummary): boolean {
+  const currentPid = slot.leaseOwner === workloadLeaseOwner()
+  const leaseValid = slot.leaseExpiresAt ? slot.leaseExpiresAt > nowSec() : false
+  return currentPid && leaseValid
+}
+
 export async function findActiveSlotOccupant(
   username: string,
   exceptId?: string
@@ -94,11 +120,67 @@ export async function findActiveSlotOccupant(
   const active = await listActiveWorkloadSlots({ username })
   for (const slot of active) {
     if (exceptId && slot.ownerId === exceptId) continue
+    if (!isWorkloadSlotLeaseLive(slot)) continue
     return slot.ownerId
   }
   return null
 }
 
+export async function findActiveSlotOccupantInPool(
+  username: string,
+  pool: string,
+  exceptId?: string
+): Promise<string | null> {
+  await ensureStartupWorkloadReady()
+  const active = await listActiveWorkloadSlots({ username, pool })
+  for (const slot of active) {
+    if (exceptId && slot.ownerId === exceptId) continue
+    if (!isWorkloadSlotLeaseLive(slot)) continue
+    return slot.ownerId
+  }
+  return null
+}
+
+export async function findExecutionOccupant(
+  username: string,
+  exceptJobId?: string
+): Promise<string | null> {
+  await ensureStartupWorkloadReady()
+
+  const memExec = findInMemoryExecutionOccupant(username, exceptJobId)
+  if (memExec) return memExec
+
+  const slotOccupant = await findActiveSlotOccupantInPool(username, 'execution', exceptJobId)
+  if (slotOccupant) return slotOccupant
+
+  const dbExec = await findDbRunningJobId(username, exceptJobId)
+  if (dbExec) return dbExec
+
+  return null
+}
+
+export async function findPlanningOccupant(
+  username: string,
+  exceptId?: string
+): Promise<string | null> {
+  await ensureStartupWorkloadReady()
+
+  const memPlan = findInMemoryPlanningOccupant(username, exceptId)
+  if (memPlan) return memPlan
+
+  const slotOccupant = await findActiveSlotOccupantInPool(username, 'planning', exceptId)
+  if (slotOccupant) return slotOccupant
+
+  const dbPlan = await findDbPlanningSessionId(username, exceptId)
+  if (dbPlan) return dbPlan
+
+  return null
+}
+
+/**
+ * @deprecated Use findExecutionOccupant or findPlanningOccupant instead.
+ * This checks ALL pools and is only retained for diagnostic APIs.
+ */
 export async function findWorkloadOccupant(
   username: string,
   exceptId?: string
@@ -131,6 +213,7 @@ export async function findOccupyingRun(
   const active = await listActiveWorkloadSlots({ username })
   for (const slot of active) {
     if (exceptId && slot.ownerId === exceptId) continue
+    if (!isWorkloadSlotLeaseLive(slot)) continue
     return slot
   }
   return null

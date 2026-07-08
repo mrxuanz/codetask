@@ -6,6 +6,7 @@ import { updateJobPlanNode } from '@renderer/api/jobs'
 import type { Thread } from '@renderer/api/threads'
 import TaskLaunchDraftCard from '@renderer/components/home/TaskLaunchDraftCard.vue'
 import PlanReviewAccordion from '@renderer/components/tasks/PlanReviewAccordion.vue'
+import TaskProgressTree from '@renderer/components/tasks/TaskProgressTree.vue'
 import TaskProgressBar from '@renderer/components/tasks/TaskProgressBar.vue'
 import { isDesignSessionId } from '@shared/design-session'
 import Button from '@renderer/components/ui/Button.vue'
@@ -41,6 +42,15 @@ const isPlanning = computed(() => planStatus.value === 'planning')
 
 const isPlanEditing = computed(() => planStatus.value === 'plan_editing')
 
+const isExecuting = computed(() =>
+  Boolean(
+    ws.selectedPlan.value?.status &&
+      ['pending', 'running', 'paused'].includes(ws.selectedPlan.value.status)
+  )
+)
+
+const activeTaskId = computed(() => ws.selectedPlan.value?.taskProgress?.currentTaskId ?? null)
+
 const isPlanFailed = computed(
   () => planStatus.value === 'failed' || planStatus.value === 'cancelled'
 )
@@ -58,12 +68,22 @@ const showExecutionTree = computed(
 
 const showPlanTreeDuringPlanning = computed(() => !isPlanning.value || ws.planTree.value.length > 0)
 
-const executionTreeShellStyle = computed((): { minHeight: string } => {
-  if (isPlanning.value && ws.planTree.value.length === 0) {
-    return { minHeight: '15rem' }
+const executionTreeShellStyle = computed((): { minHeight?: string } | undefined => {
+  if (isPlanning.value) {
+    // Overlay content: py-6 + label row + h-36 progress box + summary (~18rem+).
+    return ws.planTree.value.length === 0 ? undefined : { minHeight: '22rem' }
   }
   return { minHeight: '16rem' }
 })
+
+const planningOverlayClass = computed(() =>
+  cn(
+    'flex flex-col items-center gap-4 px-5 py-6',
+    ws.planTree.value.length === 0
+      ? ''
+      : 'absolute inset-0 z-10 justify-start bg-background/80 pt-6 backdrop-blur-[2px]'
+  )
+)
 
 watch(
   () => ws.selectedPlan.value?.id,
@@ -253,7 +273,8 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
 
         <div
           v-if="showExecutionTree"
-          class="relative overflow-hidden rounded-md border border-border bg-card"
+          class="rounded-md border border-border bg-card"
+          :class="isPlanning && ws.planTree.value.length > 0 && 'relative overflow-hidden'"
           :style="executionTreeShellStyle"
         >
           <div
@@ -282,11 +303,7 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
             />
           </div>
 
-          <div
-            v-if="isPlanning"
-            class="absolute inset-0 z-10 flex flex-col items-center gap-4 bg-background/80 px-5 py-6 backdrop-blur-[2px]"
-            :class="ws.planTree.value.length === 0 ? 'justify-center' : 'justify-start pt-6'"
-          >
+          <div v-if="isPlanning" :class="planningOverlayClass">
             <div class="flex w-full max-w-md shrink-0 flex-col items-center gap-3">
               <div class="flex items-center gap-2 text-muted-foreground">
                 <Spinner class="size-5 shrink-0" />
@@ -317,6 +334,18 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
               }}
             </Button>
           </div>
+        </div>
+
+        <div
+          v-else-if="isExecuting"
+          class="rounded-md border border-border bg-card p-4"
+        >
+          <TaskProgressTree
+            :milestones="ws.planTree.value"
+            :job-status="ws.selectedPlan.value?.status"
+            :abilities="ws.selectedPlan.value?.abilities"
+            :active-task-id="activeTaskId"
+          />
         </div>
 
         <div

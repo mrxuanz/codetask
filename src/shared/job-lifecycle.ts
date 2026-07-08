@@ -3,6 +3,7 @@ import { DESIGN_SESSION_WORKSPACE_STATUSES } from './design-session'
 export const LAUNCHED_JOB_STATUSES = [
   'pending',
   'running',
+  'pausing',
   'paused',
   'completed',
   'failed',

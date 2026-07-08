@@ -62,14 +62,64 @@ function badgeClass(status: string): string {
   switch (status) {
     case 'completed':
     case 'planned':
+    case 'progress-ok':
+    case 'passed':
       return 'bg-emerald-50 text-emerald-700'
     case 'in_progress':
+    case 'verifying':
+    case 'ready-for-verification':
       return 'bg-sky-50 text-sky-700'
     case 'failed':
+    case 'verification-blocked':
+    case 'blocked':
+    case 'inconclusive':
       return 'bg-red-50 text-red-700'
     default:
       return 'bg-muted text-muted-foreground'
   }
+}
+
+function milestoneBadgeLabel(milestone: UnifiedMilestoneNode): string {
+  if (
+    milestone.verificationStatus === 'verifying' ||
+    milestone.verificationStatus === 'ready-for-verification'
+  ) {
+    return milestone.verificationStatus
+  }
+  const verifyingSlice = milestone.slices.find(
+    (slice) =>
+      slice.runtimeStatus === 'verifying' ||
+      slice.runtimeStatus === 'ready-for-verification' ||
+      slice.verificationStatus === 'verifying' ||
+      slice.verificationStatus === 'ready-for-verification'
+  )
+  if (verifyingSlice) {
+    return verifyingSlice.runtimeStatus ?? verifyingSlice.verificationStatus ?? ''
+  }
+  return statusBadgeLabel(milestone.status, t, 'execution')
+}
+
+function milestoneBadgeTone(milestone: UnifiedMilestoneNode): string {
+  const label = milestoneBadgeLabel(milestone)
+  if (
+    label === 'verifying' ||
+    label === 'ready-for-verification' ||
+    milestone.status === 'in_progress'
+  ) {
+    return 'in_progress'
+  }
+  if (label === 'progress-ok' || label === 'passed' || milestone.status === 'completed') {
+    return 'completed'
+  }
+  if (
+    label === 'verification-blocked' ||
+    label === 'blocked' ||
+    label === 'inconclusive' ||
+    milestone.status === 'failed'
+  ) {
+    return 'failed'
+  }
+  return milestone.status
 }
 </script>
 
@@ -102,11 +152,11 @@ function badgeClass(status: string): string {
           formatMilestoneTitle(milestone.title, msIdx + 1, t)
         }}</span>
         <span
-          v-if="!hideStatus && !isPlanning && milestone.status"
+          v-if="!hideStatus && !isPlanning && milestoneBadgeLabel(milestone)"
           class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
-          :class="badgeClass(milestone.status)"
+          :class="badgeClass(milestoneBadgeTone(milestone))"
         >
-          {{ statusBadgeLabel(milestone.status, t, 'execution') }}
+          {{ milestoneBadgeLabel(milestone) }}
         </span>
       </button>
       <p

@@ -2,6 +2,7 @@ export class RuntimeRegistry {
   private readonly inflightThreads = new Set<string>()
   private readonly planningJobs = new Set<string>()
   private readonly planningOwners = new Map<string, string>()
+  private readonly planningControl = new Map<string, 'running' | 'paused'>()
 
   isThreadInflight(threadId: string): boolean {
     return this.inflightThreads.has(threadId)
@@ -49,5 +50,18 @@ export class RuntimeRegistry {
   endJobPlanning(jobId: string): void {
     this.planningJobs.delete(jobId)
     this.planningOwners.delete(jobId)
+    this.planningControl.delete(jobId)
+  }
+
+  setPlanningControl(jobId: string, control: 'running' | 'paused'): void {
+    this.planningControl.set(jobId, control)
+  }
+
+  shouldStopPlanning(jobId: string): boolean {
+    return this.planningControl.get(jobId) === 'paused'
+  }
+
+  clearPlanningControl(jobId: string): void {
+    this.planningControl.delete(jobId)
   }
 }

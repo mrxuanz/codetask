@@ -6,7 +6,10 @@ import HomeSidebar from '@renderer/components/home/HomeSidebar.vue'
 import { useHomeChat, HomeChatKey } from '@renderer/composables/useHomeChat'
 import { provideHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 
+import { provideJobEventHub } from '@renderer/composables/useJobEventHub'
+
 const workspace = provideHomeWorkspace()
+provideJobEventHub()
 const chat = useHomeChat(
   (thread) => workspace.syncThread(thread),
   (threadId, patch) => workspace.patchThreadRuntime(threadId, patch)

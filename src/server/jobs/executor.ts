@@ -48,7 +48,9 @@ import {
 import {
   resetInterruptedGateVerification,
   resetInterruptedRunningTasks,
-  syncTaskProgressForJobFailure
+  syncTaskProgressForJobFailure,
+  readPausingAttempt,
+  withPausingAttempt
 } from './execution-recovery'
 import {
   createExecutionAbortSignal,
@@ -70,7 +72,6 @@ import {
   revertJobAfterInfraStartupFailure
 } from './execution-startup'
 import { refreshExecutionLease } from './repository'
-import { findInMemoryPlanningOccupant } from './workload-slot'
 import {
   resolveTaskReferenceReadRoots,
   buildAssignedReferenceCorpusMarkdown
@@ -118,7 +119,7 @@ import {
   resolveTaskRecoveryAction,
   sleepMs
 } from './task-blocker'
-import { TASK_EVIDENCE_GRACE_MS, TASK_EVIDENCE_WAIT_FULL_MS } from './recovery-limits'
+import { MAX_PAUSING_TURN_ATTEMPTS, TASK_EVIDENCE_GRACE_MS, TASK_EVIDENCE_WAIT_FULL_MS } from './recovery-limits'
 import { resolveVerifierInfraRecovery, withVerifierInfraAttempt } from './verification-recovery'
 import {
   createTurnError,
@@ -1519,6 +1520,29 @@ async function executeSingleTask(
   }
 }
 
+async function finalizeExecutionPause(
+  jobId: string,
+  taskProgress: TaskProgressDto,
+  items: TaskProgressItemDto[],
+  gate: ReturnType<typeof buildGateStates>
+): Promise<void> {
+  const paused = taskErrorFields(JOB_PAUSED)
+  await persistTaskProgress(
+    jobId,
+    {
+      ...taskProgress,
+      tasks: items,
+      currentTaskId: null,
+      message: null,
+      progressParams: null
+    },
+    { status: 'paused', lastError: paused.error },
+    gate,
+    'snapshot'
+  )
+  pauseJobExecution(jobId)
+}
+
 async function runExecutionLoop(username: string, jobId: string): Promise<void> {
   const row = await loadJobRow(jobId)
   if (!row) return
@@ -1531,7 +1555,11 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
 
   if (job.status === 'paused' || job.status === 'cancelled') return
 
-  await updateExecutionJobRow(jobId, { status: 'running' })
+  if (job.status === 'pausing') {
+    getAppContext().executionRuntime.setControl(jobId, 'paused')
+  } else {
+    await updateExecutionJobRow(jobId, { status: 'running' })
+  }
   refreshExecutionLease(jobId)
   job = (await getUserJob(username, jobId)) ?? job
 
@@ -1573,7 +1601,12 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       progressParams: null,
       tasks: items
     }
-    await persistTaskProgress(jobId, taskProgress, { status: 'running', lastError: null }, gate)
+    await persistTaskProgress(
+      jobId,
+      taskProgress,
+      job.status === 'pausing' ? undefined : { status: 'running', lastError: null },
+      gate
+    )
   }
 
   while (true) {
@@ -1584,7 +1617,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       return
     }
     if (stop === 'pause') {
-      await updateExecutionJobRow(jobId, { status: 'paused' })
+      await finalizeExecutionPause(jobId, taskProgress, items, gate)
       return
     }
 
@@ -2210,7 +2243,50 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       return
     }
 
+    if (result.kind === 'failed' && shouldStopExecution(jobId) === 'pause') {
+      const nextAttempt = readPausingAttempt(taskProgress, jobId) + 1
+      taskProgress = withPausingAttempt(taskProgress, jobId, nextAttempt)
+      if (nextAttempt >= MAX_PAUSING_TURN_ATTEMPTS) {
+        await failJobWithProgress(
+          jobId,
+          taskProgress,
+          fullItems,
+          gate,
+          'execution.pausing_exhausted',
+          { maxAttempts: MAX_PAUSING_TURN_ATTEMPTS },
+          createTurnError('task.terminal_failure', {
+            detail: `Pause timed out after ${MAX_PAUSING_TURN_ATTEMPTS} attempts`
+          }).toDto()
+        )
+        return
+      }
+      items = slimTaskProgressItemsForRuntime(fullItems)
+      taskProgress = { ...taskProgress, tasks: fullItems }
+      continue
+    }
+
     const failed = result.kind === 'failed'
+    if (!failed && shouldStopExecution(jobId) === 'pause') {
+      const completedProgress: TaskProgressDto = {
+        phase: 'running',
+        status: 'running',
+        currentIndex: countCompleted(fullItems),
+        total: fullItems.length,
+        currentTaskId: null,
+        message: null,
+        progressCode: 'execution.completed',
+        progressParams: {
+          done: countCompleted(fullItems),
+          total: fullItems.length
+        },
+        tasks: fullItems
+      }
+      taskProgress = completedProgress
+      items = slimTaskProgressItemsForRuntime(fullItems)
+      await finalizeExecutionPause(jobId, taskProgress, items, gate)
+      return
+    }
+
     const afterProgress: TaskProgressDto = {
       phase: failed ? 'failed' : 'running',
       status: failed ? 'failed' : 'running',
@@ -2248,7 +2324,6 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
 }
 
 export function scheduleJobExecution(username: string, jobId: string): void {
-  if (username && findInMemoryPlanningOccupant(username, jobId)) return
   if (!markJobExecuting(jobId, username)) return
   void (async () => {
     let executionRunId: string | undefined
