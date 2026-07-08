@@ -1,6 +1,7 @@
 import type { ConversationRole } from './roles'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import type { TurnActivityKind } from './turn-scope'
+import { stalledAfterMsForRole } from './turn-timeouts'
 
 const LONG_RUNNING_COMMAND_RE =
   /\b(npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|yarn\s+test|bun\s+test|pytest|cargo\s+test|go\s+test|jest|vitest|playwright\s+test|mvn\s+test|gradle\s+test|make\s+test|ctest)\b/i
@@ -13,18 +14,6 @@ export function isLongRunningTestCommand(command: string | undefined | null): bo
 
 interface StalledListener {
   (): void
-}
-
-function stalledAfterMs(role: ConversationRole): number {
-  const env = process.env.CODETASK_TURN_STALLED_MS
-  if (env) {
-    const parsed = Number(env)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  if (role === 'task-worker') return 60 * 60_000
-  if (role === 'planner') return 20 * 60_000
-  if (role === 'milestone-verifier' || role === 'slice-verifier') return 15 * 60_000
-  return 20 * 60_000
 }
 
 function progressWindowMs(): number {
@@ -124,7 +113,7 @@ export class ProgressGuard {
 
     this._windowHadActivity = false
 
-    const threshold = stalledAfterMs(this._role)
+    const threshold = stalledAfterMsForRole(this._role)
     if (this._stalledAccum >= threshold) {
       sandboxTurnDebug('progress-guard: stalled', {
         role: this._role,

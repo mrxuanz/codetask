@@ -18,6 +18,7 @@ import { buildPlannerMcpUrl } from '../planner/mcp/url'
 import {
   registerPlannerMcpSession,
   unregisterPlannerMcpSession,
+  isPlannerPlanCommitted,
   type PlannerMcpSession
 } from '../planner/mcp/session'
 import {
@@ -262,6 +263,34 @@ export async function pushDesignPlanningProgressFenced(
   return pushDesignPlanningProgress(designSessionId, runId, done, partialPlan, registeredPlan)
 }
 
+async function commitPlanningSoftPause(
+  designSessionId: string,
+  designRunId: string
+): Promise<boolean> {
+  const registry = getAppContext().runtimeRegistry
+  if (!registry.shouldStopPlanning(designSessionId)) return false
+
+  registry.clearPlanningControl(designSessionId)
+  const planProgress: PlanProgressDto = {
+    ...defaultPlanProgress(),
+    phase: 'idle',
+    status: 'pending',
+    progressCode: 'plan.pending',
+    progressParams: null,
+    message: null
+  }
+  const job = await updateDesignSessionRow(designSessionId, {
+    planProgress,
+    lastError: createTurnError('job.paused').toDto()
+  })
+  await finishPlannerRun(designRunId, { status: 'cancelled' })
+  if (job) {
+    emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
+    emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job } })
+  }
+  return true
+}
+
 async function runDesignPlanner(
   username: string,
   threadId: string,
@@ -280,7 +309,7 @@ async function runDesignPlanner(
     ownerKind: 'design_session',
     ownerId: designSessionId,
     kind: 'planning',
-    pool: 'default'
+    pool: 'planning'
   })
   if (!run) {
     plannerSandboxDebug('runDesignPlanner: skipped (workload slot unavailable), waiting', {
@@ -486,8 +515,17 @@ async function runDesignPlanner(
             })
           }
           if (chunk.type === 'completed') break
+          if (getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)) {
+            getRunController(run.runId)?.abort()
+            runOutcome = 'user_stopped'
+            break
+          }
         }
       })
+
+      if (await commitPlanningSoftPause(designSessionId, designRunId)) {
+        return
+      }
 
       plannerSandboxDebug('runDesignPlanner: streamAgentTurn finished', {
         designSessionId,
@@ -545,8 +583,23 @@ async function runDesignPlanner(
       await finishPlannerRun(designRunId, { status: 'completed', planRevisionAfter: nextRevision })
     }
   } catch (error) {
-    if (planCommitted) {
+    if (isPlannerPlanCommitted(planCommitted, plannerSession)) {
+      planCommitted = true
       runOutcome = 'success'
+      if (plannerSession?.planCommitted) {
+        await finishPlannerRun(designRunId, {
+          status: 'completed',
+          planRevisionAfter: plannerSession.planRevision
+        })
+      }
+      plannerSandboxDebug('runDesignPlanner: done (plan committed, turn ended)', {
+        designSessionId,
+        runId: run.runId,
+        errorCode:
+          error instanceof Error && 'code' in error
+            ? (error as { code?: string }).code ?? null
+            : null
+      })
       return
     }
 
@@ -565,6 +618,10 @@ async function runDesignPlanner(
 
     const { getUserDesignSessionAsJob } = await import('./service')
     const current = await getUserDesignSessionAsJob(username, designSessionId)
+    if (getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)) {
+      runOutcome = 'user_stopped'
+      if (await commitPlanningSoftPause(designSessionId, designRunId)) return
+    }
     if (current?.status === 'cancelled') {
       await finishPlannerRun(designRunId, { status: 'cancelled' })
       runOutcome = 'user_stopped'

@@ -20,6 +20,7 @@ export const JOB_STATUSES = [
   'plan_confirmed',
   'plan_ready',
   'running',
+  'pausing',
   'paused',
   'completed',
   'failed',

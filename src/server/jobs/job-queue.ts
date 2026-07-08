@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import { defaultPlanProgress } from '../planner/save-plan'
-import { createTurnError } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
 import { emitJobEvent } from './service'
@@ -9,9 +8,6 @@ import {
   findNextPendingJobId,
   findOccupyingJobId,
   findRestartInterruptedPausedJobId,
-  getUserJob,
-  tryPromoteJobToRunning,
-  updateJobRow,
   updateJobRowForSnapshot
 } from './repository'
 import type { PlanProgressDto } from './types'
@@ -45,69 +41,14 @@ export async function claimJobSlotOrEnqueue(
   return 'queued'
 }
 
-async function startPendingJob(username: string, jobId: string): Promise<void> {
-  const job = await getUserJob(username, jobId)
-  if (!job || job.status !== 'pending') return
-  if (!job.plan?.tasks?.length) {
-    await updateJobRow(jobId, {
-      status: 'failed',
-      lastError: createTurnError('turn.unknown', {
-        detail: 'Execution tree is empty; cannot start job'
-      }).toDto()
-    })
-    return
-  }
-
-  const started = await tryPromoteJobToRunning(username, jobId)
-  if (!started) return
-
-  const updated = await getUserJob(username, jobId)
-  if (updated) {
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-  }
-  const { scheduleJobExecution } = await import('./executor')
-  scheduleJobExecution(username, jobId)
-}
-
-async function tryResumeRestartInterruptedJob(username: string): Promise<boolean> {
-  const jobId = await findRestartInterruptedPausedJobId(username)
-  if (!jobId) return false
-  if (await findOccupyingJobId(username, jobId)) return false
-  const { resumePausedJob } = await import('./controls')
-  await resumePausedJob(username, jobId)
-  return true
-}
-
-async function prepareJobQueueForUser(username: string): Promise<void> {
-  const {
-    reconcileOrphanRunningJobsForUser,
-    reconcileOrphanPlanningSessionsForUser,
-    reconcileOrphanWorkloadSlotsForUser
-  } = await import('./reconcile')
-  await reconcileOrphanWorkloadSlotsForUser(username)
-  await reconcileOrphanRunningJobsForUser(username)
-  await reconcileOrphanPlanningSessionsForUser(username)
-}
-
 export async function advanceJobQueue(username: string): Promise<void> {
-  await ensureStartupWorkloadReady()
-  await prepareJobQueueForUser(username)
-  if (await findOccupyingJobId(username)) return
-
-  if (await tryResumeRestartInterruptedJob(username)) return
-
-  const nextId = await findNextPendingJobId(username)
-  if (!nextId) return
-
-  await startPendingJob(username, nextId)
+  const { advanceExecutionQueue } = await import('./queue-coordinator')
+  await advanceExecutionQueue(username)
 }
 
-/** Reconcile zombie runtimes, then start the next pending job when the execution slot is free. */
 export async function resumeJobQueueForUser(username: string): Promise<void> {
-  await ensureStartupWorkloadReady()
-  await prepareJobQueueForUser(username)
-  if (await findOccupyingJobId(username)) return
-  await advanceJobQueue(username)
+  const { advanceAllQueues } = await import('./queue-coordinator')
+  await advanceAllQueues(username)
 }
 
 export async function resumeJobQueuesAfterServerReady(supervisor?: {
@@ -126,7 +67,7 @@ export async function resumeJobQueuesAfterServerReady(supervisor?: {
 
 export async function resumeJobQueuesOnStartup(): Promise<void> {
   const db = getDb()
-  const [pendingRows, pausedRows] = await Promise.all([
+  const [pendingRows, pausedRows, runningRows] = await Promise.all([
     db
       .selectDistinct({ username: threadJobs.username })
       .from(threadJobs)
@@ -134,12 +75,17 @@ export async function resumeJobQueuesOnStartup(): Promise<void> {
     db
       .selectDistinct({ username: threadJobs.username })
       .from(threadJobs)
-      .where(eq(threadJobs.status, 'paused'))
+      .where(eq(threadJobs.status, 'paused')),
+    db
+      .selectDistinct({ username: threadJobs.username })
+      .from(threadJobs)
+      .where(eq(threadJobs.status, 'running'))
   ])
 
   const usernames = new Set([
     ...pendingRows.map((row) => row.username),
-    ...pausedRows.map((row) => row.username)
+    ...pausedRows.map((row) => row.username),
+    ...runningRows.map((row) => row.username)
   ])
 
   for (const username of usernames) {
@@ -148,6 +94,10 @@ export async function resumeJobQueuesOnStartup(): Promise<void> {
     } catch (error) {
       console.warn('[jobs] startup queue resume failed', username, error)
     }
+  }
+
+  if (usernames.size > 0) {
+    console.info('[jobs] startup queue resume finished', { users: [...usernames] })
   }
 }
 

@@ -13,9 +13,11 @@ import {
   restartJob,
   resumeJob,
   retryTaskJob,
-  streamThreadJob,
   type ThreadJob
 } from '@renderer/api/jobs'
+import type { JobSseEvent } from '@shared/contracts/sse'
+import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
+import { useJobEventHub } from '@renderer/composables/useJobEventHub'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import TaskParameterPanel from '@renderer/components/tasks/TaskParameterPanel.vue'
@@ -58,8 +60,10 @@ const selectedTask = ref<UnifiedTaskNode | null>(null)
 const taskParametersOpen = ref(false)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
-let streamToken = 0
-let watchingJobId: string | null = null
+let hubRelease: (() => void) | null = null
+let hubListRelease: (() => void) | null = null
+
+const hub = useJobEventHub()
 
 const statusFilters = computed(() => [
   { value: 'all', label: t('workspace.tasks.filters.all') },
@@ -83,7 +87,7 @@ const selectedJob = computed(
 
 const listProgress = (job: ThreadJob): JobProgressSnapshot => getJobProgressSnapshot(job, t)
 const listStatusBadge = (job: ThreadJob): { label: string; className: string } =>
-  resolveJobListStatusBadge(job.status, t)
+  resolveJobListStatusBadge(job.status, t, job)
 const executionProgress = computed(() => getExecutionProgressSnapshot(selectedJob.value, t))
 const planProgress = computed(() => getPlanProgressSnapshot(selectedJob.value, t))
 const showExecutionProgress = computed(
@@ -186,15 +190,7 @@ async function loadDetail(jobId: string, options?: { silent?: boolean }): Promis
   try {
     const res = await fetchJob(jobId)
     applyJobPatch(res.data.job)
-    const status = res.data.job.status
-    if (status === 'pending' || status === 'running' || status === 'planning') {
-      if (watchingJobId !== jobId) {
-        watchingJobId = jobId
-        void watchJobStream(res.data.job)
-      }
-    } else {
-      watchingJobId = null
-    }
+    syncHubWatch()
   } catch (err) {
     if (!silent) {
       error.value = err instanceof Error ? err.message : t('workspace.tasks.detailFailed')
@@ -205,51 +201,53 @@ async function loadDetail(jobId: string, options?: { silent?: boolean }): Promis
   }
 }
 
-async function watchJobStream(job: ThreadJob): Promise<void> {
-  const token = ++streamToken
-  try {
-    await streamThreadJob(job.threadId, job.id, (event) => {
-      if (token !== streamToken) return
-      if (event.event === 'job_snapshot' || event.event === 'job_done') {
-        applyJobPatch(event.data.job)
-      } else if (event.event === 'plan_progress') {
-        const planPatch = {
-          planProgress: event.data.planProgress,
-          ...(event.data.plan ? { plan: event.data.plan } : {}),
-          updatedAt: Math.floor(Date.now() / 1000)
-        }
-        if (detail.value?.id === job.id) {
-          detail.value = mergeJobPatch(detail.value, { ...detail.value, ...planPatch })
-        }
-        const idx = jobs.value.findIndex((item) => item.id === job.id)
-        if (idx >= 0) {
-          jobs.value[idx] = mergeJobPatch(jobs.value[idx], { ...jobs.value[idx], ...planPatch })
-        }
-      } else if (event.event === 'task_progress') {
-        const taskPatch = {
-          taskProgress: event.data.taskProgress,
-          updatedAt: Math.floor(Date.now() / 1000)
-        }
-        if (detail.value?.id === job.id) {
-          detail.value = mergeJobPatch(detail.value, { ...detail.value, ...taskPatch })
-        }
-        const idx = jobs.value.findIndex((item) => item.id === job.id)
-        if (idx >= 0) {
-          jobs.value[idx] = mergeJobPatch(jobs.value[idx], { ...jobs.value[idx], ...taskPatch })
-        }
-      }
-      if (event.event === 'job_done') {
-        watchingJobId = null
-        void loadDetail(job.id, { silent: true })
-      }
-    })
-  } catch {
-    // polling fallback
-  } finally {
-    if (token === streamToken && watchingJobId === job.id) {
-      watchingJobId = null
+function handleHubEvent(jobId: string, event: JobSseEvent): void {
+  if (event.event === 'job_snapshot' || event.event === 'job_done') {
+    applyJobPatch(event.data.job)
+    if (event.event === 'job_done') {
+      syncHubWatch()
+      void loadDetail(jobId, { silent: true })
+    }
+    return
+  }
+
+  if (event.event === 'plan_progress') {
+    const planPatch = {
+      planProgress: event.data.planProgress,
+      ...(event.data.plan ? { plan: event.data.plan } : {}),
+      updatedAt: Math.floor(Date.now() / 1000)
+    }
+    if (detail.value?.id === jobId) {
+      detail.value = mergeJobPatch(detail.value, { ...detail.value, ...planPatch })
+    }
+    const idx = jobs.value.findIndex((item) => item.id === jobId)
+    if (idx >= 0) {
+      jobs.value[idx] = mergeJobPatch(jobs.value[idx], { ...jobs.value[idx], ...planPatch })
+    }
+    return
+  }
+
+  if (event.event === 'task_progress') {
+    const taskPatch = {
+      taskProgress: event.data.taskProgress,
+      updatedAt: Math.floor(Date.now() / 1000)
+    }
+    if (detail.value?.id === jobId) {
+      detail.value = mergeJobPatch(detail.value, { ...detail.value, ...taskPatch })
+    }
+    const idx = jobs.value.findIndex((item) => item.id === jobId)
+    if (idx >= 0) {
+      jobs.value[idx] = mergeJobPatch(jobs.value[idx], { ...jobs.value[idx], ...taskPatch })
     }
   }
+}
+
+function syncHubWatch(): void {
+  hubRelease?.()
+  hubRelease = null
+  const job = selectedJob.value
+  if (!job || !jobNeedsRealtimeWatch(job.status)) return
+  hubRelease = hub.watchJob(job.id, (event) => handleHubEvent(job.id, event))
 }
 
 async function runAction(label: string, fn: () => Promise<unknown>): Promise<void> {
@@ -281,17 +279,25 @@ function closeTaskParameters(): void {
   taskParametersOpen.value = false
 }
 
+const refreshJobsFromHub = useDebounceFn(() => {
+  void loadJobs({ silent: true })
+}, 500)
+
 onMounted(() => {
   void loadJobs()
+  hubListRelease = hub.onAnyJobEvent(refreshJobsFromHub)
   pollTimer = setInterval(() => {
-    void loadJobs({ silent: true })
-    if (selectedJobId.value) void loadDetail(selectedJobId.value, { silent: true })
-  }, 5000)
+    if (!hub.connected.value) {
+      void loadJobs({ silent: true })
+      const jobId = selectedJobId.value
+      if (jobId) void loadDetail(jobId, { silent: true })
+    }
+  }, 30_000)
 })
 
 onUnmounted(() => {
-  streamToken += 1
-  watchingJobId = null
+  hubListRelease?.()
+  hubRelease?.()
   if (pollTimer) clearInterval(pollTimer)
 })
 
@@ -312,7 +318,10 @@ watch(
   (jobId, prevJobId) => {
     selectedTask.value = null
     taskParametersOpen.value = false
-    if (jobId !== prevJobId) watchingJobId = null
+    if (jobId !== prevJobId) {
+      hubRelease?.()
+      hubRelease = null
+    }
     if (!jobId) {
       detail.value = null
       return
@@ -320,6 +329,11 @@ watch(
     void loadDetail(jobId)
   },
   { immediate: true }
+)
+
+watch(
+  () => selectedJob.value?.status,
+  () => syncHubWatch()
 )
 </script>
 
@@ -458,7 +472,7 @@ watch(
                     class="rounded-md px-2.5 py-1 text-xs font-medium"
                     :class="jobStatusClass(selectedJob.status)"
                   >
-                    {{ jobStatusLabel(selectedJob.status, t) }}
+                    {{ jobStatusLabel(selectedJob.status, t, selectedJob) }}
                   </span>
                   <Button
                     v-if="canPause"

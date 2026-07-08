@@ -176,6 +176,7 @@ export default {
         planReady: 'Plan ready',
         planConfirmed: 'Plan confirmed',
         running: 'Running',
+        pausing: 'Pausing',
         paused: 'Paused',
         completed: 'Completed',
         failed: 'Failed',
@@ -257,10 +258,15 @@ export default {
         plan_confirmed: 'Confirmed',
         plan_ready: 'Plan ready',
         running: 'Running',
+        pausing: 'Pausing',
         paused: 'Paused',
         completed: 'Completed',
         failed: 'Failed',
         cancelled: 'Cancelled'
+      },
+      queue: {
+        next: 'Queued (next up)',
+        position: 'Queued (#{position})'
       },
       tree: {
         empty: 'No plan data yet',

@@ -152,7 +152,9 @@ export default {
         pending: 'キュー中',
         planning: '計画中',
         planReady: '計画完了',
+        planConfirmed: '確認済み',
         running: '実行中',
+        pausing: '一時停止中',
         paused: '一時停止',
         completed: '完了',
         failed: '失敗',
@@ -235,12 +237,19 @@ export default {
       status: {
         pending: 'キュー中',
         planning: '計画中',
+        plan_editing: 'レビュー中',
+        plan_confirmed: '確認済み',
         plan_ready: '計画完了',
         running: '実行中',
+        pausing: '一時停止中',
         paused: '一時停止',
         completed: '完了',
         failed: '失敗',
         cancelled: 'キャンセル'
+      },
+      queue: {
+        next: '待機中（次に実行）',
+        position: '待機中（{position} 番目）'
       },
       tree: {
         empty: '計画データがありません',

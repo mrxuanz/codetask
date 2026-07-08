@@ -6,6 +6,13 @@ import {
   type UnifiedTaskNode
 } from '@shared/plan-tree'
 import { resolveJobLifecycleBucket, type JobLifecycleBucket } from '@shared/job-lifecycle'
+import {
+  formatExecutionQueueLabel,
+  isExecutionDisplayStatus,
+  resolveJobStatusBadgeClass,
+  resolveJobStatusBadgeKey,
+  resolveJobStatusDisplay
+} from '@shared/job-display'
 import { formatUnixTimestamp } from '@renderer/lib/formatDateTime'
 
 export { resolveJobLifecycleBucket, type JobLifecycleBucket }
@@ -92,7 +99,19 @@ export function jobCliSummary(job: Pick<ThreadJobDto, 'abilities'>): string {
 }
 
 function isExecutionPhase(status: string): boolean {
-  return ['running', 'paused', 'completed', 'failed'].includes(status)
+  return ['pending', 'running', 'pausing', 'paused', 'completed', 'failed'].includes(status)
+}
+
+function resolvePendingExecutionSummary(
+  job: ThreadJobDto,
+  t: TranslateFn,
+  fallback?: string | null
+): string {
+  return (
+    formatExecutionQueueLabel(t, job.queue) ??
+    fallback ??
+    t('workspace.tasks.status.pending')
+  )
 }
 
 export function getPlanProgressSnapshot(
@@ -121,10 +140,13 @@ export function getPlanProgressSnapshot(
       percent: 0,
       stepsDone: 0,
       stepsTotal: 0,
-      summaryLabel:
+      summaryLabel: resolvePendingExecutionSummary(
+        job,
+        t,
         formatProgressCode(plan.progressCode, t, plan.progressParams ?? undefined) ??
-        plan.message ??
-        t('workspace.tasks.status.pending'),
+          plan.message ??
+          null
+      ),
       tone: 'active'
     }
   }
@@ -237,6 +259,18 @@ export function getExecutionProgressSnapshot(
     (item) => item.status === 'completed' || item.status === 'skipped'
   ).length
 
+  if (status === 'pending') {
+    return {
+      kind: 'execution',
+      status,
+      percent: 0,
+      stepsDone: done,
+      stepsTotal: total,
+      summaryLabel: resolvePendingExecutionSummary(job, t),
+      tone: 'active'
+    }
+  }
+
   if (status === 'completed' || progress.phase === 'completed') {
     return {
       kind: 'execution',
@@ -264,7 +298,7 @@ export function getExecutionProgressSnapshot(
     }
   }
 
-  if (status === 'paused') {
+  if (status === 'paused' || status === 'pausing') {
     return {
       kind: 'execution',
       status,
@@ -318,13 +352,21 @@ export function getJobProgressSnapshot(
   return plan.kind !== 'idle' ? plan : execution
 }
 
-export function jobStatusLabel(status: string, t: TranslateFn): string {
+export function jobStatusLabel(status: string, t: TranslateFn, job?: ThreadJobDto | null): string {
+  if (isExecutionDisplayStatus(status)) {
+    const queueLabel = job ? formatExecutionQueueLabel(t, job.queue) : null
+    if (queueLabel && status === 'pending') return queueLabel
+    return t(resolveJobStatusBadgeKey(status))
+  }
   const key = `workspace.tasks.status.${status}` as const
   const translated = t(key)
   return translated === key ? status : translated
 }
 
 export function jobStatusClass(status: string): string {
+  if (isExecutionDisplayStatus(status)) {
+    return resolveJobStatusBadgeClass(status)
+  }
   switch (status) {
     case 'plan_editing':
     case 'plan_ready':
@@ -336,8 +378,6 @@ export function jobStatusClass(status: string): string {
       return 'bg-sky-50 text-sky-700'
     case 'paused':
       return 'bg-zinc-100 text-zinc-700'
-    case 'pending':
-      return 'bg-amber-50 text-amber-700'
     case 'failed':
       return 'bg-red-50 text-red-700'
     case 'cancelled':
@@ -473,7 +513,8 @@ const LIFECYCLE_ONLY_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 /** One list-row badge: prefer fine-grained status while running; lifecycle for terminal states. */
 export function resolveJobListStatusBadge(
   status: string,
-  t: TranslateFn
+  t: TranslateFn,
+  job?: ThreadJobDto | null
 ): { label: string; className: string } {
   if (LIFECYCLE_ONLY_STATUSES.has(status)) {
     const bucket = resolveJobLifecycleBucket(status)
@@ -482,8 +523,17 @@ export function resolveJobListStatusBadge(
       className: jobLifecycleBadgeClass(bucket)
     }
   }
+  if (isExecutionDisplayStatus(status)) {
+    const display = resolveJobStatusDisplay(status)
+    const queueLabel =
+      status === 'pending' ? formatExecutionQueueLabel(t, job?.queue) : null
+    return {
+      label: queueLabel ?? t(display.badge),
+      className: resolveJobStatusBadgeClass(status)
+    }
+  }
   return {
-    label: jobStatusLabel(status, t),
+    label: jobStatusLabel(status, t, job),
     className: jobStatusClass(status)
   }
 }

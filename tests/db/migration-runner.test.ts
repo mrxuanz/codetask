@@ -47,7 +47,7 @@ test('migrations apply through latest version on empty database', () => {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 23)
+  assert.equal(currentMigrationVersion(db), 24)
   db.close()
 })
 
@@ -60,7 +60,7 @@ test('migration 017 succeeds when design_sessions references threads (FK on)', (
   assert.equal(currentMigrationVersion(db), 16)
 
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 23)
+  assert.equal(currentMigrationVersion(db), 24)
   const wizardPhase = db
     .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'`)
     .get() as { sql: string }

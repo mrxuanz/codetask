@@ -69,6 +69,22 @@ describe('turn-scope', () => {
     turnScope.dispose()
   })
 
+  it('skips noFirstSignal for conversation without processExit', async () => {
+    const turnScope = new TurnScope({
+      role: 'conversation',
+      onCancel: async () => {}
+    })
+    turnScope.arm()
+
+    const winner = await turnScope.race(
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve('ok'), 150)
+      })
+    )
+    assert.equal(winner, 'ok')
+    turnScope.dispose()
+  })
+
   it('emits partial completed only after grace cancel with reply', () => {
     assert.equal(
       partialCompletedChunk({

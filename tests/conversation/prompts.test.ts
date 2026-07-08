@@ -10,13 +10,16 @@ import {
 } from '../../src/server/conversation/prompts'
 import { buildWorkspaceSnapshot } from '../../src/server/conversation/workspace-snapshot'
 
-test('buildChatConversationBody excludes task draft workflow', () => {
+test('buildChatConversationBody is a lightweight coding assistant without task workflow', () => {
   const body = buildChatConversationBody('Test Agent')
-  assert.match(body, /coordination assistant/)
+  assert.match(body, /coding assistant/)
+  assert.match(body, /read and edit files/)
   assert.doesNotMatch(body, /propose_task_draft/)
   assert.doesNotMatch(body, /Discussion Workflow/)
+  assert.doesNotMatch(body, /coordination assistant/)
+  assert.doesNotMatch(body, /Create Task/)
+  assert.doesNotMatch(body, /not a coding worker/)
   assert.match(body, /do not mention REQUIREMENTS CONTRACT/)
-  assert.match(body, /Create Task/)
 })
 
 test('buildCreateTaskConversationBody includes draft workflow when MCP is available', () => {
@@ -30,7 +33,8 @@ test('buildCreateTaskConversationBody includes draft workflow when MCP is availa
 test('buildConversationSystemPrompt uses chat mode by default', () => {
   const prompt = buildConversationSystemPrompt('Agent', { mode: 'chat' })
   assert.doesNotMatch(prompt, /propose_task_draft/)
-  assert.match(prompt, /coordination assistant/)
+  assert.match(prompt, /coding assistant/)
+  assert.doesNotMatch(prompt, /Create Task/)
 })
 
 test('buildConversationSystemPrompt create_task mode includes MCP workflow', () => {

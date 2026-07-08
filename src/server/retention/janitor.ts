@@ -1,7 +1,7 @@
 import { existsSync } from 'fs'
 import { readdir, rm } from 'fs/promises'
 import { join } from 'path'
-import { eq } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import type { getDb } from '../db'
 import {
   designSessions,
@@ -63,7 +63,7 @@ export async function pruneStalePausedRuntimeTrees(
   const rows = await db
     .select({ id: threadJobs.id, threadId: threadJobs.threadId, updatedAt: threadJobs.updatedAt })
     .from(threadJobs)
-    .where(eq(threadJobs.status, 'paused'))
+    .where(or(eq(threadJobs.status, 'paused'), eq(threadJobs.status, 'pausing')))
 
   let removed = 0
   for (const row of rows) {

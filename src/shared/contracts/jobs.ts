@@ -92,10 +92,18 @@ export type ThreadJobStatus =
   | 'plan_confirmed'
   | 'plan_ready'
   | 'running'
+  | 'pausing'
   | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled'
+
+export interface ExecutionQueueDto {
+  /** 1-based position in the user's pending FIFO queue; null when not queued. */
+  position: number | null
+  /** How many pending jobs are ahead of this one. */
+  ahead: number
+}
 
 export interface ThreadJobDto {
   id: string
@@ -124,6 +132,9 @@ export interface ThreadJobDto {
 
   availableActions?: JobAvailableAction[]
 
+  /** Present when status is `pending` and the job is in the execution FIFO queue. */
+  queue?: ExecutionQueueDto
+
   planRevision?: number | null
   draftConfirmedAt?: number | null
   planConfirmedAt?: number | null
@@ -143,6 +154,8 @@ export interface ThreadDraftSummaryDto {
   summary: string
   status: string
   linkedPlanId: string | null
+  designSessionId?: string | null
+  launchedJobId?: string | null
   createdAt: string
   collecting?: boolean
   plan?: { id: string; status: string; title: string } | null
