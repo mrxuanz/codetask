@@ -4,6 +4,7 @@ import { createTurnError, TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import type { ProgressGuard } from './progress-guard'
 import type { AgentTurnChunk } from './types'
+import { noFirstSignalMsForRole } from './turn-timeouts'
 
 export type TurnActivityKind =
   | 'provider_event'
@@ -16,7 +17,6 @@ export type TurnActivityKind =
   | 'shell_running'
   | 'heartbeat'
 
-const NO_FIRST_SIGNAL_MS = 120_000
 const KEEPALIVE_INTERVAL_MS = 60_000
 
 function softGraceMs(): number {
@@ -49,6 +49,7 @@ export class TurnScope {
   private _noFirstTimer: ReturnType<typeof setTimeout> | null = null
   private _keepaliveTimer: ReturnType<typeof setInterval> | null = null
   private _lastKeepAlive = 0
+  private _noFirstSignalMs: number | null = null
   private _abortError: Error | null = null
   private _graceCancelled = false
 
@@ -73,7 +74,11 @@ export class TurnScope {
 
   arm(): void {
     if (!this._processExit) {
-      this._scheduleNoFirstSignal()
+      const noFirstSignalMs = noFirstSignalMsForRole(this.role)
+      if (noFirstSignalMs != null) {
+        this._noFirstSignalMs = noFirstSignalMs
+        this._scheduleNoFirstSignal()
+      }
     }
     this._startKeepalive()
     this._progressGuard?.start()
@@ -204,12 +209,14 @@ export class TurnScope {
   }
 
   private _scheduleNoFirstSignal(): void {
+    const timeoutMs = this._noFirstSignalMs
+    if (timeoutMs == null) return
     this._clearNoFirstSignalTimer()
     this._noFirstTimer = setTimeout(() => {
       if (!this._sawFirstSignal) {
         void this._failWithGrace('no_first_signal')
       }
-    }, NO_FIRST_SIGNAL_MS)
+    }, timeoutMs)
   }
 
   private _clearNoFirstSignalTimer(): void {
@@ -234,7 +241,9 @@ export class TurnScope {
     this._abortError =
       reason === 'no_first_signal'
         ? createTurnError('turn.watchdog_no_signal', {
-            params: { seconds: Math.max(1, Math.round(NO_FIRST_SIGNAL_MS / 1000)) }
+            params: {
+              seconds: Math.max(1, Math.round((this._noFirstSignalMs ?? 0) / 1000))
+            }
           })
         : createTurnError('turn.timed_out')
 

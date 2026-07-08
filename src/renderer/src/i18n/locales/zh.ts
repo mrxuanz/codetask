@@ -175,6 +175,7 @@ export default {
         planReady: '计划就绪',
         planConfirmed: '已确认执行',
         running: '执行中',
+        pausing: '暂停中',
         paused: '暂停',
         completed: '完成',
         failed: '失败',
@@ -254,10 +255,15 @@ export default {
         plan_confirmed: '已确认',
         plan_ready: '计划就绪',
         running: '执行中',
+        pausing: '暂停中',
         paused: '暂停',
         completed: '完成',
         failed: '失败',
         cancelled: '取消'
+      },
+      queue: {
+        next: '排队中（即将执行）',
+        position: '排队中（第 {position} 位）'
       },
       tree: {
         empty: '暂无计划数据',

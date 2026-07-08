@@ -2,6 +2,7 @@ export const TASK_LIST_JOB_STATUSES = [
   'plan_confirmed',
   'pending',
   'running',
+  'pausing',
   'paused',
   'completed',
   'failed',

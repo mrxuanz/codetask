@@ -21,6 +21,7 @@ import { migration020JobSnapshot } from './020_job_snapshot'
 import { migration021CorpusRevision } from './021_corpus_revision'
 import { migration022AuthGuard } from './022_auth_guard'
 import { migration023WorkloadSlots } from './023_workload_slots'
+import { migration024JobPausingStatus } from './024_job_pausing_status'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -47,7 +48,8 @@ export const allMigrations = [
   migration020JobSnapshot,
   migration021CorpusRevision,
   migration022AuthGuard,
-  migration023WorkloadSlots
+  migration023WorkloadSlots,
+  migration024JobPausingStatus
 ]
 
 export function applyMigrations(db: Database.Database): void {

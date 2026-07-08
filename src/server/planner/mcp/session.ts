@@ -83,3 +83,11 @@ export function countExpectedTaskContexts(plan: PlannerRegisteredPlan | null): n
   }
   return total
 }
+
+/** Plan may commit via MCP finalizer while the agent turn is still ending (abortTurn). */
+export function isPlannerPlanCommitted(
+  planCommitted: boolean,
+  session?: Pick<PlannerMcpSession, 'planCommitted'> | null
+): boolean {
+  return planCommitted || Boolean(session?.planCommitted)
+}

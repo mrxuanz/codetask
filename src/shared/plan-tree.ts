@@ -248,15 +248,44 @@ function sliceAggregateStatus(tasks: UnifiedTaskNode[]): string {
   return 'pending'
 }
 
+function sliceFullyVerified(slice: UnifiedSliceNode): boolean {
+  return slice.runtimeStatus === 'progress-ok' || slice.verificationStatus === 'passed'
+}
+
+function sliceInVerification(slice: UnifiedSliceNode): boolean {
+  return (
+    slice.runtimeStatus === 'verifying' ||
+    slice.runtimeStatus === 'ready-for-verification' ||
+    slice.verificationStatus === 'verifying' ||
+    slice.verificationStatus === 'ready-for-verification'
+  )
+}
+
 function milestoneAggregateStatus(slices: UnifiedSliceNode[]): string {
   if (slices.length === 0) return 'pending'
-  if (slices.every((s) => s.status === 'completed' || s.runtimeStatus === 'progress-ok')) {
-    return 'completed'
+  if (slices.every(sliceFullyVerified)) return 'completed'
+  if (
+    slices.some(
+      (s) =>
+        s.status === 'failed' ||
+        s.runtimeStatus === 'verification-blocked' ||
+        s.verificationStatus === 'blocked' ||
+        s.verificationStatus === 'inconclusive'
+    )
+  ) {
+    return 'failed'
   }
-  if (slices.some((s) => s.status === 'in_progress' || s.runtimeStatus === 'running')) {
+  if (
+    slices.some(
+      (s) =>
+        s.status === 'in_progress' ||
+        s.runtimeStatus === 'running' ||
+        sliceInVerification(s) ||
+        (s.status === 'completed' && !sliceFullyVerified(s))
+    )
+  ) {
     return 'in_progress'
   }
-  if (slices.some((s) => s.status === 'failed')) return 'failed'
   return 'pending'
 }
 
@@ -281,7 +310,10 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
 
   const contextsRegistered = input.planProgress?.contextsRegistered ?? 0
   let globalOrder = 0
-  const jobRunning = input.jobStatus === 'running' || input.jobStatus === 'pending'
+  const jobRunning =
+    input.jobStatus === 'running' ||
+    input.jobStatus === 'pending' ||
+    input.jobStatus === 'paused'
   const currentTaskId = input.currentTaskId ?? null
 
   const milestones: UnifiedMilestoneNode[] = plan.milestones.map((milestone, mIdx) => {

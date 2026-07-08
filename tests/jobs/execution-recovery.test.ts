@@ -111,6 +111,36 @@ describe('execution recovery helpers', () => {
     assert.equal(resetInterruptedVerificationInProgress({ slices: [], milestones: [] }), false)
   })
 
+  it('prepareInterruptedExecutionResume preserves currentTaskId for display after restart', () => {
+    const source = {
+      phase: 'running' as const,
+      status: 'running' as const,
+      currentIndex: 1,
+      total: 3,
+      currentTaskId: null,
+      message: null,
+      progressCode: 'execution.running_task' as const,
+      progressParams: { id: 'm1-s1-t1' },
+      tasks: [
+        {
+          id: 'm1-s1-t1',
+          title: 'stuck',
+          status: 'running' as const,
+          executionStatus: 'running',
+          evidenceStatus: null,
+          errorMessage: null,
+          coreCode: null
+        }
+      ]
+    }
+
+    const { progress } = prepareInterruptedExecutionResume(source)
+
+    assert.equal(progress.currentTaskId, 'm1-s1-t1')
+    assert.equal(progress.tasks[0]?.status, 'queued')
+    assert.equal(progress.tasks[0]?.executionStatus, 'queued')
+  })
+
   it('syncTaskProgressForJobFailure marks the in-flight task failed', () => {
     const synced = syncTaskProgressForJobFailure(
       {

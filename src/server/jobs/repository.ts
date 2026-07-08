@@ -14,7 +14,8 @@ import {
   saveJobPlanInTx,
   savePlanProgress
 } from '../db/job-plan'
-import { jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
+import { designSessions, jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
+import { mapDesignSessionToJobDto } from '../design-session/service'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { getAppContext } from '../bootstrap'
@@ -40,17 +41,50 @@ export function executionLeaseOwner(): string {
   return `pid-${process.pid}`
 }
 
+/** Another process held the lease before restart; that PID is no longer alive here. */
+export function isStaleExecutionLeaseOwner(owner: string | null | undefined): boolean {
+  if (!owner) return false
+  if (owner === executionLeaseOwner()) return false
+  return owner.startsWith('pid-')
+}
+
+export function clearStaleExecutionLeaseIfNeeded(jobId: string): boolean {
+  const db = getDb()
+  const rows = db
+    .select({
+      status: threadJobs.status,
+      executionLeaseOwner: threadJobs.executionLeaseOwner
+    })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, jobId))
+    .limit(1)
+    .all()
+  const row = rows[0]
+  if (!row || row.status !== 'running') return false
+  if (!isStaleExecutionLeaseOwner(row.executionLeaseOwner)) return false
+
+  db.update(threadJobs)
+    .set({
+      executionLeaseOwner: null,
+      executionLeaseExpiresAt: null,
+      updatedAt: nowSec()
+    })
+    .where(eq(threadJobs.id, jobId))
+    .run()
+  return true
+}
+
 import {
   anyRunningJobClause,
   findInMemoryExecutionOccupant,
-  findWorkloadOccupant,
-  isWorkloadBlockedInMemory
+  findExecutionOccupant
 } from './workload-slot'
 
 function resumableForLeaseClause(now: number): SQL {
   return or(
     eq(threadJobs.status, 'pending'),
     eq(threadJobs.status, 'paused'),
+    eq(threadJobs.status, 'pausing'),
     eq(threadJobs.status, 'failed'),
     eq(threadJobs.status, 'cancelled'),
     and(
@@ -68,7 +102,7 @@ export async function findOccupyingJobId(
   username: string,
   exceptJobId?: string
 ): Promise<string | null> {
-  return findWorkloadOccupant(username, exceptJobId)
+  return findExecutionOccupant(username, exceptJobId)
 }
 
 export async function findNextPendingJobId(username: string): Promise<string | null> {
@@ -103,7 +137,7 @@ export function tryPromoteJobToRunning(username: string, jobId: string): boolean
   const now = nowSec()
   const owner = executionLeaseOwner()
 
-  if (isWorkloadBlockedInMemory(username, jobId)) return false
+  if (findInMemoryExecutionOccupant(username, jobId)) return false
 
   return db.transaction((tx) => {
     const occupying = tx
@@ -177,6 +211,8 @@ export function hasLocalExecutionLease(username: string, jobId: string): boolean
 }
 
 export function acquireExecutionLease(username: string, jobId: string): boolean {
+  clearStaleExecutionLeaseIfNeeded(jobId)
+
   if (hasLocalExecutionLease(username, jobId)) {
     const now = nowSec()
     getDb()
@@ -197,7 +233,6 @@ export function acquireExecutionLease(username: string, jobId: string): boolean 
 
   const inMemoryOccupier = findInMemoryExecutionOccupant(username, jobId)
   if (inMemoryOccupier) return false
-  if (isWorkloadBlockedInMemory(username, jobId)) return false
 
   return db.transaction((tx) => {
     const occupying = tx
@@ -319,6 +354,32 @@ export async function mapJob(
   })
 }
 
+async function getJobFallbackFromDesignSession(
+  username: string,
+  jobId: string,
+  threadId?: string
+): Promise<ThreadJobDto | null> {
+  if (isDesignSessionId(jobId)) return null
+  const db = getDb()
+  const conditions = [eq(designSessions.launchedJobId, jobId), eq(designSessions.username, username)]
+  if (threadId) {
+    conditions.push(eq(designSessions.threadId, threadId))
+  }
+  const rows = await db
+    .select()
+    .from(designSessions)
+    .where(and(...conditions))
+    .limit(1)
+  const row = rows[0]
+  if (!row) return null
+  const sessionJob = await mapDesignSessionToJobDto(row, { includePlan: true })
+  return {
+    ...sessionJob,
+    id: jobId,
+    designSessionId: row.id
+  }
+}
+
 export async function getUserJob(username: string, jobId: string): Promise<ThreadJobDto | null> {
   if (isDesignSessionId(jobId)) {
     const { getUserDesignSessionAsJob } = await import('../design-session/service')
@@ -330,7 +391,8 @@ export async function getUserJob(username: string, jobId: string): Promise<Threa
     .from(threadJobs)
     .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
     .limit(1)
-  return rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
+  if (rows[0]) return await mapJob(rows[0], { includePlan: true })
+  return getJobFallbackFromDesignSession(username, jobId)
 }
 
 export async function getThreadJob(
@@ -354,7 +416,8 @@ export async function getThreadJob(
       )
     )
     .limit(1)
-  return rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
+  if (rows[0]) return await mapJob(rows[0], { includePlan: true })
+  return getJobFallbackFromDesignSession(username, jobId, threadId)
 }
 
 export type JobRowPatch = Partial<{

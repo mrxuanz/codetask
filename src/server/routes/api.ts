@@ -16,6 +16,7 @@ import { createMcpRoutes } from './mcp'
 import { createProjectRoutes } from './projects'
 import { createSettingsRoutes } from './settings'
 import { createSystemRoutes } from './system'
+import { createEventsRoutes } from './events'
 import { createProjectThreadRoutes, createThreadRoutes } from './threads'
 
 export function createApiRoutes(ctx: AppContext): Hono {
@@ -29,6 +30,7 @@ export function createApiRoutes(ctx: AppContext): Hono {
   })
 
   api.route('/system', createSystemRoutes(ctx))
+  api.route('/events', createEventsRoutes(ctx))
 
   api.route('/', createAuthRoutes(ctx))
   api.route('/fs', createFsRoutes(ctx))

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { eq } from 'drizzle-orm'
 import { isDesignSessionId } from '@shared/design-session'
 import { deriveJobRecoveryState } from '@shared/job-recovery-state'
+import { JOB_PAUSED } from '../../shared/turn-errors.ts'
 import { resetTaskItemForManualRetry, resetTaskRecoveryCounters } from './task-blocker'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
@@ -66,6 +67,8 @@ async function loadPlan(jobId: string): Promise<SavedJobPlan | null> {
 }
 
 export async function pauseJob(username: string, jobId: string): Promise<ThreadJobDto> {
+  const pausedError = JOB_PAUSED.toDto()
+
   if (isDesignSessionId(jobId)) {
     const job = await getUserJob(username, jobId)
     if (!job) throw AppError.notFound('Design session not found', 'job.not_found')
@@ -76,15 +79,42 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
         { status: job.status }
       )
     }
-    const { updateDesignSessionRow } = await import('../design-session/service')
-    const updated = await updateDesignSessionRow(jobId, { status: 'cancelled' })
-    if (!updated) throw AppError.internal('Failed to pause design session', 'job.invalid_status')
-    getAppContext().runtimeRegistry.endJobPlanning(jobId)
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-    emitJobEvent(jobId, { event: 'job_done', data: { job: updated } })
 
-    const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
-    await stopAndReleaseActiveRun('design_session', jobId, 'paused')
+    const registry = getAppContext().runtimeRegistry
+    if (registry.isJobPlanning(jobId)) {
+      registry.setPlanningControl(jobId, 'paused')
+      const planProgress = {
+        ...job.planProgress,
+        phase: 'planning' as const,
+        status: 'running' as const,
+        progressCode: 'plan.pausing' as const,
+        progressParams: null,
+        message: null
+      }
+      const { updateDesignSessionRow } = await import('../design-session/service')
+      const updated = await updateDesignSessionRow(jobId, { planProgress, lastError: pausedError })
+      if (!updated) throw AppError.internal('Failed to pause design session', 'job.invalid_status')
+      emitJobEvent(jobId, { event: 'plan_progress', data: { planProgress } })
+      emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
+      return updated
+    }
+
+    const planProgress = {
+      ...job.planProgress,
+      phase: 'idle' as const,
+      status: 'pending' as const,
+      progressCode: 'plan.pending' as const,
+      progressParams: null,
+      message: null
+    }
+    const { updateDesignSessionRow } = await import('../design-session/service')
+    const updated = await updateDesignSessionRow(jobId, {
+      planProgress,
+      lastError: pausedError
+    })
+    if (!updated) throw AppError.internal('Failed to pause design session', 'job.invalid_status')
+    emitJobEvent(jobId, { event: 'plan_progress', data: { planProgress } })
+    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     return updated
   }
 
@@ -99,7 +129,18 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
   }
 
   if (job.status === 'pending') {
-    const updated = await updateJobRowForSnapshot(jobId, { status: 'paused' })
+    const updated = await updateJobRowForSnapshot(jobId, {
+      status: 'paused',
+      lastError: pausedError
+    })
+    if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
+    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
+    return updated
+  }
+
+  if (job.status === 'running') {
+    executionRuntime().setControl(jobId, 'paused')
+    const updated = await updateJobRowForSnapshot(jobId, { status: 'pausing' })
     if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     return updated
@@ -110,7 +151,10 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
   clearAbortController(jobId)
   cancelJobSandboxTurns(jobId)
 
-  const updated = await updateJobRowForSnapshot(jobId, { status: 'paused' })
+  const updated = await updateJobRowForSnapshot(jobId, {
+    status: 'paused',
+    lastError: pausedError
+  })
   if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
 
@@ -122,10 +166,17 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
 export async function resumePausedJob(username: string, jobId: string): Promise<ThreadJobDto> {
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
-  if (job.status !== 'paused') {
+  if (job.status !== 'paused' && job.status !== 'pausing') {
     throw AppError.badRequest('Only paused jobs can be resumed', 'job.invalid_status', {
       status: job.status
     })
+  }
+  if (job.status === 'pausing') {
+    executionRuntime().setControl(jobId, 'running')
+    const updated = await updateJobRowForSnapshot(jobId, { status: 'running' })
+    if (!updated) throw AppError.internal('Failed to resume job', 'job.invalid_status')
+    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
+    return updated
   }
   return continueJobExecution(username, jobId, job)
 }
@@ -424,7 +475,15 @@ export async function retryTaskJob(
 
   const leased = await acquireExecutionLease(username, jobId)
   if (!leased) {
-    throw AppError.badRequest('Execution slot occupied', 'job.slot_occupied')
+    const queued = await updateJobRowForSnapshot(jobId, {
+      status: 'pending',
+      taskProgress,
+      lastError: null
+    })
+    if (!queued) throw AppError.internal('Failed to retry subtask', 'job.invalid_status')
+    emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
+    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: queued } })
+    return queued
   }
 
   executionRuntime().setControl(jobId, 'running')

@@ -13,12 +13,15 @@ import type { ThreadDraftSummaryDto, ThreadJobDto } from '@shared/contracts/jobs
 import {
   fetchThreadDrafts,
   fetchThreadPlans,
+  fetchJob,
   freezeReferenceCorpus,
   launchDesignSession,
-  retryJobPlanning,
-  streamThreadJob
+  retryJobPlanning
 } from '@renderer/api/jobs'
+import type { JobSseEvent } from '@shared/contracts/sse'
+import { useJobEventHub } from '@renderer/composables/useJobEventHub'
 import { isDesignSessionId } from '@shared/design-session'
+import { resolveDraftPlanReference } from '@shared/draft-plan-resolve'
 import { updateThreadContext } from '@renderer/api/threads'
 import {
   DRAFT_WIZARD_STEP_COUNT,
@@ -86,14 +89,15 @@ export function provideDraftPlanWorkspace(options: {
   const confirmingPlan = ref(false)
   const freezingCorpus = ref(false)
   const retryingPlan = ref(false)
-  let streamToken = 0
   let loadToken = 0
-  let planStreamAbort: AbortController | null = null
+  let planHubRelease: (() => void) | null = null
+  let watchedPlanJobId: string | null = null
+  const jobHub = useJobEventHub()
 
   function stopPlanStream(): void {
-    planStreamAbort?.abort()
-    planStreamAbort = null
-    streamToken += 1
+    planHubRelease?.()
+    planHubRelease = null
+    watchedPlanJobId = null
   }
 
   const draftMessages = computed(() =>
@@ -104,11 +108,40 @@ export function provideDraftPlanWorkspace(options: {
     () => draftMessages.value.find((msg) => msg.id === selectedDraftId.value) ?? null
   )
 
+  function draftPlanRefs(
+    draft: ThreadDraftSummaryDto,
+    payload?: TaskLaunchDraftPayload | null
+  ): ReturnType<typeof resolveDraftPlanReference> {
+    return resolveDraftPlanReference({
+      linkedPlanId: draft.linkedPlanId,
+      designSessionId:
+        draft.designSessionId ??
+        (payload as { designSessionId?: string | null } | null | undefined)?.designSessionId,
+      launchedJobId: draft.launchedJobId,
+      planId: draft.plan?.id
+    })
+  }
+
+  function findPlanForDraft(
+    draft: ThreadDraftSummaryDto,
+    payload?: TaskLaunchDraftPayload | null
+  ): ThreadJobDto | null {
+    const refs = draftPlanRefs(draft, payload)
+    if (refs.launchedJobId) {
+      const byJob = plans.value.find((plan) => plan.id === refs.launchedJobId)
+      if (byJob) return byJob
+    }
+    if (refs.designSessionId) {
+      const bySession = plans.value.find((plan) => plan.id === refs.designSessionId)
+      if (bySession) return bySession
+    }
+    return null
+  }
+
   const selectedPlan = computed(() => {
     const draft = drafts.value.find((d) => d.messageId === selectedDraftId.value)
-    const planId = draft?.linkedPlanId ?? draft?.plan?.id
-    if (!planId) return null
-    return plans.value.find((p) => p.id === planId) ?? null
+    if (!draft) return null
+    return findPlanForDraft(draft, payloadForSelected())
   })
 
   const planTree = computed(() => buildPlanTree(selectedPlan.value, options.t))
@@ -123,7 +156,36 @@ export function provideDraftPlanWorkspace(options: {
   }
 
   function draftHasPlan(draft: ThreadDraftSummaryDto): boolean {
-    return Boolean(draft.linkedPlanId)
+    return Boolean(draftPlanRefs(draft).activePlanId)
+  }
+
+  async function mergeLaunchedThreadJobs(): Promise<void> {
+    const launchedJobIds = [
+      ...new Set(
+        drafts.value
+          .map((draft) => draftPlanRefs(draft).launchedJobId)
+          .filter((id): id is string => Boolean(id))
+      )
+    ]
+    if (launchedJobIds.length === 0) return
+
+    const fetched = await Promise.all(
+      launchedJobIds.map(async (jobId) => {
+        try {
+          const res = await fetchJob(jobId)
+          return res.data.job
+        } catch {
+          return null
+        }
+      })
+    )
+
+    for (const job of fetched) {
+      if (!job) continue
+      const idx = plans.value.findIndex((plan) => plan.id === job.id)
+      if (idx >= 0) plans.value[idx] = job
+      else plans.value.push(job)
+    }
   }
 
   function isDraftSelected(messageId: string): boolean {
@@ -133,8 +195,7 @@ export function provideDraftPlanWorkspace(options: {
   function resolveDraftStepForDraft(draft: ThreadDraftSummaryDto): number {
     const message = draftMessages.value.find((m) => m.id === draft.messageId)
     const payload = (message?.payload ?? {}) as TaskLaunchDraftPayload
-    const planId = draft.linkedPlanId
-    const plan = planId ? (plans.value.find((p) => p.id === planId) ?? draft.plan) : null
+    const plan = findPlanForDraft(draft, payload) ?? draft.plan
     return resolveDraftStep(payload, plan as { status: string } | null)
   }
 
@@ -183,19 +244,23 @@ export function provideDraftPlanWorkspace(options: {
 
       drafts.value = draftRes.data.drafts
       plans.value = planRes.data.plans
+      await mergeLaunchedThreadJobs()
+      if (token !== loadToken || options.threadId.value !== threadId) return
+
       const initialId = options.initialDraftId?.value
       if (initialId && drafts.value.some((d) => d.messageId === initialId)) {
         selectedDraftId.value = initialId
         const draft = drafts.value.find((d) => d.messageId === initialId)
         void updateThreadContext(threadId, {
           activeDraftId: initialId,
-          activePlanId: draft?.linkedPlanId ?? draft?.plan?.id ?? null
+          activePlanId: draft ? draftPlanRefs(draft).activePlanId : null
         })
       }
       if (selectedDraftId.value) {
         syncStepFromState()
         const draft = drafts.value.find((d) => d.messageId === selectedDraftId.value)
-        if (draft?.linkedPlanId) void watchPlan(draft.linkedPlanId)
+        const activePlanId = draft ? draftPlanRefs(draft, payloadForSelected()).activePlanId : null
+        if (activePlanId) void watchPlan(activePlanId)
       }
     } catch (err) {
       if (token !== loadToken) return
@@ -207,54 +272,53 @@ export function provideDraftPlanWorkspace(options: {
     }
   }
 
-  async function watchPlan(jobId: string): Promise<void> {
+  async function refreshPlansAfterWatch(threadId: string): Promise<void> {
+    const planRes = await fetchThreadPlans(threadId)
+    plans.value = planRes.data.plans
+    await mergeLaunchedThreadJobs()
+    syncStepFromState()
+  }
+
+  function applyPlanHubEvent(jobId: string, event: JobSseEvent, threadId: string): void {
+    if (options.threadId.value !== threadId) return
+    if (event.event === 'job_snapshot' || event.event === 'job_done') {
+      const idx = plans.value.findIndex((p) => p.id === jobId)
+      if (idx >= 0) plans.value[idx] = event.data.job
+      else plans.value.push(event.data.job)
+    }
+    if (event.event === 'plan_progress' || event.event === 'task_progress') {
+      const idx = plans.value.findIndex((p) => p.id === jobId)
+      if (idx >= 0) {
+        const job = { ...plans.value[idx] }
+        if (event.event === 'plan_progress') {
+          job.planProgress = event.data.planProgress
+          if (event.data.plan) job.plan = event.data.plan
+        }
+        if (event.event === 'task_progress') job.taskProgress = event.data.taskProgress
+        plans.value[idx] = job
+      }
+    }
+    if (
+      event.event === 'job_done' &&
+      event.data.job.status === 'plan_editing' &&
+      selectedDraftId.value
+    ) {
+      setStep(2)
+    }
+  }
+
+  function watchPlan(jobId: string): void {
     const threadId = options.threadId.value
     if (!threadId) return
-    planStreamAbort?.abort()
-    const abort = new AbortController()
-    planStreamAbort = abort
-    const token = ++streamToken
-    try {
-      await streamThreadJob(
-        threadId,
-        jobId,
-        (event) => {
-          if (token !== streamToken || options.threadId.value !== threadId) return
-          if (event.event === 'job_snapshot' || event.event === 'job_done') {
-            const idx = plans.value.findIndex((p) => p.id === jobId)
-            if (idx >= 0) plans.value[idx] = event.data.job
-            else plans.value.push(event.data.job)
-          }
-          if (event.event === 'plan_progress' || event.event === 'task_progress') {
-            const idx = plans.value.findIndex((p) => p.id === jobId)
-            if (idx >= 0) {
-              const job = { ...plans.value[idx] }
-              if (event.event === 'plan_progress') {
-                job.planProgress = event.data.planProgress
-                if (event.data.plan) job.plan = event.data.plan
-              }
-              if (event.event === 'task_progress') job.taskProgress = event.data.taskProgress
-              plans.value[idx] = job
-            }
-          }
-          if (
-            event.event === 'job_done' &&
-            event.data.job.status === 'plan_editing' &&
-            selectedDraftId.value
-          ) {
-            setStep(2)
-          }
-        },
-        { signal: abort.signal }
-      )
-    } catch {
-      // ignore
-    }
-    if (token === streamToken && options.threadId.value === threadId) {
-      const planRes = await fetchThreadPlans(threadId)
-      plans.value = planRes.data.plans
-      syncStepFromState()
-    }
+    stopPlanStream()
+    watchedPlanJobId = jobId
+    planHubRelease = jobHub.watchJob(jobId, (event) => {
+      applyPlanHubEvent(jobId, event, threadId)
+      if (event.event === 'job_done') {
+        void refreshPlansAfterWatch(threadId)
+        if (watchedPlanJobId === jobId) stopPlanStream()
+      }
+    })
   }
 
   async function selectDraft(messageId: string): Promise<void> {
@@ -265,13 +329,14 @@ export function provideDraftPlanWorkspace(options: {
 
     selectedDraftId.value = messageId
     successMessage.value = null
+    const refs = draftPlanRefs(draft)
     await updateThreadContext(threadId, {
       activeDraftId: messageId,
-      activePlanId: draft.linkedPlanId ?? draft.plan?.id ?? null
+      activePlanId: refs.activePlanId
     })
     if (options.threadId.value !== threadId) return
     syncStepFromState()
-    if (draft?.linkedPlanId) void watchPlan(draft.linkedPlanId)
+    if (refs.activePlanId) void watchPlan(refs.activePlanId)
   }
 
   async function onDraftCreated(messageId: string): Promise<void> {
@@ -284,12 +349,15 @@ export function provideDraftPlanWorkspace(options: {
     const payload = (message.payload ?? {}) as TaskLaunchDraftPayload
     await loadWorkspace()
     if (payload.status === 'editing' && !payload.linkedPlanId) {
-      planStreamAbort?.abort()
+      stopPlanStream()
       setStep(1)
       return
     }
-    const linked = payload.linkedPlanId
-    if (linked) void watchPlan(linked)
+    const draft = drafts.value.find((d) => d.messageId === message.id)
+    const activePlanId = draft
+      ? draftPlanRefs(draft, payload).activePlanId
+      : (payload.linkedPlanId ?? null)
+    if (activePlanId) void watchPlan(activePlanId)
     else syncStepFromState()
   }
 

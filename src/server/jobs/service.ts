@@ -30,6 +30,7 @@ import { buildPlannerMcpUrl } from '../planner/mcp/url'
 import {
   registerPlannerMcpSession,
   unregisterPlannerMcpSession,
+  isPlannerPlanCommitted,
   type PlannerMcpSession
 } from '../planner/mcp/session'
 import {
@@ -68,7 +69,8 @@ export async function getUserJob(username: string, jobId: string): Promise<Threa
   const job = await getUserJobRow(username, jobId)
   if (!job) return null
   if (isDesignSessionId(jobId)) return job
-  return reconcileStaleJobIfNeeded(username, job)
+  const { attachExecutionQueueMeta } = await import('./execution-queue-meta')
+  return attachExecutionQueueMeta(job, username)
 }
 
 export async function getThreadJob(
@@ -79,14 +81,14 @@ export async function getThreadJob(
   const job = await getThreadJobRow(username, threadId, jobId)
   if (!job) return null
   if (isDesignSessionId(jobId)) return job
-  return reconcileStaleJobIfNeeded(username, job)
+  const { attachExecutionQueueMeta } = await import('./execution-queue-meta')
+  return attachExecutionQueueMeta(job, username)
 }
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
-import { reconcileJobsForUser, reconcileStaleJobIfNeeded } from './reconcile'
 import { slimJobForSse, slimTaskProgressForSse } from './progress-sse'
 
 function slimJobSseEvent(event: JobSseEvent): JobSseEvent {
@@ -170,8 +172,12 @@ export async function listUserJobs(
     .from(threadJobs)
     .where(whereClause)
 
+  const { attachExecutionQueueMetaBatch } = await import('./execution-queue-meta')
   return {
-    jobs: await reconcileJobsForUser(username, await Promise.all(rows.map((row) => mapJob(row)))),
+    jobs: await attachExecutionQueueMetaBatch(
+      username,
+      await Promise.all(rows.map((row) => mapJob(row)))
+    ),
     total: Number(countRows[0]?.count ?? 0)
   }
 }
@@ -615,7 +621,7 @@ async function runJob(
     ownerKind: 'thread_job',
     ownerId: jobId,
     kind: 'planning',
-    pool: 'default'
+    pool: 'planning'
   })
   if (!run) {
     plannerSandboxDebug('runJob: skipped (workload slot unavailable), enqueuing', { jobId })
@@ -651,6 +657,7 @@ async function runJob(
   let planCommitted = false
   let runOutcome: import('./run-lifecycle').PlanningRunOutcome = 'success'
   const plannerScopeId = `${jobId}:${run.runId}`
+  let plannerSession: PlannerMcpSession | null = null
 
   const { registerRunRuntime } = await import('./runtime-supervisor')
   const { buildCursorPlannerRuntimeHandle } = await import('./runtime-handle-cursor')
@@ -678,7 +685,7 @@ async function runJob(
     const mcpSessionId = `plan-mcp-${randomUUID()}`
     const referenceManifest = await loadJobReferenceManifest(jobId)
 
-    const plannerSession: PlannerMcpSession = {
+    plannerSession = {
       sessionId: mcpSessionId,
       jobId,
       threadId,
@@ -789,9 +796,9 @@ async function runJob(
       plannerSession.planCommitted = true
     }
   } catch (error) {
-    if (planCommitted) {
+    if (isPlannerPlanCommitted(planCommitted, plannerSession)) {
       runOutcome = 'success'
-      plannerSandboxDebug('runJob: sandbox ended after plan committed (ignored)', { jobId })
+      plannerSandboxDebug('runJob: finished after plan commit (turn ended)', { jobId })
       return
     }
     const current = await getUserJob(username, jobId)
@@ -961,6 +968,7 @@ function shouldCloseJobStream(status: string): boolean {
   return (
     status === 'plan_editing' ||
     status === 'plan_ready' ||
+    status === 'pausing' ||
     status === 'paused' ||
     status === 'completed' ||
     status === 'failed' ||

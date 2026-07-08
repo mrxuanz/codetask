@@ -19,7 +19,7 @@ export function canContinueJob(
 }
 
 export function canRestartJob(status: string | null | undefined): boolean {
-  return Boolean(status && ['failed', 'cancelled', 'paused'].includes(status))
+  return Boolean(status && ['failed', 'cancelled', 'paused', 'pausing'].includes(status))
 }
 
 export function canRetryTaskItem(

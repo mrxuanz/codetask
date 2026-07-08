@@ -1,5 +1,6 @@
 import type { TaskProgressDto, TaskProgressItemDto, ThreadJobDto } from './types'
 import type { GateMilestoneState, GateSliceState } from './execution-gate'
+import { pausingAttemptKey } from './recovery-limits'
 import { taskErrorFields } from '../turn-errors/store'
 
 function findInterruptedTaskId(taskProgress: TaskProgressDto): string | null {
@@ -104,8 +105,10 @@ export function prepareInterruptedExecutionResume(taskProgress: TaskProgressDto)
   progress: TaskProgressDto
   recovered: boolean
 } {
+  const interruptedTaskId = findInterruptedTaskId(taskProgress)
   const progress: TaskProgressDto = {
     ...taskProgress,
+    currentTaskId: taskProgress.currentTaskId ?? interruptedTaskId,
     tasks: taskProgress.tasks.map((task) => ({ ...task })),
     slices: taskProgress.slices?.map((slice) => ({ ...slice })),
     milestones: taskProgress.milestones?.map((milestone) => ({ ...milestone }))
@@ -113,6 +116,36 @@ export function prepareInterruptedExecutionResume(taskProgress: TaskProgressDto)
   const tasksRecovered = resetInterruptedRunningTasks(progress.tasks)
   const verifyRecovered = resetInterruptedVerificationInProgress(progress)
   return { progress, recovered: tasksRecovered || verifyRecovered }
+}
+
+export function readPausingAttempt(progress: TaskProgressDto, jobId: string): number {
+  return progress.repairGenerations?.[pausingAttemptKey(jobId)] ?? 0
+}
+
+export function withPausingAttempt(
+  progress: TaskProgressDto,
+  jobId: string,
+  attempt: number
+): TaskProgressDto {
+  return {
+    ...progress,
+    repairGenerations: {
+      ...(progress.repairGenerations ?? {}),
+      [pausingAttemptKey(jobId)]: attempt
+    }
+  }
+}
+
+export type StaleExecutionJobAction = 'noop' | 'finalize-user-pause' | 'resume-running'
+
+/** Decide how to reconcile a thread job whose in-memory execution loop is gone. */
+export function resolveStaleExecutionJobAction(
+  job: Pick<ThreadJobDto, 'status'>
+): StaleExecutionJobAction {
+  if (job.status === 'paused') return 'noop'
+  if (job.status === 'pausing') return 'finalize-user-pause'
+  if (job.status === 'running') return 'resume-running'
+  return 'noop'
 }
 
 /** Paused by restart reconcile — not an explicit user pause (job.paused). */
