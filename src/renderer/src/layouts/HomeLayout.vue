@@ -8,8 +8,8 @@ import { provideHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 
 import { provideJobEventHub } from '@renderer/composables/useJobEventHub'
 
-const workspace = provideHomeWorkspace()
 provideJobEventHub()
+const workspace = provideHomeWorkspace()
 const chat = useHomeChat(
   (thread) => workspace.syncThread(thread),
   (threadId, patch) => workspace.patchThreadRuntime(threadId, patch)

@@ -11,7 +11,6 @@ import {
   WIZARD_PHASE_PLAN_EDIT,
   WIZARD_PHASE_PLAN_GENERATING,
   WIZARD_PHASE_READY_TO_LAUNCH,
-  isWizardPhase,
   type WizardPhase
 } from './types'
 import { isToolAllowedInWizardPhase } from './tools'
@@ -203,8 +202,10 @@ export function evaluateWizardToolPhaseAccess(input: {
   wizardStage: WizardPhase | string | null | undefined
   resolvedPhase: WizardPhase
 }): { allowed: boolean; message: string } | null {
-  const stage = isWizardPhase(input.wizardStage) ? input.wizardStage : input.resolvedPhase
-  if (isToolAllowedInWizardPhase(input.toolName, stage)) {
+  // DB-resolved phase is the sole allow/deny authority. session.wizardStage is only
+  // for MCP URL/capability tokens and optional mismatch diagnostics.
+  void input.wizardStage
+  if (isToolAllowedInWizardPhase(input.toolName, input.resolvedPhase)) {
     return null
   }
 

@@ -45,6 +45,8 @@ const completedContext = ref<CompletedContext | null>(null)
 const draftWorkspaceRef = ref<InstanceType<typeof DraftPlanWorkspace> | null>(null)
 const draftListRef = ref<InstanceType<typeof CreateDraftList> | null>(null)
 const createProjectDialogOpen = ref(false)
+/** Mirrors DraftPlanWorkspace first-load gate (reactive via workspaceReadyChange). */
+const workspaceReady = ref(false)
 
 const messages = computed(() => chat.messages.value)
 const cores = computed(() => chat.cores.value)
@@ -86,6 +88,19 @@ const busy = computed(
   () => sending.value || runtimeStatus.value === 'running' || coreSwitching.value
 )
 
+/** Block send until the right-hand workspace finishes its first load for this thread. */
+const workspaceNotReady = computed(
+  () => phase.value === 'workspace' && Boolean(activeThread.value) && !workspaceReady.value
+)
+
+const composerDisabled = computed(
+  () =>
+    loading.value ||
+    coreSwitching.value ||
+    coreUnavailable.value ||
+    workspaceNotReady.value
+)
+
 // Multi-source watch: avoid `() => [id, id]` (new array each run → blank flash on sync).
   watch(
   [() => phase.value, () => activeProject.value?.id, () => activeThread.value?.id],
@@ -115,6 +130,7 @@ watch(
   (currentPhase, previousPhase) => {
     if (previousPhase === 'workspace' && currentPhase !== 'workspace') {
       stopWorkspaceStreams()
+      workspaceReady.value = false
     }
   }
 )
@@ -132,6 +148,10 @@ watch(
     if (newId) void draftWorkspaceRef.value.onDraftCreated(newId)
   }
 )
+
+function handleWorkspaceReadyChange(ready: boolean): void {
+  workspaceReady.value = ready
+}
 
 function stopWorkspaceStreams(): void {
   draftWorkspaceRef.value?.stopPlanStream?.()
@@ -236,6 +256,7 @@ async function handleCoreChange(code: string): Promise<void> {
 }
 
 async function handleSend(payload: { message: string; files: File[] }): Promise<void> {
+  if (composerDisabled.value) return
   const updated = await chat.sendMessage({
     ...payload,
     createTaskMode: true,
@@ -332,7 +353,7 @@ function handlePlanConfirmed(payload: {
           <ChatComposer
             :cores="cores"
             :core-code="currentCoreCode"
-            :disabled="loading || coreSwitching || coreUnavailable"
+            :disabled="composerDisabled"
             :sending="busy"
             @core-change="handleCoreChange"
             @send="handleSend"
@@ -348,6 +369,7 @@ function handlePlanConfirmed(payload: {
           :initial-draft-id="resumeDraftId"
           @draft-updated="handleDraftUpdated"
           @plan-confirmed="handlePlanConfirmed"
+          @workspace-ready-change="handleWorkspaceReadyChange"
         />
       </div>
     </template>

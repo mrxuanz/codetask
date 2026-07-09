@@ -35,4 +35,20 @@ export type {
   SavedJobPlan
 } from './plan'
 export type { ChatSseEvent, JobSseEvent } from './sse'
+export type {
+  HubEnvelope,
+  HubEvent,
+  HubSubscriptionsDto,
+  HubTopic,
+  JobHubEnvelope,
+  JobHubSubscriptionsDto,
+  ThreadHubEvent
+} from './job-event-hub'
+export {
+  jobIdFromTopic,
+  jobTopic,
+  parseHubTopic,
+  threadIdFromTopic,
+  threadTopic
+} from './job-event-hub'
 export type { ThreadDto, ThreadKind, TitleSource, WizardPhase } from './threads'

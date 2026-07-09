@@ -508,6 +508,14 @@ export async function* streamSendMessage(
     const thinkingDurationMs =
       thinkingStartedAt != null && finalThinking ? Date.now() - thinkingStartedAt : undefined
 
+    let assistantWizardPhase: WizardPhase | null = createTaskMode ? wizardPhase : null
+    if (createTaskMode) {
+      const latestRow = await getThreadRow(username, thread.id)
+      if (latestRow) {
+        assistantWizardPhase = resolveWizardPhase(latestRow)
+      }
+    }
+
     const assistantMessage = await insertMessage({
       id: assistantMessageId,
       threadId: thread.id,
@@ -518,7 +526,7 @@ export async function* streamSendMessage(
       coreCode: thread.coreCode,
       conversationId: thread.conversationId,
       runtimeSessionId,
-      wizardPhase: createTaskMode ? wizardPhase : null,
+      wizardPhase: assistantWizardPhase,
       payload: buildMessageThinkingPayload(finalThinking, thinkingDurationMs)
     })
 

@@ -21,6 +21,7 @@ export function buildWizardPhasePromptSection(phase: WizardPhase): string {
         'Do not claim contract changes without calling one of these tools.',
         'Confirm REQUIREMENTS CONTRACT with `confirm_requirements_contract` when the user explicitly agrees.',
         'If requirements need a full rethink, call `request_phase_rollback` to return to collection — do not silently rewrite scope.',
+        'Never call `propose_task_draft` in this phase (including regenerate / rewrite requests) — it is unavailable; use rollback then re-collect instead.',
         'Execution-plan tools are not available until the draft is confirmed and planning starts.'
       ].join('\n')
     case WIZARD_PHASE_PLAN_EDIT:
