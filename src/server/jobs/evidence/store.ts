@@ -20,6 +20,8 @@ import { eq } from 'drizzle-orm'
 
 export const EVIDENCE_INLINE_MAX_BYTES = 2048
 
+export const MAX_TASK_EVIDENCE_BYTES = 5 * 1024 * 1024
+
 export type ExternalizeArtifactOptions = {
   expiresAt?: number | null
   replaceExisting?: boolean
@@ -52,6 +54,17 @@ export function slimTaskEvidence(evidence: TaskEvidenceDto): TaskEvidenceDto {
   }
 }
 
+export function truncateEvidence(evidence: TaskEvidenceDto): TaskEvidenceDto {
+  const json = JSON.stringify(evidence)
+  if (Buffer.byteLength(json, 'utf8') <= MAX_TASK_EVIDENCE_BYTES) return evidence
+  const truncated: TaskEvidenceDto = {
+    ...evidence,
+    evidence: evidence.evidence.slice(0, Math.min(evidence.evidence.length, 1000)),
+    summary: evidence.summary || '(truncated)'
+  }
+  return { ...truncated, truncated: true } as TaskEvidenceDto & { truncated: boolean }
+}
+
 export async function externalizeTaskEvidence(
   dataDir: string,
   jobId: string,
@@ -61,10 +74,16 @@ export async function externalizeTaskEvidence(
   db?: ReturnType<typeof getDb>,
   options?: ExternalizeArtifactOptions
 ): Promise<{ evidence: TaskEvidenceDto; artifactId: string }> {
+  const shouldStoreFull = evidence.status === 'failed' || evidence.status === 'blocked'
+  if (!shouldStoreFull) {
+    return { evidence: slimTaskEvidence(evidence), artifactId: '' }
+  }
+
+  const truncated = truncateEvidence(evidence)
   const stored = await storeTaskEvidenceArtifact({
     jobId,
     taskId,
-    evidence,
+    evidence: truncated,
     dataDir,
     settings,
     db,
@@ -257,7 +276,11 @@ export async function deleteSupersededTaskProgressEvidenceArtifacts(
   const replacedKeys = new Set(
     artifacts.map((artifact) => `${artifact.kind}\u0000${artifact.taskId}`)
   )
-  const rows = await db.select().from(jobArtifacts).where(eq(jobArtifacts.jobId, jobId))
+  const rows = db
+    .select({ id: jobArtifacts.id, taskId: jobArtifacts.taskId, kind: jobArtifacts.kind })
+    .from(jobArtifacts)
+    .where(eq(jobArtifacts.jobId, jobId))
+    .all()
   const supersededIds = rows
     .filter((row) => {
       if (!row.taskId || keepIds.has(row.id)) return false
@@ -273,12 +296,20 @@ export async function hydrateTaskProgressEvidence(
   options?: { hydrateEvidence?: boolean }
 ): Promise<TaskProgressDto> {
   if (options?.hydrateEvidence === false) return progress
-  const tasks = await Promise.all(
-    progress.tasks.map(async (task) => {
-      const evidence = await hydrateTaskEvidence(dataDir, task.evidence, task.evidenceArtifactId)
-      return evidence ? { ...task, evidence } : task
-    })
-  )
+
+  const CONCURRENCY = 4
+  const tasks: TaskProgressItemDto[] = []
+  for (let i = 0; i < progress.tasks.length; i += CONCURRENCY) {
+    const batch = progress.tasks.slice(i, i + CONCURRENCY)
+    const hydrated = await Promise.all(
+      batch.map(async (task) => {
+        const evidence = await hydrateTaskEvidence(dataDir, task.evidence, task.evidenceArtifactId)
+        return evidence ? { ...task, evidence } : task
+      })
+    )
+    tasks.push(...hydrated)
+  }
+
   const slices = await hydrateSliceProgress(dataDir, progress.slices)
   return { ...progress, tasks, slices }
 }
@@ -314,9 +345,14 @@ export function hydrateTaskEvidenceSync(
     const row = rows[0]
     if (row?.storage === 'inline' && row.contentInline) {
       try {
-        return JSON.parse(row.contentInline) as TaskEvidenceDto
+        const decompressed = gunzipSync(Buffer.from(row.contentInline, 'base64')).toString('utf8')
+        return JSON.parse(decompressed) as TaskEvidenceDto
       } catch {
-        return evidence ?? null
+        try {
+          return JSON.parse(row.contentInline) as TaskEvidenceDto
+        } catch {
+          return evidence ?? null
+        }
       }
     }
     if (row?.storage === 'file' && row.contentPath) {

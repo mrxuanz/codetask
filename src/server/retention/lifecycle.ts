@@ -4,7 +4,10 @@ import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
 import {
+  checkJobRuntimeQuota,
   cleanupJobRuntimeTreeIfTerminal,
+  estimateJobRuntimeBytes,
+  extractRuntimeSummary,
   isTerminalJobStatus as isTerminalRuntimeStatus,
   pruneOrphanRuntimeTrees
 } from '../runtime/cleanup'
@@ -14,6 +17,7 @@ import { deleteJobCounters } from './counters'
 import { readRetentionSettings, artifactExpirySec } from './settings'
 import { runSqliteMaintenanceIfDue } from './maintenance'
 import {
+  enforceDataDirWatermark,
   pruneLegacyEvidenceFiles,
   pruneOrphanAttachments,
   pruneOrphanDesignArtifactDirs,
@@ -100,6 +104,41 @@ export async function onJobReachedTerminal(
   }
 
   if (settings.runtimeTerminalImmediate && isTerminalRuntimeStatus(status)) {
+    try {
+      const bytes = await estimateJobRuntimeBytes(ctx.dataDir, threadId, jobId)
+      if (bytes > 0) {
+        await db
+          .update(threadJobs)
+          .set({ runtimeBytes: bytes })
+          .where(eq(threadJobs.id, jobId))
+      }
+      await checkJobRuntimeQuota(ctx.dataDir, threadId, jobId, settings.runtimeMaxBytesPerJob)
+    } catch (error) {
+      console.warn('[retention] runtime bytes estimate failed', jobId, error)
+    }
+
+    try {
+      const summary = await extractRuntimeSummary(ctx.dataDir, threadId, jobId)
+      if (summary && (summary.changedFiles.length > 0 || summary.logTail)) {
+        const summaryText = [
+          summary.changedFiles.length > 0
+            ? `Changed files:\n${summary.changedFiles.map((f) => `- ${f}`).join('\n')}`
+            : '',
+          summary.logTail ? `\nLog tail:\n${summary.logTail}` : ''
+        ]
+          .filter(Boolean)
+          .join('\n')
+        if (summaryText) {
+          await db
+            .update(threadJobs)
+            .set({ summary: summaryText })
+            .where(eq(threadJobs.id, jobId))
+        }
+      }
+    } catch (error) {
+      console.warn('[retention] runtime summary extraction failed', jobId, error)
+    }
+
     await cleanupJobRuntimeTreeIfTerminal(ctx.dataDir, threadId, jobId, status).catch((error) => {
       console.warn('[retention] terminal runtime cleanup failed', jobId, error)
     })
@@ -117,6 +156,8 @@ export async function runRetentionJanitorPass(): Promise<{
   staleAttachmentDirs: number
   orphanRuntimeTrees: number
   emptyCreateTaskThreads: number
+  watermarkCleanedBytes: number
+  watermarkCleanedJobs: number
   sqliteMaintenance: { ran: boolean; vacuumedPages: number }
 }> {
   const ctx = getAppContext()
@@ -147,6 +188,8 @@ export async function runRetentionJanitorPass(): Promise<{
     pruneEmptyCreateTaskThreads()
   ])
 
+  const watermark = await enforceDataDirWatermark(ctx.dataDir, db, settings.dataDirMaxBytes)
+
   const sqliteMaintenance = runSqliteMaintenanceIfDue({
     db,
     store: ctx.settings,
@@ -164,6 +207,8 @@ export async function runRetentionJanitorPass(): Promise<{
     staleAttachmentDirs: staleAttachmentDirs.removed,
     orphanRuntimeTrees: orphanRuntimeTrees.removedPaths.length,
     emptyCreateTaskThreads: emptyCreateTaskThreads.removed,
+    watermarkCleanedBytes: watermark.cleanedBytes,
+    watermarkCleanedJobs: watermark.cleanedJobCount,
     sqliteMaintenance: {
       ran: sqliteMaintenance.ran,
       vacuumedPages: sqliteMaintenance.vacuumedPages

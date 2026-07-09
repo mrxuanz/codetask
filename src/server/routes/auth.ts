@@ -1,7 +1,13 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
 import { ok } from '../response'
-import { getBootstrap, loginAccount, setupAccount, type LoginOptions } from '../auth/service'
+import {
+  getBootstrap,
+  loginAccount,
+  logoutAccount,
+  setupAccount,
+  type LoginOptions
+} from '../auth/service'
 import { validateSetupToken } from '../auth/setup-token'
 import { getClientIp, scopeKeyForLogin, hashIp, bucketKeyForIp } from '../auth/client-ip'
 import { generateCaptcha } from '../auth/captcha'
@@ -84,6 +90,12 @@ export function createAuthRoutes(ctx: AppContext): Hono {
     }
     const data = await loginAccount(opts)
     return c.json(ok(data))
+  })
+
+  auth.post('/logout', async (c) => {
+    const token = bearerToken(c.req.header('Authorization'))
+    await logoutAccount(token)
+    return c.json(ok({ loggedOut: true }))
   })
 
   auth.post('/captcha', async (c) => {

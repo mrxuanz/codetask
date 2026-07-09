@@ -40,6 +40,15 @@ function createWindow(serverUrl: string): void {
   mainWindow.loadURL(serverUrl)
 }
 
+let shuttingDown = false
+
+async function gracefulShutdown(): Promise<void> {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log('[app] graceful shutdown initiated')
+  await stopAppServer()
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
 
@@ -76,6 +85,18 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
-  stopAppServer()
+app.on('before-quit', async (event) => {
+  if (!shuttingDown) {
+    event.preventDefault()
+    await gracefulShutdown()
+    app.quit()
+  }
+})
+
+process.on('SIGTERM', () => {
+  void gracefulShutdown().finally(() => process.exit(0))
+})
+
+process.on('SIGINT', () => {
+  void gracefulShutdown().finally(() => process.exit(0))
 })

@@ -6,10 +6,7 @@ import type { AgentTurnChunk } from '../types'
 import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { TurnErrorCode } from '../../../shared/turn-errors/codes.ts'
 import { classifyCursorAcpError } from './errors'
-import { TurnScope } from '../turn-scope'
-import { ProgressGuard } from '../progress-guard'
-import { getExecutionRunContext } from '../../jobs/execution-run-context'
-import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
+import { createProviderTurnScope } from '../provider-turn'
 import { createAsyncQueue } from './async-queue'
 import {
   applyCursorModel,
@@ -342,27 +339,15 @@ export class CursorAcpSessionRuntime {
       child.once('exit', onExit)
     })
 
-    const progressGuard = new ProgressGuard(input.role)
-
-    const turnScope = new TurnScope({
-      role: input.role,
-      externalSignal: input.signal,
+    const turnScope = createProviderTurnScope(input.role, { signal: input.signal }, {
       processExit: exitPromise,
-      progressGuard,
-      onKeepAlive: () => {
-        const ctx = getExecutionRunContext()
-        if (ctx?.runId) {
-          void refreshWorkloadLease(ctx.runId)
+      onSoftCancel: async () => {
+        if (this.activeTaskSession) {
+          await cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
         }
       },
-      onCancel: async (mode) => {
-        if (mode === 'soft') {
-          if (this.activeTaskSession) {
-            await cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
-          }
-        } else {
-          killChildTree(child)
-        }
+      onHardCancel: () => {
+        killChildTree(child)
       }
     })
     turnScope.arm()

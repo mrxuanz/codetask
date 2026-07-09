@@ -31,7 +31,7 @@ export function parseCliArgs(argv: string[] = process.argv): CliOptions {
   const serve = argv.includes('--serve')
 
   if (serve) {
-    const host = readArgValue(argv, '--host') ?? '0.0.0.0'
+    const host = readArgValue(argv, '--host') ?? '127.0.0.1'
     const port = readPort(argv, DEFAULT_SERVER_PORT)
     return { mode: 'server', host, port }
   }

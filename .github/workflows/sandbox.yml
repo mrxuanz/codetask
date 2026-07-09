@@ -2,42 +2,49 @@ name: Sandbox
 
 on:
   push:
+    branches: [main, master]
     paths:
       - 'native/**'
       - 'src/server/sandbox/**'
+      - 'src/sandbox/**'
       - 'tests/sandbox/**'
-      - 'package.json'
-      - '.github/workflows/sandbox.yml'
   pull_request:
+    branches: [main, master]
     paths:
       - 'native/**'
       - 'src/server/sandbox/**'
+      - 'src/sandbox/**'
       - 'tests/sandbox/**'
-      - 'package.json'
-      - '.github/workflows/sandbox.yml'
+
+env:
+  NODE_VERSION: '22'
 
 jobs:
-  rust:
-    name: Rust unit tests
+  rust-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Adapter + sandbox crate tests
-        run: |
-          cd native
-          cargo test -p codeteam-sandbox-adapter
-          cargo test -p codeteam-sandbox attestation
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - run: cargo test --manifest-path native/Cargo.toml
+      - run: cargo test --manifest-path native/Cargo.toml --release
 
-  node-typecheck:
-    name: Node typecheck
+  escape-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: Install dependencies
-        run: npm ci
-      - name: Typecheck
-        run: npm run typecheck
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - run: npm ci
+      - run: npm run build:sandbox:debug
+      - run: npm run test:sandbox:all

@@ -6,7 +6,8 @@ import type { RunSandboxedTurnInput } from './orchestrator-local'
 import { getSandboxSupervisorManager } from './supervisor-manager'
 import type { SupervisorEvent } from '../../sandbox/supervisor-protocol'
 
-const TURN_WAIT_MS = 100
+const TURN_IDLE_TIMEOUT_MS = 25_000
+const MAX_PENDING_CHUNKS = 256
 
 export async function* streamSandboxedTurnViaSupervisor(
   input: RunSandboxedTurnInput
@@ -73,6 +74,12 @@ async function* streamSandboxedTurnViaSupervisorOnce(
         notify()
         break
       case 'chunk':
+        if (pending.length >= MAX_PENDING_CHUNKS) {
+          failure = new SandboxError('supervisor chunk queue overflow', 'sandbox.queue.overflow')
+          finished = true
+          notify()
+          break
+        }
         if (pending.length === 0) {
           sandboxTurnDebug('supervisor-client: first chunk', {
             sessionId,
@@ -145,23 +152,15 @@ async function* streamSandboxedTurnViaSupervisorOnce(
   }
 
   try {
-    let waitTicks = 0
     while (!finished || pending.length > 0) {
       if (pending.length > 0) {
         yield pending.shift()!
         continue
       }
       if (finished) break
-      waitTicks += 1
-      if (waitTicks % 50 === 0) {
-        sandboxTurnDebug('supervisor-client: still waiting', {
-          sessionId,
-          waitMs: waitTicks * TURN_WAIT_MS
-        })
-      }
       await new Promise<void>((resolve) => {
         waiters.push(resolve)
-        setTimeout(resolve, TURN_WAIT_MS)
+        setTimeout(resolve, TURN_IDLE_TIMEOUT_MS)
       })
     }
     if (failure) throw failure

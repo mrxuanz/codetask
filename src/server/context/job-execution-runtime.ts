@@ -104,4 +104,16 @@ export class JobExecutionRuntimeRegistry {
     this.activeLoops.delete(jobId)
     this.runtimes.delete(jobId)
   }
+
+  dropAll(): void {
+    for (const runtime of this.runtimes.values()) {
+      try {
+        runtime.abortController?.abort()
+      } catch {
+        // ignore
+      }
+    }
+    this.activeLoops.clear()
+    this.runtimes.clear()
+  }
 }

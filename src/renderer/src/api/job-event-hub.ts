@@ -3,6 +3,7 @@ import { throwIfNotSseResponse } from '@renderer/api/sse'
 import { ApiError, api } from '@renderer/api/client'
 import type { JobHubEnvelope } from '@shared/contracts/job-event-hub'
 import type { JobSseEvent } from '@shared/contracts/sse'
+import { parseSseBlock, readSseWithTimeout } from '@shared/sse'
 
 export function putJobHubSubscriptions(jobIds: string[]): Promise<{ data: { jobIds: string[] } }> {
   return api<{ jobIds: string[] }>('/api/events/jobs/subscriptions', {
@@ -32,7 +33,7 @@ export async function connectJobHubStream(
   let buffer = ''
 
   while (true) {
-    const { done, value } = await reader.read()
+    const { done, value } = await readSseWithTimeout(reader)
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const parts = buffer.split('\n\n')
@@ -43,18 +44,6 @@ export async function connectJobHubStream(
       onEnvelope(JSON.parse(parsed.data) as JobHubEnvelope)
     }
   }
-}
-
-function parseSseBlock(block: string): { event: string; data: string } | null {
-  const lines = block.split('\n')
-  let event = 'message'
-  const dataLines: string[] = []
-  for (const line of lines) {
-    if (line.startsWith('event:')) event = line.slice(6).trim()
-    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
-  }
-  if (dataLines.length === 0) return null
-  return { event, data: dataLines.join('\n') }
 }
 
 export type { JobSseEvent }

@@ -18,4 +18,5 @@ export interface AppContext {
   runtimeRegistry: RuntimeRegistry
   executionRuntime: JobExecutionRuntimeRegistry
   security: SecurityContext
+  bootId: string
 }

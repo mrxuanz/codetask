@@ -24,6 +24,10 @@ export interface RetentionSettings {
   sqliteMaintenanceIntervalHours: number
 
   messagePayloadInlineMaxBytes: number
+
+  runtimeMaxBytesPerJob: number
+
+  dataDirMaxBytes: number
 }
 
 export const DEFAULT_RETENTION_SETTINGS: RetentionSettings = {
@@ -35,7 +39,9 @@ export const DEFAULT_RETENTION_SETTINGS: RetentionSettings = {
   artifactInlineMaxBytes: 8192,
   pruneIntervalHours: 24,
   sqliteMaintenanceIntervalHours: 24,
-  messagePayloadInlineMaxBytes: 8192
+  messagePayloadInlineMaxBytes: 8192,
+  runtimeMaxBytesPerJob: 5 * 1024 * 1024 * 1024,
+  dataDirMaxBytes: 20 * 1024 * 1024 * 1024
 }
 
 export const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled'] as const

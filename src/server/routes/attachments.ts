@@ -48,7 +48,7 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
     const threadId = c.req.param('threadId')
     const attachmentId = c.req.param('attachmentId')
     const authHeader = c.req.header('Authorization')
-    const assetToken = c.req.query('asset_token')
+    const assetToken = c.req.query('asset_token') || c.req.header('x-asset-token')
 
     if (assetToken) {
       if (!validateAssetToken(ctx.security.authSecret, assetToken, threadId, attachmentId)) {

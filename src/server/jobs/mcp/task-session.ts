@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { timingSafeStringEqual } from '../../auth/timing-safe'
 import type { TaskEvidencePacket } from '../evidence/normalize'
 
 export type { TaskEvidencePacket }
@@ -55,5 +56,5 @@ export function authorizeTaskMcpRequest(input: {
   const session = getTaskMcpSession(input.sessionId)
   if (!session || session.jobId !== jobId || session.taskId !== taskId) return false
   const expected = buildTaskMcpCapabilityToken(input.sessionId, jobId, taskId)
-  return input.capability?.trim() === expected
+  return timingSafeStringEqual(input.capability?.trim(), expected)
 }
