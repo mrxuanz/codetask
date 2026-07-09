@@ -10,7 +10,7 @@ function bus(): import('../context/event-bus').JobEventBus {
 }
 
 export function emitJobSseEvent(jobId: string, event: JobSseEvent): void {
-  bus().emit(jobId, event)
+  bus().emit(`job:${jobId}`, event)
 }
 
 export function emitTaskProgressDelta(jobId: string, taskProgress: TaskProgressDto): void {

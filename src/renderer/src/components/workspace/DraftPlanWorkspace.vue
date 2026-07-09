@@ -18,6 +18,7 @@ const emit = defineEmits<{
   draftUpdated: [message: ConversationMessage]
   draftCreated: [messageId: string]
   planConfirmed: [payload: { jobId: string; draftMessageId: string; title: string }]
+  workspaceReadyChange: [ready: boolean]
 }>()
 
 const { t } = useI18n()
@@ -42,8 +43,17 @@ watch(
   }
 )
 
+watch(
+  ws.workspaceReady,
+  (ready) => {
+    emit('workspaceReadyChange', ready)
+  },
+  { immediate: true }
+)
+
 function handleDraftUpdated(message: ConversationMessage): void {
   emit('draftUpdated', message)
+  void ws.onDraftUpdated(message)
 }
 
 watch(
@@ -61,7 +71,8 @@ defineExpose({
   onDraftCreated: ws.onDraftCreated,
   selectDraft: ws.selectDraft,
   loadWorkspace: ws.loadWorkspace,
-  stopPlanStream: ws.stopPlanStream
+  stopPlanStream: ws.stopPlanStream,
+  workspaceReady: ws.workspaceReady
 })
 </script>
 

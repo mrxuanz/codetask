@@ -8,51 +8,72 @@ import {
   type Ref
 } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { connectJobHubStream, putJobHubSubscriptions } from '@renderer/api/job-event-hub'
-import type { JobHubEnvelope } from '@shared/contracts/job-event-hub'
+import { connectHubStream, putHubSubscriptions } from '@renderer/api/job-event-hub'
+import type { HubEnvelope, HubTopic } from '@shared/contracts/job-event-hub'
+import { jobTopic } from '@shared/contracts/job-event-hub'
 import type { JobSseEvent } from '@shared/contracts/sse'
 import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
 
 export type JobHubListener = (event: JobSseEvent) => void
+export type TopicHubListener = (envelope: HubEnvelope) => void
 
 export interface JobEventHub {
   connected: Ref<boolean>
+  connectionId: string
+  watchTopic: (topic: HubTopic, listener: TopicHubListener) => () => void
   watchJob: (jobId: string, listener: JobHubListener) => () => void
-  onAnyJobEvent: (listener: (envelope: JobHubEnvelope) => void) => () => void
+  onAnyEvent: (listener: TopicHubListener) => () => void
+  /** @deprecated Prefer onAnyEvent */
+  onAnyJobEvent: (listener: TopicHubListener) => () => void
 }
 
 const JobEventHubKey: InjectionKey<JobEventHub> = Symbol('jobEventHub')
 
+function newConnectionId(): string {
+  return `conn-${Math.random().toString(36).slice(2, 10)}`
+}
+
 export function provideJobEventHub(): JobEventHub {
   const connected = ref(false)
-  const listenersByJob = new Map<string, Set<JobHubListener>>()
-  const globalListeners = new Set<(envelope: JobHubEnvelope) => void>()
-  const refCounts = new Map<string, number>()
+  const connectionId = newConnectionId()
+  const listenersByTopic = new Map<HubTopic, Set<TopicHubListener>>()
+  const globalListeners = new Set<TopicHubListener>()
+  const refCounts = new Map<HubTopic, number>()
   let abort: AbortController | null = null
-  let desiredJobIds: string[] = []
+  let desiredTopics: HubTopic[] = []
+  let lastSeq: number | null = null
 
   const flushSubscriptions = useDebounceFn(async () => {
     if (!connected.value) return
     try {
-      await putJobHubSubscriptions(desiredJobIds)
-    } catch {
-      // stream may reconnect; subscriptions will retry on next flush
+      await putHubSubscriptions(connectionId, desiredTopics)
+    } catch (error) {
+      console.warn('[event-hub] subscription flush failed', error)
     }
   }, 50)
 
-  function recomputeDesiredJobIds(): void {
-    desiredJobIds = [...refCounts.keys()].filter((jobId) => (refCounts.get(jobId) ?? 0) > 0)
+  function recomputeDesiredTopics(): void {
+    desiredTopics = [...refCounts.keys()].filter((topic) => (refCounts.get(topic) ?? 0) > 0)
     void flushSubscriptions()
   }
 
-  function dispatch(envelope: JobHubEnvelope): void {
+  function dispatch(envelope: HubEnvelope): void {
+    if (typeof envelope.seq === 'number' && Number.isFinite(envelope.seq)) {
+      lastSeq = envelope.seq
+    }
+    if (envelope.event === 'resync') {
+      void putHubSubscriptions(connectionId, desiredTopics).catch((error) => {
+        console.warn('[event-hub] resync subscription failed', error)
+      })
+      return
+    }
     for (const listener of globalListeners) {
       listener(envelope)
     }
-    const set = listenersByJob.get(envelope.jobId)
+    const set = listenersByTopic.get(envelope.topic)
     if (!set) return
     for (const listener of set) {
-      listener(envelope.payload)
+      listener(envelope)
     }
   }
 
@@ -61,10 +82,19 @@ export function provideJobEventHub(): JobEventHub {
     const controller = new AbortController()
     abort = controller
     connected.value = true
-    void putJobHubSubscriptions(desiredJobIds).catch(() => {})
+    void putHubSubscriptions(connectionId, desiredTopics).catch((error) => {
+      console.warn('[event-hub] initial subscription failed', error)
+    })
 
-    void connectJobHubStream(dispatch, { signal: controller.signal })
-      .catch(() => {})
+    void connectHubStream(connectionId, dispatch, {
+      signal: controller.signal,
+      lastEventId: lastSeq
+    })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.warn('[event-hub] stream ended', error)
+        }
+      })
       .finally(() => {
         if (abort === controller) {
           connected.value = false
@@ -78,25 +108,42 @@ export function provideJobEventHub(): JobEventHub {
 
   const hub: JobEventHub = {
     connected,
-    watchJob(jobId: string, listener: JobHubListener) {
-      const set = listenersByJob.get(jobId) ?? new Set()
+    connectionId,
+    watchTopic(topic: HubTopic, listener: TopicHubListener) {
+      const set = listenersByTopic.get(topic) ?? new Set()
       set.add(listener)
-      listenersByJob.set(jobId, set)
-      refCounts.set(jobId, (refCounts.get(jobId) ?? 0) + 1)
-      recomputeDesiredJobIds()
+      listenersByTopic.set(topic, set)
+      refCounts.set(topic, (refCounts.get(topic) ?? 0) + 1)
+      recomputeDesiredTopics()
 
       return () => {
         set.delete(listener)
-        if (set.size === 0) listenersByJob.delete(jobId)
-        const next = (refCounts.get(jobId) ?? 1) - 1
-        if (next <= 0) refCounts.delete(jobId)
-        else refCounts.set(jobId, next)
-        recomputeDesiredJobIds()
+        if (set.size === 0) listenersByTopic.delete(topic)
+        const next = (refCounts.get(topic) ?? 1) - 1
+        if (next <= 0) refCounts.delete(topic)
+        else refCounts.set(topic, next)
+        recomputeDesiredTopics()
       }
     },
-    onAnyJobEvent(listener) {
+    watchJob(jobId: string, listener: JobHubListener) {
+      return hub.watchTopic(jobTopic(jobId), (envelope) => {
+        if (
+          envelope.event === 'job_snapshot' ||
+          envelope.event === 'plan_progress' ||
+          envelope.event === 'task_progress' ||
+          envelope.event === 'job_done' ||
+          envelope.event === 'error'
+        ) {
+          listener(envelope)
+        }
+      })
+    },
+    onAnyEvent(listener) {
       globalListeners.add(listener)
       return () => globalListeners.delete(listener)
+    },
+    onAnyJobEvent(listener) {
+      return hub.onAnyEvent(listener)
     }
   }
 

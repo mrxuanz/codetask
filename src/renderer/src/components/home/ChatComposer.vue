@@ -70,6 +70,7 @@ function removePending(id: string): void {
 }
 
 function submit(): void {
+  if (props.disabled || props.sending) return
   const text = value.value.trim()
   if (!text && pending.value.length === 0) return
   emit('send', {
