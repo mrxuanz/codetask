@@ -142,7 +142,8 @@ export function useJobsStore(options: UseJobsStoreOptions) {
   }
 
   function startHubPolling(): void {
-    hubListRelease = hub.onAnyJobEvent(() => {
+    hubListRelease = hub.onAnyJobEvent((envelope) => {
+      if (!envelope.topic.startsWith('job:')) return
       void loadJobs({ silent: true })
     })
     pollTimer = setInterval(() => {

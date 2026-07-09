@@ -54,7 +54,6 @@ import {
   updateJobRowFenced
 } from './repository'
 import { loadJobReferenceManifest } from './reference-manifest'
-import { enqueueJobSseEvent } from '../context/event-bus'
 import { getRunController } from './workload-slot-store'
 import { runWithExecutionRunContext } from './execution-run-context'
 
@@ -105,7 +104,7 @@ function slimJobSseEvent(event: JobSseEvent): JobSseEvent {
 }
 
 export function emitJobEvent(jobId: string, event: JobSseEvent): void {
-  getAppContext().eventBus.emit(jobId, slimJobSseEvent(event))
+  getAppContext().eventBus.emit(`job:${jobId}`, slimJobSseEvent(event))
 }
 
 export {
@@ -122,7 +121,9 @@ export function subscribeJobEvents(
   jobId: string,
   listener: (event: JobSseEvent) => void
 ): () => void {
-  return getAppContext().eventBus.subscribe(jobId, listener)
+  return getAppContext().eventBus.subscribe(`job:${jobId}`, (event) => {
+    listener(event as JobSseEvent)
+  })
 }
 
 export async function listUserJobs(
@@ -1004,83 +1005,6 @@ export async function pushPlanningProgressFenced(
   registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
 ): Promise<void> {
   return pushPlanningProgress(jobId, runId, done, partialPlan, registeredPlan)
-}
-
-function shouldCloseJobStream(status: string): boolean {
-  return (
-    status === 'plan_editing' ||
-    status === 'plan_ready' ||
-    status === 'pausing' ||
-    status === 'paused' ||
-    status === 'completed' ||
-    status === 'failed' ||
-    status === 'cancelled'
-  )
-}
-
-export async function* streamJobEvents(
-  username: string,
-  threadId: string,
-  jobId: string
-): AsyncGenerator<JobSseEvent> {
-  const job = await getThreadJob(username, threadId, jobId)
-  if (!job) {
-    throw AppError.notFound('Job not found', 'job.not_found')
-  }
-
-  yield { event: 'job_snapshot', data: { job } }
-  yield { event: 'plan_progress', data: { planProgress: job.planProgress } }
-  yield { event: 'task_progress', data: { taskProgress: job.taskProgress } }
-
-  if (shouldCloseJobStream(job.status)) {
-    if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
-      yield { event: 'job_done', data: { job } }
-    }
-    return
-  }
-
-  const queue: JobSseEvent[] = []
-  let resolveWait: (() => void) | null = null
-
-  const unsubscribe = subscribeJobEvents(jobId, (event) => {
-    enqueueJobSseEvent(queue, event)
-    resolveWait?.()
-    resolveWait = null
-  })
-
-  try {
-    while (true) {
-      while (queue.length > 0) {
-        const event = queue.shift()!
-        yield event
-        if (event.event === 'job_done' || event.event === 'error') {
-          const latest = await getThreadJob(username, threadId, jobId)
-          if (latest && shouldCloseJobStream(latest.status)) {
-            return
-          }
-        }
-      }
-
-      const latest = await getThreadJob(username, threadId, jobId)
-      if (latest && shouldCloseJobStream(latest.status)) {
-        if (
-          latest.status === 'completed' ||
-          latest.status === 'failed' ||
-          latest.status === 'cancelled'
-        ) {
-          yield { event: 'job_done', data: { job: latest } }
-        }
-        return
-      }
-
-      await new Promise<void>((resolve) => {
-        resolveWait = resolve
-        setTimeout(resolve, 15000)
-      })
-    }
-  } finally {
-    unsubscribe()
-  }
 }
 
 export async function getTaskEvidenceDetailForUser(input: {

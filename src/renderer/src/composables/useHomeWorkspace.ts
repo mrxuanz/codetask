@@ -1,4 +1,4 @@
-import { inject, onMounted, provide, ref, type InjectionKey, type Ref } from 'vue'
+import { inject, onMounted, onScopeDispose, provide, ref, watch, type InjectionKey, type Ref } from 'vue'
 import { createProject, deleteProject, fetchProjects, type Project } from '@renderer/api/projects'
 import {
   createThread,
@@ -7,6 +7,8 @@ import {
   renameThread,
   type Thread
 } from '@renderer/api/threads'
+import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import { threadTopic } from '@shared/contracts/job-event-hub'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { workspaceRootsMatch } from '@renderer/lib/workspace'
 
@@ -258,6 +260,29 @@ export function provideHomeWorkspace(): HomeWorkspaceContext {
     threads.value = threads.value.map((item) => (item.id === threadId ? thread : item))
     return thread
   }
+
+  const hub = useJobEventHub()
+  let threadHubRelease: (() => void) | null = null
+
+  watch(
+    activeThreadId,
+    (threadId) => {
+      threadHubRelease?.()
+      threadHubRelease = null
+      if (!threadId) return
+      threadHubRelease = hub.watchTopic(threadTopic(threadId), (envelope) => {
+        if (envelope.event === 'thread_updated' || envelope.event === 'thread_snapshot') {
+          syncThread(envelope.data.thread)
+        }
+      })
+    },
+    { immediate: true }
+  )
+
+  onScopeDispose(() => {
+    threadHubRelease?.()
+    threadHubRelease = null
+  })
 
   const ctx: HomeWorkspaceContext = {
     projects,

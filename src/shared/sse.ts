@@ -1,18 +1,21 @@
 export interface SseBlock {
   event: string
   data: string
+  id?: string
 }
 
 export function parseSseBlock(block: string): SseBlock | null {
   const lines = block.split('\n')
   let event = 'message'
+  let id: string | undefined
   const dataLines: string[] = []
   for (const line of lines) {
     if (line.startsWith('event:')) event = line.slice(6).trim()
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    else if (line.startsWith('id:')) id = line.slice(3).trim()
   }
   if (dataLines.length === 0) return null
-  return { event, data: dataLines.join('\n') }
+  return { event, data: dataLines.join('\n'), id }
 }
 
 export const SSE_IDLE_TIMEOUT_MS = 45_000

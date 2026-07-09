@@ -41,7 +41,7 @@
     "test:claude:light": "node --import tsx tests/sandbox/diagnose-claude-light.ts",
     "test:opencode:light": "node --import tsx tests/sandbox/diagnose-opencode-light.ts",
     "test:providers:light": "npm run test:codex:light -- --case static --skip-live --role all && npm run test:cursor:light -- --case static --skip-live && npm run test:claude:light -- --case static --skip-live && npm run test:opencode:light -- --case static --skip-live",
-    "test:unit": "node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/agent-runtime/*.test.ts tests/auth/*.test.ts tests/conversation/*.test.ts tests/db/*.test.ts tests/jobs/*.test.ts tests/mcp/*.test.ts tests/retention/*.test.ts tests/shared/*.test.ts tests/threads/*.test.ts tests/wizard/*.test.ts tests/sandbox/*.test.mjs tests/sandbox/*.test.ts",
+    "test:unit": "node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/agent-runtime/*.test.ts tests/auth/*.test.ts tests/conversation/*.test.ts tests/db/*.test.ts tests/events/*.test.ts tests/jobs/*.test.ts tests/mcp/*.test.ts tests/retention/*.test.ts tests/shared/*.test.ts tests/threads/*.test.ts tests/wizard/*.test.ts tests/sandbox/*.test.mjs tests/sandbox/*.test.ts",
     "test:workflow": "node tests/run-workflow.mjs",
     "test:provider-contract": "node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/provider-contract/*.test.ts",
     "seed:cli-benchmark": "node scripts/seed-cli-benchmark.mjs",

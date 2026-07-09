@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
-import { streamSSE } from 'hono/streaming'
 import { requireUsername } from '../auth/session'
 import {
   confirmDraftMessage,
@@ -11,7 +10,6 @@ import {
   importDraftReferences,
   addLocalCorpusDraftReference,
   listUserJobs,
-  streamJobEvents,
   updateDraftAbilityCores,
   updateDraftReferenceDescription,
   uploadDraftReferences
@@ -321,29 +319,6 @@ export function createJobRoutes(_ctx: AppContext): Hono {
       body.description ?? ''
     )
     return c.json(ok(result))
-  })
-
-  routes.get('/:threadId/jobs/:jobId/stream', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const threadId = c.req.param('threadId')
-    const jobId = c.req.param('jobId')
-
-    return streamSSE(c, async (stream) => {
-      try {
-        for await (const chunk of streamJobEvents(username, threadId, jobId)) {
-          await stream.writeSSE({
-            event: chunk.event,
-            data: JSON.stringify(chunk.data)
-          })
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Job stream failed'
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ message })
-        })
-      }
-    })
   })
 
   return routes

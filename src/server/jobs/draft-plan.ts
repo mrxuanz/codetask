@@ -210,6 +210,10 @@ async function persistDraftPayload(
   if (!updated?.payload) {
     throw AppError.internal('Failed to update draft', 'turn.unknown')
   }
+  getAppContext().eventBus.emit(`thread:${threadId}`, {
+    event: 'draft_updated',
+    data: { message: updated }
+  })
   return { messageId, payload: updated.payload as Record<string, unknown>, message: updated }
 }
 

@@ -39,6 +39,13 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+function emitThreadUpdated(thread: ThreadDto): void {
+  getAppContext().eventBus.emit(`thread:${thread.id}`, {
+    event: 'thread_updated',
+    data: { thread }
+  })
+}
+
 function defaultConversationId(now: number, id: string): string {
   return `conv-${now}-${id}`
 }
@@ -238,7 +245,9 @@ export async function renameThread(
   if (!row) {
     throw AppError.internal('Failed to read thread after rename', 'thread.read_failed')
   }
-  return toThreadDto(row)
+  const dto = toThreadDto(row)
+  emitThreadUpdated(dto)
+  return dto
 }
 
 export async function autoRenameThreadFromDraft(
@@ -294,7 +303,9 @@ export async function updateThreadContext(
   const row = await getThreadRow(username, threadId)
   if (!row)
     throw AppError.internal('Failed to read thread after updating context', 'thread.read_failed')
-  return toThreadDto(row)
+  const dto = toThreadDto(row)
+  emitThreadUpdated(dto)
+  return dto
 }
 
 export async function updateThreadCore(
@@ -345,7 +356,9 @@ export async function updateThreadCore(
   if (!row) {
     throw AppError.internal('Failed to read thread after switching CLI', 'thread.read_failed')
   }
-  return toThreadDto(row)
+  const dto = toThreadDto(row)
+  emitThreadUpdated(dto)
+  return dto
 }
 
 export async function updateThreadRuntime(
@@ -383,7 +396,9 @@ export async function updateThreadRuntime(
       'thread.read_failed'
     )
   }
-  return toThreadDto(updated)
+  const dto = toThreadDto(updated)
+  emitThreadUpdated(dto)
+  return dto
 }
 
 export async function threadHasMessages(threadId: string): Promise<boolean> {

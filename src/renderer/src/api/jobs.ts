@@ -1,6 +1,5 @@
 import { authHeaders } from '@renderer/auth/token'
 import type {
-  JobSseEvent,
   MessageAttachment,
   TaskProgressDto,
   ThreadDraftSummaryDto,
@@ -11,8 +10,6 @@ import type {
 import type { ConversationMessageDto } from '@shared/contracts/conversation'
 import { api, ApiError } from './client'
 import type { ApiResponse } from './types'
-import { throwIfNotSseResponse } from './sse'
-import { parseSseBlock, readSseWithTimeout } from '@shared/sse'
 
 export type {
   JobSseEvent,
@@ -395,43 +392,4 @@ export function addLocalCorpusDraftReference(
       body: JSON.stringify(input)
     }
   )
-}
-
-export async function streamThreadJob(
-  threadId: string,
-  jobId: string,
-  onEvent: (event: JobSseEvent) => void,
-  options?: { signal?: AbortSignal }
-): Promise<void> {
-  const res = await fetch(`/api/threads/${threadId}/jobs/${jobId}/stream`, {
-    headers: {
-      Accept: 'text/event-stream',
-      ...authHeaders()
-    },
-    signal: options?.signal
-  })
-
-  await throwIfNotSseResponse(res)
-
-  const reader = res.body?.getReader()
-  if (!reader) throw new ApiError('SSE 响应无 body', res.status, null)
-
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  while (true) {
-    const { done, value } = await readSseWithTimeout(reader)
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() ?? ''
-    for (const part of parts) {
-      const parsed = parseSseBlock(part)
-      if (!parsed) continue
-      onEvent({
-        event: parsed.event as JobSseEvent['event'],
-        data: JSON.parse(parsed.data)
-      } as JobSseEvent)
-    }
-  }
 }

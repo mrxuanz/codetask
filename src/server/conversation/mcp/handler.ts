@@ -37,7 +37,6 @@ import {
   requestPhaseRollback,
   resolveWizardPhase
 } from '../../wizard/phase'
-import { isToolAllowedInWizardPhase } from '../../wizard/tools'
 import type { WizardPhase } from '../../wizard/types'
 import {
   isWizardPhase,
@@ -93,6 +92,19 @@ async function rejectIfWizardToolPhaseBlocked(
   const row = await getThreadRow(session.username, session.threadId)
   if (!row) throw AppError.notFound('Thread not found', 'thread.not_found')
   const resolvedPhase = resolveWizardPhase(row)
+  if (
+    session.wizardStage &&
+    isWizardPhase(session.wizardStage) &&
+    session.wizardStage !== resolvedPhase
+  ) {
+    console.warn('[conversation-mcp] wizard phase mismatch', {
+      threadId: session.threadId,
+      sessionId: session.sessionId,
+      toolName,
+      sessionWizardStage: session.wizardStage,
+      resolvedPhase
+    })
+  }
   const block = evaluateWizardToolPhaseAccess({
     toolName,
     wizardStage: session.wizardStage,
@@ -100,20 +112,6 @@ async function rejectIfWizardToolPhaseBlocked(
   })
   if (!block) return null
   return toolTextResult(mcpMutationRejected(block.message))
-}
-
-function assertSessionWizardTool(
-  session: NonNullable<ReturnType<typeof getConversationMcpSession>>,
-  toolName: string
-): void {
-  if (!session.wizardStage || !isWizardPhase(session.wizardStage)) return
-  if (!isToolAllowedInWizardPhase(toolName, session.wizardStage)) {
-    throw AppError.badRequest(
-      `Tool "${toolName}" is not available in the current phase`,
-      'wizard.tool_not_allowed',
-      { toolName }
-    )
-  }
 }
 
 async function assertMcpWizardPhase(
@@ -136,8 +134,6 @@ async function dispatchTool(
   if (!session) {
     throw AppError.badRequest(`Agent session "${sessionId}" not found or already closed`)
   }
-
-  assertSessionWizardTool(session, toolName)
 
   const phaseRejected = await rejectIfWizardToolPhaseBlocked(session, toolName)
   if (phaseRejected) return phaseRejected
@@ -313,6 +309,11 @@ async function proposeTaskDraft(
       sourceMessageIds: [session.userMessageId]
     })
   })
+
+  // Keep draft pointer fresh for same-turn get/update. Do not mutate
+  // session.wizardStage — it is bound into the MCP capability token for this turn.
+  session.activeDraftId = message.id
+  session.activePlanId = null
 
   return {
     accepted: true,
@@ -935,7 +936,12 @@ export async function handleConversationMcpJsonRpc(
 
   if (method === 'tools/list') {
     const session = getConversationMcpSession(sessionId)
-    const tools = conversationMcpToolDefinitionsForPhase(session?.wizardStage ?? null)
+    let phase: WizardPhase | null = null
+    if (session) {
+      const row = await getThreadRow(session.username, session.threadId)
+      if (row) phase = resolveWizardPhase(row)
+    }
+    const tools = conversationMcpToolDefinitionsForPhase(phase)
     return jsonRpcOk(id, { tools })
   }
 

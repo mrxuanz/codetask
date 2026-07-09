@@ -20,6 +20,7 @@ import {
 } from '@renderer/api/jobs'
 import type { JobSseEvent } from '@shared/contracts/sse'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import { threadTopic } from '@shared/contracts/job-event-hub'
 import { resolveDraftPlanReference } from '@shared/draft-plan-resolve'
 import { updateThreadContext } from '@renderer/api/threads'
 import {
@@ -37,6 +38,8 @@ export interface DraftPlanWorkspaceContext {
   drafts: Ref<ThreadDraftSummaryDto[]>
   plans: Ref<ThreadJobDto[]>
   loading: Ref<boolean>
+  /** False until the first loadWorkspace for the current thread finishes (success or error). */
+  workspaceReady: Ref<boolean>
   error: Ref<string | null>
   successMessage: Ref<string | null>
   selectedDraftId: Ref<string | null>
@@ -80,6 +83,7 @@ export function provideDraftPlanWorkspace(options: {
   const drafts = ref<ThreadDraftSummaryDto[]>([])
   const plans = ref<ThreadJobDto[]>([])
   const loading = ref(false)
+  const workspaceReady = ref(false)
   const error = ref<string | null>(null)
   const successMessage = ref<string | null>(null)
   const selectedDraftId = ref<string | null>(null)
@@ -90,6 +94,7 @@ export function provideDraftPlanWorkspace(options: {
   const retryingPlan = ref(false)
   let loadToken = 0
   let planHubRelease: (() => void) | null = null
+  let threadHubRelease: (() => void) | null = null
   let watchedPlanJobId: string | null = null
   const jobHub = useJobEventHub()
 
@@ -97,6 +102,21 @@ export function provideDraftPlanWorkspace(options: {
     planHubRelease?.()
     planHubRelease = null
     watchedPlanJobId = null
+  }
+
+  function stopThreadWatch(): void {
+    threadHubRelease?.()
+    threadHubRelease = null
+  }
+
+  function watchThread(threadId: string): void {
+    stopThreadWatch()
+    threadHubRelease = jobHub.watchTopic(threadTopic(threadId), (envelope) => {
+      if (options.threadId.value !== threadId) return
+      if (envelope.event === 'draft_updated') {
+        void onDraftUpdated(envelope.data.message)
+      }
+    })
   }
 
   const draftMessages = computed(() =>
@@ -233,7 +253,10 @@ export function provideDraftPlanWorkspace(options: {
 
   async function loadWorkspace(): Promise<void> {
     const threadId = options.threadId.value
-    if (!threadId) return
+    if (!threadId) {
+      workspaceReady.value = false
+      return
+    }
     const token = ++loadToken
     loading.value = true
     error.value = null
@@ -270,6 +293,7 @@ export function provideDraftPlanWorkspace(options: {
     } finally {
       if (token === loadToken) {
         loading.value = false
+        workspaceReady.value = true
       }
     }
   }
@@ -439,12 +463,15 @@ export function provideDraftPlanWorkspace(options: {
 
   watch(
     () => options.threadId.value,
-    () => {
+    (threadId) => {
       stopPlanStream()
+      stopThreadWatch()
       selectedDraftId.value = null
       currentStep.value = 0
       centerView.value = 'draft'
       successMessage.value = null
+      workspaceReady.value = false
+      if (threadId) watchThread(threadId)
       void loadWorkspace()
     },
     { immediate: true }
@@ -452,6 +479,7 @@ export function provideDraftPlanWorkspace(options: {
 
   onScopeDispose(() => {
     stopPlanStream()
+    stopThreadWatch()
   })
 
   watch(
@@ -465,6 +493,7 @@ export function provideDraftPlanWorkspace(options: {
     drafts,
     plans,
     loading,
+    workspaceReady,
     error,
     successMessage,
     selectedDraftId,
