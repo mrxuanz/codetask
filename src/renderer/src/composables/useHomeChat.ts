@@ -52,6 +52,13 @@ export interface HomeChatContext {
 
 export const HomeChatKey: InjectionKey<HomeChatContext> = Symbol('homeChat')
 
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError')
+  )
+}
+
 export function useHomeChat(
   syncThread: (thread: Thread) => void,
   patchThreadRuntime: (
@@ -75,23 +82,42 @@ export function useHomeChat(
   const sending = ref(false)
   const error = ref<string | null>(null)
   let openToken = 0
+  let streamAbort: AbortController | null = null
+  let streamGeneration = 0
+
+  function abortActiveStream(): void {
+    if (!streamAbort) return
+    streamAbort.abort()
+    streamAbort = null
+  }
+
+  function isViewingThread(threadId: string): boolean {
+    return activeThreadId.value === threadId
+  }
 
   function clear(): void {
     openToken += 1
+    abortActiveStream()
     messages.value = []
     activeThreadId.value = null
     activeCoreCode.value = null
     runtimeStatus.value = 'idle'
     streamingMessageId.value = null
     awaitingAssistantReply.value = false
+    sending.value = false
     error.value = null
     loading.value = false
   }
 
-  function clearStreamingMessage(): void {
-    if (!streamingMessageId.value) return
-    messages.value = removeStreamingAssistantMessage(messages.value, streamingMessageId.value)
+  function clearStreamingMessage(options?: { removePlaceholder?: boolean }): void {
+    const messageId = streamingMessageId.value
     streamingMessageId.value = null
+    if (!messageId || options?.removePlaceholder === false) return
+    const existing = messages.value.find((message) => message.id === messageId)
+    // Only drop empty in-flight placeholders; keep streamed content if finalize never arrived.
+    if (existing && !existing.content.trim() && !existing.thinking?.trim()) {
+      messages.value = removeStreamingAssistantMessage(messages.value, messageId)
+    }
   }
 
   function displayError(value: TurnErrorDto | string | null | undefined): string | null {
@@ -103,18 +129,26 @@ export function useHomeChat(
     activeCoreCode.value = state.core?.code ?? activeCoreCode.value
     error.value = displayError(state.lastError)
     if (state.runtimeStatus !== 'running') {
-      clearStreamingMessage()
+      // done/idle: stop streaming cursor without wiping the finalized assistant message
+      clearStreamingMessage({ removePlaceholder: false })
     }
   }
 
   async function openThread(thread: Thread): Promise<void> {
+    const sameThread = activeThreadId.value === thread.id
     const token = ++openToken
+    if (!sameThread) {
+      // Detach in-flight SSE from the previous thread so deltas cannot leak into this view.
+      abortActiveStream()
+      awaitingAssistantReply.value = false
+      sending.value = false
+      messages.value = []
+      loading.value = true
+    }
     activeThreadId.value = thread.id
     activeCoreCode.value = thread.coreCode
     runtimeStatus.value = thread.runtimeStatus || 'idle'
     streamingMessageId.value = null
-    messages.value = []
-    loading.value = true
     error.value = displayError(thread.lastError)
 
     try {
@@ -184,6 +218,11 @@ export function useHomeChat(
     const outbound = input.message.trim()
     if (!outbound && !(input.files?.length ?? 0)) return null
 
+    abortActiveStream()
+    const controller = new AbortController()
+    const generation = ++streamGeneration
+    streamAbort = controller
+
     sending.value = true
     runtimeStatus.value = 'running'
     awaitingAssistantReply.value = true
@@ -214,6 +253,9 @@ export function useHomeChat(
     try {
       const attachmentIds: string[] = []
       for (const file of input.files ?? []) {
+        if (controller.signal.aborted || !isViewingThread(threadId)) {
+          throw new DOMException('The operation was aborted.', 'AbortError')
+        }
         const attachment = await uploadThreadAttachment(threadId, file)
         attachmentIds.push(attachment.id)
       }
@@ -222,8 +264,12 @@ export function useHomeChat(
         threadId,
         outbound,
         (event) => {
+          // Sidebar/runtime patches are safe for any thread; message UI is view-scoped.
+          const viewing = isViewingThread(threadId)
+
           switch (event.event) {
             case 'user_message':
+              if (!viewing) break
               messages.value = replaceOptimisticUserMessage(
                 messages.value,
                 optimisticUserId,
@@ -232,6 +278,7 @@ export function useHomeChat(
               optimisticUserId = null
               break
             case 'draft_message': {
+              if (!viewing) break
               const draftMessage = event.data.message
               const exists = messages.value.some((m) => m.id === draftMessage.id)
               messages.value = exists
@@ -243,6 +290,7 @@ export function useHomeChat(
               input.onPlanUpdated?.(event.data.job)
               break
             case 'assistant_start':
+              if (!viewing) break
               activeStreamingId = event.data.messageId
               activeThinking = ''
               streamingMessageId.value = event.data.messageId
@@ -255,7 +303,7 @@ export function useHomeChat(
               )
               break
             case 'thinking_delta':
-              if (!activeStreamingId) break
+              if (!viewing || !activeStreamingId) break
               activeThinking += event.data.content
               messages.value = upsertStreamingAssistantMessage(
                 messages.value,
@@ -266,7 +314,7 @@ export function useHomeChat(
               )
               break
             case 'delta':
-              if (!activeStreamingId) break
+              if (!viewing || !activeStreamingId) break
               {
                 const current =
                   messages.value.find((m) => m.id === activeStreamingId)?.content ?? ''
@@ -280,13 +328,13 @@ export function useHomeChat(
               }
               break
             case 'assistant_message':
+              if (!viewing) break
               messages.value = finalizeStreamingAssistantMessage(messages.value, event.data.message)
               activeStreamingId = null
               streamingMessageId.value = null
               awaitingAssistantReply.value = false
               break
             case 'done':
-              applyStatus(event.data.state)
               syncThread(event.data.thread)
               patchThreadRuntime(event.data.thread.id, {
                 coreCode: event.data.thread.coreCode,
@@ -297,6 +345,9 @@ export function useHomeChat(
                 updatedAt: event.data.thread.updatedAt
               })
               resultThread = event.data.thread
+              if (viewing) {
+                applyStatus(event.data.state)
+              }
               break
             case 'thread_updated':
               syncThread(event.data.thread)
@@ -313,33 +364,49 @@ export function useHomeChat(
               }
               break
             case 'error':
-              clearStreamingMessage()
-              activeStreamingId = null
-              awaitingAssistantReply.value = false
-              runtimeStatus.value = 'error'
-              error.value = displayError(event.data.error ?? event.data.message)
               patchThreadRuntime(threadId, {
-                coreCode: activeCoreCode.value ?? 'codex',
+                coreCode: coreCode,
                 runtimeStatus: 'error',
                 runtimeSessionId: null,
                 lastError: coerceTurnErrorField(event.data.error ?? event.data.message),
                 lastUsedAt: Math.floor(Date.now() / 1000),
                 updatedAt: Math.floor(Date.now() / 1000)
               })
+              if (!viewing) break
+              clearStreamingMessage()
+              activeStreamingId = null
+              awaitingAssistantReply.value = false
+              runtimeStatus.value = 'error'
+              error.value = displayError(event.data.error ?? event.data.message)
               break
           }
         },
-        { generateDraft, createTaskMode: input.createTaskMode === true, attachmentIds }
+        {
+          generateDraft,
+          createTaskMode: input.createTaskMode === true,
+          attachmentIds,
+          signal: controller.signal
+        }
       )
       return resultThread
     } catch (err) {
-      clearStreamingMessage()
-      awaitingAssistantReply.value = false
-      runtimeStatus.value = 'error'
-      error.value = err instanceof Error ? err.message : t('workspace.sendFailed')
+      if (isAbortError(err)) {
+        return null
+      }
+      if (generation === streamGeneration && isViewingThread(threadId)) {
+        clearStreamingMessage()
+        awaitingAssistantReply.value = false
+        runtimeStatus.value = 'error'
+        error.value = err instanceof Error ? err.message : t('workspace.sendFailed')
+      }
       return null
     } finally {
-      sending.value = false
+      if (streamAbort === controller) {
+        streamAbort = null
+      }
+      if (generation === streamGeneration && isViewingThread(threadId)) {
+        sending.value = false
+      }
     }
   }
 

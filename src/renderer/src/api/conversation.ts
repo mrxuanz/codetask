@@ -45,8 +45,14 @@ export async function streamThreadMessage(
     attachmentIds?: string[]
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
+    signal?: AbortSignal
   }
 ): Promise<void> {
+  const signal = options?.signal
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError')
+  }
+
   const res = await fetch(`/api/threads/${threadId}/messages`, {
     method: 'POST',
     headers: {
@@ -61,7 +67,8 @@ export async function streamThreadMessage(
       attachmentIds: options?.attachmentIds ?? [],
       selectedDraftSection: options?.selectedDraftSection,
       selectedPlanNodeRef: options?.selectedPlanNodeRef
-    })
+    }),
+    signal
   })
 
   await throwIfNotSseResponse(res)
@@ -71,25 +78,40 @@ export async function streamThreadMessage(
     throw new ApiError('SSE 响应无 body', res.status, null)
   }
 
+  const cancelReader = (): void => {
+    void reader.cancel().catch(() => {})
+  }
+  signal?.addEventListener('abort', cancelReader, { once: true })
+
   const decoder = new TextDecoder()
   let buffer = ''
 
-  while (true) {
-    const { done, value } = await readSseWithTimeout(reader)
-    if (done) break
+  try {
+    while (true) {
+      if (signal?.aborted) break
+      const { done, value } = await readSseWithTimeout(reader)
+      if (done) break
 
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() ?? ''
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
 
-    for (const part of parts) {
-      const parsed = parseSseBlock(part)
-      if (!parsed) continue
-      onEvent({
-        event: parsed.event as ChatSseEvent['event'],
-        data: JSON.parse(parsed.data)
-      } as ChatSseEvent)
+      for (const part of parts) {
+        if (signal?.aborted) break
+        const parsed = parseSseBlock(part)
+        if (!parsed) continue
+        onEvent({
+          event: parsed.event as ChatSseEvent['event'],
+          data: JSON.parse(parsed.data)
+        } as ChatSseEvent)
+      }
     }
+  } finally {
+    signal?.removeEventListener('abort', cancelReader)
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError')
   }
 }
 

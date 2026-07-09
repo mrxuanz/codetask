@@ -62,8 +62,10 @@ const busy = computed(
   () => sending.value || runtimeStatus.value === 'running' || coreSwitching.value
 )
 
-watch(
-  () => [activeProject.value?.id, activeThread.value?.id] as const,
+// Multi-source watch compares each id; a getter that returns `[id, id]` would
+  // allocate a new array every run and re-open on syncThread() (blank flash).
+  watch(
+  [() => activeProject.value?.id, () => activeThread.value?.id],
   ([projectId, threadId]) => {
     if (!projectId || !threadId || !activeThread.value) {
       chat.clear()
