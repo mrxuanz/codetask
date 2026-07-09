@@ -40,7 +40,6 @@ dmg:
 linux:
   target:
     - AppImage
-    - snap
     - deb
   maintainer: electronjs.org
   category: Utility
@@ -48,7 +47,9 @@ appImage:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 deb:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  depends:
+    - libnss3
+    - libgbm1
+    - libgtk-3-0
+    - libasound2
 npmRebuild: false
-publish:
-  provider: generic
-  url: https://example.com/auto-updates

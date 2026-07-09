@@ -70,7 +70,7 @@ export function requireAuth(): MiddlewareHandler {
       return next()
     }
 
-    if (isAttachmentAssetTokenGet(c.req.method, c.req.path, c.req.query('asset_token'))) {
+    if (isAttachmentAssetTokenGet(c.req.method, c.req.path, c.req.query('asset_token') || c.req.header('x-asset-token'))) {
       return next()
     }
 

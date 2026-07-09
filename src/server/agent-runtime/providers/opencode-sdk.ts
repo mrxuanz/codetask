@@ -11,10 +11,8 @@ import { createTurnError, TURN_CANCELLED, type TurnError } from '../../../shared
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
-import { TurnScope, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { ProgressGuard } from '../progress-guard'
-import { getExecutionRunContext } from '../../jobs/execution-run-context'
-import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
+import { assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import { createProviderTurnScope } from '../provider-turn'
 
 type NodeSpawn = typeof import('child_process').spawn
 
@@ -334,28 +332,11 @@ export async function* streamOpencodeTurn(
   options?.signal?.addEventListener('abort', abortTurn, { once: true })
   if (options?.signal?.aborted) abortTurn()
 
-  const progressGuard = new ProgressGuard(input.role)
-
-  const turnScope = new TurnScope({
-    role: input.role,
-    externalSignal: options?.signal,
+  const turnScope = createProviderTurnScope(input.role, options, {
     processExit: server.processExit,
-    progressGuard,
-    onKeepAlive: () => {
-      const ctx = getExecutionRunContext()
-      if (ctx?.runId) {
-        void refreshWorkloadLease(ctx.runId)
-      }
-    },
-    onCancel: async (mode) => {
-      if (mode === 'soft') {
-        abortTurn()
-      } else {
-        server.close()
-      }
-    }
+    onSoftCancel: () => abortTurn(),
+    onHardCancel: () => server.close()
   })
-  turnScope.arm()
 
   let sessionId = input.runtimeSessionId ?? ''
   let reply = ''

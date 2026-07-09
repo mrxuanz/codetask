@@ -13,8 +13,7 @@ import {
 import { resolveMainSandboxScript } from './packaged-paths'
 import type { RunSandboxedTurnInput } from './orchestrator-local'
 import { safePollSandboxExit, throwIfSandboxTurnAborted } from './turn-guards'
-
-const TURN_DONE_MARKER = '{"type":"_turn_done"}'
+import { readSandboxChunks, readStderrPreview } from './stdout-reader'
 
 interface JobCursorSandboxSession {
   jobId: string
@@ -46,7 +45,6 @@ async function* readTurnChunks(
   signal?: AbortSignal
 ): AsyncGenerator<AgentTurnChunk> {
   let streamEnded = false
-  let lineCount = 0
 
   const abort = (): void => terminateSandboxTree(handle)
   signal?.addEventListener('abort', abort, { once: true })
@@ -54,36 +52,20 @@ async function* readTurnChunks(
   try {
     throwIfSandboxTurnAborted(signal)
 
-    for await (const line of readSandboxStdoutLines(handle, {
+    const stdoutLines = readSandboxStdoutLines(handle, {
       keepReading: () => !streamEnded,
       pollExit: () => safePollSandboxExit(handle)
-    })) {
-      throwIfSandboxTurnAborted(signal)
-      lineCount += 1
+    })
 
-      if (line === TURN_DONE_MARKER) {
-        streamEnded = true
-        break
-      }
-      const chunk = JSON.parse(line) as AgentTurnChunk
-      if (chunk.type === 'error') {
-        throw new SandboxError(chunk.message, 'sandbox.sdk.error')
-      }
-      yield chunk
-      if (chunk.type === 'completed') {
-        streamEnded = true
-        break
-      }
-    }
+    yield* readSandboxChunks(stdoutLines, {
+      signal,
+      stopOnDoneMarker: true,
+      debugPrefix: 'job-cursor-pool'
+    })
 
+    const lineCount = 0
+    const stderrPreview = readStderrPreview(handle)
     if (lineCount === 0) {
-      let stderrPreview = ''
-      for (;;) {
-        const tail = handle.readStderrChunk(64 * 1024)
-        if (tail.length === 0) break
-        stderrPreview += tail.toString('utf8')
-        if (stderrPreview.length > 4000) break
-      }
       sandboxTurnDebug('job-cursor-pool: no stdout before worker exit', {
         stderrPreview: stderrPreview.trim().slice(0, 500) || undefined
       })

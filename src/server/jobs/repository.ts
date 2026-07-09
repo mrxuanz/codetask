@@ -5,14 +5,12 @@ import { enrichJobWithRecoveryState } from '@shared/job-recovery-state'
 import { hydrateTurnErrorField, coercePersistedTurnError } from '../turn-errors/store'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
-import { loadTaskProgress, saveTaskProgress, saveTaskProgressInTx } from '../db/job-progress'
+import { loadTaskProgress, saveTaskProgressInTx } from '../db/job-progress'
 import {
   loadJobAbilities,
   loadJobPlan,
   loadPlanProgress,
-  saveJobPlan,
-  saveJobPlanInTx,
-  savePlanProgress
+  saveJobPlanInTx
 } from '../db/job-plan'
 import { designSessions, jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
 import { mapDesignSessionToJobDto } from '../design-session/service'
@@ -24,6 +22,7 @@ import { readRetentionSettings } from '../retention/settings'
 import {
   deleteSupersededTaskProgressEvidenceArtifacts,
   deleteTaskProgressEvidenceArtifacts,
+  externalizeTaskProgressEvidence,
   externalizeTaskProgressEvidenceForCommit,
   type ExternalizedEvidenceArtifact
 } from './evidence/store'
@@ -38,14 +37,23 @@ function nowSec(): number {
 }
 
 export function executionLeaseOwner(): string {
-  return `pid-${process.pid}`
+  const ctx = getAppContext()
+  return `${process.pid}-${ctx.bootId}`
 }
 
-/** Another process held the lease before restart; that PID is no longer alive here. */
+export function bootIdFromLeaseOwner(owner: string | null | undefined): string | null {
+  if (!owner) return null
+  const idx = owner.indexOf('-')
+  if (idx < 0) return null
+  return owner.slice(idx + 1)
+}
+
+/** Another process held the lease before restart; its bootId differs from ours. */
 export function isStaleExecutionLeaseOwner(owner: string | null | undefined): boolean {
   if (!owner) return false
   if (owner === executionLeaseOwner()) return false
-  return owner.startsWith('pid-')
+  const ownerBootId = bootIdFromLeaseOwner(owner)
+  return ownerBootId !== null && ownerBootId !== getAppContext().bootId
 }
 
 export function clearStaleExecutionLeaseIfNeeded(jobId: string): boolean {
@@ -436,7 +444,7 @@ export async function updateJobRow(
   options?: { includePlan?: boolean; hydrateEvidence?: boolean }
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
-  const existingRows = await db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1)
+  const existingRows = db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1).all()
   const previousStatus = existingRows[0]?.status
   const threadId = existingRows[0]?.threadId
 
@@ -453,27 +461,53 @@ export async function updateJobRow(
     ...(lastError !== undefined ? { lastError: coercePersistedTurnError(lastError) } : {})
   }
 
-  if (Object.keys(dbPatch).length > 0) {
-    await db
-      .update(threadJobs)
-      .set({ ...dbPatch, ...leaseClear, updatedAt: now })
-      .where(eq(threadJobs.id, jobId))
-  }
-
-  if (plan !== undefined) {
-    await saveJobPlan(db, jobId, plan)
-    await db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId))
-  }
-
-  if (planProgress) {
-    await savePlanProgress(db, jobId, planProgress)
-    await db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId))
-  }
-
+  let storedTaskProgress: TaskProgressDto | undefined
   if (taskProgress) {
-    await saveTaskProgress(db, jobId, taskProgress)
-    await db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId))
+    const dataDir = getAppContext().dataDir
+    const settings = readRetentionSettings(getAppContext().settings)
+    storedTaskProgress = await externalizeTaskProgressEvidence(dataDir, jobId, taskProgress, settings)
   }
+
+  db.transaction(() => {
+    if (Object.keys(dbPatch).length > 0) {
+      db
+        .update(threadJobs)
+        .set({ ...dbPatch, ...leaseClear, updatedAt: now })
+        .where(eq(threadJobs.id, jobId))
+        .run()
+    }
+
+    if (plan !== undefined) {
+      saveJobPlanInTx(db, jobId, plan)
+      db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId)).run()
+    }
+
+    if (planProgress) {
+      const counts = {
+        milestones: planProgress.milestones,
+        slices: planProgress.slices,
+        tasks: planProgress.tasks
+      }
+      db
+        .update(threadJobs)
+        .set({
+          planPhase: planProgress.phase,
+          planStatus: planProgress.status,
+          planContextsRegistered: planProgress.contextsRegistered,
+          planContextsTotal: planProgress.contextsTotal,
+          planMessage: planProgress.message ?? null,
+          planCountsJson: JSON.stringify(counts)
+        })
+        .where(eq(threadJobs.id, jobId))
+        .run()
+      db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId)).run()
+    }
+
+    if (storedTaskProgress) {
+      saveTaskProgressInTx(db, jobId, storedTaskProgress, eq(threadJobs.id, jobId))
+      db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId)).run()
+    }
+  })
 
   if (rowPatch.status && previousStatus && threadId && rowPatch.status !== previousStatus) {
     await onJobStatusTransition({
@@ -484,7 +518,7 @@ export async function updateJobRow(
     })
   }
 
-  const rows = await db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1)
+  const rows = db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1).all()
   return rows[0]
     ? await mapJob(rows[0], {
         includePlan: options?.includePlan ?? false,

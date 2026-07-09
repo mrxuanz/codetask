@@ -1,5 +1,5 @@
 import { existsSync } from 'fs'
-import { readdir, rm } from 'fs/promises'
+import { readdir, readFile, rm, stat } from 'fs/promises'
 import { join } from 'path'
 import type { getDb } from '../db'
 import { threadJobs, threads } from '../db/schema'
@@ -12,6 +12,58 @@ export function threadRuntimeDir(dataDir: string, threadId: string): string {
 
 export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string): string {
   return join(dataDir, 'runtimes', threadId, 'jobs', jobId)
+}
+
+export async function estimateJobRuntimeBytes(
+  dataDir: string,
+  threadId: string,
+  jobId: string
+): Promise<number> {
+  const dir = jobRuntimeDir(dataDir, threadId, jobId)
+  if (!existsSync(dir)) return 0
+  let total = 0
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        const subEntries = await readdir(full, { withFileTypes: true })
+        for (const sub of subEntries) {
+          try {
+            const s = await stat(join(full, sub.name))
+            total += s.size
+          } catch {
+            // skip
+          }
+        }
+      } else {
+        try {
+          const s = await stat(full)
+          total += s.size
+        } catch {
+          // skip
+        }
+      }
+    }
+  } catch {
+    // skip
+  }
+  return total
+}
+
+export async function checkJobRuntimeQuota(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  maxBytes: number
+): Promise<void> {
+  if (maxBytes <= 0) return
+  const size = await estimateJobRuntimeBytes(dataDir, threadId, jobId)
+  if (size > maxBytes) {
+    console.warn(
+      `[runtime] job ${jobId} runtime exceeds quota: ${Math.round(size / (1024 * 1024))}MB > ${Math.round(maxBytes / (1024 * 1024))}MB`
+    )
+  }
 }
 
 export async function removeDirectoryIfExists(path: string): Promise<boolean> {
@@ -89,4 +141,62 @@ export async function pruneOrphanRuntimeTrees(
   }
 
   return { removedPaths }
+}
+
+export interface RuntimeSummary {
+  changedFiles: string[]
+  logTail: string | null
+}
+
+export async function extractRuntimeSummary(
+  dataDir: string,
+  threadId: string,
+  jobId: string
+): Promise<RuntimeSummary | null> {
+  const dir = jobRuntimeDir(dataDir, threadId, jobId)
+  if (!existsSync(dir)) return null
+
+  const changedFiles: string[] = []
+  let logTail: string | null = null
+
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
+        try {
+          const subEntries = await readdir(join(dir, entry.name), { withFileTypes: true })
+          for (const sub of subEntries) {
+            if (sub.isFile()) {
+              changedFiles.push(`${entry.name}/${sub.name}`)
+            }
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+
+    const logPaths = [
+      join(dir, 'stderr.log'),
+      join(dir, 'stdout.log'),
+      join(dir, 'agent.log')
+    ]
+    for (const logPath of logPaths) {
+      if (existsSync(logPath)) {
+        try {
+          const content = await readFile(logPath, 'utf8')
+          const lines = content.split('\n')
+          logTail = lines.slice(-50).join('\n')
+          break
+        } catch {
+          // skip
+        }
+      }
+    }
+  } catch {
+    // skip
+  }
+
+  if (changedFiles.length === 0 && !logTail) return null
+  return { changedFiles, logTail }
 }

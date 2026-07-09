@@ -5,10 +5,8 @@ import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot } from '../delta-emit'
 import { extractCodexReasoningText } from '../reasoning-text'
-import { TurnScope, recordCodexThreadItemActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { ProgressGuard } from '../progress-guard'
-import { getExecutionRunContext } from '../../jobs/execution-run-context'
-import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
+import { recordCodexThreadItemActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import { createProviderTurnScope } from '../provider-turn'
 
 function extractAgentText(item: { type?: string; text?: string }): string | null {
   if (item.type === 'agent_message' && item.text) {
@@ -87,23 +85,8 @@ export async function* streamCodexTurn(
   }
   externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
 
-  const progressGuard = new ProgressGuard(input.role)
-
-  const turnScope = new TurnScope({
-    role: input.role,
-    externalSignal,
-    progressGuard,
-    onCancel: async (mode) => {
-      if (mode === 'soft') {
-        turnAbort.abort()
-      }
-    },
-    onKeepAlive: () => {
-      const ctx = getExecutionRunContext()
-      if (ctx?.runId) {
-        void refreshWorkloadLease(ctx.runId)
-      }
-    }
+  const turnScope = createProviderTurnScope(input.role, options, {
+    onSoftCancel: () => turnAbort.abort()
   })
   turnScope.arm()
 

@@ -710,10 +710,12 @@ async function runJob(
         }
       },
       onTaskContextRegistered: (_key, done) => {
-        const partial = plannerSession.registeredPlan
-          ? flattenRegisteredPlan(plannerSession.registeredPlan, plannerSession.taskContexts)
-          : buildPartialPlanFromContexts(plannerSession.taskContexts)
-        void pushPlanningProgress(jobId, run.runId, done, partial, plannerSession.registeredPlan)
+        const session = plannerSession
+        if (!session) return
+        const partial = session.registeredPlan
+          ? flattenRegisteredPlan(session.registeredPlan, session.taskContexts)
+          : buildPartialPlanFromContexts(session.taskContexts)
+        void pushPlanningProgress(jobId, run.runId, done, partial, session.registeredPlan)
       }
     }
 

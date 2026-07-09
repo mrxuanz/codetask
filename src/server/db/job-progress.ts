@@ -209,43 +209,7 @@ export async function saveTaskProgress(
   const settings = readRetentionSettings(getAppContext().settings)
   const stored = await externalizeTaskProgressEvidence(dataDir, jobId, progress, settings)
 
-  syncJobCountersFromProgressInTx(db, jobId, stored)
-
-  const meta: TaskMeta = metaForStorage(stored)
-
-  await db
-    .update(threadJobs)
-    .set({
-      taskPhase: stored.phase,
-      taskStatus: stored.status,
-      taskCurrentIndex: stored.currentIndex,
-      taskTotal: stored.total,
-      taskCurrentTaskId: stored.currentTaskId ?? null,
-      taskMessage: stored.message ?? null,
-      taskMetaJson: JSON.stringify(meta)
-    })
-    .where(eq(threadJobs.id, jobId))
-
-  await db.delete(jobTasks).where(eq(jobTasks.jobId, jobId))
-
-  for (const [index, task] of stored.tasks.entries()) {
-    const evidence = task.evidence
-    await db.insert(jobTasks).values({
-      jobId,
-      taskId: task.id,
-      title: task.title,
-      sortOrder: index,
-      status: task.status,
-      abilityCode: task.abilityCode ?? null,
-      executionStatus: task.executionStatus ?? null,
-      evidenceStatus: task.evidenceStatus ?? null,
-      evidenceJson: evidence ? JSON.stringify(evidence) : null,
-      evidenceArtifactId: task.evidenceArtifactId ?? null,
-      evidenceSummary: task.evidenceSummary ?? (evidence ? summarizeEvidence(evidence) : null),
-      blockerKind: task.blockerKind ?? evidence?.blockerKind ?? null,
-      recoveryAction: task.recoveryAction ?? evidence?.recovery?.action ?? null,
-      errorMessage: resolveStoredTaskError(task),
-      coreCode: task.coreCode ?? null
-    })
-  }
+  db.transaction(() => {
+    saveTaskProgressInTx(db, jobId, stored, eq(threadJobs.id, jobId))
+  })
 }

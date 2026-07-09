@@ -32,7 +32,7 @@ function isSessionPlanning(sessionId: string): boolean {
 }
 
 function leaseOwner(): string {
-  return `pid-${process.pid}`
+  return `${process.pid}-${getAppContext().bootId}`
 }
 
 function nowSec(): number {
@@ -366,7 +366,13 @@ export function startWorkloadReconciler(): void {
 
   reconcilerTimer = setInterval(() => {
     void reconcileOrphanWorkloadSlotsOnStartup().catch((error) => {
-      console.warn('[reconcile] periodic workload reconciler failed', error)
+      console.warn('[reconcile] periodic workload slot reconciler failed', error)
+    })
+    void reconcileOrphanRunningJobsOnStartup().catch((error) => {
+      console.warn('[reconcile] periodic running jobs reconciler failed', error)
+    })
+    void reconcileOrphanPlanningSessionsOnStartup().catch((error) => {
+      console.warn('[reconcile] periodic planning sessions reconciler failed', error)
     })
   }, intervalMs)
   reconcilerTimer.unref?.()

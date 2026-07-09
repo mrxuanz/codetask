@@ -1,9 +1,9 @@
+import { randomUUID } from 'crypto'
 import { and, eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
-import { threads, type Thread } from '../db/schema'
+import { threadMessages, threads, type Thread } from '../db/schema'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
-import { insertMessage } from '../conversation/messages'
 import { getThreadRow, toThreadDto } from '../threads/service'
 import type { ThreadDto } from '../threads/types'
 import { RUNTIME_STATUS_IDLE } from '../threads/types'
@@ -272,19 +272,8 @@ export async function advanceWizardPhase(
   const now = nowSec()
   const runtimeMap = parseCoreRuntimeJson(row.coreRuntimeJson)
   const clearedMap = clearCorePhaseRuntime(runtimeMap, input.coreCode, input.to)
-
-  await insertMessage({
-    threadId,
-    username,
-    role: 'system',
-    kind: 'wizard-handoff',
-    content: formatHandoffMarkdown(input.handoff),
-    coreCode: input.coreCode,
-    conversationId: row.conversationId,
-    runtimeSessionId: null,
-    wizardPhase: input.to,
-    payload: input.handoff
-  })
+  const msgId = `msg-${randomUUID()}`
+  const handoffContent = formatHandoffMarkdown(input.handoff)
 
   const db = getDb()
   const patch: Partial<Thread> = {
@@ -297,10 +286,31 @@ export async function advanceWizardPhase(
   if (input.activeDraftId !== undefined) patch.activeDraftId = input.activeDraftId
   if (input.activePlanId !== undefined) patch.activePlanId = input.activePlanId
 
-  await db
-    .update(threads)
-    .set(patch)
-    .where(and(eq(threads.username, username), eq(threads.id, threadId)))
+  db.transaction(() => {
+    db.insert(threadMessages)
+      .values({
+        id: msgId,
+        threadId,
+        username,
+        role: 'system',
+        kind: 'wizard-handoff',
+        content: handoffContent,
+        coreCode: input.coreCode,
+        conversationId: row.conversationId,
+        runtimeSessionId: null,
+        payloadJson: JSON.stringify(input.handoff),
+        payloadArtifactId: null,
+        attachmentsJson: null,
+        wizardPhase: input.to,
+        createdAt: new Date().toISOString()
+      })
+      .run()
+
+    db.update(threads)
+      .set(patch)
+      .where(and(eq(threads.username, username), eq(threads.id, threadId)))
+      .run()
+  })
 
   const updated = await getThreadRow(username, threadId)
   if (!updated)

@@ -16,6 +16,7 @@ export interface AgentTurnInput {
   userMcpServers?: Record<string, unknown>
 
   jobId?: string
+  workloadRunId?: string
 }
 
 export type RoleWorkerInput = AgentTurnInput
@@ -56,6 +57,7 @@ export interface AgentTurnRunnerInput {
   readRoots?: string[]
 
   jobId?: string
+  workloadRunId?: string
 }
 
 export interface AgentTurnProvider {

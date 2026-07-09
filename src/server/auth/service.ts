@@ -1,10 +1,11 @@
-import { randomUUID } from 'crypto'
+import { randomUUID, timingSafeEqual } from 'crypto'
 import { eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
 import { authState } from '../db/schema'
 import { assertSetupCredentialsAllowed } from './credentials-policy'
 import { hashPassword, verifyPassword, DUMMY_HASH } from './password'
+import { timingSafeStringEqual } from './timing-safe'
 import {
   checkGuardState,
   recordLoginFailure,
@@ -64,10 +65,15 @@ export async function getBootstrap(token?: string): Promise<BootstrapData> {
     return { initialized: true, authenticated: false }
   }
 
-  const valid =
-    row.sessionToken === token && row.sessionExpiresAt !== null && row.sessionExpiresAt > nowSec()
+  const sessionTokenValid =
+    row.sessionToken &&
+    token &&
+    row.sessionToken.length === token.length &&
+    timingSafeEqual(Buffer.from(row.sessionToken), Buffer.from(token)) &&
+    row.sessionExpiresAt !== null &&
+    row.sessionExpiresAt > nowSec()
 
-  if (!valid) {
+  if (!sessionTokenValid) {
     return { initialized: true, authenticated: false }
   }
 
@@ -211,7 +217,21 @@ export async function loginAccount(opts: LoginOptions): Promise<AuthData> {
 
 export async function findSessionUsername(token: string): Promise<string | null> {
   const row = await getAuthRow()
-  if (!row?.sessionToken || row.sessionToken !== token) return null
+  if (!row?.sessionToken || !timingSafeStringEqual(row.sessionToken, token)) return null
   if (!row.sessionExpiresAt || row.sessionExpiresAt <= nowSec()) return null
   return row.username
+}
+
+/** Revoke the current session (single-user auth_state row). */
+export async function logoutAccount(token?: string): Promise<void> {
+  const row = await getAuthRow()
+  if (!row) return
+  if (token && row.sessionToken && !timingSafeStringEqual(row.sessionToken, token)) {
+    return
+  }
+  const db = getDb()
+  await db
+    .update(authState)
+    .set({ sessionToken: null, sessionExpiresAt: null })
+    .where(eq(authState.id, AUTH_ROW_ID))
 }
