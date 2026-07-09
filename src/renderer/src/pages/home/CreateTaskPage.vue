@@ -86,9 +86,10 @@ const busy = computed(
   () => sending.value || runtimeStatus.value === 'running' || coreSwitching.value
 )
 
-watch(
-  () => [activeProject.value?.id, activeThread.value?.id, phase.value] as const,
-  ([projectId, threadId, currentPhase]) => {
+// Multi-source watch: avoid `() => [id, id]` (new array each run → blank flash on sync).
+  watch(
+  [() => phase.value, () => activeProject.value?.id, () => activeThread.value?.id],
+  ([currentPhase, projectId, threadId]) => {
     if (currentPhase !== 'workspace' || !projectId || !threadId || !activeThread.value) {
       return
     }

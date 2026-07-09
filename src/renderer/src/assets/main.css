@@ -40,3 +40,144 @@
     @apply bg-background font-sans text-foreground antialiased;
   }
 }
+
+@layer components {
+  .chat-markdown {
+    overflow-wrap: anywhere;
+  }
+
+  .chat-markdown > :first-child {
+    margin-top: 0;
+  }
+
+  .chat-markdown > :last-child {
+    margin-bottom: 0;
+  }
+
+  .chat-markdown p {
+    margin: 0.5em 0;
+  }
+
+  .chat-markdown h1,
+  .chat-markdown h2,
+  .chat-markdown h3,
+  .chat-markdown h4 {
+    margin: 0.85em 0 0.4em;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--color-foreground);
+  }
+
+  .chat-markdown h1 {
+    font-size: 1.15em;
+  }
+
+  .chat-markdown h2 {
+    font-size: 1.05em;
+  }
+
+  .chat-markdown h3,
+  .chat-markdown h4 {
+    font-size: 1em;
+  }
+
+  .chat-markdown ul,
+  .chat-markdown ol {
+    margin: 0.5em 0;
+    padding-left: 1.35em;
+  }
+
+  .chat-markdown ul {
+    list-style: disc;
+  }
+
+  .chat-markdown ol {
+    list-style: decimal;
+  }
+
+  .chat-markdown li {
+    margin: 0.2em 0;
+  }
+
+  .chat-markdown li > p {
+    margin: 0.2em 0;
+  }
+
+  .chat-markdown blockquote {
+    margin: 0.6em 0;
+    border-left: 3px solid var(--color-border);
+    padding-left: 0.75em;
+    color: var(--color-muted-foreground);
+  }
+
+  .chat-markdown a {
+    color: oklch(0.45 0.12 250);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .chat-markdown hr {
+    margin: 0.85em 0;
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .chat-markdown code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+      'Courier New', monospace;
+    font-size: 0.85em;
+    border-radius: 0.3rem;
+    background: var(--color-muted);
+    padding: 0.1em 0.35em;
+  }
+
+  .chat-markdown pre {
+    margin: 0.65em 0;
+    overflow-x: auto;
+    border-radius: 0.6rem;
+    border: 1px solid var(--color-border);
+    background: var(--color-muted);
+    padding: 0.75rem 0.9rem;
+  }
+
+  .chat-markdown pre code {
+    display: block;
+    padding: 0;
+    background: transparent;
+    font-size: 0.8em;
+    line-height: 1.55;
+    white-space: pre;
+  }
+
+  .chat-markdown table {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0.65em 0;
+    overflow-x: auto;
+    border-collapse: collapse;
+  }
+
+  .chat-markdown th,
+  .chat-markdown td {
+    border: 1px solid var(--color-border);
+    padding: 0.35em 0.55em;
+    text-align: left;
+  }
+
+  .chat-markdown th {
+    background: var(--color-muted);
+    font-weight: 600;
+  }
+
+  .chat-markdown img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.4rem;
+  }
+
+  .chat-markdown input[type='checkbox'] {
+    margin-right: 0.4em;
+    vertical-align: middle;
+  }
+}

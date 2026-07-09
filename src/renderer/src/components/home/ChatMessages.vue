@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ConversationMessage } from '@renderer/api/conversation'
+import ChatMarkdown from '@renderer/components/home/ChatMarkdown.vue'
 import ChatThinkingBlock from '@renderer/components/home/ChatThinkingBlock.vue'
 import { useStickToBottom } from '@renderer/composables/useStickToBottom'
 import { assetUrlWithAuth } from '@renderer/auth/token'
@@ -86,7 +87,7 @@ onMounted(() => {
               "
               :class="
                 cn(
-                  'w-full whitespace-pre-wrap text-sm leading-relaxed',
+                  'w-full text-sm leading-relaxed',
                   message.role === 'user'
                     ? 'rounded-2xl border border-border bg-muted px-3 py-2 text-foreground'
                     : cn(
@@ -137,7 +138,16 @@ onMounted(() => {
                 </span>
                 <span class="sr-only">{{ t('workspace.running') }}</span>
               </template>
-              <template v-else-if="message.content.trim()">{{ message.content }}</template>
+              <ChatMarkdown
+                v-else-if="message.content.trim() && message.role === 'assistant'"
+                :text="message.content"
+                :streaming="streamingMessageId === message.id"
+              />
+              <ChatMarkdown
+                v-else-if="message.content.trim()"
+                :text="message.content"
+                breaks
+              />
             </div>
           </div>
         </div>
