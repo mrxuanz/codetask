@@ -14,7 +14,7 @@ import { join } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
-const dbPath = join(__dirname, '../data/app.db')
+const dbPath = join(__dirname, '../data/db/app.db')
 
 const DEFAULT_JOB_IDS = [
   'job-4d995b51-c763-4656-8553-295a1236e766',

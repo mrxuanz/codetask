@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   isTerminalJobStatus,
@@ -15,10 +16,10 @@ test('isTerminalJobStatus matches completed lifecycle states', () => {
 })
 
 test('runtime dir helpers resolve under data/runtimes', () => {
-  const dataDir = '/tmp/codetask-data'
-  assert.equal(threadRuntimeDir(dataDir, 'thread-1'), '/tmp/codetask-data/runtimes/thread-1')
+  const dataDir = join('tmp', 'codetask-data')
+  assert.equal(threadRuntimeDir(dataDir, 'thread-1'), join(dataDir, 'runtimes', 'thread-1'))
   assert.equal(
     jobRuntimeDir(dataDir, 'thread-1', 'job-1'),
-    '/tmp/codetask-data/runtimes/thread-1/jobs/job-1'
+    join(dataDir, 'runtimes', 'thread-1', 'jobs', 'job-1')
   )
 })

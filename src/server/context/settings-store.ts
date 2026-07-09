@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { dirname } from 'path'
+import { dataPaths } from '../data-paths'
 
 export class SettingsStore {
   constructor(private readonly dataDir: string) {}
 
   private settingsPath(): string {
-    return join(this.dataDir, 'settings.json')
+    return dataPaths(this.dataDir).settingsFile
   }
 
   read(): Record<string, unknown> {
@@ -28,8 +29,8 @@ export class SettingsStore {
   }
 
   write(value: Record<string, unknown>): void {
-    mkdirSync(this.dataDir, { recursive: true })
     const path = this.settingsPath()
+    mkdirSync(dirname(path), { recursive: true })
     const tmpPath = `${path}.tmp.${Date.now()}`
     try {
       writeFileSync(tmpPath, JSON.stringify(value, null, 2), 'utf-8')

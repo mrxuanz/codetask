@@ -5,6 +5,7 @@ import { dirname, join } from 'path'
 import { and, eq } from 'drizzle-orm'
 import { DEFAULT_RETENTION_SETTINGS } from '../../shared/contracts/retention.ts'
 import type { RetentionSettings } from '../../shared/contracts/retention.ts'
+import { messageArtifactDir, messageArtifactRelPath } from '../data-paths'
 import type { getDb } from '../db'
 import { messageArtifacts } from '../db/schema'
 
@@ -18,8 +19,9 @@ function hashContent(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
+/** @deprecated Prefer messageArtifactRelPath from data-paths; kept as re-export for callers. */
 export function messageArtifactFileRelPath(messageId: string, artifactId: string): string {
-  return join('artifacts', 'messages', messageId, `${artifactId}.json.gz`)
+  return messageArtifactRelPath(messageId, artifactId)
 }
 
 function messageArtifactFileAbsPath(
@@ -27,7 +29,7 @@ function messageArtifactFileAbsPath(
   messageId: string,
   artifactId: string
 ): string {
-  return join(dataDir, messageArtifactFileRelPath(messageId, artifactId))
+  return join(dataDir, messageArtifactRelPath(messageId, artifactId))
 }
 
 async function writeMessageArtifactFile(
@@ -77,7 +79,7 @@ export async function putMessageArtifact(input: {
   if (byteSize > inlineMax) {
     storage = 'file'
     contentInline = null
-    contentPath = messageArtifactFileRelPath(input.messageId, id)
+    contentPath = messageArtifactRelPath(input.messageId, id)
     await writeMessageArtifactFile(input.dataDir, input.messageId, id, raw)
   }
 
@@ -157,7 +159,7 @@ export async function deleteMessageArtifactFiles(
   dataDir: string,
   messageId: string
 ): Promise<void> {
-  await rm(join(dataDir, 'artifacts', 'messages', messageId), {
+  await rm(messageArtifactDir(dataDir, messageId), {
     recursive: true,
     force: true
   }).catch(() => {})

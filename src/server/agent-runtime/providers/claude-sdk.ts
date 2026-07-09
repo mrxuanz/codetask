@@ -1,7 +1,7 @@
 import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
 import { throwSdkTurnError } from '../errors'
 import { buildClaudeMcpServers } from '../mcp'
-import { resolveClaudeSettingSources } from './claude-policy'
+import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
 import { CLI_FULL_ACCESS_BUILTINS } from '../roles'
 import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
@@ -52,7 +52,7 @@ export async function* streamClaudeTurn(
       cwd: input.cwd,
       model: input.model,
       resume: input.runtimeSessionId ?? undefined,
-      systemPrompt: input.systemPrompt,
+      systemPrompt: resolveClaudeSystemPrompt(input.systemPrompt),
       settingSources: resolveClaudeSettingSources(outerSandbox),
       tools: builtins,
       allowedTools,

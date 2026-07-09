@@ -18,7 +18,6 @@ import { SettingsStore } from '../../src/server/context/settings-store'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
 import {
   pruneOrphanDesignArtifactDirs,
-  pruneOrphanJobArtifactDirs,
   pruneStaleThreadAttachmentDirs
 } from '../../src/server/retention/janitor'
 import {
@@ -32,6 +31,13 @@ import {
   shouldRunSqliteMaintenance
 } from '../../src/server/retention/maintenance'
 import { putJobArtifact } from '../../src/server/retention/artifacts'
+import {
+  attachmentDir,
+  dataPaths,
+  designArtifactDir,
+  messageArtifactDir,
+  threadAttachmentsDir
+} from '../../src/server/data-paths'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
 
 async function seedThreadGraph(
@@ -181,7 +187,6 @@ test('purgeJobFilesystem removes job artifacts and runtime tree', async () => {
 
     await purgeJobFilesystem(dataDir, threadId, jobId)
 
-    assert.equal(existsSync(join(dataDir, 'artifacts', jobId)), false)
     assert.equal(existsSync(runtimeDir), false)
   } finally {
     closeIsolatedTestDatabase(db)
@@ -196,52 +201,48 @@ test('purgeThreadFilesystem removes attachments, design artifacts, and message a
     const { threadId, designSessionId, messageId, attachmentId } = await seedThreadGraph(db)
     const targets = await collectThreadPurgeTargets(db, threadId)
 
-    mkdirSync(join(dataDir, 'attachments', threadId, attachmentId), { recursive: true })
-    writeFileSync(join(dataDir, 'attachments', threadId, attachmentId, 'ref.png'), 'png')
-    mkdirSync(join(dataDir, 'artifacts', 'designs', designSessionId), { recursive: true })
-    writeFileSync(join(dataDir, 'artifacts', 'designs', designSessionId, 'plan-v1.json.gz'), 'gz')
-    mkdirSync(join(dataDir, 'artifacts', 'messages', messageId), { recursive: true })
-    writeFileSync(join(dataDir, 'artifacts', 'messages', messageId, 'payload.json.gz'), 'gz')
-    mkdirSync(join(dataDir, 'runtimes', threadId), { recursive: true })
+    mkdirSync(attachmentDir(dataDir, threadId, attachmentId), { recursive: true })
+    writeFileSync(join(attachmentDir(dataDir, threadId, attachmentId), 'ref.png'), 'png')
+    mkdirSync(designArtifactDir(dataDir, designSessionId), { recursive: true })
+    writeFileSync(join(designArtifactDir(dataDir, designSessionId), 'plan-v1.json.gz'), 'gz')
+    mkdirSync(messageArtifactDir(dataDir, messageId), { recursive: true })
+    writeFileSync(join(messageArtifactDir(dataDir, messageId), 'payload.json.gz'), 'gz')
+    mkdirSync(join(dataPaths(dataDir).runtimes, threadId), { recursive: true })
 
     await purgeThreadFilesystem(dataDir, threadId, targets)
 
-    assert.equal(existsSync(join(dataDir, 'attachments', threadId)), false)
-    assert.equal(existsSync(join(dataDir, 'artifacts', 'designs', designSessionId)), false)
-    assert.equal(existsSync(join(dataDir, 'artifacts', 'messages', messageId)), false)
-    assert.equal(existsSync(join(dataDir, 'runtimes', threadId)), false)
+    assert.equal(existsSync(threadAttachmentsDir(dataDir, threadId)), false)
+    assert.equal(existsSync(designArtifactDir(dataDir, designSessionId)), false)
+    assert.equal(existsSync(messageArtifactDir(dataDir, messageId)), false)
+    assert.equal(existsSync(join(dataPaths(dataDir).runtimes, threadId)), false)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })
   }
 })
 
-test('janitor prunes orphan job/design artifacts and stale attachment dirs', async () => {
+test('janitor prunes orphan design artifacts and stale attachment dirs', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-janitor-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
     const { threadId, designSessionId, attachmentId } = await seedThreadGraph(db)
 
-    mkdirSync(join(dataDir, 'artifacts', 'orphan-job'), { recursive: true })
-    mkdirSync(join(dataDir, 'artifacts', 'designs', 'orphan-design'), { recursive: true })
-    mkdirSync(join(dataDir, 'artifacts', 'designs', designSessionId), { recursive: true })
-    mkdirSync(join(dataDir, 'attachments', threadId, attachmentId), { recursive: true })
-    mkdirSync(join(dataDir, 'attachments', threadId, 'att-stale'), { recursive: true })
+    mkdirSync(designArtifactDir(dataDir, 'orphan-design'), { recursive: true })
+    mkdirSync(designArtifactDir(dataDir, designSessionId), { recursive: true })
+    mkdirSync(attachmentDir(dataDir, threadId, attachmentId), { recursive: true })
+    mkdirSync(attachmentDir(dataDir, threadId, 'att-stale'), { recursive: true })
 
-    const [jobResult, designResult, attachmentResult] = await Promise.all([
-      pruneOrphanJobArtifactDirs(dataDir, db),
+    const [designResult, attachmentResult] = await Promise.all([
       pruneOrphanDesignArtifactDirs(dataDir, db),
       pruneStaleThreadAttachmentDirs(dataDir, db)
     ])
 
-    assert.equal(jobResult.removed, 1)
     assert.equal(designResult.removed, 1)
     assert.equal(attachmentResult.removed, 1)
-    assert.equal(existsSync(join(dataDir, 'artifacts', 'orphan-job')), false)
-    assert.equal(existsSync(join(dataDir, 'artifacts', 'designs', 'orphan-design')), false)
-    assert.equal(existsSync(join(dataDir, 'attachments', threadId, 'att-stale')), false)
-    assert.equal(existsSync(join(dataDir, 'attachments', threadId, attachmentId)), true)
-    assert.equal(existsSync(join(dataDir, 'artifacts', 'designs', designSessionId)), true)
+    assert.equal(existsSync(designArtifactDir(dataDir, 'orphan-design')), false)
+    assert.equal(existsSync(attachmentDir(dataDir, threadId, 'att-stale')), false)
+    assert.equal(existsSync(attachmentDir(dataDir, threadId, attachmentId)), true)
+    assert.equal(existsSync(designArtifactDir(dataDir, designSessionId)), true)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })
@@ -301,7 +302,7 @@ test('JobEventBus clearJob drops SSE listeners', () => {
   assert.equal(hits, 1)
 })
 
-test('deleting job row cascades artifact metadata while filesystem purge is explicit', async () => {
+test('deleting job row cascades artifact metadata; purgeJobFilesystem clears runtime only', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-cascade-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
@@ -322,18 +323,17 @@ test('deleting job row cascades artifact metadata while filesystem purge is expl
       settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 16 }
     })
 
-    // putJobArtifact stores inline; leave a leftover on-disk tree to assert purge is explicit.
-    const artifactDir = join(dataDir, 'artifacts', 'job-cascade')
-    mkdirSync(artifactDir, { recursive: true })
-    writeFileSync(join(artifactDir, 'leftover.json.gz'), 'gz')
+    const runtimeDir = join(dataDir, 'runtimes', 'thread-1', 'jobs', 'job-cascade')
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(join(runtimeDir, 'state.json'), '{}')
 
     await db.delete(threadJobs).where(eq(threadJobs.id, 'job-cascade'))
     const rows = await db.select().from(jobArtifacts)
     assert.equal(rows.length, 0)
-    assert.equal(existsSync(artifactDir), true)
+    assert.equal(existsSync(runtimeDir), true)
 
     await purgeJobFilesystem(dataDir, 'thread-1', 'job-cascade')
-    assert.equal(existsSync(artifactDir), false)
+    assert.equal(existsSync(runtimeDir), false)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

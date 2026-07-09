@@ -6,10 +6,6 @@ export function initSettingsStore(): void {
 }
 
 function resolveSettingsStore(): SettingsStore {
-  const fromEnv = process.env.CODETASK_DATA_DIR?.trim()
-  if (fromEnv) {
-    return new SettingsStore(fromEnv)
-  }
   return getAppContext().settings
 }
 

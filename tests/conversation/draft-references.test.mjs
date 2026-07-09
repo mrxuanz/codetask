@@ -51,7 +51,7 @@ test('buildAssignedReferencesMarkdown includes planner note and local path', () 
     ],
     referenceIds: ['ref-1'],
     referenceReason: 'Use for header component',
-    localPathById: new Map([['ref-1', '/data/attachments/thread/ref-1.png']])
+    localPathById: new Map([['ref-1', '/data/blobs/attachments/thread/ref-1.png']])
   })
   assert.match(markdown, /Assigned Draft References/)
   assert.match(markdown, /Planner note: Use for header component/)

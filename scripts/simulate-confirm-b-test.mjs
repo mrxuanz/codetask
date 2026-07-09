@@ -17,7 +17,7 @@ import { join } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
-const dbPath = join(__dirname, '../data/app.db')
+const dbPath = join(__dirname, '../data/db/app.db')
 const baseUrl = process.env.CODETASK_URL ?? 'http://127.0.0.1:8080'
 
 const TASK_A = {

@@ -1,26 +1,16 @@
 import { randomBytes, createHmac } from 'crypto'
-import { existsSync, chmodSync, readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { existsSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname } from 'path'
+import { dataPaths } from '../data-paths'
 
-const SECRET_KEY = 'security.authSecretV1'
 const SECRET_LENGTH = 32
 
 function generateSecret(): string {
   return randomBytes(SECRET_LENGTH).toString('hex')
 }
 
-function secretFilePath(dataDir: string): string {
-  return join(dataDir, 'auth-secret')
-}
-
-export function getOrCreateAuthSecret(
-  settings: {
-    read(): Record<string, unknown>
-    patch(mutator: (file: Record<string, unknown>) => void): void
-  },
-  dataDir: string
-): string {
-  const secretPath = secretFilePath(dataDir)
+export function getOrCreateAuthSecret(dataDir: string): string {
+  const secretPath = dataPaths(dataDir).secretFile
 
   if (existsSync(secretPath)) {
     try {
@@ -34,17 +24,10 @@ export function getOrCreateAuthSecret(
     }
   }
 
+  mkdirSync(dirname(secretPath), { recursive: true })
   const secret = generateSecret()
   writeFileSync(secretPath, secret, { encoding: 'utf8', mode: 0o600 })
   chmodSync(secretPath, 0o600)
-
-  const file = settings.read()
-  if (typeof file[SECRET_KEY] !== 'string' || file[SECRET_KEY] !== secret) {
-    settings.patch((f) => {
-      f[SECRET_KEY] = secret
-    })
-  }
-
   return secret
 }
 

@@ -1,5 +1,5 @@
-import { join } from 'path'
 import { resolveAssignedReferences, type JobReferenceManifest } from '../../shared/job-references'
+import { attachmentDir } from '../data-paths'
 import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
 
 export class ReferenceFileMissingError extends Error {
@@ -97,5 +97,5 @@ export function attachmentIsolationDir(
   threadId: string,
   attachmentId: string
 ): string {
-  return join(dataDir, 'attachments', threadId, attachmentId)
+  return attachmentDir(dataDir, threadId, attachmentId)
 }
