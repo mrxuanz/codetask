@@ -1,7 +1,8 @@
 import { mkdirSync } from 'fs'
-import { join } from 'path'
+import { dirname } from 'path'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import { dataPaths } from '../data-paths'
 import { applyMigrations } from './migrations/index'
 import {
   authState,
@@ -50,8 +51,9 @@ export type AppDatabase = BetterSQLite3Database<typeof schema>
 let db: AppDatabase | null = null
 
 export function createIsolatedTestDatabase(dataDir: string): AppDatabase {
-  mkdirSync(dataDir, { recursive: true })
-  const sqlite = new Database(join(dataDir, 'app.db'))
+  const dbFile = dataPaths(dataDir).dbFile
+  mkdirSync(dirname(dbFile), { recursive: true })
+  const sqlite = new Database(dbFile)
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('busy_timeout = 5000')
   sqlite.pragma('foreign_keys = ON')
@@ -68,8 +70,9 @@ export function closeIsolatedTestDatabase(database: AppDatabase): void {
 export function createDatabase(dataDir: string): AppDatabase {
   if (db) return db
 
-  mkdirSync(dataDir, { recursive: true })
-  const sqlite = new Database(join(dataDir, 'app.db'))
+  const dbFile = dataPaths(dataDir).dbFile
+  mkdirSync(dirname(dbFile), { recursive: true })
+  const sqlite = new Database(dbFile)
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('busy_timeout = 5000')
   sqlite.pragma('foreign_keys = ON')

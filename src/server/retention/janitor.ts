@@ -5,16 +5,14 @@ import { asc, eq, or } from 'drizzle-orm'
 import type { getDb } from '../db'
 import {
   draftReferences,
-  jobArtifacts,
   messageArtifacts,
   threadJobs,
   threadMessages,
   threads
 } from '../db/schema'
+import { dataPaths, threadAttachmentsDir } from '../data-paths'
 
 type AppDatabase = ReturnType<typeof getDb>
-
-const RESERVED_ARTIFACT_DIRS = new Set(['messages', 'designs'])
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -24,7 +22,7 @@ export async function removeThreadAttachmentsDir(
   dataDir: string,
   threadId: string
 ): Promise<boolean> {
-  const path = join(dataDir, 'attachments', threadId)
+  const path = threadAttachmentsDir(dataDir, threadId)
   if (!existsSync(path)) return false
   await rm(path, { recursive: true, force: true })
   return true
@@ -34,7 +32,7 @@ export async function pruneOrphanAttachments(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removed: number }> {
-  const root = join(dataDir, 'attachments')
+  const root = dataPaths(dataDir).attachments
   if (!existsSync(root)) return { removed: 0 }
 
   const threadRows = await db.select({ id: threads.id }).from(threads)
@@ -67,7 +65,7 @@ export async function pruneStalePausedRuntimeTrees(
   let removed = 0
   for (const row of rows) {
     if (row.updatedAt >= cutoff) continue
-    const jobPath = join(dataDir, 'runtimes', row.threadId, 'jobs', row.id)
+    const jobPath = join(dataPaths(dataDir).runtimes, row.threadId, 'jobs', row.id)
     if (!existsSync(jobPath)) continue
     await rm(jobPath, { recursive: true, force: true })
     removed += 1
@@ -76,25 +74,11 @@ export async function pruneStalePausedRuntimeTrees(
   return { removed }
 }
 
-export async function pruneLegacyEvidenceFiles(dataDir: string): Promise<{ removed: number }> {
-  const legacyRoot = join(dataDir, 'jobs')
-  if (!existsSync(legacyRoot)) return { removed: 0 }
-  let removed = 0
-  for (const jobEntry of await readdir(legacyRoot, { withFileTypes: true })) {
-    if (!jobEntry.isDirectory()) continue
-    const evidenceDir = join(legacyRoot, jobEntry.name, 'evidence')
-    if (!existsSync(evidenceDir)) continue
-    await rm(evidenceDir, { recursive: true, force: true })
-    removed += 1
-  }
-  return { removed }
-}
-
 export async function pruneOrphanMessageArtifactDirs(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removed: number }> {
-  const root = join(dataDir, 'artifacts', 'messages')
+  const root = dataPaths(dataDir).artifactsMessages
   if (!existsSync(root)) return { removed: 0 }
 
   const rows = await db.select({ messageId: messageArtifacts.messageId }).from(messageArtifacts)
@@ -111,52 +95,11 @@ export async function pruneOrphanMessageArtifactDirs(
   return { removed }
 }
 
-export async function pruneOrphanJobArtifactDirs(
-  dataDir: string,
-  db: AppDatabase
-): Promise<{ removed: number }> {
-  const root = join(dataDir, 'artifacts')
-  if (!existsSync(root)) return { removed: 0 }
-
-  const [jobRows, artifactRows] = await Promise.all([
-    db.select({ id: threadJobs.id }).from(threadJobs),
-    db
-      .select({ jobId: jobArtifacts.jobId, contentPath: jobArtifacts.contentPath })
-      .from(jobArtifacts)
-      .where(eq(jobArtifacts.storage, 'file'))
-  ])
-
-  const validJobIds = new Set(jobRows.map((row) => row.id))
-  const referencedPaths = new Set(
-    artifactRows
-      .map((row) => row.contentPath?.replace(/\\/g, '/'))
-      .filter((path): path is string => Boolean(path))
-  )
-
-  let removed = 0
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    if (RESERVED_ARTIFACT_DIRS.has(entry.name)) continue
-    if (validJobIds.has(entry.name)) continue
-
-    const dirPath = join(root, entry.name)
-    const hasReferencedFile = [...referencedPaths].some((path) =>
-      path.startsWith(`artifacts/${entry.name}/`)
-    )
-    if (hasReferencedFile) continue
-
-    await rm(dirPath, { recursive: true, force: true })
-    removed += 1
-  }
-
-  return { removed }
-}
-
 export async function pruneOrphanDesignArtifactDirs(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removed: number }> {
-  const root = join(dataDir, 'artifacts', 'designs')
+  const root = dataPaths(dataDir).artifactsDesigns
   if (!existsSync(root)) return { removed: 0 }
 
   const rows = await db.select({ id: threadJobs.id }).from(threadJobs)
@@ -188,7 +131,7 @@ export async function pruneStaleThreadAttachmentDirs(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removed: number }> {
-  const attachmentsRoot = join(dataDir, 'attachments')
+  const attachmentsRoot = dataPaths(dataDir).attachments
   if (!existsSync(attachmentsRoot)) return { removed: 0 }
 
   const threadRows = await db.select({ id: threads.id }).from(threads)
@@ -274,7 +217,13 @@ export async function enforceDataDirWatermark(
       updatedAt: threadJobs.updatedAt
     })
     .from(threadJobs)
-    .where(or(eq(threadJobs.status, 'completed'), eq(threadJobs.status, 'failed'), eq(threadJobs.status, 'cancelled')))
+    .where(
+      or(
+        eq(threadJobs.status, 'completed'),
+        eq(threadJobs.status, 'failed'),
+        eq(threadJobs.status, 'cancelled')
+      )
+    )
     .orderBy(asc(threadJobs.updatedAt))
     .limit(50)
 
@@ -284,7 +233,7 @@ export async function enforceDataDirWatermark(
 
   for (const row of terminalRows) {
     if (totalBytes - cleanedBytes <= remainingTarget) break
-    const jobPath = join(dataDir, 'runtimes', row.threadId, 'jobs', row.id)
+    const jobPath = join(dataPaths(dataDir).runtimes, row.threadId, 'jobs', row.id)
     if (!existsSync(jobPath)) continue
     const jobSize = await estimateDirSize(jobPath)
     await rm(jobPath, { recursive: true, force: true })

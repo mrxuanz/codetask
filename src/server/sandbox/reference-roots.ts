@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from 'fs'
 import { dirname } from 'path'
-import { join } from 'path'
 import { getAppContext } from '../bootstrap'
+import { threadAttachmentsDir } from '../data-paths'
 import type { JobReferenceManifest } from '@shared/job-references'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
 import {
@@ -29,7 +29,7 @@ export function resolveThreadAttachmentReadRoot(
   threadId: string,
   dataDir = getAppContext().dataDir
 ): string | null {
-  const dir = join(dataDir, 'attachments', threadId)
+  const dir = threadAttachmentsDir(dataDir, threadId)
   if (!existsSync(dir)) return null
   try {
     return realpathSync(dir)

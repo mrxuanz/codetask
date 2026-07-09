@@ -3,15 +3,20 @@ import { readdir, readFile, rm, stat } from 'fs/promises'
 import { join } from 'path'
 import type { getDb } from '../db'
 import { threadJobs, threads } from '../db/schema'
+import {
+  dataPaths,
+  jobRuntimeDirPath,
+  threadRuntimeDirPath
+} from '../data-paths'
 
 type AppDatabase = ReturnType<typeof getDb>
 
 export function threadRuntimeDir(dataDir: string, threadId: string): string {
-  return join(dataDir, 'runtimes', threadId)
+  return threadRuntimeDirPath(dataDir, threadId)
 }
 
 export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string): string {
-  return join(dataDir, 'runtimes', threadId, 'jobs', jobId)
+  return jobRuntimeDirPath(dataDir, threadId, jobId)
 }
 
 export async function estimateJobRuntimeBytes(
@@ -104,7 +109,7 @@ export async function pruneOrphanRuntimeTrees(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removedPaths: string[] }> {
-  const runtimesRoot = join(dataDir, 'runtimes')
+  const runtimesRoot = dataPaths(dataDir).runtimes
   if (!existsSync(runtimesRoot)) return { removedPaths: [] }
 
   const [threadRows, jobRows] = await Promise.all([

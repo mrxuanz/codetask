@@ -31,8 +31,8 @@ test('migration 018 creates draft_references table', () => {
 })
 
 test('projectTaskReadGrants mounts attachment parent dir only for assigned ref', () => {
-  const attA = '/data/attachments/thread-1/att-a/file.png'
-  const attB = '/data/attachments/thread-1/att-b/other.png'
+  const attA = '/data/blobs/attachments/thread-1/att-a/file.png'
+  const attB = '/data/blobs/attachments/thread-1/att-b/other.png'
   const manifest = buildJobReferenceManifest({
     jobId: 'ds-1',
     threadId: 'thread-1',
@@ -71,10 +71,10 @@ test('projectTaskReadGrants mounts attachment parent dir only for assigned ref',
   })
   assert.equal(grants.length, 1)
   assert.equal(grants[0]?.kind, 'directory')
-  assert.equal((grants[0] as { path: string }).path, '/data/attachments/thread-1/att-a')
+  assert.equal((grants[0] as { path: string }).path, '/data/blobs/attachments/thread-1/att-a')
 
   const roots = readGrantsToReadRoots(grants)
-  assert.deepEqual(roots, ['/data/attachments/thread-1/att-a'])
+  assert.deepEqual(roots, ['/data/blobs/attachments/thread-1/att-a'])
 })
 
 test('projectTaskReadGrants skips inWorkspace local corpus entries', () => {

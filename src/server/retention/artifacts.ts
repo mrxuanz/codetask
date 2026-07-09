@@ -1,7 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
 import { gunzipSync, gzipSync } from 'zlib'
-import { readFile, rm } from 'fs/promises'
-import { join } from 'path'
 import { and, eq, lt } from 'drizzle-orm'
 import type { JobArtifactKind, JobArtifactTier, RetentionSettings } from '../../shared/contracts/retention.ts'
 import type { getDb } from '../db'
@@ -32,33 +30,6 @@ function hashContent(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
-export function artifactFileRelPath(jobId: string, artifactId: string): string {
-  return join('artifacts', jobId, `${artifactId}.json.gz`)
-}
-
-export function artifactFileAbsPath(dataDir: string, jobId: string, artifactId: string): string {
-  return join(dataDir, artifactFileRelPath(jobId, artifactId))
-}
-
-export async function deleteArtifactFile(
-  dataDir: string,
-  jobId: string,
-  artifactId: string
-): Promise<void> {
-  await rm(artifactFileAbsPath(dataDir, jobId, artifactId), { force: true })
-}
-
-async function readArtifactFile(dataDir: string, relPath: string): Promise<string | null> {
-  const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
-  if (normalized.includes('..')) return null
-  try {
-    const buf = await readFile(join(dataDir, normalized))
-    return gunzipSync(buf).toString('utf8')
-  } catch {
-    return null
-  }
-}
-
 export async function putJobArtifact(input: {
   db: AppDatabase
   dataDir: string
@@ -82,28 +53,9 @@ export async function putJobArtifact(input: {
 
   const compressed = gzipSync(raw)
   const contentInline = compressed.toString('base64')
-  const storage: 'inline' | 'file' = 'inline'
+  const storage = 'inline' as const
 
   if (input.taskId && input.replaceExisting !== false) {
-    const existing = await input.db
-      .select(jobArtifactMeta)
-      .from(jobArtifacts)
-      .where(
-        and(
-          eq(jobArtifacts.jobId, input.jobId),
-          eq(jobArtifacts.taskId, input.taskId),
-          eq(jobArtifacts.kind, input.kind)
-        )
-      )
-    for (const row of existing) {
-      if (row.storage === 'file' && row.contentPath) {
-        await rm(join(input.dataDir, row.contentPath.replace(/\\/g, '/')), { force: true }).catch(
-          (error) => {
-            console.warn('[artifacts] failed to remove replaced file artifact', row.contentPath, error)
-          }
-        )
-      }
-    }
     await input.db
       .delete(jobArtifacts)
       .where(
@@ -146,14 +98,6 @@ export async function deleteJobArtifact(input: {
   const row = rows[0]
   if (!row) return false
 
-  if (row.storage === 'file' && row.contentPath) {
-    await rm(join(input.dataDir, row.contentPath.replace(/\\/g, '/')), { force: true }).catch(
-      (error) => {
-        console.warn('[artifacts] failed to remove file artifact', row.contentPath, error)
-      }
-    )
-  }
-
   await input.db.delete(jobArtifacts).where(eq(jobArtifacts.id, input.artifactId))
   return true
 }
@@ -169,7 +113,7 @@ function decompressInline(encoded: string): string | null {
 
 export async function getJobArtifactPayload<T = unknown>(
   db: AppDatabase,
-  dataDir: string,
+  _dataDir: string,
   artifactId: string
 ): Promise<T | null> {
   const rows = await db.select().from(jobArtifacts).where(eq(jobArtifacts.id, artifactId)).limit(1)
@@ -196,16 +140,6 @@ export async function getJobArtifactPayload<T = unknown>(
     }
   }
 
-  if (row.storage === 'file' && row.contentPath) {
-    const raw = await readArtifactFile(dataDir, row.contentPath)
-    if (!raw) return null
-    try {
-      return JSON.parse(raw) as T
-    } catch {
-      return null
-    }
-  }
-
   return null
 }
 
@@ -219,7 +153,7 @@ export async function scheduleJobArtifactExpiry(
 
 export async function deleteExpiredArtifacts(
   db: AppDatabase,
-  dataDir: string
+  _dataDir: string
 ): Promise<{ deleted: number }> {
   const cutoff = nowSec()
   const expired = await db
@@ -227,41 +161,9 @@ export async function deleteExpiredArtifacts(
     .from(jobArtifacts)
     .where(lt(jobArtifacts.expiresAt, cutoff))
 
-  for (const row of expired) {
-    if (row.storage === 'file' && row.contentPath) {
-      await rm(join(dataDir, row.contentPath.replace(/\\/g, '/')), { force: true }).catch(
-        (error) => {
-          console.warn('[artifacts] failed to remove expired file artifact', row.contentPath, error)
-        }
-      )
-    }
-  }
-
   if (expired.length > 0) {
     await db.delete(jobArtifacts).where(lt(jobArtifacts.expiresAt, cutoff))
   }
 
   return { deleted: expired.length }
-}
-
-export async function deleteJobArtifactFiles(dataDir: string, jobId: string): Promise<void> {
-  await rm(join(dataDir, 'artifacts', jobId), { recursive: true, force: true }).catch(() => {})
-}
-
-export function isLegacyEvidenceRef(ref: string): boolean {
-  return ref.startsWith('jobs/') && ref.includes('/evidence/')
-}
-
-export async function readLegacyEvidenceFile(
-  dataDir: string,
-  evidenceRef: string
-): Promise<unknown | null> {
-  const rel = evidenceRef.replace(/\\/g, '/').replace(/^\/+/, '')
-  if (rel.includes('..')) return null
-  try {
-    const raw = await readFile(join(dataDir, rel), 'utf8')
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
 }

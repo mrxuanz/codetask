@@ -18,10 +18,8 @@ import { readRetentionSettings, artifactExpirySec } from './settings'
 import { runSqliteMaintenanceIfDue } from './maintenance'
 import {
   enforceDataDirWatermark,
-  pruneLegacyEvidenceFiles,
   pruneOrphanAttachments,
   pruneOrphanDesignArtifactDirs,
-  pruneOrphanJobArtifactDirs,
   pruneOrphanMessageArtifactDirs,
   pruneStalePausedRuntimeTrees,
   pruneStaleThreadAttachmentDirs
@@ -149,9 +147,7 @@ export async function runRetentionJanitorPass(): Promise<{
   expiredArtifacts: number
   orphanAttachments: number
   staleRuntimes: number
-  legacyEvidenceDirs: number
   orphanMessageArtifacts: number
-  orphanJobArtifacts: number
   orphanDesignArtifacts: number
   staleAttachmentDirs: number
   orphanRuntimeTrees: number
@@ -168,9 +164,7 @@ export async function runRetentionJanitorPass(): Promise<{
     artifacts,
     attachments,
     runtimes,
-    legacy,
     messageArtifacts,
-    jobArtifacts,
     designArtifacts,
     staleAttachmentDirs,
     orphanRuntimeTrees,
@@ -179,9 +173,7 @@ export async function runRetentionJanitorPass(): Promise<{
     deleteExpiredArtifacts(db, ctx.dataDir),
     pruneOrphanAttachments(ctx.dataDir, db),
     pruneStalePausedRuntimeTrees(ctx.dataDir, db, settings.runtimePausedDays),
-    pruneLegacyEvidenceFiles(ctx.dataDir),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
-    pruneOrphanJobArtifactDirs(ctx.dataDir, db),
     pruneOrphanDesignArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
     pruneOrphanRuntimeTrees(ctx.dataDir, db),
@@ -200,9 +192,7 @@ export async function runRetentionJanitorPass(): Promise<{
     expiredArtifacts: artifacts.deleted,
     orphanAttachments: attachments.removed,
     staleRuntimes: runtimes.removed,
-    legacyEvidenceDirs: legacy.removed,
     orphanMessageArtifacts: messageArtifacts.removed,
-    orphanJobArtifacts: jobArtifacts.removed,
     orphanDesignArtifacts: designArtifacts.removed,
     staleAttachmentDirs: staleAttachmentDirs.removed,
     orphanRuntimeTrees: orphanRuntimeTrees.removedPaths.length,

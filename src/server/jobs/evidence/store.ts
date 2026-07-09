@@ -1,15 +1,8 @@
-import { readFileSync } from 'fs'
 import { gunzipSync } from 'zlib'
-import { join } from 'path'
 import type { SliceVerificationRecordDto, TaskEvidenceDto } from '@shared/contracts/evidence'
 import type { TaskProgressDto, TaskProgressItemDto, TaskProgressSliceDto } from '../types'
 import type { JobArtifactKind, RetentionSettings } from '@shared/contracts/retention'
-import {
-  deleteJobArtifact,
-  getJobArtifactPayload,
-  isLegacyEvidenceRef,
-  readLegacyEvidenceFile
-} from '../../retention/artifacts'
+import { deleteJobArtifact, getJobArtifactPayload } from '../../retention/artifacts'
 import {
   storeSliceVerdictArtifact,
   storeTaskEvidenceArtifact
@@ -108,21 +101,6 @@ export async function hydrateTaskEvidence(
   }
 
   if (!evidence) return null
-
-  if (evidence.evidenceRef?.trim()) {
-    if (isLegacyEvidenceRef(evidence.evidenceRef)) {
-      const legacy = await readLegacyEvidenceFile(dataDir, evidence.evidenceRef)
-      if (legacy && typeof legacy === 'object') {
-        return {
-          ...(legacy as TaskEvidenceDto),
-          evidenceRef: evidence.evidenceRef,
-          evidenceLineCount:
-            evidence.evidenceLineCount ?? (legacy as TaskEvidenceDto).evidence?.length
-        }
-      }
-    }
-  }
-
   if (evidence.evidence?.length) return evidence
   return evidence
 }
@@ -330,7 +308,7 @@ export async function getTaskEvidenceDetail(input: {
 }
 
 export function hydrateTaskEvidenceSync(
-  dataDir: string,
+  _dataDir: string,
   evidence: TaskEvidenceDto | null | undefined,
   artifactId?: string | null,
   db: AppDatabase = getDb()
@@ -355,36 +333,9 @@ export function hydrateTaskEvidenceSync(
         }
       }
     }
-    if (row?.storage === 'file' && row.contentPath) {
-      const rel = row.contentPath.replace(/\\/g, '/').replace(/^\/+/, '')
-      if (!rel.includes('..')) {
-        try {
-          const buf = readFileSync(join(dataDir, rel))
-          return JSON.parse(gunzipSync(buf).toString('utf8')) as TaskEvidenceDto
-        } catch {
-          return evidence ?? null
-        }
-      }
-    }
   }
 
   if (!evidence) return null
-  if (evidence.evidenceRef?.trim() && isLegacyEvidenceRef(evidence.evidenceRef)) {
-    const rel = evidence.evidenceRef.replace(/\\/g, '/').replace(/^\/+/, '')
-    if (!rel.includes('..')) {
-      try {
-        const raw = readFileSync(join(dataDir, rel), 'utf8')
-        const full = JSON.parse(raw) as TaskEvidenceDto
-        return {
-          ...full,
-          evidenceRef: evidence.evidenceRef,
-          evidenceLineCount: evidence.evidenceLineCount ?? full.evidence?.length
-        }
-      } catch {
-        return evidence
-      }
-    }
-  }
   if (evidence.evidence?.length) return evidence
   return evidence
 }

@@ -4,13 +4,16 @@ import { mkdir, readFile, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { buildPlanSummary } from '@shared/plan-mutations'
+import {
+  designPlanArtifactRelPath as designPlanArtifactRelPathFromDataPaths
+} from '../data-paths'
 
 function hashContent(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
 export function designPlanArtifactRelPath(designSessionId: string, planRevision: number): string {
-  return join('artifacts', 'designs', designSessionId, `plan-v${planRevision}.json.gz`)
+  return designPlanArtifactRelPathFromDataPaths(designSessionId, planRevision)
 }
 
 export function designPlanArtifactAbsPath(

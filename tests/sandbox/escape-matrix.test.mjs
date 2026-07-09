@@ -295,7 +295,7 @@ describe('attachment readRoots remain read-only inside sandbox', () => {
     const fixture = createSandboxFixture('codeteam-attach-')
     t.after(() => fixture.cleanup())
 
-    const attachmentsRoot = join(fixture.base, 'attachments', 'thread-1')
+    const attachmentsRoot = join(fixture.base, 'blobs', 'attachments', 'thread-1')
     mkdirSync(attachmentsRoot, { recursive: true })
     const heroPath = join(attachmentsRoot, 'att-hero.png')
     const copiedPath = join(fixture.workspace, 'from-attachment.png')

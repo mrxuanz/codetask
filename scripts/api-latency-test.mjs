@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { join } from 'path'
 
-const db = new Database(join('data', 'app.db'), { readonly: true })
+const db = new Database(join('data', 'db', 'app.db'), { readonly: true })
 const row = db.prepare('select session_token from auth_state limit 1').get()
 const token = row?.session_token
 if (!token) {

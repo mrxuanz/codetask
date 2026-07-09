@@ -7,7 +7,7 @@ import {
   renameThread,
   type Thread
 } from '@renderer/api/threads'
-import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import type { JobEventHub } from '@renderer/composables/useJobEventHub'
 import { threadTopic } from '@shared/contracts/job-event-hub'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { workspaceRootsMatch } from '@renderer/lib/workspace'
@@ -85,7 +85,7 @@ function createThreadInput(): { coreCode?: string } {
   return coreCode ? { coreCode } : {}
 }
 
-export function provideHomeWorkspace(): HomeWorkspaceContext {
+export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
   const projects = ref<HomeProject[]>([])
   const threads = ref<HomeThread[]>([])
   const activeProjectId = ref<string | null>(null)
@@ -261,7 +261,6 @@ export function provideHomeWorkspace(): HomeWorkspaceContext {
     return thread
   }
 
-  const hub = useJobEventHub()
   let threadHubRelease: (() => void) | null = null
 
   watch(

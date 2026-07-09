@@ -72,7 +72,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   const mode = options.mode ?? 'desktop'
 
   const settings = new SettingsStore(options.dataDir)
-  const authSecret = getOrCreateAuthSecret(settings, options.dataDir)
+  const authSecret = getOrCreateAuthSecret(options.dataDir)
 
   const bootId = randomUUID()
 
@@ -126,7 +126,6 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
           result.expiredArtifacts > 0 ||
           result.orphanAttachments > 0 ||
           result.staleRuntimes > 0 ||
-          result.orphanJobArtifacts > 0 ||
           result.orphanDesignArtifacts > 0 ||
           result.staleAttachmentDirs > 0 ||
           result.orphanRuntimeTrees > 0 ||
