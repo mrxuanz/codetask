@@ -1661,36 +1661,44 @@ async function handleWorkflowCompletion(
   return { taskProgress: completedProgress, items, done: true }
 }
 
-async function runExecutionLoop(username: string, jobId: string): Promise<void> {
-  const state = await initializeExecutionState(username, jobId)
-  if (!state) return
+type GateStates = ReturnType<typeof buildGateStates>
 
-  let { plan, items, taskProgress, gate, dataDir } = state
-  let job = state.job
+interface ExecutionLoopMutable {
+  jobId: string
+  username: string
+  job: ThreadJobDto
+  plan: SavedJobPlan
+  items: TaskProgressItemDto[]
+  taskProgress: TaskProgressDto
+  gate: GateStates
+  dataDir: string
+}
 
-  while (true) {
-    refreshExecutionLease(jobId)
+type LoopStepAction = 'continue' | 'return' | 'skip'
 
-    const stop = shouldStopExecution(jobId)
-    if (stop === 'cancel') return
-    if (stop === 'pause') {
-      await finalizeExecutionPause(jobId, taskProgress, items, gate)
-      return
-    }
+function syncLoopState(
+  ctx: ExecutionLoopMutable,
+  next: {
+    plan?: SavedJobPlan
+    items?: TaskProgressItemDto[]
+    taskProgress?: TaskProgressDto
+    gate?: GateStates
+    job?: ThreadJobDto
+  }
+): void {
+  if (next.plan !== undefined) ctx.plan = next.plan
+  if (next.items !== undefined) ctx.items = next.items
+  if (next.taskProgress !== undefined) ctx.taskProgress = next.taskProgress
+  if (next.gate !== undefined) ctx.gate = next.gate
+  if (next.job !== undefined) ctx.job = next.job
+}
 
-    applyTaskProgressToGate(gate.tasks, items)
-    reconcileSliceStatuses(gate.slices)
-    reconcileMilestoneStatuses(gate.milestones, gate.slices)
+async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
+  const jobId = ctx.jobId
+  let { plan, items, taskProgress, gate, job, dataDir } = ctx
+  const sliceToVerify = findSliceReadyForVerification(gate.slices)
+  if (!sliceToVerify) return 'skip'
 
-    if (isWorkflowComplete(gate.milestones, gate.slices)) {
-      const result = await handleWorkflowCompletion(jobId, items, gate)
-      taskProgress = result.taskProgress
-      items = result.items
-      return
-    }
-
-    const sliceToVerify = findSliceReadyForVerification(gate.slices)
-    if (sliceToVerify) {
       const slicePreflight = preflightSliceTaskEvidence(plan, sliceToVerify.id, items)
       if (!slicePreflight.ok) {
         for (const taskId of slicePreflight.missingTaskIds) {
@@ -1720,7 +1728,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
           tasks: items
         }
         await persistTaskProgress(jobId, taskProgress, undefined, gate)
-        continue
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
       }
 
       const sliceBundleHash = computeSliceEvidenceBundleHash(plan, sliceToVerify.id, items, dataDir)
@@ -1742,7 +1751,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
           sliceAttemptGuard.progressParams,
           taskTerminalError(sliceToVerify.id, sliceAttemptGuard.reason)
         )
-        return
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
       }
 
       const signal = executionAbortSignal(jobId)
@@ -1800,13 +1810,15 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
               repair.progressParams,
               taskTerminalError(sliceToVerify.id)
             )
-            return
+            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
           }
           plan = repair.plan
           items = repair.items
           taskProgress = repair.taskProgress
           gate = repair.gate
-          continue
+          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
         }
 
         if (verification.verdict?.status === 'blocked') {
@@ -1832,7 +1844,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
             { id: sliceToVerify.id },
             taskTerminalError(sliceToVerify.id, verification.message)
           )
-          return
+          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
         }
 
         if (verification.verdict?.status === 'inconclusive') {
@@ -1861,7 +1874,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
               { id: sliceToVerify.id, maxAttempts: MAX_VERIFICATION_ATTEMPTS },
               taskTerminalError(sliceToVerify.id, verification.message)
             )
-            return
+            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
           }
 
           const repair = await handleSliceEvidenceRepair({
@@ -1885,13 +1899,15 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
               repair.progressParams,
               taskTerminalError(sliceToVerify.id)
             )
-            return
+            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
           }
           plan = repair.plan
           items = repair.items
           taskProgress = repair.taskProgress
           gate = repair.gate
-          continue
+          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
         }
 
         const failed = await persistTaskProgress(
@@ -1917,7 +1933,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         if (failed) {
           items = slimTaskProgressItemsForRuntime(items)
         }
-        return
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
       }
 
       sliceToVerify.runtimeStatus = 'progress-ok'
@@ -1943,11 +1960,19 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         tasks: items
       }
       await persistTaskProgress(jobId, taskProgress, undefined, gate)
-      continue
-    }
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
+    
+  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+  return 'continue'
+}
 
-    const milestoneToVerify = findMilestoneReadyForVerification(gate.milestones, gate.slices)
-    if (milestoneToVerify) {
+async function processMilestoneVerificationStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
+  const jobId = ctx.jobId
+  let { plan, items, taskProgress, gate, job, dataDir } = ctx
+  const milestoneToVerify = findMilestoneReadyForVerification(gate.milestones, gate.slices)
+  if (!milestoneToVerify) return 'skip'
+
       const sliceVerdictMap = Object.fromEntries(
         (taskProgress.slices ?? []).filter((row) => row.verdict).map((row) => [row.id, row.verdict])
       )
@@ -1970,7 +1995,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
           tasks: items
         }
         await persistTaskProgress(jobId, taskProgress, undefined, gate)
-        continue
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
       }
 
       const milestoneBundleHash = computeMilestoneEvidenceBundleHash(
@@ -1997,7 +2023,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
           milestoneAttemptGuard.progressParams,
           taskTerminalError(milestoneToVerify.id, milestoneAttemptGuard.reason)
         )
-        return
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
       }
 
       const signal = executionAbortSignal(jobId)
@@ -2057,13 +2084,15 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
               repair.progressParams,
               taskTerminalError(milestoneToVerify.id)
             )
-            return
+            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
           }
           plan = repair.plan
           items = repair.items
           taskProgress = repair.taskProgress
           gate = repair.gate
-          continue
+          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
         }
 
         if (verification.verdict?.status === 'blocked') {
@@ -2077,7 +2106,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
             { id: milestoneToVerify.id },
             taskTerminalError(milestoneToVerify.id, verification.message)
           )
-          return
+          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
         }
 
         if (verification.verdict?.status === 'inconclusive') {
@@ -2095,7 +2125,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
               { id: milestoneToVerify.id, maxAttempts: MAX_VERIFICATION_ATTEMPTS },
               taskTerminalError(milestoneToVerify.id, verification.message)
             )
-            return
+            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
           }
 
           const repair = await handleMilestoneEvidenceRepair({
@@ -2119,13 +2150,15 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
               repair.progressParams,
               taskTerminalError(milestoneToVerify.id)
             )
-            return
+            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
           }
           plan = repair.plan
           items = repair.items
           taskProgress = repair.taskProgress
           gate = repair.gate
-          continue
+          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
         }
 
         await failJobWithProgress(
@@ -2137,7 +2170,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
           { id: milestoneToVerify.id },
           taskTerminalError(milestoneToVerify.id, verification.message)
         )
-        return
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
       }
 
       milestoneToVerify.verificationStatus = 'passed'
@@ -2154,16 +2188,24 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         tasks: items
       }
       await persistTaskProgress(jobId, taskProgress, undefined, gate)
-      continue
-    }
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
+    
+  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+  return 'continue'
+}
 
-    const next = findNextReadyTask(gate.slices, gate.tasks)
+async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
+  const jobId = ctx.jobId
+  const username = ctx.username
+  let { plan, items, taskProgress, gate, job } = ctx
+const next = findNextReadyTask(gate.slices, gate.tasks)
     if (!next) {
       const anyFailed = items.some((item) => item.status === 'failed')
       const workflowError = createTurnError(
         anyFailed ? 'workflow.failed_block' : 'workflow.deadlock'
       ).toDto()
-      const taskProgress: TaskProgressDto = {
+      const failedProgress: TaskProgressDto = {
         phase: 'failed',
         status: 'failed',
         currentIndex: countCompleted(items),
@@ -2174,9 +2216,10 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         progressParams: null,
         tasks: items
       }
+      taskProgress = failedProgress
       const failed = await persistTaskProgress(
         jobId,
-        taskProgress,
+        failedProgress,
         {
           status: 'failed',
           lastError: workflowError
@@ -2187,7 +2230,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       if (failed) {
         items = slimTaskProgressItemsForRuntime(items)
       }
-      return
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
     }
 
     const nextFlat = findFlatTask(plan, next.id)
@@ -2249,7 +2293,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       }
       items = slimTaskProgressItemsForRuntime(fullItems)
       job = (await getUserJob(username, jobId)) ?? job
-      continue
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
     }
 
     if (result.kind === 'paused') {
@@ -2275,7 +2320,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
         'snapshot'
       )
       pauseJobExecution(jobId)
-      return
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
     }
 
     if (result.kind === 'failed' && shouldStopExecution(jobId) === 'pause') {
@@ -2293,11 +2339,13 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
             detail: `Pause timed out after ${MAX_PAUSING_TURN_ATTEMPTS} attempts`
           }).toDto()
         )
-        return
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
       }
       items = slimTaskProgressItemsForRuntime(fullItems)
       taskProgress = { ...taskProgress, tasks: fullItems }
-      continue
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
     }
 
     const failed = result.kind === 'failed'
@@ -2319,7 +2367,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
       taskProgress = completedProgress
       items = slimTaskProgressItemsForRuntime(fullItems)
       await finalizeExecutionPause(jobId, taskProgress, items, gate)
-      return
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
     }
 
     const afterProgress: TaskProgressDto = {
@@ -2351,12 +2400,64 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
 
     items = slimTaskProgressItemsForRuntime(fullItems)
     if (failed) {
-      return
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
     }
 
     job = (await getUserJob(username, jobId)) ?? job
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'continue'
+}
+
+async function runExecutionLoop(username: string, jobId: string): Promise<void> {
+  const state = await initializeExecutionState(username, jobId)
+  if (!state) return
+
+  const ctx: ExecutionLoopMutable = {
+    jobId: state.jobId,
+    username: state.username,
+    job: state.job,
+    plan: state.plan,
+    items: state.items,
+    taskProgress: state.taskProgress,
+    gate: state.gate,
+    dataDir: state.dataDir
+  }
+
+  while (true) {
+    refreshExecutionLease(jobId)
+
+    const stop = shouldStopExecution(jobId)
+    if (stop === 'cancel') return
+    if (stop === 'pause') {
+      await finalizeExecutionPause(jobId, ctx.taskProgress, ctx.items, ctx.gate)
+      return
+    }
+
+    applyTaskProgressToGate(ctx.gate.tasks, ctx.items)
+    reconcileSliceStatuses(ctx.gate.slices)
+    reconcileMilestoneStatuses(ctx.gate.milestones, ctx.gate.slices)
+
+    if (isWorkflowComplete(ctx.gate.milestones, ctx.gate.slices)) {
+      const result = await handleWorkflowCompletion(jobId, ctx.items, ctx.gate)
+      ctx.taskProgress = result.taskProgress
+      ctx.items = result.items
+      return
+    }
+
+    const sliceAction = await processSliceVerificationStep(ctx)
+    if (sliceAction === 'return') return
+    if (sliceAction === 'continue') continue
+
+    const milestoneAction = await processMilestoneVerificationStep(ctx)
+    if (milestoneAction === 'return') return
+    if (milestoneAction === 'continue') continue
+
+    const taskAction = await processNextTaskStep(ctx)
+    if (taskAction === 'return') return
   }
 }
+
 
 export function scheduleJobExecution(username: string, jobId: string): void {
   if (!markJobExecuting(jobId, username)) return
