@@ -57,6 +57,6 @@ test('attachment reference paths', async (t) => {
 
   assert.equal(roots.length, 1)
   assert.equal(roots[0], dirname(expectedPath))
-  assert.notEqual(roots[0], join(dataDir, 'attachments', threadId))
+  assert.notEqual(roots[0], join(dataDir, 'blobs', 'attachments', threadId))
   assert.notEqual(roots[0], dataDir)
 })

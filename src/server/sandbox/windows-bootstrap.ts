@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { dataPaths } from '../data-paths'
 import { SandboxError } from './types'
 import { loadSandboxNative, resolveRunnerEntryScript, resolveSetupEntryScript } from './native'
 
@@ -15,7 +16,7 @@ export function fixedSandboxHome(dataDir: string): string {
       return join(localAppData, 'codetask', 'sandbox-home')
     }
   }
-  return join(dataDir, 'sandbox-home')
+  return dataPaths(dataDir).sandboxHome
 }
 
 export function sandboxSetupIsComplete(sandboxHome: string): boolean {

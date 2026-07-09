@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, realpathSync } from 'fs'
 import { homedir } from 'os'
 import { isAbsolute, join, resolve, sep } from 'path'
+import { threadAttachmentsDir } from '../data-paths'
 import { cleanDisplayPath } from '../fs/index'
 import { detectSandboxReadCapabilities } from './sandbox-capabilities'
 
@@ -90,7 +91,7 @@ export function resolveAttachmentAbsolutePath(
   threadId: string,
   relativePath: string
 ): string {
-  const attachmentsDir = resolve(dataDir, 'attachments', threadId)
+  const attachmentsDir = threadAttachmentsDir(dataDir, threadId)
   const candidate = resolve(attachmentsDir, relativePath)
   if (!existsSync(candidate)) {
     throw new ReferencePathError(`Attachment not found: ${relativePath}`)

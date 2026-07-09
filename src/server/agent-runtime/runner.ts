@@ -2,6 +2,7 @@ import { join } from 'path'
 import { isOuterSandboxEnabled, streamSandboxedConversationTurn } from '../sandbox'
 import { SandboxError } from '../sandbox/types'
 import type { SupportedCoreCode } from '../conversation/cores'
+import { dataPaths } from '../data-paths'
 import { ensureIsolatedProviderDirs } from './env'
 import { getAgentTurnProvider } from './providers'
 import { isTestFakeProvider } from './providers/test-overrides'
@@ -12,7 +13,7 @@ import { resolveUserMcpServersMap } from '../settings/mcp'
 import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './types'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
-  const runtimeRoot = join(dataDir, 'runtimes', threadId, coreCode)
+  const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
   ensureIsolatedProviderDirs(runtimeRoot)
   return runtimeRoot
 }
@@ -23,7 +24,7 @@ export function ensureJobCursorRuntimeRoot(
   jobId: string,
   coreCode: string
 ): string {
-  const runtimeRoot = join(dataDir, 'runtimes', threadId, 'jobs', jobId, coreCode)
+  const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, 'jobs', jobId, coreCode)
   ensureIsolatedProviderDirs(runtimeRoot)
   return runtimeRoot
 }
@@ -35,7 +36,15 @@ export function ensureJobTaskRuntimeRoot(
   taskId: string,
   coreCode: string
 ): string {
-  const runtimeRoot = join(dataDir, 'runtimes', threadId, 'jobs', jobId, 'tasks', taskId, coreCode)
+  const runtimeRoot = join(
+    dataPaths(dataDir).runtimes,
+    threadId,
+    'jobs',
+    jobId,
+    'tasks',
+    taskId,
+    coreCode
+  )
   ensureIsolatedProviderDirs(runtimeRoot)
   return runtimeRoot
 }

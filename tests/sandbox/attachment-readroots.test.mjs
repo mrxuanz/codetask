@@ -44,7 +44,7 @@ async function main() {
   const base = mkdtempSync(join(tmpdir(), 'codeteam-attachment-readroots-'))
   const workspace = join(base, 'workspace')
   const runtime = join(base, 'runtime')
-  const attachmentsRoot = join(base, 'attachments', 'thread-1')
+  const attachmentsRoot = join(base, 'blobs', 'attachments', 'thread-1')
   mkdirSync(workspace, { recursive: true })
   mkdirSync(runtime, { recursive: true })
   mkdirSync(attachmentsRoot, { recursive: true })

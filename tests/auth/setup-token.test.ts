@@ -1,32 +1,22 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { getOrCreateAuthSecret, hmacAuthSecret } from '../../src/server/auth/secret'
 import { generateSetupToken, validateSetupToken } from '../../src/server/auth/setup-token'
-
-function createFakeSettings(initial?: Record<string, unknown>): {
-  read: () => Record<string, unknown>
-  patch: (mutator: (file: Record<string, unknown>) => void) => void
-} {
-  const store = initial ? { ...initial } : ({} as Record<string, unknown>)
-  return {
-    read: () => store,
-    patch: (mutator: (file: Record<string, unknown>) => void) => {
-      mutator(store)
-    }
-  }
-}
+import { dataPaths } from '../../src/server/data-paths'
 
 test('getOrCreateAuthSecret persists and returns the same secret', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-'))
   try {
-    const settings = createFakeSettings()
-    const secret1 = getOrCreateAuthSecret(settings, dataDir)
+    const secret1 = getOrCreateAuthSecret(dataDir)
     assert.ok(typeof secret1 === 'string')
     assert.equal(secret1.length, 64)
-    const secret2 = getOrCreateAuthSecret(settings, dataDir)
+    const secretPath = dataPaths(dataDir).secretFile
+    assert.equal(existsSync(secretPath), true)
+    assert.equal(readFileSync(secretPath, 'utf8').trim(), secret1)
+    const secret2 = getOrCreateAuthSecret(dataDir)
     assert.equal(secret1, secret2)
   } finally {
     rmSync(dataDir, { recursive: true, force: true })
@@ -36,9 +26,12 @@ test('getOrCreateAuthSecret persists and returns the same secret', () => {
 test('getOrCreateAuthSecret regenerates if stored value is wrong length', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-regen-'))
   try {
-    const settings = createFakeSettings({ 'security.authSecretV1': 'short' })
-    const secret = getOrCreateAuthSecret(settings, dataDir)
+    const secretPath = dataPaths(dataDir).secretFile
+    mkdirSync(dirname(secretPath), { recursive: true })
+    writeFileSync(secretPath, 'short', 'utf8')
+    const secret = getOrCreateAuthSecret(dataDir)
     assert.equal(secret.length, 64)
+    assert.equal(readFileSync(secretPath, 'utf8').trim(), secret)
   } finally {
     rmSync(dataDir, { recursive: true, force: true })
   }

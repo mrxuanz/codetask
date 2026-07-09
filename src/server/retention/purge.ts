@@ -1,8 +1,7 @@
-import { join } from 'path'
 import { eq } from 'drizzle-orm'
 import type { getDb } from '../db'
 import { threadJobs, threadMessages } from '../db/schema'
-import { deleteJobArtifactFiles } from './artifacts'
+import { designArtifactDir } from '../data-paths'
 import { deleteMessageArtifactFiles } from './message-artifacts'
 import { removeThreadAttachmentsDir } from './janitor'
 import { cleanupJobRuntimeTree, cleanupThreadRuntimeTree } from '../runtime/cleanup'
@@ -37,7 +36,7 @@ export async function deleteDesignArtifactFiles(
   designSessionId: string
 ): Promise<void> {
   const { rm } = await import('fs/promises')
-  await rm(join(dataDir, 'artifacts', 'designs', designSessionId), {
+  await rm(designArtifactDir(dataDir, designSessionId), {
     recursive: true,
     force: true
   }).catch(() => {})
@@ -48,7 +47,6 @@ export async function purgeJobFilesystem(
   threadId: string,
   jobId: string
 ): Promise<void> {
-  await deleteJobArtifactFiles(dataDir, jobId)
   await cleanupJobRuntimeTree(dataDir, threadId, jobId).catch(() => {})
 }
 

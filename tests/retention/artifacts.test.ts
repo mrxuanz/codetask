@@ -20,7 +20,7 @@ import { summarizeEvidence } from '../../src/server/retention/lifecycle-helpers'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
 import type { TaskEvidenceDto } from '../../src/shared/contracts/evidence'
 
-test('putJobArtifact stores large payloads as files and hydrates round-trip', async () => {
+test('putJobArtifact stores payloads inline and hydrates round-trip', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-artifact-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {

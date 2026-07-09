@@ -104,7 +104,7 @@ test('validateTaskReferenceIds rejects unknown ids', () => {
 test('assertManifestReferenceFilesExist validates on-disk files', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'ref-manifest-'))
   const threadId = 'thread-ok'
-  const attachmentsDir = join(dataDir, 'attachments', threadId)
+  const attachmentsDir = join(dataDir, 'blobs', 'attachments', threadId)
   mkdirSync(attachmentsDir, { recursive: true })
   writeFileSync(join(attachmentsDir, 'att-1.png'), 'png')
 

@@ -136,6 +136,7 @@ function formatServerStartFailure(
 async function startOpencodeServer(options: {
   hostname: string
   port: number
+  cwd: string
   config: Config
   env: Record<string, string>
   signal?: AbortSignal
@@ -148,7 +149,10 @@ async function startOpencodeServer(options: {
     ...options.env,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(options.config)
   }
+  // Pin OS cwd to the project workspace so a ignored/mismatched `directory`
+  // query cannot fall back to the CodeTask process cwd (program directory).
   const proc = crossSpawn(resolveOpencodeSpawnBin(), args, {
+    cwd: options.cwd,
     env,
     windowsHide: true
   }) as ChildProcessWithoutNullStreams
@@ -313,6 +317,7 @@ export async function* streamOpencodeTurn(
   const server = await startOpencodeServer({
     hostname: '127.0.0.1',
     port: await pickEphemeralPort(),
+    cwd: input.cwd,
     config,
     env,
     signal: options?.signal

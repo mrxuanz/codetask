@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
 import { join, extname, basename, dirname } from 'path'
 import { getAppContext } from '../bootstrap'
+import { attachmentDir, threadAttachmentsDir } from '../data-paths'
 import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
 import type { MessageAttachment } from './types'
 
@@ -15,7 +16,7 @@ function attachmentDataDir(): string {
 }
 
 function attachmentsRoot(threadId: string): string {
-  const root = join(attachmentDataDir(), 'attachments', threadId)
+  const root = threadAttachmentsDir(attachmentDataDir(), threadId)
   mkdirSync(root, { recursive: true })
   return root
 }
@@ -39,7 +40,7 @@ export function migrateFlatAttachmentIfNeeded(
   threadId: string,
   attachmentId: string
 ): string | null {
-  const root = join(attachmentDataDir(), 'attachments', threadId)
+  const root = threadAttachmentsDir(attachmentDataDir(), threadId)
   if (!existsSync(root)) return null
 
   const isolatedDir = join(root, attachmentId)
@@ -97,12 +98,12 @@ export function resolveAttachmentRelativePath(
   attachmentId: string
 ): string | null {
   migrateFlatAttachmentIfNeeded(threadId, attachmentId)
-  const isolatedDir = join(attachmentDataDir(), 'attachments', threadId, attachmentId)
+  const isolatedDir = attachmentDir(attachmentDataDir(), threadId, attachmentId)
   if (existsSync(isolatedDir)) {
     const files = readdirSync(isolatedDir)
     if (files.length > 0) return `${attachmentId}/${files[0]!}`
   }
-  const root = join(attachmentDataDir(), 'attachments', threadId)
+  const root = threadAttachmentsDir(attachmentDataDir(), threadId)
   if (!existsSync(root)) return null
   const match = readdirSync(root).find(
     (file) => file.startsWith(`${attachmentId}.`) || file === attachmentId
@@ -121,7 +122,7 @@ export function readThreadAttachment(
   const relativePath = resolveAttachmentRelativePath(threadId, attachmentId)
   if (!relativePath) return null
 
-  const absolutePath = join(attachmentDataDir(), 'attachments', threadId, relativePath)
+  const absolutePath = join(threadAttachmentsDir(attachmentDataDir(), threadId), relativePath)
   if (!existsSync(absolutePath)) return null
 
   const buffer = readFileSync(absolutePath)

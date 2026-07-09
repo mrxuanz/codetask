@@ -3,10 +3,7 @@ export {
   putJobArtifact,
   getJobArtifactPayload,
   scheduleJobArtifactExpiry,
-  deleteExpiredArtifacts,
-  deleteJobArtifactFiles,
-  isLegacyEvidenceRef,
-  readLegacyEvidenceFile
+  deleteExpiredArtifacts
 } from './artifacts'
 export {
   syncJobCountersFromProgress,
@@ -32,7 +29,6 @@ export {
   removeThreadAttachmentsDir,
   pruneOrphanAttachments,
   pruneOrphanMessageArtifactDirs,
-  pruneOrphanJobArtifactDirs,
   pruneOrphanDesignArtifactDirs,
   pruneStaleThreadAttachmentDirs
 } from './janitor'

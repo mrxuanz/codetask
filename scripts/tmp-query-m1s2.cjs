@@ -1,5 +1,5 @@
 const Database = require('better-sqlite3')
-const db = new Database('E:/studycode/codetask/data/app.db', { readonly: true })
+const db = new Database('E:/studycode/codetask/data/db/app.db', { readonly: true })
 
 const jobs = db
   .prepare(
