@@ -11,7 +11,7 @@ import {
   buildJobSnapshot,
   validateLaunchPreconditions
 } from '../../src/server/design-session/launch'
-import type { DesignSession } from '../../src/server/db/schema'
+import type { ThreadJob } from '../../src/server/db/schema'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 import { AppError } from '../../src/server/error'
 import { ReferenceFileMissingError } from '../../src/server/jobs/reference-paths'
@@ -59,7 +59,7 @@ function samplePlan(): SavedJobPlan {
   }
 }
 
-function sampleSession(overrides: Partial<DesignSession> = {}): DesignSession {
+function sampleSession(overrides: Partial<ThreadJob> = {}): ThreadJob {
   return {
     id: 'ds-test',
     threadId: 'thread-1',
@@ -67,7 +67,7 @@ function sampleSession(overrides: Partial<DesignSession> = {}): DesignSession {
     draftMessageId: 'msg-1',
     title: 'Test',
     summary: '',
-    workspaceRoot: '/workspace/project',
+    workspacePath: '/workspace/project',
     phase: 'ready_to_launch',
     draftRevision: 2,
     planRevision: 1,
@@ -93,7 +93,16 @@ function sampleSession(overrides: Partial<DesignSession> = {}): DesignSession {
     planArtifactPath: null,
     planSummaryJson: null,
     draftConfirmedAt: 1,
-    launchedJobId: null,
+    planConfirmedAt: null,
+    designSessionId: null,
+    snapshotDraftRevision: null,
+    snapshotPlanRevision: null,
+    snapshotManifestRevision: null,
+    executionLeaseOwner: null,
+    executionLeaseExpiresAt: null,
+    activeRunId: null,
+    terminalAt: null,
+    runtimeBytes: 0,
     lastError: null,
     createdAt: 1,
     updatedAt: 1,
@@ -182,6 +191,7 @@ test('buildJobSnapshot captures revision metadata', () => {
   assert.equal(snapshot.draftRevision, 2)
   assert.equal(snapshot.planRevision, 1)
   assert.equal(snapshot.manifestRevision, 1)
+  assert.equal(snapshot.workspaceRoot, '/workspace/project')
   assert.equal(snapshot.executionPlan.tasks.length, 1)
 })
 

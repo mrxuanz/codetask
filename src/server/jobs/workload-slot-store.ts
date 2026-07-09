@@ -2,8 +2,9 @@ import { randomUUID } from 'crypto'
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb } from '../db'
 import { getAppContext } from '../bootstrap'
-import { designSessions, threadJobs, workloadRuns, workloadSlots } from '../db/schema'
+import { threadJobs, workloadRuns, workloadSlots } from '../db/schema'
 
+/** @deprecated `design_session` kept for reading legacy workload_runs rows only; never write it. */
 export type WorkloadOwnerKind = 'thread_job' | 'design_session'
 export type WorkloadRunKind = 'planning' | 'execution'
 export type WorkloadRunStatus = 'active' | 'cancelling' | 'stopping' | 'released' | 'failed'
@@ -82,12 +83,12 @@ export function workloadLeaseTtlSec(): number {
 	  return 90 * 60
 }
 
-function ownerTable(ownerKind: WorkloadOwnerKind) {
-  return ownerKind === 'thread_job' ? threadJobs : designSessions
+function ownerTable(_ownerKind: WorkloadOwnerKind) {
+  return threadJobs
 }
 
-function ownerIdColumn(ownerKind: WorkloadOwnerKind) {
-  return ownerKind === 'thread_job' ? threadJobs.id : designSessions.id
+function ownerIdColumn(_ownerKind: WorkloadOwnerKind) {
+  return threadJobs.id
 }
 
 export function getRunController(runId: string): AbortController | undefined {
@@ -640,8 +641,8 @@ export async function releaseActiveRunOrAdvanceQueue(
   }
 }
 
-/** Single queue-advance exit: pending thread jobs, then slot-waiting design sessions. */
-export async function advanceWorkloadQueue(username: string): Promise<void> {
+  /** Single queue-advance exit: pending / planning thread jobs. */
+  export async function advanceWorkloadQueue(username: string): Promise<void> {
   const { advanceAllQueues } = await import('./queue-coordinator')
   await advanceAllQueues(username)
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { eq } from 'drizzle-orm'
-import { isDesignSessionId } from '@shared/design-session'
+import { isPlanningJobStatus } from '@shared/design-session'
 import { deriveJobRecoveryState } from '@shared/job-recovery-state'
 import { JOB_PAUSED } from '../../shared/turn-errors.ts'
 import { resetTaskItemForManualRetry, resetTaskRecoveryCounters } from './task-blocker'
@@ -12,7 +12,7 @@ import { threadJobs } from '../db/schema'
 import type { TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultPlanProgress } from '../planner/save-plan'
-import { emitJobEvent, getUserJob, updateJobRowForSnapshot } from './service'
+import { emitJobEvent, getUserJob, updateJobRow, updateJobRowForSnapshot } from './service'
 import { claimJobSlotOrEnqueue, findOccupyingJobId } from './job-queue'
 import { acquireExecutionLease, clearExecutionLease } from './repository'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
@@ -69,17 +69,10 @@ async function loadPlan(jobId: string): Promise<SavedJobPlan | null> {
 export async function pauseJob(username: string, jobId: string): Promise<ThreadJobDto> {
   const pausedError = JOB_PAUSED.toDto()
 
-  if (isDesignSessionId(jobId)) {
-    const job = await getUserJob(username, jobId)
-    if (!job) throw AppError.notFound('Design session not found', 'job.not_found')
-    if (!['planning', 'plan_editing'].includes(job.status)) {
-      throw AppError.badRequest(
-        `Design session status ${job.status} cannot be paused`,
-        'job.invalid_status',
-        { status: job.status }
-      )
-    }
+  const job = await getUserJob(username, jobId)
+  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
 
+  if (isPlanningJobStatus(job.status)) {
     const registry = getAppContext().runtimeRegistry
     if (registry.isJobPlanning(jobId)) {
       registry.setPlanningControl(jobId, 'paused')
@@ -91,9 +84,8 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
         progressParams: null,
         message: null
       }
-      const { updateDesignSessionRow } = await import('../design-session/service')
-      const updated = await updateDesignSessionRow(jobId, { planProgress, lastError: pausedError })
-      if (!updated) throw AppError.internal('Failed to pause design session', 'job.invalid_status')
+      const updated = await updateJobRow(jobId, { planProgress, lastError: pausedError })
+      if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
       emitJobEvent(jobId, { event: 'plan_progress', data: { planProgress } })
       emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
       return updated
@@ -107,21 +99,18 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
       progressParams: null,
       message: null
     }
-    const { updateDesignSessionRow } = await import('../design-session/service')
-    const updated = await updateDesignSessionRow(jobId, {
+    const updated = await updateJobRow(jobId, {
       planProgress,
       lastError: pausedError
     })
-    if (!updated) throw AppError.internal('Failed to pause design session', 'job.invalid_status')
+    if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
     emitJobEvent(jobId, { event: 'plan_progress', data: { planProgress } })
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     return updated
   }
 
-  const job = await getUserJob(username, jobId)
-  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
   if (
-    !['planning', 'plan_editing', 'plan_ready', 'running', 'paused', 'pending'].includes(job.status)
+    !['plan_ready', 'running', 'paused', 'pending'].includes(job.status)
   ) {
     throw AppError.badRequest(`Job status ${job.status} cannot be paused`, 'job.invalid_status', {
       status: job.status
@@ -502,13 +491,13 @@ export async function retryTaskJob(
 }
 
 export async function cancelJob(username: string, jobId: string): Promise<ThreadJobDto> {
-  if (isDesignSessionId(jobId)) {
-    const job = await getUserJob(username, jobId)
-    if (!job) throw AppError.notFound('Design session not found', 'job.not_found')
-    if (['completed', 'cancelled', 'launched'].includes(job.status)) {
-      throw AppError.badRequest('Design session already finished', 'job.already_finished')
-    }
+  const job = await getUserJob(username, jobId)
+  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
+  if (['completed', 'cancelled'].includes(job.status)) {
+    throw AppError.badRequest('Job already finished', 'job.already_finished')
+  }
 
+  if (isPlanningJobStatus(job.status)) {
     getAppContext().runtimeRegistry.endJobPlanning(jobId)
     cancelJobSandboxTurns(jobId)
 
@@ -521,27 +510,20 @@ export async function cancelJob(username: string, jobId: string): Promise<Thread
       progressParams: { reason: 'cancelled' }
     }
 
-    const { updateDesignSessionRow } = await import('../design-session/service')
-    const updated = await updateDesignSessionRow(jobId, {
+    const updated = await updateJobRow(jobId, {
       status: 'cancelled',
       taskProgress,
       lastError: null
     })
-    if (!updated) throw AppError.internal('Failed to cancel design session', 'job.invalid_status')
+    if (!updated) throw AppError.internal('Failed to cancel job', 'job.invalid_status')
 
     emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     emitJobEvent(jobId, { event: 'job_done', data: { job: updated } })
 
     const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
-    await stopAndReleaseActiveRun('design_session', jobId, 'cancelled')
+    await stopAndReleaseActiveRun('thread_job', jobId, 'cancelled')
     return updated
-  }
-
-  const job = await getUserJob(username, jobId)
-  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
-  if (['completed', 'cancelled'].includes(job.status)) {
-    throw AppError.badRequest('Job already finished', 'job.already_finished')
   }
 
   executionRuntime().setControl(jobId, 'cancelling')

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import { getOrCreateAuthSecret, hmacAuthSecret } from '../../src/server/auth/secret'
 import { generateSetupToken, validateSetupToken } from '../../src/server/auth/setup-token'
@@ -17,18 +20,28 @@ function createFakeSettings(initial?: Record<string, unknown>): {
 }
 
 test('getOrCreateAuthSecret persists and returns the same secret', () => {
-  const settings = createFakeSettings()
-  const secret1 = getOrCreateAuthSecret(settings)
-  assert.ok(typeof secret1 === 'string')
-  assert.equal(secret1.length, 64)
-  const secret2 = getOrCreateAuthSecret(settings)
-  assert.equal(secret1, secret2)
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-'))
+  try {
+    const settings = createFakeSettings()
+    const secret1 = getOrCreateAuthSecret(settings, dataDir)
+    assert.ok(typeof secret1 === 'string')
+    assert.equal(secret1.length, 64)
+    const secret2 = getOrCreateAuthSecret(settings, dataDir)
+    assert.equal(secret1, secret2)
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true })
+  }
 })
 
 test('getOrCreateAuthSecret regenerates if stored value is wrong length', () => {
-  const settings = createFakeSettings({ 'security.authSecretV1': 'short' })
-  const secret = getOrCreateAuthSecret(settings)
-  assert.equal(secret.length, 64)
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-regen-'))
+  try {
+    const settings = createFakeSettings({ 'security.authSecretV1': 'short' })
+    const secret = getOrCreateAuthSecret(settings, dataDir)
+    assert.equal(secret.length, 64)
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true })
+  }
 })
 
 test('generateSetupToken creates a valid 3-segment token', () => {

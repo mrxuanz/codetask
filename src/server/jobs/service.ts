@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto'
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
-import { isDesignSessionId } from '@shared/design-session'
 import { AppError } from '../error'
 import { getDb } from '../db'
 import { saveJobPlan, savePlanProgress } from '../db/job-plan'
@@ -68,7 +67,6 @@ export { mapJob, updateJobRow, updateJobRowForSnapshot } from './repository'
 export async function getUserJob(username: string, jobId: string): Promise<ThreadJobDto | null> {
   const job = await getUserJobRow(username, jobId)
   if (!job) return null
-  if (isDesignSessionId(jobId)) return job
   const { attachExecutionQueueMeta } = await import('./execution-queue-meta')
   return attachExecutionQueueMeta(job, username)
 }
@@ -80,7 +78,6 @@ export async function getThreadJob(
 ): Promise<ThreadJobDto | null> {
   const job = await getThreadJobRow(username, threadId, jobId)
   if (!job) return null
-  if (isDesignSessionId(jobId)) return job
   const { attachExecutionQueueMeta } = await import('./execution-queue-meta')
   return attachExecutionQueueMeta(job, username)
 }
@@ -559,7 +556,7 @@ export async function launchJobFromDraft(
 async function commitPlanReady(
   jobId: string,
   runId: string,
-  _username: string,
+  username: string,
   savedPlan: SavedJobPlan,
   counts: { milestones: number; slices: number; tasks: number }
 ): Promise<boolean> {
@@ -581,6 +578,7 @@ async function commitPlanReady(
   const { updateJobRowFenced } = await import('./repository')
   const jobAfterPlan = await updateJobRowFenced(jobId, runId, {
     status: 'plan_editing',
+    phase: 'plan_edit',
     plan: savedPlan,
     planProgress: planReady,
     taskProgress: initialTaskProgress,
@@ -595,6 +593,38 @@ async function commitPlanReady(
   emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress: initialTaskProgress } })
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job: fullJob } })
   emitJobEvent(jobId, { event: 'job_done', data: { job: fullJob } })
+
+  // Advance wizard into plan_edit so confirm/edit APIs unlock (same as design planner path).
+  if (username && fullJob) {
+    try {
+      const { advanceWizardPhase, buildDraftToPlanHandoff } = await import('../wizard/phase')
+      const { WIZARD_PHASE_PLAN_EDIT } = await import('../wizard/types')
+      const { getMessage } = await import('../conversation/messages')
+      const { getThreadRow } = await import('../threads/service')
+      const threadRow = await getThreadRow(username, fullJob.threadId)
+      const message = await getMessage(username, fullJob.threadId, fullJob.draftMessageId, {
+        signAssets: false
+      })
+      const payload = message?.payload as TaskLaunchDraftPayload | undefined
+      if (threadRow && payload) {
+        await advanceWizardPhase(username, fullJob.threadId, {
+          to: WIZARD_PHASE_PLAN_EDIT,
+          coreCode: threadRow.coreCode,
+          activeDraftId: fullJob.draftMessageId,
+          activePlanId: jobId,
+          handoff: buildDraftToPlanHandoff({
+            draftMessageId: fullJob.draftMessageId,
+            draftRevision: payload.revision ?? 1,
+            planId: jobId,
+            payload
+          })
+        })
+      }
+    } catch (error) {
+      console.warn('[jobs] failed to advance wizard to plan_edit after plan commit', jobId, error)
+    }
+  }
+
   return true
 }
 
@@ -604,7 +634,13 @@ export async function commitPlanReadyFenced(
   savedPlan: SavedJobPlan,
   counts: { milestones: number; slices: number; tasks: number }
 ): Promise<boolean> {
-  return commitPlanReady(jobId, runId, '', savedPlan, counts)
+  const db = getDb()
+  const rows = await db
+    .select({ username: threadJobs.username })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, jobId))
+    .limit(1)
+  return commitPlanReady(jobId, runId, rows[0]?.username ?? '', savedPlan, counts)
 }
 
 async function runJob(
@@ -684,6 +720,7 @@ async function runJob(
 
     const mcpSessionId = `plan-mcp-${randomUUID()}`
     const referenceManifest = await loadJobReferenceManifest(jobId)
+    const jobRow = await getUserJob(username, jobId)
 
     plannerSession = {
       sessionId: mcpSessionId,
@@ -699,6 +736,14 @@ async function runJob(
       referenceManifest,
       taskContexts: new Map(),
       registeredPlan: null,
+      phaseAdvance: jobRow
+        ? {
+            username,
+            threadId,
+            coreCode,
+            draftMessageId: jobRow.draftMessageId
+          }
+        : undefined,
       abortTurn: () => {
         const controller = getRunController(run.runId)
         if (controller && !controller.signal.aborted) {
@@ -849,11 +894,6 @@ export function scheduleJobPlanning(
 }
 
 export async function retryJobPlanning(username: string, jobId: string): Promise<ThreadJobDto> {
-  if (isDesignSessionId(jobId)) {
-    const { retryDesignSessionPlanning } = await import('../design-session/planner')
-    return retryDesignSessionPlanning(username, jobId)
-  }
-
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
   if (!['failed', 'cancelled', 'paused', 'plan_editing', 'planning'].includes(job.status)) {

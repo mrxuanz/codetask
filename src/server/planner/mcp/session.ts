@@ -8,7 +8,7 @@ export interface PlannerMcpSession {
   threadId: string
 
   runId: string
-  ownerKind: 'thread_job' | 'design_session'
+  ownerKind: 'thread_job'
   ownerId: string
 
   allowedAbilityCodes: string[]

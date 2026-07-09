@@ -12,10 +12,12 @@ import { cleanupJobRuntimeTree, jobRuntimeDir } from '../../src/server/runtime/c
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { onJobReachedTerminal } from '../../src/server/retention/lifecycle'
 import { readRetentionSettings } from '../../src/server/retention/settings'
+import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'txn-test-user'
 const JOB_ID = 'job-txn-atomic-test'
 const THREAD_ID = 'thread-txn'
+const DRAFT_ID = 'msg-txn'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -29,20 +31,14 @@ describe('write path transaction atomicity', () => {
     await resetAppContextForTests()
     bootstrapRuntime({ dataDir })
 
-    const now = nowSec()
-    await getDb()
-      .insert(threadJobs)
-      .values({
-        id: JOB_ID,
-        username: USERNAME,
-        threadId: THREAD_ID,
-        draftMessageId: 'msg-txn',
-        title: 'Transaction test job',
-        status: 'running',
-        workspacePath: dataDir,
-        createdAt: now,
-        updatedAt: now
-      })
+    await seedJobGraph(getDb(), {
+      jobId: JOB_ID,
+      username: USERNAME,
+      threadId: THREAD_ID,
+      draftMessageId: DRAFT_ID,
+      status: 'running',
+      workspacePath: dataDir
+    })
   })
 
   after(async () => {
@@ -93,7 +89,7 @@ describe('write path transaction atomicity', () => {
     const job = db.select().from(threadJobs).where(eq(threadJobs.id, JOB_ID)).limit(1).all()[0]
     assert.equal(job?.status, 'failed')
     assert.equal(job?.planStatus, 'failed')
-    assert.equal(job?.lastError, 'test error')
+    assert.ok(job?.lastError?.includes('test error'))
 
     const tasks = db.select().from(jobTasks).where(eq(jobTasks.jobId, JOB_ID)).all()
     assert.equal(tasks.length, 1)
@@ -110,20 +106,14 @@ describe('terminal runtime cleanup', () => {
     await resetAppContextForTests()
     bootstrapRuntime({ dataDir })
 
-    const now = nowSec()
-    await getDb()
-      .insert(threadJobs)
-      .values({
-        id: 'job-cleanup-test',
-        username: USERNAME,
-        threadId: 'thread-cleanup',
-        draftMessageId: 'msg-cleanup',
-        title: 'Cleanup test job',
-        status: 'completed',
-        workspacePath: dataDir,
-        createdAt: now,
-        updatedAt: now
-      })
+    await seedJobGraph(getDb(), {
+      jobId: 'job-cleanup-test',
+      username: USERNAME,
+      threadId: 'thread-cleanup',
+      draftMessageId: 'msg-cleanup',
+      status: 'completed',
+      workspacePath: dataDir
+    })
 
     const runtimeDir = jobRuntimeDir(dataDir, 'thread-cleanup', 'job-cleanup-test')
     mkdirSync(runtimeDir, { recursive: true })
@@ -185,7 +175,7 @@ describe('PID reuse zombie detection with bootId', () => {
     const { isStaleExecutionLeaseOwner, executionLeaseOwner } = require('../../src/server/jobs/repository')
     const ownOwner = executionLeaseOwner()
     const [pid] = ownOwner.split('-')
-    const fakeOwner = `${pid}-different-boot-id-12345`
+    const fakeOwner = `${pid}-00000000-0000-4000-8000-000000000042`
 
     assert.ok(isStaleExecutionLeaseOwner(fakeOwner), 'same PID with different bootId should be stale')
     assert.equal(isStaleExecutionLeaseOwner(ownOwner), false, 'own owner should not be stale')

@@ -1,13 +1,14 @@
 import { and, eq, or } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { designSessions, threadJobs } from '../db/schema'
+import { threadJobs, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import {
   clearExecutionLease,
   mapJob,
   refreshExecutionLease,
+  updateJobRow,
   updateJobRowForSnapshot
 } from './repository'
 import { emitJobProgressAfterPersist } from './progress-emit'
@@ -160,9 +161,7 @@ export async function reconcileOrphanRunningJobsOnStartupOnce(): Promise<void> {
   await reconcileOrphanRunningJobsOnStartup()
 }
 
-async function reconcileStalePlanningSessionIfNeeded(
-  session: typeof designSessions.$inferSelect
-): Promise<void> {
+async function reconcileStalePlanningSessionIfNeeded(session: ThreadJob): Promise<void> {
   if (session.status !== 'planning') return
   if (isSessionPlanning(session.id)) return
 
@@ -175,8 +174,7 @@ async function reconcileStalePlanningSessionIfNeeded(
     progressParams: null
   }
 
-  const { updateDesignSessionRow } = await import('../design-session/service')
-  await updateDesignSessionRow(session.id, {
+  await updateJobRow(session.id, {
     status: 'failed',
     phase: 'plan_edit',
     planProgress,
@@ -191,8 +189,8 @@ export async function reconcileOrphanPlanningSessionsForUser(username: string): 
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(and(eq(designSessions.username, username), eq(designSessions.status, 'planning')))
+    .from(threadJobs)
+    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'planning')))
 
   for (const row of rows) {
     try {
@@ -205,7 +203,7 @@ export async function reconcileOrphanPlanningSessionsForUser(username: string): 
 
 export async function reconcileOrphanPlanningSessionsOnStartup(): Promise<void> {
   const db = getDb()
-  const rows = await db.select().from(designSessions).where(eq(designSessions.status, 'planning'))
+  const rows = await db.select().from(threadJobs).where(eq(threadJobs.status, 'planning'))
 
   for (const row of rows) {
     try {

@@ -3,8 +3,7 @@ import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
 import { isDraftEditable } from '../conversation/draft/status'
 import { getThreadRow } from '../threads/service'
 import type { Thread } from '../db/schema'
-import { isDesignSessionId } from '@shared/design-session'
-import { getDesignSessionAsJob } from '../design-session/service'
+import { getThreadJob } from '../jobs/service'
 import { resolveWizardPhase } from './phase'
 import {
   WIZARD_PHASE_COLLECT,
@@ -133,15 +132,7 @@ export async function checkExecutionPlanEditAllowed(input: {
     }
   }
 
-  if (!isDesignSessionId(planId)) {
-    return {
-      allowed: false,
-      reason: 'no_plan',
-      message: 'Please access the execution tree using a designSessionId (ds-*).'
-    }
-  }
-
-  const job = await getDesignSessionAsJob(input.username, input.threadId, planId)
+  const job = await getThreadJob(input.username, input.threadId, planId)
   if (!job) {
     return {
       allowed: false,

@@ -38,7 +38,6 @@ import { resolveCoreModel } from './models'
 import { buildConversationSystemPrompt, buildDraftTurnSystemPrompt } from './prompts'
 import { buildWizardContextSnapshot, buildWizardPhasePromptSection } from '../wizard/prompts'
 import { getDesignSessionRow } from '../design-session/service'
-import { isDesignSessionId } from '@shared/design-session'
 import { getThreadPhaseRuntime, resolveWizardPhase } from '../wizard/phase'
 import { WIZARD_PHASE_COLLECT } from '../wizard/types'
 import { toolsForWizardPhase } from '../wizard/tools'
@@ -366,7 +365,7 @@ export async function* streamSendMessage(
       const payload = draftMessage?.payload as TaskLaunchDraftPayload | undefined
       draftRevision = payload?.revision ?? null
     }
-    if (createTaskMode && thread.activePlanId && isDesignSessionId(thread.activePlanId)) {
+    if (createTaskMode && thread.activePlanId) {
       const sessionRow = await getDesignSessionRow(thread.activePlanId)
       planRevision = sessionRow?.planRevision ?? null
     }
@@ -377,7 +376,7 @@ export async function* streamSendMessage(
           activePlanId: thread.activePlanId,
           draftRevision,
           planRevision,
-          designSessionId: isDesignSessionId(thread.activePlanId) ? thread.activePlanId : null,
+          designSessionId: thread.activePlanId ?? null,
           selectedDraftSection: options?.selectedDraftSection?.trim() || null,
           selectedPlanNodeRef: options?.selectedPlanNodeRef?.trim() || null
         })

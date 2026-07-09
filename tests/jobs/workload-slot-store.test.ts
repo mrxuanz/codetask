@@ -3,7 +3,10 @@ import test from 'node:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createDatabase, closeDatabaseForTests, getDb } from '../../src/server/db'
+import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
+import { getDb } from '../../src/server/db'
+import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/jobs/reconcile'
+import { ensureStartupWorkloadReady } from '../../src/server/jobs/workload-slot'
 import {
   jobArtifacts,
   jobTasks,
@@ -13,7 +16,7 @@ import {
   projects
 } from '../../src/server/db/schema'
 import { eq } from 'drizzle-orm'
-import type { createIsolatedTestDatabase } from '../../src/server/db'
+import type { getDb as GetDb } from '../../src/server/db'
 import {
   claimWorkloadSlotTx,
   releaseWorkloadSlot,
@@ -36,27 +39,29 @@ import { handlePlannerMcpJsonRpc } from '../../src/server/planner/mcp/handler'
 
 let dataDir: string
 
-function setupDb(): void {
+async function setupDb(): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'codetask-workload-slot-'))
-  createDatabase(dataDir)
+  await resetAppContextForTests()
+  resetJobReconcileForTests()
+  bootstrapRuntime({ dataDir })
+  await ensureStartupWorkloadReady()
+  // Unit tests claim planning slots; stop startup reconciler so it does not
+  // mark seeded planning rows as failed mid-test.
+  stopWorkloadReconcilerForTests()
 }
 
-function teardownDb(): void {
-  try {
-    closeDatabaseForTests()
-  } catch {
-    // ignore
-  }
+async function teardownDb(): Promise<void> {
+  resetWorkloadRunControllersForTests()
+  await resetAppContextForTests()
   try {
     rmSync(dataDir, { recursive: true, force: true })
   } catch {
     // ignore
   }
-  resetWorkloadRunControllersForTests()
 }
 
 async function seedJob(
-  db: ReturnType<typeof createIsolatedTestDatabase>,
+  db: ReturnType<typeof GetDb>,
   jobId: string,
   status: string
 ): Promise<void> {
@@ -112,6 +117,7 @@ async function seedJob(
 }
 
 function progressWithEvidence(summary: string): TaskProgressDto {
+  // Full evidence artifacts are only persisted for failed/blocked evidence.
   return {
     phase: 'running',
     status: 'running',
@@ -123,15 +129,15 @@ function progressWithEvidence(summary: string): TaskProgressDto {
       {
         id: 'task-1',
         title: 'Task 1',
-        status: 'running',
-        executionStatus: 'running',
+        status: 'failed',
+        executionStatus: 'failed',
         evidenceStatus: 'ready',
         evidence: {
-          status: 'completed',
+          status: 'failed',
           summary,
           changedFiles: ['src/a.ts'],
           evidence: ['line'],
-          validation: { ran: true, outcome: 'passed' }
+          validation: { ran: true, outcome: 'failed' }
         }
       }
     ]
@@ -139,7 +145,7 @@ function progressWithEvidence(summary: string): TaskProgressDto {
 }
 
 test('claim capacity=1 rejects second run', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -161,12 +167,12 @@ test('claim capacity=1 rejects second run', async () => {
     })
     assert.equal(second, null)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('capacity=N allows N runs', async () => {
-  setupDb()
+  await setupDb()
   const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
   process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '2'
   try {
@@ -200,12 +206,12 @@ test('capacity=N allows N runs', async () => {
     assert.equal(workloadPoolCapacity('default'), 2)
   } finally {
     process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('release is idempotent', async () => {
-  setupDb()
+  await setupDb()
   const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
   process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '1'
   try {
@@ -227,12 +233,12 @@ test('release is idempotent', async () => {
     assert.equal(second.released, false)
   } finally {
     process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('stale release does not clear newer active_run_id', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -260,12 +266,12 @@ test('stale release does not clear newer active_run_id', async () => {
     const active = await getActiveRun('thread_job', 'job-1')
     assert.equal(active?.runId, newRun.runId)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('fenced update rejects stale run', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -277,7 +283,7 @@ test('fenced update rejects stale run', async () => {
       kind: 'planning'
     })
     assert.ok(oldRun)
-    await releaseWorkloadSlot(oldRun.runId, { reason: 'test' })
+    await releaseWorkloadSlot(oldRun.runId, { reason: 'test', skipQueueAdvance: true })
 
     const patched = await updateJobRowFenced('job-1', oldRun.runId, { status: 'failed' })
     assert.equal(patched, null)
@@ -285,12 +291,12 @@ test('fenced update rejects stale run', async () => {
     const row = await db.select().from(threadJobs).where(eq(threadJobs.id, 'job-1')).limit(1)
     assert.notEqual(row[0]?.status, 'failed')
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('stale fenced update does not replace committed evidence artifacts', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -312,7 +318,7 @@ test('stale fenced update does not replace committed evidence artifacts', async 
     const originalArtifactId = taskRows[0]?.evidenceArtifactId
     assert.ok(originalArtifactId)
 
-    await releaseWorkloadSlot(run.runId, { reason: 'test' })
+    await releaseWorkloadSlot(run.runId, { reason: 'test', skipQueueAdvance: true })
 
     const rejected = await updateJobRowFenced('job-1', run.runId, {
       taskProgress: progressWithEvidence('stale evidence')
@@ -336,13 +342,14 @@ test('stale fenced update does not replace committed evidence artifacts', async 
       db
     )
     assert.equal(hydrated?.summary, 'committed evidence')
+    assert.equal(hydrated?.status, 'failed')
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('assertRunActive is false after release', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -359,12 +366,12 @@ test('assertRunActive is false after release', async () => {
     await releaseWorkloadSlot(run.runId, { reason: 'test' })
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), false)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('assertRunWritable is false while run is cancelling', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -383,12 +390,12 @@ test('assertRunWritable is false while run is cancelling', async () => {
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), true)
     assert.equal(await assertRunWritable('thread_job', 'job-1', run.runId), false)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('MCP handler rejects stale run', async () => {
-  setupDb()
+  await setupDb()
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -439,6 +446,6 @@ test('MCP handler rejects stale run', async () => {
       unregisterPlannerMcpSession('plan-mcp-test')
     }
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })

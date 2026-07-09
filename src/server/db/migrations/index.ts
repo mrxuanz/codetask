@@ -23,6 +23,7 @@ import { migration022AuthGuard } from './022_auth_guard'
 import { migration023WorkloadSlots } from './023_workload_slots'
 import { migration024JobPausingStatus } from './024_job_pausing_status'
 import { migration025RuntimeBytes } from './025_runtime_bytes'
+import { migration026UnifyThreadJobs } from './026_unify_thread_jobs'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -51,7 +52,8 @@ export const allMigrations = [
   migration022AuthGuard,
   migration023WorkloadSlots,
   migration024JobPausingStatus,
-  migration025RuntimeBytes
+  migration025RuntimeBytes,
+  migration026UnifyThreadJobs
 ]
 
 export function applyMigrations(db: Database.Database): void {
