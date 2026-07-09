@@ -4,7 +4,6 @@ import { join } from 'path'
 import { asc, eq, or } from 'drizzle-orm'
 import type { getDb } from '../db'
 import {
-  designSessions,
   draftReferences,
   jobArtifacts,
   messageArtifacts,
@@ -160,7 +159,7 @@ export async function pruneOrphanDesignArtifactDirs(
   const root = join(dataDir, 'artifacts', 'designs')
   if (!existsSync(root)) return { removed: 0 }
 
-  const rows = await db.select({ id: designSessions.id }).from(designSessions)
+  const rows = await db.select({ id: threadJobs.id }).from(threadJobs)
   const valid = new Set(rows.map((row) => row.id))
   let removed = 0
 
@@ -203,8 +202,8 @@ export async function pruneStaleThreadAttachmentDirs(
       db
         .select({ attachmentId: draftReferences.attachmentId })
         .from(draftReferences)
-        .innerJoin(designSessions, eq(draftReferences.designSessionId, designSessions.id))
-        .where(eq(designSessions.threadId, thread.id)),
+        .innerJoin(threadJobs, eq(draftReferences.designSessionId, threadJobs.id))
+        .where(eq(threadJobs.threadId, thread.id)),
       db
         .select({ attachmentsJson: threadMessages.attachmentsJson })
         .from(threadMessages)

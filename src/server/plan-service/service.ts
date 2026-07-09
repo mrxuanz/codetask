@@ -3,15 +3,14 @@ import { and, eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { loadDesignAbilities, loadDesignPlan } from '../db/design-plan'
-import { designRuns, designSessions } from '../db/schema'
+import { loadJobAbilities, loadJobPlan } from '../db/job-plan'
+import { designRuns, threadJobs } from '../db/schema'
 import {
-  getDesignSessionAsJob,
   getDesignSessionRow,
-  loadDesignReferenceManifest,
-  updateDesignSessionRow
+  loadDesignReferenceManifest
 } from '../design-session/service'
 import { scheduleDesignSessionPlanRegeneration } from '../design-session/planner'
+import { emitJobEvent, getThreadJob, updateJobRow } from '../jobs/service'
 import type { PlannerRegisteredPlan } from '../planner/plan-types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import {
@@ -24,7 +23,6 @@ import {
 import { validatePlanAbilityCodes } from '../planner/plan-ability-validation'
 import { flattenRegisteredPlan } from '../planner/save-plan'
 import { putDesignPlanArtifact } from '../retention/design-plan-artifacts'
-import { emitJobEvent } from '../jobs/service'
 import type { ThreadJobDto } from '../jobs/types'
 import {
   assertThreadWizardPhase,
@@ -37,7 +35,6 @@ import {
   WIZARD_PHASE_PLAN_GENERATING,
   WIZARD_PHASE_READY_TO_LAUNCH
 } from '../wizard/types'
-import { isDesignSessionId } from '@shared/design-session'
 import { clearPlanConfirmedFlags, buildPlanSummary } from '@shared/plan-mutations'
 
 function nowSec(): number {
@@ -162,7 +159,7 @@ async function persistPlanMutation(input: {
 
   const db = getDb()
   await db
-    .update(designSessions)
+    .update(threadJobs)
     .set({
       planRevision: nextRevision,
       planArtifactId: artifact.artifactId,
@@ -172,9 +169,9 @@ async function persistPlanMutation(input: {
       ...phasePatch,
       updatedAt: nowSec()
     })
-    .where(eq(designSessions.id, input.designSessionId))
+    .where(eq(threadJobs.id, input.designSessionId))
 
-  const updated = await updateDesignSessionRow(input.designSessionId, {
+  const updated = await updateJobRow(input.designSessionId, {
     plan: cleared,
     planRevision: nextRevision,
     ...phasePatch
@@ -214,7 +211,7 @@ async function persistPlanMutation(input: {
     data: { job: updated }
   })
 
-  const full = await getDesignSessionAsJob(input.username, input.threadId, input.designSessionId)
+  const full = await getThreadJob(input.username, input.threadId, input.designSessionId)
   return full ?? updated
 }
 
@@ -227,8 +224,8 @@ export async function replaceExecutionPlan(
     milestones: unknown
   }
 ): Promise<ThreadJobDto> {
-  if (!isDesignSessionId(input.designSessionId)) {
-    throw AppError.badRequest('designSessionId is required', 'job.invalid_id')
+  if (!input.designSessionId?.trim()) {
+    throw AppError.badRequest('jobId is required', 'job.invalid_id')
   }
 
   await assertThreadWizardPhase(username, threadId, WIZARD_PHASE_PLAN_EDIT)
@@ -244,7 +241,7 @@ export async function replaceExecutionPlan(
   }
 
   const db = getDb()
-  const existingPlan = await loadDesignPlan(db, input.designSessionId)
+  const existingPlan = await loadJobPlan(db, input.designSessionId)
   if (!existingPlan?.tasks?.length) {
     throw AppError.badRequest('Execution plan not generated', 'draft.plan_not_ready')
   }
@@ -260,7 +257,7 @@ export async function replaceExecutionPlan(
   }
 
   const manifest = await loadDesignReferenceManifest(input.designSessionId)
-  const abilities = await loadDesignAbilities(db, input.designSessionId)
+  const abilities = await loadJobAbilities(db, input.designSessionId)
   const validReferenceIds = manifest?.references.map((item) => item.id) ?? []
   try {
     validatePlanAbilityCodes(
@@ -298,8 +295,8 @@ export async function requestPlanRegeneration(
     instruction: string
   }
 ): Promise<ThreadJobDto> {
-  if (!isDesignSessionId(input.designSessionId)) {
-    throw AppError.badRequest('designSessionId is required', 'job.invalid_id')
+  if (!input.designSessionId?.trim()) {
+    throw AppError.badRequest('jobId is required', 'job.invalid_id')
   }
 
   const instruction = input.instruction?.trim()
@@ -323,16 +320,16 @@ export async function requestPlanRegeneration(
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
+    .from(threadJobs)
     .where(
       and(
-        eq(designSessions.id, input.designSessionId),
-        eq(designSessions.threadId, threadId),
-        eq(designSessions.username, username)
+        eq(threadJobs.id, input.designSessionId),
+        eq(threadJobs.threadId, threadId),
+        eq(threadJobs.username, username)
       )
     )
     .limit(1)
-  if (!rows[0]) throw AppError.notFound('Design session not found', 'design_session.not_found')
+  if (!rows[0]) throw AppError.notFound('Plan not found', 'job.not_found')
 
   const { getThreadRow } = await import('../threads/service')
   const { getMessage } = await import('../conversation/messages')
@@ -357,7 +354,7 @@ export async function requestPlanRegeneration(
       ? { phase: 'plan_edit' as const, status: 'plan_editing' as const }
       : { phase: 'plan_generating' as const, status: 'planning' as const }
 
-  const updated = await updateDesignSessionRow(input.designSessionId, {
+  const updated = await updateJobRow(input.designSessionId, {
     ...phasePatch,
     lastError: null
   })

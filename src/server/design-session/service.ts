@@ -1,19 +1,13 @@
 import { randomUUID } from 'crypto'
 import { and, desc, eq, inArray } from 'drizzle-orm'
-import { parseJobReferenceManifest, toPublicReferenceManifest } from '@shared/job-references'
-import { isDesignSessionId } from '@shared/design-session'
-import { hydrateTurnErrorField, coercePersistedTurnError } from '../turn-errors/store'
+import { parseJobReferenceManifest } from '@shared/job-references'
+import { isDesignSessionId, DESIGN_SESSION_WORKSPACE_STATUSES } from '@shared/design-session'
+import { coercePersistedTurnError } from '../turn-errors/store'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
-import {
-  copyDesignPlanToJob,
-  loadDesignAbilities,
-  loadDesignPlan,
-  loadDesignPlanProgress,
-  saveDesignPlanInTx
-} from '../db/design-plan'
+import { loadJobAbilities, loadJobPlan, saveJobPlanInTx } from '../db/job-plan'
 import { saveTaskProgressInTx } from '../db/job-progress'
-import { designRuns, designSessions, threadJobs, threads, type DesignSession } from '../db/schema'
+import { designRuns, threadJobs, threads, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../jobs/types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultTaskProgress } from '../planner/save-plan'
@@ -23,8 +17,6 @@ import { ReferenceFileMissingError } from '../jobs/reference-paths'
 import { buildJobSnapshot, parseSessionManifest, validateLaunchPreconditions } from './launch'
 import { advanceWorkloadQueue } from '../jobs/workload-slot-store'
 import { emitJobEvent } from '../jobs/service'
-import { DESIGN_SESSION_WORKSPACE_STATUSES } from '@shared/design-session'
-import { isManifestFresh } from '../reference-corpus/corpus-sync'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -39,60 +31,19 @@ export type DesignSessionRowPatch = Partial<{
   taskProgress: TaskProgressDto
   lastError: TurnErrorDto | string | null
   launchedJobId: string | null
+  planArtifactId: string | null
+  planArtifactPath: string | null
+  planSummaryJson: string | null
 }>
 
-export async function getDesignSessionRow(designSessionId: string): Promise<DesignSession | null> {
+export async function getDesignSessionRow(designSessionId: string): Promise<ThreadJob | null> {
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
     .limit(1)
   return rows[0] ?? null
-}
-
-export async function mapDesignSessionToJobDto(
-  row: DesignSession,
-  options?: { includePlan?: boolean }
-): Promise<ThreadJobDto> {
-  const db = getDb()
-  const includePlan = options?.includePlan ?? true
-  const [abilities, planProgress, plan] = await Promise.all([
-    loadDesignAbilities(db, row.id),
-    loadDesignPlanProgress(db, row.id),
-    includePlan ? loadDesignPlan(db, row.id) : Promise.resolve(null)
-  ])
-  const taskProgress: TaskProgressDto = {
-    phase: row.taskPhase as TaskProgressDto['phase'],
-    status: row.taskStatus as TaskProgressDto['status'],
-    currentIndex: row.taskCurrentIndex,
-    total: row.taskTotal,
-    currentTaskId: row.taskCurrentTaskId ?? null,
-    message: row.taskMessage,
-    tasks: []
-  }
-  const manifest = parseJobReferenceManifest(row.referenceManifestJson)
-  return {
-    id: row.id,
-    threadId: row.threadId,
-    draftMessageId: row.draftMessageId,
-    title: row.title,
-    summary: row.summary ?? '',
-    status: row.status as ThreadJobDto['status'],
-    planProgress,
-    taskProgress,
-    abilities,
-    plan: includePlan ? (plan ?? undefined) : undefined,
-    referenceManifest: manifest ? toPublicReferenceManifest(manifest) : undefined,
-    referenceManifestStale: !isManifestFresh(row),
-    planRevision: row.planRevision,
-    workspacePath: row.workspaceRoot,
-    lastError: hydrateTurnErrorField(row.lastError),
-    draftConfirmedAt: row.draftConfirmedAt ?? null,
-    planConfirmedAt: null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
-  }
 }
 
 export async function getDesignSessionAsJob(
@@ -103,16 +54,16 @@ export async function getDesignSessionAsJob(
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
+    .from(threadJobs)
     .where(
       and(
-        eq(designSessions.id, designSessionId),
-        eq(designSessions.threadId, threadId),
-        eq(designSessions.username, username)
+        eq(threadJobs.id, designSessionId),
+        eq(threadJobs.threadId, threadId),
+        eq(threadJobs.username, username)
       )
     )
     .limit(1)
-  return rows[0] ? mapDesignSessionToJobDto(rows[0], { includePlan: true }) : null
+  return rows[0] ? mapJob(rows[0], { includePlan: true }) : null
 }
 
 export async function getUserDesignSessionAsJob(
@@ -122,10 +73,10 @@ export async function getUserDesignSessionAsJob(
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.username, username)))
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, designSessionId), eq(threadJobs.username, username)))
     .limit(1)
-  return rows[0] ? mapDesignSessionToJobDto(rows[0], { includePlan: true }) : null
+  return rows[0] ? mapJob(rows[0], { includePlan: true }) : null
 }
 
 export async function listThreadDesignSessions(
@@ -135,17 +86,17 @@ export async function listThreadDesignSessions(
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
+    .from(threadJobs)
     .where(
       and(
-        eq(designSessions.threadId, threadId),
-        eq(designSessions.username, username),
-        inArray(designSessions.status, [...DESIGN_SESSION_WORKSPACE_STATUSES])
+        eq(threadJobs.threadId, threadId),
+        eq(threadJobs.username, username),
+        inArray(threadJobs.status, [...DESIGN_SESSION_WORKSPACE_STATUSES])
       )
     )
-    .orderBy(desc(designSessions.updatedAt))
+    .orderBy(desc(threadJobs.updatedAt))
 
-  return Promise.all(rows.map((row) => mapDesignSessionToJobDto(row, { includePlan: true })))
+  return Promise.all(rows.map((row) => mapJob(row, { includePlan: true })))
 }
 
 export async function updateDesignSessionRow(
@@ -155,7 +106,8 @@ export async function updateDesignSessionRow(
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
   const now = nowSec()
-  const { plan, planProgress, taskProgress, lastError, ...rowPatch } = patch
+  const { plan, planProgress, taskProgress, lastError, launchedJobId: _launchedJobId, ...rowPatch } =
+    patch
 
   const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
   if (lastError !== undefined) {
@@ -164,16 +116,12 @@ export async function updateDesignSessionRow(
 
   db.transaction(() => {
     if (Object.keys(dbPatch).length > 1) {
-      db.update(designSessions).set(dbPatch).where(eq(designSessions.id, designSessionId)).run()
+      db.update(threadJobs).set(dbPatch).where(eq(threadJobs.id, designSessionId)).run()
     }
 
     if (plan !== undefined) {
-      saveDesignPlanInTx(db, designSessionId, plan)
-      db
-        .update(designSessions)
-        .set({ updatedAt: now })
-        .where(eq(designSessions.id, designSessionId))
-        .run()
+      saveJobPlanInTx(db, designSessionId, plan)
+      db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, designSessionId)).run()
     }
 
     if (planProgress) {
@@ -182,8 +130,7 @@ export async function updateDesignSessionRow(
         slices: planProgress.slices,
         tasks: planProgress.tasks
       }
-      db
-        .update(designSessions)
+      db.update(threadJobs)
         .set({
           planPhase: planProgress.phase,
           planStatus: planProgress.status,
@@ -193,35 +140,19 @@ export async function updateDesignSessionRow(
           planCountsJson: JSON.stringify(counts),
           updatedAt: now
         })
-        .where(eq(designSessions.id, designSessionId))
+        .where(eq(threadJobs.id, designSessionId))
         .run()
     }
 
     if (taskProgress) {
-      db
-        .update(designSessions)
-        .set({
-          taskPhase: taskProgress.phase,
-          taskStatus: taskProgress.status,
-          taskCurrentIndex: taskProgress.currentIndex,
-          taskTotal: taskProgress.total,
-          taskCurrentTaskId: taskProgress.currentTaskId ?? null,
-          taskMessage: taskProgress.message ?? null,
-          updatedAt: now
-        })
-        .where(eq(designSessions.id, designSessionId))
-        .run()
+      saveTaskProgressInTx(db, designSessionId, taskProgress, eq(threadJobs.id, designSessionId))
+      db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, designSessionId)).run()
     }
   })
 
-  const rows = db
-    .select()
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
-    .limit(1)
-    .all()
+  const rows = db.select().from(threadJobs).where(eq(threadJobs.id, designSessionId)).limit(1).all()
   return rows[0]
-    ? mapDesignSessionToJobDto(rows[0], { includePlan: options?.includePlan ?? true })
+    ? mapJob(rows[0], { includePlan: options?.includePlan ?? true })
     : null
 }
 
@@ -232,17 +163,15 @@ export async function updateDesignSessionRowFenced(
   options?: { includePlan?: boolean }
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
-  const fence = and(
-    eq(designSessions.id, designSessionId),
-    eq(designSessions.activeRunId, runId)
-  )!
+  const fence = and(eq(threadJobs.id, designSessionId), eq(threadJobs.activeRunId, runId))!
 
   const applied = db.transaction((tx) => {
-    const existing = tx.select().from(designSessions).where(fence).limit(1).all()[0]
+    const existing = tx.select().from(threadJobs).where(fence).limit(1).all()[0]
     if (!existing) return false
 
     const now = nowSec()
-    const { plan, planProgress, taskProgress, lastError, ...rowPatch } = patch
+    const { plan, planProgress, taskProgress, lastError, launchedJobId: _launchedJobId, ...rowPatch } =
+      patch
 
     const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
     if (lastError !== undefined) {
@@ -250,13 +179,13 @@ export async function updateDesignSessionRowFenced(
     }
 
     if (Object.keys(dbPatch).length > 1) {
-      const result = tx.update(designSessions).set(dbPatch).where(fence).run()
+      const result = tx.update(threadJobs).set(dbPatch).where(fence).run()
       if (result.changes === 0) return false
     }
 
     if (plan !== undefined) {
-      saveDesignPlanInTx(tx, designSessionId, plan)
-      tx.update(designSessions).set({ updatedAt: now }).where(fence).run()
+      saveJobPlanInTx(tx, designSessionId, plan)
+      tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
     }
 
     if (planProgress) {
@@ -265,7 +194,7 @@ export async function updateDesignSessionRowFenced(
         slices: planProgress.slices,
         tasks: planProgress.tasks
       }
-      tx.update(designSessions)
+      tx.update(threadJobs)
         .set({
           planPhase: planProgress.phase,
           planStatus: planProgress.status,
@@ -276,36 +205,26 @@ export async function updateDesignSessionRowFenced(
         })
         .where(fence)
         .run()
-      tx.update(designSessions).set({ updatedAt: now }).where(fence).run()
+      tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
     }
 
     if (taskProgress) {
-      tx.update(designSessions)
-        .set({
-          taskPhase: taskProgress.phase,
-          taskStatus: taskProgress.status,
-          taskCurrentIndex: taskProgress.currentIndex,
-          taskTotal: taskProgress.total,
-          taskCurrentTaskId: taskProgress.currentTaskId ?? null,
-          taskMessage: taskProgress.message ?? null,
-          updatedAt: now
-        })
-        .where(fence)
-        .run()
+      saveTaskProgressInTx(tx, designSessionId, taskProgress, fence)
+      tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
     }
 
-    return tx.select().from(designSessions).where(fence).limit(1).all()[0] != null
+    return tx.select().from(threadJobs).where(fence).limit(1).all()[0] != null
   })
 
   if (!applied) return null
 
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
     .limit(1)
   return rows[0]
-    ? mapDesignSessionToJobDto(rows[0], { includePlan: options?.includePlan ?? true })
+    ? mapJob(rows[0], { includePlan: options?.includePlan ?? true })
     : null
 }
 
@@ -372,12 +291,12 @@ export async function launchJobFromDesignSession(
   const db = getDb()
   const sessionRows = await db
     .select()
-    .from(designSessions)
+    .from(threadJobs)
     .where(
       and(
-        eq(designSessions.id, designSessionId),
-        eq(designSessions.threadId, threadId),
-        eq(designSessions.username, username)
+        eq(threadJobs.id, designSessionId),
+        eq(threadJobs.threadId, threadId),
+        eq(threadJobs.username, username)
       )
     )
     .limit(1)
@@ -385,8 +304,8 @@ export async function launchJobFromDesignSession(
   if (!session) throw AppError.notFound('Design session not found', 'job.not_found')
 
   const [plan, abilities] = await Promise.all([
-    loadDesignPlan(db, designSessionId),
-    loadDesignAbilities(db, designSessionId)
+    loadJobPlan(db, designSessionId),
+    loadJobAbilities(db, designSessionId)
   ])
   const manifest = parseSessionManifest(session)
 
@@ -410,7 +329,6 @@ export async function launchJobFromDesignSession(
     manifest: manifest!
   })
 
-  const jobId = `job-${randomUUID()}`
   const confirmedAt = nowSec()
   const planProgress: PlanProgressDto = {
     phase: 'plan_ready',
@@ -427,80 +345,39 @@ export async function launchJobFromDesignSession(
   const taskProgress = defaultTaskProgress(snapshot.executionPlan.tasks)
 
   db.transaction(() => {
-    db.insert(threadJobs).values({
-      id: jobId,
-      threadId,
-      username,
-      draftMessageId: session.draftMessageId,
-      title: session.title,
-      summary: session.summary ?? '',
-      status: 'pending',
-      workspacePath: snapshot.workspaceRoot,
-      planPhase: planProgress.phase,
-      planStatus: planProgress.status,
-      planContextsRegistered: planProgress.contextsRegistered,
-      planContextsTotal: planProgress.contextsTotal,
-      planMessage: planProgress.message ?? null,
-      planCountsJson: JSON.stringify({
-        milestones: planProgress.milestones,
-        slices: planProgress.slices,
-        tasks: planProgress.tasks
-      }),
-      taskPhase: taskProgress.phase,
-      taskStatus: taskProgress.status,
-      taskCurrentIndex: taskProgress.currentIndex,
-      taskTotal: taskProgress.total,
-      taskCurrentTaskId: taskProgress.currentTaskId ?? null,
-      taskMessage: taskProgress.message ?? null,
-      taskMetaJson: '{}',
-      lastError: null,
-      referenceManifestJson: session.referenceManifestJson,
-      draftConfirmedAt: session.draftConfirmedAt ?? confirmedAt,
-      planConfirmedAt: confirmedAt,
-      designSessionId: snapshot.designSessionId,
-      snapshotDraftRevision: snapshot.draftRevision,
-      snapshotPlanRevision: snapshot.planRevision,
-      snapshotManifestRevision: snapshot.manifestRevision,
-      createdAt: confirmedAt,
-      updatedAt: confirmedAt
-    }).run()
-
-    copyDesignPlanToJob(db, designSessionId, jobId)
-
     const planCounts = {
       milestones: planProgress.milestones,
       slices: planProgress.slices,
       tasks: planProgress.tasks
     }
-    db
-      .update(threadJobs)
+
+    db.update(threadJobs)
       .set({
+        status: 'pending',
+        phase: 'archived',
+        workspacePath: snapshot.workspaceRoot,
         planPhase: planProgress.phase,
         planStatus: planProgress.status,
         planContextsRegistered: planProgress.contextsRegistered,
         planContextsTotal: planProgress.contextsTotal,
         planMessage: planProgress.message ?? null,
-        planCountsJson: JSON.stringify(planCounts)
-      })
-      .where(eq(threadJobs.id, jobId))
-      .run()
-
-    saveTaskProgressInTx(db, jobId, taskProgress, eq(threadJobs.id, jobId))
-
-    db
-      .update(designSessions)
-      .set({
-        status: 'launched',
-        phase: 'archived',
-        launchedJobId: jobId,
+        planCountsJson: JSON.stringify(planCounts),
+        draftConfirmedAt: session.draftConfirmedAt ?? confirmedAt,
+        planConfirmedAt: confirmedAt,
+        designSessionId: designSessionId,
+        snapshotDraftRevision: snapshot.draftRevision,
+        snapshotPlanRevision: snapshot.planRevision,
+        snapshotManifestRevision: snapshot.manifestRevision,
+        lastError: null,
         updatedAt: confirmedAt
       })
-      .where(eq(designSessions.id, designSessionId))
+      .where(eq(threadJobs.id, designSessionId))
       .run()
 
-    db
-      .update(threads)
-      .set({ activePlanId: jobId, updatedAt: confirmedAt })
+    saveTaskProgressInTx(db, designSessionId, taskProgress, eq(threadJobs.id, designSessionId))
+
+    db.update(threads)
+      .set({ activePlanId: designSessionId, updatedAt: confirmedAt })
       .where(and(eq(threads.id, threadId), eq(threads.username, username)))
       .run()
   })
@@ -513,17 +390,22 @@ export async function launchJobFromDesignSession(
     const payload = draftMessage.payload as Record<string, unknown>
     await updateMessagePayload(username, threadId, session.draftMessageId, {
       ...payload,
-      linkedPlanId: jobId,
+      linkedPlanId: designSessionId,
       designSessionId
     })
   }
 
-  const jobRows = db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1).all()
+  const jobRows = db
+    .select()
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
+    .limit(1)
+    .all()
   const job = jobRows[0] ? await mapJob(jobRows[0], { includePlan: true }) : null
-  if (!job) throw AppError.internal('Failed to create job', 'turn.unknown')
+  if (!job) throw AppError.internal('Failed to launch job', 'turn.unknown')
 
-  emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
-  emitJobEvent(jobId, { event: 'job_snapshot', data: { job } })
+  emitJobEvent(designSessionId, { event: 'task_progress', data: { taskProgress } })
+  emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job } })
 
   if (!options?.skipQueueAdvance) {
     await advanceWorkloadQueue(username)

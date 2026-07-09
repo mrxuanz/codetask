@@ -1,7 +1,7 @@
 import { and, eq, type SQL } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { designSessions, threadJobs } from '../db/schema'
+import { threadJobs } from '../db/schema'
 import type { WorkloadOwnerKind, WorkloadRunKind, WorkloadRunSummary } from './workload-slot-store'
 import { findActiveWorkloadRunId, listActiveWorkloadSlots } from './workload-slot-store'
 
@@ -87,10 +87,10 @@ export async function findDbPlanningSessionId(
   exceptId?: string
 ): Promise<string | null> {
   const rows = await getDb()
-    .select({ id: designSessions.id })
-    .from(designSessions)
-    .where(and(eq(designSessions.username, username), eq(designSessions.status, 'planning')))
-    .orderBy(designSessions.updatedAt)
+    .select({ id: threadJobs.id })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'planning')))
+    .orderBy(threadJobs.updatedAt)
     .limit(1)
   const id = rows[0]?.id ?? null
   if (!id) return null

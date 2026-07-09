@@ -8,7 +8,6 @@ import TaskLaunchDraftCard from '@renderer/components/home/TaskLaunchDraftCard.v
 import PlanReviewAccordion from '@renderer/components/tasks/PlanReviewAccordion.vue'
 import TaskProgressTree from '@renderer/components/tasks/TaskProgressTree.vue'
 import TaskProgressBar from '@renderer/components/tasks/TaskProgressBar.vue'
-import { isDesignSessionId } from '@shared/design-session'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
@@ -98,7 +97,7 @@ function planNodePatch(
 ): Parameters<typeof updateJobPlanNode>[2] {
   const plan = ws.selectedPlan.value
   const patch: Parameters<typeof updateJobPlanNode>[2] = { nodeRef, ...fields }
-  if (plan && isDesignSessionId(plan.id) && plan.planRevision != null) {
+  if (plan && plan.planRevision != null) {
     patch.expectedPlanRevision = plan.planRevision
   }
   return patch

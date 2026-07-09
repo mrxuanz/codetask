@@ -18,8 +18,14 @@ test('migration 018 creates draft_references table', () => {
     .all() as Array<{ name: string }>
   assert.ok(tables.some((t) => t.name === 'draft_references'))
 
-  const cols = sqlite.prepare(`PRAGMA table_info(design_sessions)`).all() as Array<{ name: string }>
+  // After P10 (026), planning metadata lives on thread_jobs; design_sessions is dropped.
+  const cols = sqlite.prepare(`PRAGMA table_info(thread_jobs)`).all() as Array<{ name: string }>
   assert.ok(cols.some((col) => col.name === 'manifest_revision'))
+  assert.ok(cols.some((col) => col.name === 'corpus_revision'))
+  assert.equal(
+    tables.some((t) => t.name === 'design_sessions'),
+    false
+  )
 
   sqlite.close()
 })

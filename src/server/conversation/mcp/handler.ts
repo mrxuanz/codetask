@@ -46,7 +46,6 @@ import {
   WIZARD_PHASE_PLAN_EDIT
 } from '../../wizard/types'
 import { mergeDraftReferences } from '../../jobs/draft-references'
-import { isDesignSessionId } from '@shared/design-session'
 import {
   checkDraftEditAllowed,
   checkExecutionPlanEditAllowed,
@@ -609,12 +608,12 @@ async function resolveDesignSessionIdFromPlanArgs(
       : typeof args.jobId === 'string'
         ? args.jobId.trim()
         : ''
-  if (explicit && isDesignSessionId(explicit)) return explicit
+  if (explicit) return explicit
 
-  const active = session.activePlanId
-  if (active && isDesignSessionId(active)) return active
+  const active = session.activePlanId?.trim()
+  if (active) return active
 
-  throw AppError.badRequest('designSessionId (ds-*) is required', 'job.invalid_id')
+  throw AppError.badRequest('jobId / activePlanId is required', 'job.invalid_id')
 }
 
 async function replaceExecutionPlanTool(
@@ -751,15 +750,14 @@ async function resolveDesignSessionIdFromArgs(
       : typeof args.jobId === 'string'
         ? args.jobId.trim()
         : ''
-  if (explicit && isDesignSessionId(explicit)) return explicit
+  if (explicit) return explicit
 
   const messageId = await resolveDraftMessageIdFromSession(session, args)
   const message = await getMessage(session.username, session.threadId, messageId, {
     signAssets: false
   })
   const payload = message?.payload as TaskLaunchDraftPayload | undefined
-  const linked = payload?.linkedPlanId
-  return linked && isDesignSessionId(linked) ? linked : null
+  return payload?.linkedPlanId?.trim() || null
 }
 
 async function listReferenceCorpusTool(

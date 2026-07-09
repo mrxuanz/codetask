@@ -20,7 +20,6 @@ import {
 } from '@renderer/api/jobs'
 import type { JobSseEvent } from '@shared/contracts/sse'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
-import { isDesignSessionId } from '@shared/design-session'
 import { resolveDraftPlanReference } from '@shared/draft-plan-resolve'
 import { updateThreadContext } from '@renderer/api/threads'
 import {
@@ -118,7 +117,10 @@ export function provideDraftPlanWorkspace(options: {
         draft.designSessionId ??
         (payload as { designSessionId?: string | null } | null | undefined)?.designSessionId,
       launchedJobId: draft.launchedJobId,
-      planId: draft.plan?.id
+      planId: draft.plan?.id,
+      planStatus: draft.plan?.status,
+      planConfirmedAt: (draft.plan as { planConfirmedAt?: number | null } | null | undefined)
+        ?.planConfirmedAt
     })
   }
 
@@ -127,13 +129,13 @@ export function provideDraftPlanWorkspace(options: {
     payload?: TaskLaunchDraftPayload | null
   ): ThreadJobDto | null {
     const refs = draftPlanRefs(draft, payload)
+    if (refs.activePlanId) {
+      const byId = plans.value.find((plan) => plan.id === refs.activePlanId)
+      if (byId) return byId
+    }
     if (refs.launchedJobId) {
       const byJob = plans.value.find((plan) => plan.id === refs.launchedJobId)
       if (byJob) return byJob
-    }
-    if (refs.designSessionId) {
-      const bySession = plans.value.find((plan) => plan.id === refs.designSessionId)
-      if (bySession) return bySession
     }
     return null
   }
@@ -375,10 +377,6 @@ export function provideDraftPlanWorkspace(options: {
       error.value = options.t('workspace.draftPanel.referenceManifestStaleHint')
       return
     }
-    if (!isDesignSessionId(plan.id)) {
-      error.value = options.t('workspace.draftPanel.launchRequiresDesignSession')
-      return
-    }
     confirmingPlan.value = true
     error.value = null
     successMessage.value = null
@@ -424,7 +422,7 @@ export function provideDraftPlanWorkspace(options: {
   async function handleRefreezeCorpus(): Promise<void> {
     const plan = selectedPlan.value
     const threadId = options.threadId.value
-    if (!plan || !threadId || !isDesignSessionId(plan.id)) return
+    if (!plan || !threadId) return
     freezingCorpus.value = true
     error.value = null
     successMessage.value = null

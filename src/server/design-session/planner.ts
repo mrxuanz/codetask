@@ -3,7 +3,8 @@ import { and, asc, eq, isNull } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { saveDesignPlan, saveDesignPlanProgress, saveDesignAbilities } from '../db/design-plan'
-import { designSessions } from '../db/schema'
+import { threadJobs } from '../db/schema'
+import { mapJob } from '../jobs/repository'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import { ensureRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
@@ -41,7 +42,6 @@ import {
   createPlannerRun,
   finishPlannerRun,
   loadDesignReferenceManifest,
-  mapDesignSessionToJobDto,
   updateDesignSessionRow,
   updateDesignSessionRowFenced
 } from './service'
@@ -104,7 +104,7 @@ export async function commitDesignPlanReady(
   })
   const db = getDb()
   await db
-    .update(designSessions)
+    .update(threadJobs)
     .set({
       planArtifactId: artifact.artifactId,
       planArtifactPath: artifact.contentPath,
@@ -112,7 +112,7 @@ export async function commitDesignPlanReady(
       planCountsJson: JSON.stringify(counts),
       updatedAt: nowSec()
     })
-    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.activeRunId, runId)))
+    .where(and(eq(threadJobs.id, designSessionId), eq(threadJobs.activeRunId, runId)))
 
   emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress: planReady } })
   emitJobEvent(designSessionId, {
@@ -193,9 +193,9 @@ async function pushDesignPlanningProgress(
 ): Promise<void> {
   const db = getDb()
   const fenced = await db
-    .select({ activeRunId: designSessions.activeRunId })
-    .from(designSessions)
-    .where(and(eq(designSessions.id, designSessionId), eq(designSessions.activeRunId, runId)))
+    .select({ activeRunId: threadJobs.activeRunId })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, designSessionId), eq(threadJobs.activeRunId, runId)))
     .limit(1)
     .then((rows) => rows[0])
 
@@ -226,16 +226,16 @@ async function pushDesignPlanningProgress(
   await saveDesignPlan(db, designSessionId, partialPlan)
   await saveDesignPlanProgress(db, designSessionId, planProgress)
   await db
-    .update(designSessions)
+    .update(threadJobs)
     .set({ updatedAt: nowSec() })
-    .where(eq(designSessions.id, designSessionId))
+    .where(eq(threadJobs.id, designSessionId))
 
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
     .limit(1)
-  const job = rows[0] ? await mapDesignSessionToJobDto(rows[0], { includePlan: true }) : null
+  const job = rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
   if (!job) return
 
   emitJobEvent(designSessionId, {
@@ -306,7 +306,7 @@ async function runDesignPlanner(
   const { claimWorkloadSlotTx } = await import('../jobs/workload-slot-store')
   const run = await claimWorkloadSlotTx({
     username,
-    ownerKind: 'design_session',
+    ownerKind: 'thread_job',
     ownerId: designSessionId,
     kind: 'planning',
     pool: 'planning'
@@ -401,7 +401,7 @@ async function runDesignPlanner(
       jobId: designSessionId,
       threadId,
       runId: run.runId,
-      ownerKind: 'design_session',
+      ownerKind: 'thread_job',
       ownerId: designSessionId,
       allowedAbilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode),
       validReferenceIds:
@@ -683,16 +683,16 @@ export async function tryStartPendingDesignSessionPlanning(username: string): Pr
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
+    .from(threadJobs)
     .where(
       and(
-        eq(designSessions.username, username),
-        eq(designSessions.status, 'planning'),
-        eq(designSessions.planStatus, 'pending'),
-        isNull(designSessions.activeRunId)
+        eq(threadJobs.username, username),
+        eq(threadJobs.status, 'planning'),
+        eq(threadJobs.planStatus, 'pending'),
+        isNull(threadJobs.activeRunId)
       )
     )
-    .orderBy(asc(designSessions.updatedAt))
+    .orderBy(asc(threadJobs.updatedAt))
     .limit(1)
 
   const row = rows[0]
@@ -733,7 +733,7 @@ export async function tryStartPendingDesignSessionPlanning(username: string): Pr
     row.threadId,
     row.id,
     payload,
-    row.workspaceRoot,
+    row.workspacePath,
     threadRow.coreCode
   )
 }
