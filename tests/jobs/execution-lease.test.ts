@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { eq } from 'drizzle-orm'
-import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
+import { bootstrapRuntime, resetAppContextForTests, getAppContext } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import { threadJobs } from '../../src/server/db/schema'
 import {
@@ -30,6 +30,7 @@ describe('execution lease stale recovery', () => {
     bootstrapRuntime({ dataDir })
 
     const now = nowSec()
+    const bootId = getAppContext().bootId
     await getDb()
       .insert(threadJobs)
       .values({
@@ -38,7 +39,7 @@ describe('execution lease stale recovery', () => {
         threadId: 'thread-lease',
         title: 'Lease test job',
         status: 'running',
-        executionLeaseOwner: 'pid-999999',
+        executionLeaseOwner: `999999-${bootId}-old`,
         executionLeaseExpiresAt: now + 3600,
         createdAt: now,
         updatedAt: now
@@ -56,10 +57,17 @@ describe('execution lease stale recovery', () => {
     }
   })
 
-  it('detects stale pid lease owners', () => {
-    assert.equal(isStaleExecutionLeaseOwner('pid-999999'), true)
+  it('detects stale bootId lease owners', () => {
+    const currentBootId = getAppContext().bootId
+    assert.equal(isStaleExecutionLeaseOwner(`999999-${currentBootId}-old`), true)
     assert.equal(isStaleExecutionLeaseOwner(executionLeaseOwner()), false)
     assert.equal(isStaleExecutionLeaseOwner(null), false)
+    assert.equal(isStaleExecutionLeaseOwner('pid-999999'), false)
+  })
+
+  it('rejects legacy pid-only lease as not stale', () => {
+    const currentBootId = getAppContext().bootId
+    assert.equal(isStaleExecutionLeaseOwner(`12345-${currentBootId}`), false)
   })
 
   it('clears stale lease left by a dead process', () => {

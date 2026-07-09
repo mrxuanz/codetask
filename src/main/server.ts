@@ -156,8 +156,78 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   return info
 }
 
-export function stopAppServer(): void {
-  activeServer?.close()
-  activeServer = null
-  void shutdownSandboxSupervisor()
+export async function stopAppServer(): Promise<void> {
+  // 1) Stop accepting new connections
+  if (activeServer) {
+    activeServer.close()
+    activeServer = null
+  }
+
+  // 2) Stop background timers before draining work
+  try {
+    const { stopRetentionJanitor } = await import('../server/retention/lifecycle')
+    stopRetentionJanitor()
+  } catch (error) {
+    console.warn('[server] failed to stop retention janitor', error)
+  }
+
+  try {
+    const { stopAuthJanitor } = await import('../server/auth/janitor')
+    stopAuthJanitor()
+  } catch (error) {
+    console.warn('[server] failed to stop auth janitor', error)
+  }
+
+  try {
+    const { stopWorkloadReconcilerForTests } = await import('../server/jobs/reconcile')
+    stopWorkloadReconcilerForTests()
+  } catch (error) {
+    console.warn('[server] failed to stop workload reconciler', error)
+  }
+
+  // 3) Abort in-memory execution loops, then release this process's workload slots/leases
+  try {
+    const { getAppContext } = await import('../server/bootstrap')
+    getAppContext().executionRuntime.dropAll()
+  } catch (error) {
+    console.warn('[server] failed to abort in-memory execution runtimes', error)
+  }
+
+  try {
+    const { getAppContext } = await import('../server/bootstrap')
+    const owner = `${process.pid}-${getAppContext().bootId}`
+    const { listActiveWorkloadSlots, releaseWorkloadSlot } = await import(
+      '../server/jobs/workload-slot-store'
+    )
+    const { clearExecutionLease } = await import('../server/jobs/repository')
+    const slots = await listActiveWorkloadSlots({})
+    for (const slot of slots) {
+      if (slot.leaseOwner !== owner) continue
+      try {
+        await releaseWorkloadSlot(slot.runId, {
+          reason: 'process_shutdown',
+          status: 'released',
+          skipQueueAdvance: true
+        })
+        if (slot.ownerKind === 'thread_job') {
+          await clearExecutionLease(slot.ownerId)
+        }
+      } catch (error) {
+        console.warn('[server] failed to release workload slot on shutdown', slot.runId, error)
+      }
+    }
+  } catch (error) {
+    console.warn('[server] failed to drain workload slots on shutdown', error)
+  }
+
+  // 4) Reap sandbox children
+  await shutdownSandboxSupervisor()
+
+  // 5) Close DB last
+  try {
+    const { closeDatabaseForTests } = await import('../server/db')
+    closeDatabaseForTests()
+  } catch (error) {
+    console.warn('[server] failed to close database', error)
+  }
 }

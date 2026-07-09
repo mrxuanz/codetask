@@ -8,6 +8,7 @@ import type {
 import { api, ApiError } from './client'
 import type { ApiResponse } from './types'
 import { throwIfNotSseResponse } from './sse'
+import { parseSseBlock, readSseWithTimeout } from '@shared/sse'
 
 export type {
   ChatSseEvent,
@@ -74,7 +75,7 @@ export async function streamThreadMessage(
   let buffer = ''
 
   while (true) {
-    const { done, value } = await reader.read()
+    const { done, value } = await readSseWithTimeout(reader)
     if (done) break
 
     buffer += decoder.decode(value, { stream: true })
@@ -92,19 +93,3 @@ export async function streamThreadMessage(
   }
 }
 
-function parseSseBlock(block: string): { event: string; data: string } | null {
-  const lines = block.split('\n')
-  let event = 'message'
-  const dataLines: string[] = []
-
-  for (const line of lines) {
-    if (line.startsWith('event:')) {
-      event = line.slice(6).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trim())
-    }
-  }
-
-  if (dataLines.length === 0) return null
-  return { event, data: dataLines.join('\n') }
-}

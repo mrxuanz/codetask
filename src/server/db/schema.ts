@@ -135,6 +135,7 @@ export const threadJobs = sqliteTable(
     executionLeaseExpiresAt: integer('execution_lease_expires_at'),
     activeRunId: text('active_run_id'),
     terminalAt: integer('terminal_at'),
+    runtimeBytes: integer('runtime_bytes').notNull().default(0),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },

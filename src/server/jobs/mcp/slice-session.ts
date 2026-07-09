@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { timingSafeStringEqual } from '../../auth/timing-safe'
 import type { SliceVerificationVerdict } from '../verification/types'
 
 export interface SliceVerifierMcpSession {
@@ -52,8 +53,8 @@ export function authorizeSliceVerifierMcpRequest(input: {
   if (!jobId || !sliceId) return false
   const session = getSliceVerifierMcpSession(input.sessionId)
   if (!session || session.jobId !== jobId || session.sliceId !== sliceId) return false
-  return (
-    input.capability?.trim() ===
+  return timingSafeStringEqual(
+    input.capability?.trim(),
     buildSliceVerifierMcpCapabilityToken(input.sessionId, jobId, sliceId)
   )
 }

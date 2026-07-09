@@ -12,18 +12,7 @@ function isLoopbackAddress(address: string): boolean {
 }
 
 export async function requireLocalhost(c: Context, next: Next): Promise<Response | void> {
-  const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
-  if (forwarded && !isLoopbackAddress(forwarded)) {
-    return c.json(
-      {
-        jsonrpc: '2.0',
-        id: null,
-        error: { code: -32001, message: 'MCP endpoints are localhost-only' }
-      },
-      403
-    )
-  }
-
+  // Do not trust x-forwarded-for — clients can spoof it. Only the real peer address counts.
   const remote = getConnInfo(c).remote
   const address = remote.address
   if (!address || !isLoopbackAddress(address)) {

@@ -1543,18 +1543,34 @@ async function finalizeExecutionPause(
   pauseJobExecution(jobId)
 }
 
-async function runExecutionLoop(username: string, jobId: string): Promise<void> {
-  const row = await loadJobRow(jobId)
-  if (!row) return
+interface ExecutionLoopState {
+  jobId: string
+  username: string
+  job: ThreadJobDto
+  plan: SavedJobPlan
+  items: TaskProgressItemDto[]
+  taskProgress: TaskProgressDto
+  gate: ReturnType<typeof buildGateStates>
+  dataDir: string
+  initialStatus: string
+}
 
-  let plan = await loadJobPlan(getDb(), jobId)
-  if (!plan?.tasks?.length) return
+async function initializeExecutionState(
+  username: string,
+  jobId: string
+): Promise<ExecutionLoopState | null> {
+  const row = await loadJobRow(jobId)
+  if (!row) return null
+
+  const plan = await loadJobPlan(getDb(), jobId)
+  if (!plan?.tasks?.length) return null
 
   let job = await getUserJob(username, jobId)
-  if (!job) return
+  if (!job) return null
 
-  if (job.status === 'paused' || job.status === 'cancelled') return
+  if (job.status === 'paused' || job.status === 'cancelled') return null
 
+  const initialStatus = job.status
   if (job.status === 'pausing') {
     getAppContext().executionRuntime.setControl(jobId, 'paused')
   } else {
@@ -1578,7 +1594,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
     }))
   }
 
-  let gate = buildGateStates(plan)
+  const gate = buildGateStates(plan)
   applyVerificationProgress(gate.slices, gate.milestones, job.taskProgress)
   const dataDir = getAppContext().dataDir
 
@@ -1604,18 +1620,59 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
     await persistTaskProgress(
       jobId,
       taskProgress,
-      job.status === 'pausing' ? undefined : { status: 'running', lastError: null },
+      initialStatus === 'pausing' ? undefined : { status: 'running', lastError: null },
       gate
     )
   }
+
+  return { jobId, username, job, plan, items, taskProgress, gate, dataDir, initialStatus }
+}
+
+function buildCompletedProgress(items: TaskProgressItemDto[]): TaskProgressDto {
+  return {
+    phase: 'completed' as const,
+    status: 'completed' as const,
+    currentIndex: items.length,
+    total: items.length,
+    currentTaskId: null,
+    message: null,
+    progressCode: 'execution.completed',
+    progressParams: { done: items.length, total: items.length },
+    tasks: items
+  }
+}
+
+async function handleWorkflowCompletion(
+  jobId: string,
+  items: TaskProgressItemDto[],
+  gate: ReturnType<typeof buildGateStates>
+): Promise<{ taskProgress: TaskProgressDto; items: TaskProgressItemDto[]; done: boolean }> {
+  const completedProgress = buildCompletedProgress(items)
+  const completed = await persistTaskProgress(
+    jobId,
+    completedProgress,
+    { status: 'completed', lastError: null },
+    gate,
+    'terminal'
+  )
+  if (completed) {
+    items = slimTaskProgressItemsForRuntime(items)
+  }
+  return { taskProgress: completedProgress, items, done: true }
+}
+
+async function runExecutionLoop(username: string, jobId: string): Promise<void> {
+  const state = await initializeExecutionState(username, jobId)
+  if (!state) return
+
+  let { plan, items, taskProgress, gate, dataDir } = state
+  let job = state.job
 
   while (true) {
     refreshExecutionLease(jobId)
 
     const stop = shouldStopExecution(jobId)
-    if (stop === 'cancel') {
-      return
-    }
+    if (stop === 'cancel') return
     if (stop === 'pause') {
       await finalizeExecutionPause(jobId, taskProgress, items, gate)
       return
@@ -1626,31 +1683,9 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
     reconcileMilestoneStatuses(gate.milestones, gate.slices)
 
     if (isWorkflowComplete(gate.milestones, gate.slices)) {
-      const completedProgress: TaskProgressDto = {
-        ...taskProgress,
-        phase: 'completed',
-        status: 'completed',
-        currentIndex: items.length,
-        total: items.length,
-        currentTaskId: null,
-        message: null,
-        progressCode: 'execution.completed',
-        progressParams: { done: items.length, total: items.length },
-        tasks: items
-      }
-      const completed = await persistTaskProgress(
-        jobId,
-        completedProgress,
-        {
-          status: 'completed',
-          lastError: null
-        },
-        gate,
-        'terminal'
-      )
-      if (completed) {
-        items = slimTaskProgressItemsForRuntime(items)
-      }
+      const result = await handleWorkflowCompletion(jobId, items, gate)
+      taskProgress = result.taskProgress
+      items = result.items
       return
     }
 

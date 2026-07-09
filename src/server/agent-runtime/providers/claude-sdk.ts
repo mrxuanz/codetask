@@ -6,10 +6,8 @@ import { CLI_FULL_ACCESS_BUILTINS } from '../roles'
 import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
-import { TurnScope, recordClaudeStreamActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { ProgressGuard } from '../progress-guard'
-import { getExecutionRunContext } from '../../jobs/execution-run-context'
-import { refreshWorkloadLease } from '../../jobs/workload-slot-store'
+import { recordClaudeStreamActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import { createProviderTurnScope } from '../provider-turn'
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
@@ -38,21 +36,10 @@ export async function* streamClaudeTurn(
   }
   externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
 
-  const progressGuard = new ProgressGuard(input.role)
-
-  const turnScope = new TurnScope({
-    role: input.role,
-    externalSignal,
-    progressGuard,
-    onCancel: async () => {
+  const turnScope = createProviderTurnScope(input.role, options, {
+    onSoftCancel: () => {
       turnAbort.abort()
       queryHandle?.close()
-    },
-    onKeepAlive: () => {
-      const ctx = getExecutionRunContext()
-      if (ctx?.runId) {
-        void refreshWorkloadLease(ctx.runId)
-      }
     }
   })
   turnScope.arm()

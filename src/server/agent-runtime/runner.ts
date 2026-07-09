@@ -40,6 +40,43 @@ export function ensureJobTaskRuntimeRoot(
   return runtimeRoot
 }
 
+async function* withWorkloadLeaseRefresh<T>(
+  stream: AsyncGenerator<T>,
+  workloadRunId: string,
+  signal?: AbortSignal
+): AsyncGenerator<T> {
+  const KEEPALIVE_INTERVAL_MS = 60_000
+  const { refreshWorkloadLease } = await import('../jobs/workload-slot-store')
+  let timer: ReturnType<typeof setInterval> | null = setInterval(() => {
+    refreshWorkloadLease(workloadRunId).catch((error) => {
+      console.warn('[keepalive] lease refresh failed', workloadRunId, error)
+    })
+  }, KEEPALIVE_INTERVAL_MS)
+
+  if (timer && typeof timer.unref === 'function') {
+    timer.unref()
+  }
+
+  const cleanup = (): void => {
+    if (timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  }
+
+  if (signal) {
+    signal.addEventListener('abort', cleanup, { once: true })
+  }
+
+  try {
+    for await (const chunk of stream) {
+      yield chunk
+    }
+  } finally {
+    cleanup()
+  }
+}
+
 export async function* streamAgentTurn(
   input: AgentTurnRunnerInput
 ): AsyncGenerator<AgentTurnChunk> {
@@ -80,7 +117,7 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
         'sandbox.required'
       )
     }
-    yield* streamSandboxedConversationTurn({
+    const sandboxStream = streamSandboxedConversationTurn({
       role: input.role,
       coreCode: input.provider,
       workspaceRoot: input.workspaceRoot,
@@ -97,6 +134,11 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       readRoots: input.readRoots,
       jobId: input.jobId
     })
+    if (input.workloadRunId) {
+      yield* withWorkloadLeaseRefresh(sandboxStream, input.workloadRunId, input.signal)
+    } else {
+      yield* sandboxStream
+    }
     return
   }
 

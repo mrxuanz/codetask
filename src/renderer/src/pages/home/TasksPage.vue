@@ -3,21 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
-import {
-  cancelJob,
-  continueJob,
-  deleteJob,
-  fetchJob,
-  fetchJobs,
-  pauseJob,
-  restartJob,
-  resumeJob,
-  retryTaskJob,
-  type ThreadJob
-} from '@renderer/api/jobs'
-import type { JobSseEvent } from '@shared/contracts/sse'
-import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
-import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import { retryTaskJob, type ThreadJob } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import TaskParameterPanel from '@renderer/components/tasks/TaskParameterPanel.vue'
@@ -39,62 +25,62 @@ import {
   type JobProgressSnapshot,
   type UnifiedTaskNode
 } from '@renderer/lib/jobProgress'
-import { enrichJobWithRecoveryState, jobHasAction } from '@shared/job-recovery-state'
+import { jobHasAction } from '@shared/job-recovery-state'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
+import { useJobsStore } from '@renderer/composables/useJobsStore'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
-const statusFilter = ref('all')
-const searchQuery = ref('')
-const jobs = ref<ThreadJob[]>([])
-const total = ref(0)
-const loadingList = ref(true)
-const loadingDetail = ref(false)
-const error = ref<string | null>(null)
-const actionError = ref<string | null>(null)
-const runningAction = ref<string | null>(null)
-const detail = ref<ThreadJob | null>(null)
+const selectedJobId = computed(() => (route.params.jobId as string) || null)
+const store = useJobsStore({ selectedJobId })
+
+const {
+  statusFilter,
+  searchQuery,
+  jobs,
+  total,
+  loadingList,
+  loadingDetail,
+  error,
+  actionError,
+  runningAction,
+  selectedJob
+} = store
+
 const selectedTask = ref<UnifiedTaskNode | null>(null)
 const taskParametersOpen = ref(false)
 
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let hubRelease: (() => void) | null = null
-let hubListRelease: (() => void) | null = null
-
-const hub = useJobEventHub()
-
 const statusFilters = computed(() => [
   { value: 'all', label: t('workspace.tasks.filters.all') },
-  { value: 'pending', label: t('workspace.tasks.filters.pending') },
-  { value: 'plan_confirmed', label: t('workspace.tasks.filters.planConfirmed') },
+  { value: 'planning', label: t('workspace.tasks.filters.planning') },
+  { value: 'plan_editing', label: t('workspace.tasks.filters.planEditing') },
   { value: 'running', label: t('workspace.tasks.filters.running') },
   { value: 'paused', label: t('workspace.tasks.filters.paused') },
-  { value: 'completed', label: t('workspace.tasks.filters.completed') },
   { value: 'failed', label: t('workspace.tasks.filters.failed') },
+  { value: 'completed', label: t('workspace.tasks.filters.completed') },
   { value: 'cancelled', label: t('workspace.tasks.filters.cancelled') }
 ])
-
-const selectedJobId = computed(() => {
-  const id = route.params.jobId
-  return typeof id === 'string' ? id : null
-})
-
-const selectedJob = computed(
-  () => detail.value ?? jobs.value.find((job) => job.id === selectedJobId.value) ?? null
-)
 
 const listProgress = (job: ThreadJob): JobProgressSnapshot => getJobProgressSnapshot(job, t)
 const listStatusBadge = (job: ThreadJob): { label: string; className: string } =>
   resolveJobListStatusBadge(job.status, t, job)
+
 const executionProgress = computed(() => getExecutionProgressSnapshot(selectedJob.value, t))
 const planProgress = computed(() => getPlanProgressSnapshot(selectedJob.value, t))
 const showExecutionProgress = computed(
-  () => executionProgress.value.kind === 'execution' && executionProgress.value.stepsTotal > 0
+  () =>
+    selectedJob.value?.status === 'running' ||
+    selectedJob.value?.status === 'completed' ||
+    selectedJob.value?.status === 'failed' ||
+    selectedJob.value?.status === 'cancelled' ||
+    selectedJob.value?.status === 'paused'
 )
 const showPlanProgress = computed(
-  () => planProgress.value.kind === 'plan' && selectedJob.value?.status === 'planning'
+  () =>
+    selectedJob.value?.status === 'planning' ||
+    selectedJob.value?.status === 'plan_editing'
 )
 
 const standaloneLastError = computed(() => {
@@ -107,7 +93,6 @@ const standaloneLastError = computed(() => {
 })
 
 const planTree = computed(() => buildPlanTree(selectedJob.value, t))
-
 const activeTaskId = computed(() => selectedJob.value?.taskProgress?.currentTaskId ?? null)
 
 const hasAction = (action: string): boolean => jobHasAction(selectedJob.value, action as never)
@@ -125,145 +110,6 @@ const canCancel = computed(() => hasAction('cancel'))
 const canRestart = computed(() => hasAction('restart'))
 const canDelete = computed(() => hasAction('delete'))
 
-async function runContinueAction(): Promise<void> {
-  const job = selectedJob.value
-  if (!job) return
-  if (job.lifecycle === 'paused' || job.status === 'paused') {
-    await resumeJob(job.id)
-    return
-  }
-  await continueJob(job.id)
-}
-
-function mergeJobPatch(existing: ThreadJob | null | undefined, job: ThreadJob): ThreadJob {
-  const merged = {
-    ...(existing ?? {}),
-    ...job,
-    plan: job.plan ?? existing?.plan ?? null,
-    abilities: job.abilities?.length ? job.abilities : (existing?.abilities ?? []),
-    planProgress: job.planProgress ?? existing?.planProgress,
-    taskProgress: job.taskProgress ?? existing?.taskProgress
-  } as ThreadJob
-  return job.availableActions?.length ? merged : enrichJobWithRecoveryState(merged)
-}
-
-function applyJobPatch(job: ThreadJob): void {
-  if (detail.value?.id === job.id) {
-    detail.value = mergeJobPatch(detail.value, job)
-  } else if (selectedJobId.value === job.id) {
-    detail.value = mergeJobPatch(detail.value, job)
-  }
-  const idx = jobs.value.findIndex((item) => item.id === job.id)
-  if (idx >= 0) {
-    jobs.value[idx] = mergeJobPatch(jobs.value[idx], job)
-  }
-}
-
-async function loadJobs(options?: { silent?: boolean }): Promise<void> {
-  const silent = options?.silent ?? false
-  if (!silent) loadingList.value = true
-  error.value = null
-  try {
-    const res = await fetchJobs(statusFilter.value, 1, 50, searchQuery.value)
-    jobs.value = res.data.jobs
-    total.value = res.data.total
-
-    const currentId = selectedJobId.value
-    const stillExists = currentId ? res.data.jobs.some((job) => job.id === currentId) : false
-    if (currentId && !stillExists) {
-      await router.replace({ name: 'tasks' })
-    }
-  } catch (err) {
-    if (!silent) {
-      error.value = err instanceof Error ? err.message : t('workspace.tasks.loadFailed')
-      jobs.value = []
-      total.value = 0
-    }
-  } finally {
-    if (!silent) loadingList.value = false
-  }
-}
-
-async function loadDetail(jobId: string, options?: { silent?: boolean }): Promise<void> {
-  const silent = options?.silent ?? false
-  if (!silent) loadingDetail.value = true
-  try {
-    const res = await fetchJob(jobId)
-    applyJobPatch(res.data.job)
-    syncHubWatch()
-  } catch (err) {
-    if (!silent) {
-      error.value = err instanceof Error ? err.message : t('workspace.tasks.detailFailed')
-      detail.value = null
-    }
-  } finally {
-    if (!silent) loadingDetail.value = false
-  }
-}
-
-function handleHubEvent(jobId: string, event: JobSseEvent): void {
-  if (event.event === 'job_snapshot' || event.event === 'job_done') {
-    applyJobPatch(event.data.job)
-    if (event.event === 'job_done') {
-      syncHubWatch()
-      void loadDetail(jobId, { silent: true })
-    }
-    return
-  }
-
-  if (event.event === 'plan_progress') {
-    const planPatch = {
-      planProgress: event.data.planProgress,
-      ...(event.data.plan ? { plan: event.data.plan } : {}),
-      updatedAt: Math.floor(Date.now() / 1000)
-    }
-    if (detail.value?.id === jobId) {
-      detail.value = mergeJobPatch(detail.value, { ...detail.value, ...planPatch })
-    }
-    const idx = jobs.value.findIndex((item) => item.id === jobId)
-    if (idx >= 0) {
-      jobs.value[idx] = mergeJobPatch(jobs.value[idx], { ...jobs.value[idx], ...planPatch })
-    }
-    return
-  }
-
-  if (event.event === 'task_progress') {
-    const taskPatch = {
-      taskProgress: event.data.taskProgress,
-      updatedAt: Math.floor(Date.now() / 1000)
-    }
-    if (detail.value?.id === jobId) {
-      detail.value = mergeJobPatch(detail.value, { ...detail.value, ...taskPatch })
-    }
-    const idx = jobs.value.findIndex((item) => item.id === jobId)
-    if (idx >= 0) {
-      jobs.value[idx] = mergeJobPatch(jobs.value[idx], { ...jobs.value[idx], ...taskPatch })
-    }
-  }
-}
-
-function syncHubWatch(): void {
-  hubRelease?.()
-  hubRelease = null
-  const job = selectedJob.value
-  if (!job || !jobNeedsRealtimeWatch(job.status)) return
-  hubRelease = hub.watchJob(job.id, (event) => handleHubEvent(job.id, event))
-}
-
-async function runAction(label: string, fn: () => Promise<unknown>): Promise<void> {
-  runningAction.value = label
-  actionError.value = null
-  try {
-    await fn()
-    await loadJobs({ silent: true })
-    if (selectedJobId.value) await loadDetail(selectedJobId.value, { silent: true })
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : t('workspace.tasks.actionFailed')
-  } finally {
-    runningAction.value = null
-  }
-}
-
 function selectJob(jobId: string): void {
   selectedTask.value = null
   taskParametersOpen.value = false
@@ -279,62 +125,35 @@ function closeTaskParameters(): void {
   taskParametersOpen.value = false
 }
 
-const refreshJobsFromHub = useDebounceFn(() => {
-  void loadJobs({ silent: true })
-}, 500)
+async function handleRetryTask(): Promise<void> {
+  const job = selectedJob.value
+  const task = selectedTask.value
+  if (!job || !task) return
+  runningAction.value = 'retry_task'
+  actionError.value = null
+  try {
+    await retryTaskJob(job.id, task.id)
+    await store.loadDetail(job.id)
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : 'Failed to retry task'
+  } finally {
+    runningAction.value = null
+  }
+}
 
 onMounted(() => {
-  void loadJobs()
-  hubListRelease = hub.onAnyJobEvent(refreshJobsFromHub)
-  pollTimer = setInterval(() => {
-    if (!hub.connected.value) {
-      void loadJobs({ silent: true })
-      const jobId = selectedJobId.value
-      if (jobId) void loadDetail(jobId, { silent: true })
-    }
-  }, 30_000)
+  void store.loadJobs()
+  store.startHubPolling()
 })
 
 onUnmounted(() => {
-  hubListRelease?.()
-  hubRelease?.()
-  if (pollTimer) clearInterval(pollTimer)
+  store.stopHubPolling()
 })
 
-watch(statusFilter, () => {
-  void loadJobs()
-})
+watch(statusFilter, () => void store.loadJobs())
 
-const debouncedSearch = useDebounceFn(() => {
-  void loadJobs()
-}, 300)
-
-watch(searchQuery, () => {
-  void debouncedSearch()
-})
-
-watch(
-  selectedJobId,
-  (jobId, prevJobId) => {
-    selectedTask.value = null
-    taskParametersOpen.value = false
-    if (jobId !== prevJobId) {
-      hubRelease?.()
-      hubRelease = null
-    }
-    if (!jobId) {
-      detail.value = null
-      return
-    }
-    void loadDetail(jobId)
-  },
-  { immediate: true }
-)
-
-watch(
-  () => selectedJob.value?.status,
-  () => syncHubWatch()
-)
+const debouncedSearch = useDebounceFn(() => void store.loadJobs(), 300)
+watch(searchQuery, () => void debouncedSearch())
 </script>
 
 <template>
@@ -378,14 +197,12 @@ watch(
         <p v-if="loadingList && jobs.length === 0" class="px-2 py-2 text-sm text-muted-foreground">
           {{ t('workspace.loading') }}
         </p>
-
         <div
           v-else-if="jobs.length === 0"
           class="rounded-md border border-dashed border-border px-4 py-6 text-sm text-muted-foreground"
         >
           {{ searchQuery.trim() ? t('workspace.tasks.searchEmpty') : t('workspace.tasks.empty') }}
         </div>
-
         <div v-else class="space-y-2">
           <button
             v-for="job in jobs"
@@ -479,7 +296,7 @@ watch(
                     size="sm"
                     variant="outline"
                     :disabled="runningAction === 'pause'"
-                    @click="runAction('pause', () => pauseJob(selectedJob!.id))"
+                    @click="store.handlePause()"
                   >
                     {{ t('workspace.tasks.actions.pause') }}
                   </Button>
@@ -488,7 +305,7 @@ watch(
                     size="sm"
                     variant="outline"
                     :disabled="runningAction === 'continue'"
-                    @click="runAction('continue', () => runContinueAction())"
+                    @click="store.handleContinue()"
                   >
                     {{ t('workspace.tasks.actions.continue') }}
                   </Button>
@@ -496,15 +313,8 @@ watch(
                     v-if="canRetryTask"
                     size="sm"
                     variant="outline"
-                    :disabled="runningAction === 'retryTask'"
-                    @click="
-                      runAction('retryTask', () =>
-                        retryTaskJob(
-                          selectedJob!.id,
-                          (selectedTask?.id ?? selectedJob!.recovery?.failedTaskId)!
-                        )
-                      )
-                    "
+                    :disabled="runningAction === 'retry_task'"
+                    @click="handleRetryTask()"
                   >
                     {{ t('workspace.tasks.actions.retryTask') }}
                   </Button>
@@ -513,7 +323,7 @@ watch(
                     size="sm"
                     variant="outline"
                     :disabled="runningAction === 'restart'"
-                    @click="runAction('restart', () => restartJob(selectedJob!.id))"
+                    @click="store.handleRestart()"
                   >
                     {{ t('workspace.tasks.actions.restart') }}
                   </Button>
@@ -522,7 +332,7 @@ watch(
                     size="sm"
                     variant="outline"
                     :disabled="runningAction === 'cancel'"
-                    @click="runAction('cancel', () => cancelJob(selectedJob!.id))"
+                    @click="store.handleCancel()"
                   >
                     {{ t('workspace.tasks.actions.cancel') }}
                   </Button>
@@ -531,12 +341,7 @@ watch(
                     size="sm"
                     variant="outline"
                     :disabled="runningAction === 'delete'"
-                    @click="
-                      runAction('delete', async () => {
-                        await deleteJob(selectedJob!.id)
-                        await router.replace({ name: 'tasks' })
-                      })
-                    "
+                    @click="store.handleDelete()"
                   >
                     {{ t('workspace.tasks.actions.delete') }}
                   </Button>

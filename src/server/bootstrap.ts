@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { JobEventBus, RuntimeRegistry, SettingsStore, type AppContext } from './context'
 import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
@@ -71,7 +72,9 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   const mode = options.mode ?? 'desktop'
 
   const settings = new SettingsStore(options.dataDir)
-  const authSecret = getOrCreateAuthSecret(settings)
+  const authSecret = getOrCreateAuthSecret(settings, options.dataDir)
+
+  const bootId = randomUUID()
 
   appContext = {
     dataDir: options.dataDir,
@@ -83,7 +86,8 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     },
     eventBus: new JobEventBus(),
     runtimeRegistry: new RuntimeRegistry(),
-    executionRuntime: new JobExecutionRuntimeRegistry()
+    executionRuntime: new JobExecutionRuntimeRegistry(),
+    bootId
   }
   process.env.CODETASK_DATA_DIR = options.dataDir
 

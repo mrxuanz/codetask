@@ -1,0 +1,58 @@
+name: Build (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner OS (ubuntu-latest / macos-latest / windows-latest)'
+        required: true
+        type: string
+      builder-args:
+        description: 'electron-builder CLI args (--win / --mac / --linux)'
+        required: true
+        type: string
+      upload-artifact:
+        description: 'Whether to upload the build artifact'
+        required: false
+        default: false
+        type: boolean
+      artifact-name:
+        description: 'Artifact name for upload'
+        required: false
+        default: 'package'
+        type: string
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - run: npm ci
+
+      - name: Build sandbox (native)
+        run: npm run build:sandbox
+
+      - name: Build app
+        run: npm run build
+
+      - name: Package ${{ inputs.builder-args }}
+        run: node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }}
+
+      - if: ${{ inputs.upload-artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: dist/*.{exe,deb,AppImage,dmg,zip,portable}
+          if-no-files-found: error

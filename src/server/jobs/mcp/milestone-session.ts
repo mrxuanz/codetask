@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { timingSafeStringEqual } from '../../auth/timing-safe'
 import type { MilestoneVerificationVerdict } from '../verification/types'
 
 export interface MilestoneVerifierMcpSession {
@@ -54,8 +55,8 @@ export function authorizeMilestoneVerifierMcpRequest(input: {
   if (!jobId || !milestoneId) return false
   const session = getMilestoneVerifierMcpSession(input.sessionId)
   if (!session || session.jobId !== jobId || session.milestoneId !== milestoneId) return false
-  return (
-    input.capability?.trim() ===
+  return timingSafeStringEqual(
+    input.capability?.trim(),
     buildMilestoneVerifierMcpCapabilityToken(input.sessionId, jobId, milestoneId)
   )
 }

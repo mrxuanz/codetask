@@ -4,6 +4,7 @@ import { jobHubTerminalStatus } from '@shared/job-realtime'
 
 interface HubConnection {
   username: string
+  connectionId: string
   subscribedJobIds: Set<string>
   unsubByJob: Map<string, () => void>
   queue: JobHubOutbound[]
@@ -16,7 +17,8 @@ export interface JobHubOutbound {
   payload: JobSseEvent
 }
 
-const connections = new Map<string, HubConnection>()
+const MAX_QUEUE_SIZE = 256
+const connections = new Map<string, Map<string, HubConnection>>()
 
 function teardownJobSubscriptions(conn: HubConnection): void {
   for (const unsub of conn.unsubByJob.values()) {
@@ -33,31 +35,44 @@ function notify(conn: HubConnection): void {
 
 function push(conn: HubConnection, message: JobHubOutbound): void {
   if (conn.closed) return
+  if (conn.queue.length >= MAX_QUEUE_SIZE) {
+    conn.queue.shift()
+    console.warn('[job-hub] queue overflow, dropped oldest message', conn.username, message.jobId)
+  }
   conn.queue.push(message)
   notify(conn)
 }
 
-export function registerJobHubConnection(username: string): {
+function getUserConnectionMap(username: string): Map<string, HubConnection> {
+  let userMap = connections.get(username)
+  if (!userMap) {
+    userMap = new Map()
+    connections.set(username, userMap)
+  }
+  return userMap
+}
+
+export function registerJobHubConnection(
+  username: string,
+  connectionId?: string
+): {
   setSubscriptions: (jobIds: string[]) => Promise<void>
   stream: AsyncGenerator<JobHubOutbound>
   close: () => void
 } {
-  const existing = connections.get(username)
-  if (existing) {
-    existing.closed = true
-    teardownJobSubscriptions(existing)
-    connections.delete(username)
-  }
+  const connId = connectionId ?? `conn-${Math.random().toString(36).slice(2, 10)}`
+  const userMap = getUserConnectionMap(username)
 
   const conn: HubConnection = {
     username,
+    connectionId: connId,
     subscribedJobIds: new Set(),
     unsubByJob: new Map(),
     queue: [],
     resolveWait: null,
     closed: false
   }
-  connections.set(username, conn)
+  userMap.set(connId, conn)
 
   const setSubscriptions = async (jobIds: string[]): Promise<void> => {
     if (conn.closed) return
@@ -136,7 +151,13 @@ export function registerJobHubConnection(username: string): {
     if (conn.closed) return
     conn.closed = true
     teardownJobSubscriptions(conn)
-    connections.delete(username)
+    const userMap = connections.get(username)
+    if (userMap) {
+      userMap.delete(connId)
+      if (userMap.size === 0) {
+        connections.delete(username)
+      }
+    }
     notify(conn)
   }
 

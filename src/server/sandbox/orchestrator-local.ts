@@ -29,7 +29,7 @@ import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from './session-state'
 import { SandboxError } from './types'
 import { streamJobCursorSandboxTurn } from './job-cursor-pool'
 import { throwIfSandboxTurnAborted } from './turn-guards'
-
+import { readStderrPreview } from './stdout-reader'
 export interface RunSandboxedTurnInput {
   role: ConversationRole
   coreCode: SupportedCoreCode
@@ -97,13 +97,7 @@ async function* readWorkerJsonl(
     }
     sandboxTurnDebug('sandbox orchestrator: stdout drained', { lineCount })
     if (lineCount === 0) {
-      let stderrPreview = ''
-      for (;;) {
-        const tail = handle.readStderrChunk(64 * 1024)
-        if (tail.length === 0) break
-        stderrPreview += tail.toString('utf8')
-        if (stderrPreview.length > 4000) break
-      }
+      const stderrPreview = readStderrPreview(handle)
       if (stderrPreview.trim()) {
         sandboxTurnDebug('sandbox orchestrator: stderr preview', {
           stderr: stderrPreview.trim().slice(0, 2000)
@@ -125,11 +119,7 @@ async function* readWorkerJsonl(
       code: exitResult.code,
       status: exitResult.status
     })
-    for (;;) {
-      const tail = handle.readStderrChunk(64 * 1024)
-      if (tail.length === 0) break
-      stderr += tail.toString('utf8')
-    }
+    stderr += readStderrPreview(handle)
     handle.close()
   }
 

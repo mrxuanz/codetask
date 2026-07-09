@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb } from '../db'
+import { getAppContext } from '../bootstrap'
 import { designSessions, threadJobs, workloadRuns, workloadSlots } from '../db/schema'
 
 export type WorkloadOwnerKind = 'thread_job' | 'design_session'
@@ -56,7 +57,7 @@ export interface WorkloadRunSummary {
 const runControllers = new Map<string, AbortController>()
 
 function leaseOwner(): string {
-  return `pid-${process.pid}`
+  return `${process.pid}-${getAppContext().bootId}`
 }
 
 function nowSec(): number {

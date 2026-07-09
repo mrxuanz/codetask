@@ -3,7 +3,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { designSessions, projects, threadMessages, threads } from '../db/schema'
+import { designSessions, projects, threadMessages, threads, type Thread } from '../db/schema'
 import type { ConversationMessageDto } from '../conversation/types'
 import type { PlanProgressDto, ThreadJobDto } from './types'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
@@ -740,29 +740,22 @@ async function findDesignSessionForDraft(
   return rows[0] ?? null
 }
 
-export async function confirmDraftAndStartPlanning(
+interface DraftPlanningContext {
+  payload: TaskLaunchDraftPayload
+  payloadWithAbilities: TaskLaunchDraftPayload
+  row: Thread
+  project: { workspaceRoot: string }
+}
+
+async function validateDraftForPlanning(
   username: string,
   threadId: string,
   draftMessageId: string
-): Promise<{ job: ThreadJobDto; draft: ConversationMessageDto }> {
-  const { ensureStartupWorkloadReady } = await import('./workload-slot')
-  const { reconcileOrphanWorkloadSlotsForUser, reconcileUserPlanningState } =
-    await import('./reconcile')
-  await ensureStartupWorkloadReady()
-  await reconcileOrphanWorkloadSlotsForUser(username)
-  await reconcileUserPlanningState(username)
-
+): Promise<DraftPlanningContext> {
   await assertThreadWizardPhase(username, threadId, WIZARD_PHASE_DRAFT_REVIEW)
   await assertActiveDraft(username, threadId, draftMessageId)
 
   const payload = await loadDraftPayload(username, threadId, draftMessageId)
-  const recovered = await recoverStuckDraftPlanningHandoff(
-    username,
-    threadId,
-    draftMessageId,
-    payload
-  )
-  if (recovered) return recovered
 
   if (!isDraftEditable(payload)) {
     throw AppError.badRequest('Draft is already confirmed', 'draft.locked', { reason: 'confirmed' })
@@ -790,6 +783,32 @@ export async function confirmDraftAndStartPlanning(
   }
   const project = await getProject(username, row.projectId)
   if (!project) throw AppError.notFound('Project not found', 'project.not_found')
+
+  return { payload, payloadWithAbilities, row, project }
+}
+
+export async function confirmDraftAndStartPlanning(
+  username: string,
+  threadId: string,
+  draftMessageId: string
+): Promise<{ job: ThreadJobDto; draft: ConversationMessageDto }> {
+  const { ensureStartupWorkloadReady } = await import('./workload-slot')
+  const { reconcileOrphanWorkloadSlotsForUser, reconcileUserPlanningState } =
+    await import('./reconcile')
+  await ensureStartupWorkloadReady()
+  await reconcileOrphanWorkloadSlotsForUser(username)
+  await reconcileUserPlanningState(username)
+
+  const ctx = await validateDraftForPlanning(username, threadId, draftMessageId)
+  const { payload, payloadWithAbilities, row, project } = ctx
+
+  const recovered = await recoverStuckDraftPlanningHandoff(
+    username,
+    threadId,
+    draftMessageId,
+    payload
+  )
+  if (recovered) return recovered
 
   const confirmedAt = nowSec()
   const planProgress: PlanProgressDto = {
@@ -842,17 +861,6 @@ export async function confirmDraftAndStartPlanning(
     updatedAt: confirmedAt
   }
 
-  if (existingSession) {
-    await saveDesignPlan(db, designSessionId, EMPTY_SAVED_PLAN)
-    await db.update(designSessions).set(sessionValues).where(eq(designSessions.id, designSessionId))
-  } else {
-    await db.insert(designSessions).values({
-      id: designSessionId,
-      ...sessionValues,
-      createdAt: confirmedAt
-    })
-  }
-
   let referenceManifest
   try {
     await syncCorpusFromDraftPayload({ designSessionId, payload: payloadWithAbilities })
@@ -867,7 +875,6 @@ export async function confirmDraftAndStartPlanning(
       manifestRevision: 1
     })
   } catch (error) {
-    await db.delete(designSessions).where(eq(designSessions.id, designSessionId))
     if (error instanceof ReferenceFileMissingError) {
       throw AppError.badRequest('Reference file missing', 'draft.reference_not_found', {
         referenceId: error.referenceId,
@@ -878,19 +885,32 @@ export async function confirmDraftAndStartPlanning(
     throw error
   }
 
-  await db
-    .update(designSessions)
-    .set({
-      referenceManifestJson: serializeJobReferenceManifest(referenceManifest),
-      manifestRevision: 1,
-      corpusRevision: 1,
-      frozenCorpusRevision: 1,
-      updatedAt: confirmedAt
-    })
-    .where(eq(designSessions.id, designSessionId))
+  db.transaction(() => {
+    if (existingSession) {
+      saveDesignPlan(db, designSessionId, EMPTY_SAVED_PLAN)
+      db.update(designSessions).set(sessionValues).where(eq(designSessions.id, designSessionId)).run()
+    } else {
+      db.insert(designSessions).values({
+        id: designSessionId,
+        ...sessionValues,
+        createdAt: confirmedAt
+      }).run()
+    }
 
-  await saveDesignAbilities(db, designSessionId, payloadWithAbilities.abilities)
-  await saveDesignPlanProgress(db, designSessionId, planProgress)
+    db.update(designSessions)
+      .set({
+        referenceManifestJson: serializeJobReferenceManifest(referenceManifest),
+        manifestRevision: 1,
+        corpusRevision: 1,
+        frozenCorpusRevision: 1,
+        updatedAt: confirmedAt
+      })
+      .where(eq(designSessions.id, designSessionId))
+      .run()
+
+    saveDesignAbilities(db, designSessionId, payloadWithAbilities.abilities)
+    saveDesignPlanProgress(db, designSessionId, planProgress)
+  })
 
   const confirmedPayload: TaskLaunchDraftPayload = {
     ...payloadWithAbilities,

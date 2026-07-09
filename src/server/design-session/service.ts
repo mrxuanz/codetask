@@ -10,12 +10,9 @@ import {
   loadDesignAbilities,
   loadDesignPlan,
   loadDesignPlanProgress,
-  saveDesignPlan,
-  saveDesignPlanInTx,
-  saveDesignPlanProgress
+  saveDesignPlanInTx
 } from '../db/design-plan'
-import { savePlanProgress } from '../db/job-plan'
-import { saveTaskProgress } from '../db/job-progress'
+import { saveTaskProgressInTx } from '../db/job-progress'
 import { designRuns, designSessions, threadJobs, threads, type DesignSession } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../jobs/types'
 import type { SavedJobPlan } from '../planner/plan-types'
@@ -165,46 +162,64 @@ export async function updateDesignSessionRow(
     dbPatch.lastError = coercePersistedTurnError(lastError)
   }
 
-  if (Object.keys(dbPatch).length > 1) {
-    await db.update(designSessions).set(dbPatch).where(eq(designSessions.id, designSessionId))
-  }
+  db.transaction(() => {
+    if (Object.keys(dbPatch).length > 1) {
+      db.update(designSessions).set(dbPatch).where(eq(designSessions.id, designSessionId)).run()
+    }
 
-  if (plan !== undefined) {
-    await saveDesignPlan(db, designSessionId, plan)
-    await db
-      .update(designSessions)
-      .set({ updatedAt: now })
-      .where(eq(designSessions.id, designSessionId))
-  }
+    if (plan !== undefined) {
+      saveDesignPlanInTx(db, designSessionId, plan)
+      db
+        .update(designSessions)
+        .set({ updatedAt: now })
+        .where(eq(designSessions.id, designSessionId))
+        .run()
+    }
 
-  if (planProgress) {
-    await saveDesignPlanProgress(db, designSessionId, planProgress)
-    await db
-      .update(designSessions)
-      .set({ updatedAt: now })
-      .where(eq(designSessions.id, designSessionId))
-  }
+    if (planProgress) {
+      const counts = {
+        milestones: planProgress.milestones,
+        slices: planProgress.slices,
+        tasks: planProgress.tasks
+      }
+      db
+        .update(designSessions)
+        .set({
+          planPhase: planProgress.phase,
+          planStatus: planProgress.status,
+          planContextsRegistered: planProgress.contextsRegistered,
+          planContextsTotal: planProgress.contextsTotal,
+          planMessage: planProgress.message ?? null,
+          planCountsJson: JSON.stringify(counts),
+          updatedAt: now
+        })
+        .where(eq(designSessions.id, designSessionId))
+        .run()
+    }
 
-  if (taskProgress) {
-    await db
-      .update(designSessions)
-      .set({
-        taskPhase: taskProgress.phase,
-        taskStatus: taskProgress.status,
-        taskCurrentIndex: taskProgress.currentIndex,
-        taskTotal: taskProgress.total,
-        taskCurrentTaskId: taskProgress.currentTaskId ?? null,
-        taskMessage: taskProgress.message ?? null,
-        updatedAt: now
-      })
-      .where(eq(designSessions.id, designSessionId))
-  }
+    if (taskProgress) {
+      db
+        .update(designSessions)
+        .set({
+          taskPhase: taskProgress.phase,
+          taskStatus: taskProgress.status,
+          taskCurrentIndex: taskProgress.currentIndex,
+          taskTotal: taskProgress.total,
+          taskCurrentTaskId: taskProgress.currentTaskId ?? null,
+          taskMessage: taskProgress.message ?? null,
+          updatedAt: now
+        })
+        .where(eq(designSessions.id, designSessionId))
+        .run()
+    }
+  })
 
-  const rows = await db
+  const rows = db
     .select()
     .from(designSessions)
     .where(eq(designSessions.id, designSessionId))
     .limit(1)
+    .all()
   return rows[0]
     ? mapDesignSessionToJobDto(rows[0], { includePlan: options?.includePlan ?? true })
     : null
@@ -411,57 +426,84 @@ export async function launchJobFromDesignSession(
   }
   const taskProgress = defaultTaskProgress(snapshot.executionPlan.tasks)
 
-  await db.insert(threadJobs).values({
-    id: jobId,
-    threadId,
-    username,
-    draftMessageId: session.draftMessageId,
-    title: session.title,
-    summary: session.summary ?? '',
-    status: 'pending',
-    workspacePath: snapshot.workspaceRoot,
-    planPhase: planProgress.phase,
-    planStatus: planProgress.status,
-    planContextsRegistered: planProgress.contextsRegistered,
-    planContextsTotal: planProgress.contextsTotal,
-    planMessage: planProgress.message ?? null,
-    planCountsJson: JSON.stringify({
+  db.transaction(() => {
+    db.insert(threadJobs).values({
+      id: jobId,
+      threadId,
+      username,
+      draftMessageId: session.draftMessageId,
+      title: session.title,
+      summary: session.summary ?? '',
+      status: 'pending',
+      workspacePath: snapshot.workspaceRoot,
+      planPhase: planProgress.phase,
+      planStatus: planProgress.status,
+      planContextsRegistered: planProgress.contextsRegistered,
+      planContextsTotal: planProgress.contextsTotal,
+      planMessage: planProgress.message ?? null,
+      planCountsJson: JSON.stringify({
+        milestones: planProgress.milestones,
+        slices: planProgress.slices,
+        tasks: planProgress.tasks
+      }),
+      taskPhase: taskProgress.phase,
+      taskStatus: taskProgress.status,
+      taskCurrentIndex: taskProgress.currentIndex,
+      taskTotal: taskProgress.total,
+      taskCurrentTaskId: taskProgress.currentTaskId ?? null,
+      taskMessage: taskProgress.message ?? null,
+      taskMetaJson: '{}',
+      lastError: null,
+      referenceManifestJson: session.referenceManifestJson,
+      draftConfirmedAt: session.draftConfirmedAt ?? confirmedAt,
+      planConfirmedAt: confirmedAt,
+      designSessionId: snapshot.designSessionId,
+      snapshotDraftRevision: snapshot.draftRevision,
+      snapshotPlanRevision: snapshot.planRevision,
+      snapshotManifestRevision: snapshot.manifestRevision,
+      createdAt: confirmedAt,
+      updatedAt: confirmedAt
+    }).run()
+
+    copyDesignPlanToJob(db, designSessionId, jobId)
+
+    const planCounts = {
       milestones: planProgress.milestones,
       slices: planProgress.slices,
       tasks: planProgress.tasks
-    }),
-    taskPhase: taskProgress.phase,
-    taskStatus: taskProgress.status,
-    taskCurrentIndex: taskProgress.currentIndex,
-    taskTotal: taskProgress.total,
-    taskCurrentTaskId: taskProgress.currentTaskId ?? null,
-    taskMessage: taskProgress.message ?? null,
-    taskMetaJson: '{}',
-    lastError: null,
-    referenceManifestJson: session.referenceManifestJson,
-    draftConfirmedAt: session.draftConfirmedAt ?? confirmedAt,
-    planConfirmedAt: confirmedAt,
-    designSessionId: snapshot.designSessionId,
-    snapshotDraftRevision: snapshot.draftRevision,
-    snapshotPlanRevision: snapshot.planRevision,
-    snapshotManifestRevision: snapshot.manifestRevision,
-    createdAt: confirmedAt,
-    updatedAt: confirmedAt
+    }
+    db
+      .update(threadJobs)
+      .set({
+        planPhase: planProgress.phase,
+        planStatus: planProgress.status,
+        planContextsRegistered: planProgress.contextsRegistered,
+        planContextsTotal: planProgress.contextsTotal,
+        planMessage: planProgress.message ?? null,
+        planCountsJson: JSON.stringify(planCounts)
+      })
+      .where(eq(threadJobs.id, jobId))
+      .run()
+
+    saveTaskProgressInTx(db, jobId, taskProgress, eq(threadJobs.id, jobId))
+
+    db
+      .update(designSessions)
+      .set({
+        status: 'launched',
+        phase: 'archived',
+        launchedJobId: jobId,
+        updatedAt: confirmedAt
+      })
+      .where(eq(designSessions.id, designSessionId))
+      .run()
+
+    db
+      .update(threads)
+      .set({ activePlanId: jobId, updatedAt: confirmedAt })
+      .where(and(eq(threads.id, threadId), eq(threads.username, username)))
+      .run()
   })
-
-  await copyDesignPlanToJob(db, designSessionId, jobId)
-  await savePlanProgress(db, jobId, planProgress)
-  await saveTaskProgress(db, jobId, taskProgress)
-
-  await db
-    .update(designSessions)
-    .set({
-      status: 'launched',
-      phase: 'archived',
-      launchedJobId: jobId,
-      updatedAt: confirmedAt
-    })
-    .where(eq(designSessions.id, designSessionId))
 
   const { updateMessagePayload, getMessage } = await import('../conversation/messages')
   const draftMessage = await getMessage(username, threadId, session.draftMessageId, {
@@ -476,12 +518,7 @@ export async function launchJobFromDesignSession(
     })
   }
 
-  await db
-    .update(threads)
-    .set({ activePlanId: jobId, updatedAt: confirmedAt })
-    .where(and(eq(threads.id, threadId), eq(threads.username, username)))
-
-  const jobRows = await db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1)
+  const jobRows = db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1).all()
   const job = jobRows[0] ? await mapJob(jobRows[0], { includePlan: true }) : null
   if (!job) throw AppError.internal('Failed to create job', 'turn.unknown')
 
