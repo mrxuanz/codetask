@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { eq } from 'drizzle-orm'
 import type { getDb } from '../db'
-import { designSessions, threadMessages } from '../db/schema'
+import { threadJobs, threadMessages } from '../db/schema'
 import { deleteJobArtifactFiles } from './artifacts'
 import { deleteMessageArtifactFiles } from './message-artifacts'
 import { removeThreadAttachmentsDir } from './janitor'
@@ -18,11 +18,8 @@ export async function collectThreadPurgeTargets(
   db: AppDatabase,
   threadId: string
 ): Promise<ThreadPurgeTargets> {
-  const [sessionRows, messageRows] = await Promise.all([
-    db
-      .select({ id: designSessions.id })
-      .from(designSessions)
-      .where(eq(designSessions.threadId, threadId)),
+  const [jobRows, messageRows] = await Promise.all([
+    db.select({ id: threadJobs.id }).from(threadJobs).where(eq(threadJobs.threadId, threadId)),
     db
       .select({ id: threadMessages.id })
       .from(threadMessages)
@@ -30,7 +27,7 @@ export async function collectThreadPurgeTargets(
   ])
 
   return {
-    designSessionIds: sessionRows.map((row) => row.id),
+    designSessionIds: jobRows.map((row) => row.id),
     messageIds: messageRows.map((row) => row.id)
   }
 }

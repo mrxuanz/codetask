@@ -24,18 +24,18 @@ test('shouldExternalizeEvidence when payload exceeds inline limit', () => {
   assert.equal(shouldExternalizeEvidence(large, 2048), true)
 })
 
-test('externalizeTaskEvidence always stores artifact and returns slim state', async () => {
+test('externalizeTaskEvidence stores failed evidence artifact and returns slim state', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-evidence-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
     await seedMinimalJob(db, 'job-1', 'running')
     const settings = { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 1024 }
     const evidence = {
-      status: 'completed' as const,
+      status: 'failed' as const,
       summary: 'done',
       changedFiles: ['src/a.ts'],
       evidence: ['x'.repeat(3000)],
-      validation: { ran: true, outcome: 'passed' as const }
+      validation: { ran: true, outcome: 'failed' as const }
     }
 
     const { evidence: slim, artifactId } = await externalizeTaskEvidence(
@@ -60,7 +60,7 @@ test('externalizeTaskEvidence always stores artifact and returns slim state', as
   }
 })
 
-test('externalizeTaskEvidence stores small payloads in artifact registry too', async () => {
+test('externalizeTaskEvidence slims completed evidence without artifact', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-evidence-small-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
@@ -82,12 +82,10 @@ test('externalizeTaskEvidence stores small payloads in artifact registry too', a
       db
     )
 
-    assert.ok(artifactId)
+    assert.equal(artifactId, '')
     assert.deepEqual(slim.evidence, [])
     assert.equal(slim.evidenceLineCount, 1)
-
-    const hydrated = hydrateTaskEvidenceSync(dataDir, slim, artifactId, db)
-    assert.deepEqual(hydrated?.evidence, ['one line'])
+    assert.equal(slim.summary, 'tiny')
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

@@ -3,7 +3,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { designSessions, projects, threadMessages, threads, type Thread } from '../db/schema'
+import { projects, threadJobs, threadMessages, threads, type Thread, type ThreadJob } from '../db/schema'
 import type { ConversationMessageDto } from '../conversation/types'
 import type { PlanProgressDto, ThreadJobDto } from './types'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
@@ -29,6 +29,7 @@ import type { SavedJobPlan } from '../planner/plan-types'
 import { collectMissingReferenceDescriptions } from '@shared/draft-references'
 import { validateTaskReferenceIds } from '@shared/job-references'
 import { isDraftListEntryLaunched } from '@shared/job-lifecycle'
+import { DESIGN_SESSION_WORKSPACE_STATUSES, isPlanningJobStatus } from '@shared/design-session'
 import { mergeDraftReferences } from './draft-references'
 import {
   buildManifestFromCorpus,
@@ -61,22 +62,18 @@ import {
   WIZARD_PHASE_PLAN_GENERATING,
   WIZARD_PHASE_READY_TO_LAUNCH
 } from '../wizard/types'
-import { emitJobEvent, getThreadJob, updateJobRow } from './service'
 import {
-  getDesignSessionAsJob,
-  getDesignSessionRow,
-  isDesignSessionId,
-  launchJobFromDesignSession,
-  listThreadDesignSessions,
-  updateDesignSessionRow
-} from '../design-session/service'
-import { scheduleDesignSessionPlanning } from '../design-session/planner'
+  emitJobEvent,
+  getThreadJob,
+  scheduleJobPlanning,
+  updateJobRow
+} from './service'
+import { launchJobFromDesignSession } from '../design-session/service'
 import {
-  saveDesignAbilities,
-  saveDesignPlan,
-  saveDesignPlanProgress,
-  loadDesignPlan
-} from '../db/design-plan'
+  loadJobPlan,
+  saveJobAbilities,
+  saveJobPlanInTx
+} from '../db/job-plan'
 
 function resolveDraftSummaryLinkedPlanId(
   payload: Pick<TaskLaunchDraftPayload, 'linkedPlanId' | 'status'>,
@@ -90,24 +87,30 @@ function resolveDraftSummaryLinkedPlanId(
 
 export { TASK_LIST_JOB_STATUSES } from './constants'
 
-function resolveDraftDesignSessionId(
+function resolveDraftPlanId(
   planRow: { id: string } | undefined,
   payload: Pick<TaskLaunchDraftPayload, 'linkedPlanId'> & { designSessionId?: string | null }
 ): string | null {
   if (planRow?.id) return planRow.id
   const fromPayload = payload.designSessionId?.trim()
-  if (fromPayload && isDesignSessionId(fromPayload)) return fromPayload
+  if (fromPayload) return fromPayload
   const linked = payload.linkedPlanId?.trim()
-  if (linked && isDesignSessionId(linked)) return linked
-  return null
+  return linked || null
 }
 
 function resolveDraftLaunchedJobId(
-  planRow: { launchedJobId: string | null } | undefined,
+  planRow: { id: string; planConfirmedAt: number | null; status: string } | undefined,
   linkedPlanId: string | null
 ): string | null {
-  if (planRow?.launchedJobId) return planRow.launchedJobId
-  if (linkedPlanId && !isDesignSessionId(linkedPlanId)) return linkedPlanId
+  if (planRow?.planConfirmedAt != null) return planRow.id
+  if (planRow && isDraftListEntryLaunched({ planStatus: planRow.status })) return planRow.id
+  if (
+    linkedPlanId &&
+    planRow?.id === linkedPlanId &&
+    isDraftListEntryLaunched({ planStatus: planRow.status })
+  ) {
+    return linkedPlanId
+  }
   return null
 }
 
@@ -339,16 +342,9 @@ export async function getExecutionPlanSnapshot(
   ])
   await assertActivePlan(username, threadId, planOrSessionId)
 
-  if (isDesignSessionId(planOrSessionId)) {
-    const job = await getDesignSessionAsJob(username, threadId, planOrSessionId)
-    if (!job) throw AppError.notFound('Design session not found', 'job.not_found')
-    const sessionRow = await getDesignSessionRow(planOrSessionId)
-    return buildExecutionPlanSnapshotFromJob(job, sessionRow?.planRevision ?? 0)
-  }
-
   const job = await getThreadJob(username, threadId, planOrSessionId)
   if (!job) throw AppError.notFound('Plan not found', 'job.not_found')
-  return buildExecutionPlanSnapshotFromJob(job, 0)
+  return buildExecutionPlanSnapshotFromJob(job, job.planRevision ?? 0)
 }
 
 function buildExecutionPlanSnapshotFromJob(
@@ -359,7 +355,6 @@ function buildExecutionPlanSnapshotFromJob(
   if (!plan?.milestones?.length) {
     return {
       jobId: job.id,
-      designSessionId: isDesignSessionId(job.id) ? job.id : undefined,
       planRevision,
       draftMessageId: job.draftMessageId,
       title: job.title,
@@ -430,7 +425,6 @@ function buildExecutionPlanSnapshotFromJob(
 
   return {
     jobId: job.id,
-    designSessionId: isDesignSessionId(job.id) ? job.id : undefined,
     planRevision,
     draftMessageId: job.draftMessageId,
     title: job.title,
@@ -528,13 +522,13 @@ export async function listThreadDrafts(
   const messages = await listMessages(username, threadId, 500, { signAssets: false })
   const drafts = messages.filter((msg) => msg.kind === 'task-launch-draft')
   const db = getDb()
-  const designRows = await db
+  const planRows = await db
     .select()
-    .from(designSessions)
-    .where(and(eq(designSessions.threadId, threadId), eq(designSessions.username, username)))
-    .orderBy(desc(designSessions.updatedAt))
+    .from(threadJobs)
+    .where(and(eq(threadJobs.threadId, threadId), eq(threadJobs.username, username)))
+    .orderBy(desc(threadJobs.updatedAt))
 
-  const planByDraftId = new Map(designRows.map((row) => [row.draftMessageId, row]))
+  const planByDraftId = new Map(planRows.map((row) => [row.draftMessageId, row]))
 
   return drafts.map((msg) => {
     const payload = (msg.payload ?? {}) as TaskLaunchDraftPayload & {
@@ -542,7 +536,7 @@ export async function listThreadDrafts(
     }
     const planRow = planByDraftId.get(msg.id)
     const linkedPlanId = resolveDraftSummaryLinkedPlanId(payload, planRow)
-    const designSessionId = resolveDraftDesignSessionId(planRow, payload)
+    const designSessionId = resolveDraftPlanId(planRow, payload)
     const launchedJobId = resolveDraftLaunchedJobId(planRow, linkedPlanId)
     return {
       messageId: msg.id,
@@ -614,17 +608,15 @@ export async function listUserDrafts(
     .orderBy(desc(threadMessages.createdAt))
 
   const threadIds = [...new Set(rows.map((row) => row.threadId))]
-  const designRows =
+  const planRows =
     threadIds.length === 0
       ? []
       : await db
           .select()
-          .from(designSessions)
-          .where(
-            and(eq(designSessions.username, username), inArray(designSessions.threadId, threadIds))
-          )
+          .from(threadJobs)
+          .where(and(eq(threadJobs.username, username), inArray(threadJobs.threadId, threadIds)))
 
-  const planByDraftId = new Map(designRows.map((row) => [row.draftMessageId, row]))
+  const planByDraftId = new Map(planRows.map((row) => [row.draftMessageId, row]))
 
   let entries: UserDraftListEntry[] = []
   for (const row of rows) {
@@ -632,26 +624,26 @@ export async function listUserDrafts(
     const status = normalizeDraftStatus(payload.status)
     if (status === 'archived') continue
     const planRow = planByDraftId.get(row.messageId)
-    const designSessionId = resolveDraftSummaryLinkedPlanId(
+    const linkedPlanId = resolveDraftSummaryLinkedPlanId(
       { linkedPlanId: payload.linkedPlanId ?? null, status },
       planRow
     )
     const plan =
-      designSessionId && planRow
+      linkedPlanId && planRow
         ? { id: planRow.id, status: planRow.status, title: planRow.title }
         : null
     const launched = isDraftListEntryLaunched({
       planStatus: planRow?.status ?? plan?.status,
-      hasLaunchedJobId: Boolean(planRow?.launchedJobId)
+      hasLaunchedJobId: planRow?.planConfirmedAt != null
     })
-    const jobId = planRow?.launchedJobId ?? (launched ? designSessionId : null)
+    const jobId = launched && planRow ? planRow.id : null
     entries.push({
       messageId: row.messageId,
       draftId: payload.draftId ?? row.messageId,
       title: payload.title ?? row.content.split('\n')[0] ?? 'Draft',
       summary: payload.summary ?? '',
       status,
-      linkedPlanId: designSessionId,
+      linkedPlanId,
       createdAt: row.createdAt,
       plan,
       threadId: row.threadId,
@@ -682,7 +674,21 @@ export async function listUserDrafts(
 }
 
 export async function listThreadPlans(username: string, threadId: string): Promise<ThreadJobDto[]> {
-  return listThreadDesignSessions(username, threadId)
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(threadJobs)
+    .where(
+      and(
+        eq(threadJobs.threadId, threadId),
+        eq(threadJobs.username, username),
+        inArray(threadJobs.status, [...DESIGN_SESSION_WORKSPACE_STATUSES])
+      )
+    )
+    .orderBy(desc(threadJobs.updatedAt))
+
+  const { mapJob } = await import('./repository')
+  return Promise.all(rows.map((row) => mapJob(row, { includePlan: true })))
 }
 
 async function recoverStuckDraftPlanningHandoff(
@@ -692,13 +698,15 @@ async function recoverStuckDraftPlanningHandoff(
   payload: TaskLaunchDraftPayload
 ): Promise<{ job: ThreadJobDto; draft: ConversationMessageDto } | null> {
   if (isDraftEditable(payload) || !payload.linkedPlanId) return null
-  if (!isDesignSessionId(payload.linkedPlanId)) return null
 
   const row = await getThreadRow(username, threadId)
   if (!row) throw AppError.notFound('Thread not found', 'thread.not_found')
 
-  const job = await getDesignSessionAsJob(username, threadId, payload.linkedPlanId)
+  const job = await getThreadJob(username, threadId, payload.linkedPlanId)
   if (!job) return null
+  if (!isPlanningJobStatus(job.status) && job.status !== 'cancelled' && job.status !== 'failed') {
+    return null
+  }
 
   const message = await getMessage(username, threadId, draftMessageId)
   if (!message) throw AppError.notFound('Draft message not found', 'draft.not_found')
@@ -725,17 +733,15 @@ async function recoverStuckDraftPlanningHandoff(
   return { job, draft: message }
 }
 
-async function findDesignSessionForDraft(
+async function findPlanningJobForDraft(
   threadId: string,
   draftMessageId: string
-): Promise<typeof designSessions.$inferSelect | null> {
+): Promise<ThreadJob | null> {
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(
-      and(eq(designSessions.threadId, threadId), eq(designSessions.draftMessageId, draftMessageId))
-    )
+    .from(threadJobs)
+    .where(and(eq(threadJobs.threadId, threadId), eq(threadJobs.draftMessageId, draftMessageId)))
     .limit(1)
   return rows[0] ?? null
 }
@@ -821,19 +827,19 @@ export async function confirmDraftAndStartPlanning(
   const taskProgress = defaultTaskProgress()
   const db = getDb()
 
-  const existingSession = await findDesignSessionForDraft(threadId, draftMessageId)
-  if (existingSession?.launchedJobId) {
+  const existingJob = await findPlanningJobForDraft(threadId, draftMessageId)
+  if (existingJob?.planConfirmedAt != null) {
     throw AppError.badRequest('Job already launched', 'job.already_launched')
   }
 
-  const designSessionId = existingSession?.id ?? `ds-${randomUUID()}`
-  const sessionValues = {
+  const jobId = existingJob?.id ?? `job-${randomUUID()}`
+  const jobValues = {
     threadId,
     username,
     draftMessageId,
     title: payloadWithAbilities.title,
     summary: payloadWithAbilities.summary ?? '',
-    workspaceRoot: project.workspaceRoot,
+    workspacePath: project.workspaceRoot,
     phase: 'plan_generating',
     draftRevision: payloadWithAbilities.revision ?? 0,
     planRevision: 0,
@@ -851,23 +857,23 @@ export async function confirmDraftAndStartPlanning(
     taskCurrentTaskId: taskProgress.currentTaskId ?? null,
     taskMessage: taskProgress.message ?? null,
     taskMetaJson: '{}',
-    referenceManifestJson: null,
+    referenceManifestJson: null as string | null,
     manifestRevision: 0,
     corpusRevision: 0,
     frozenCorpusRevision: 0,
     draftConfirmedAt: confirmedAt,
-    launchedJobId: null,
-    lastError: null,
+    planConfirmedAt: null as number | null,
+    lastError: null as string | null,
     updatedAt: confirmedAt
   }
 
   let referenceManifest
   try {
-    await syncCorpusFromDraftPayload({ designSessionId, payload: payloadWithAbilities })
-    const corpus = await listReferenceCorpus(designSessionId)
+    await syncCorpusFromDraftPayload({ designSessionId: jobId, payload: payloadWithAbilities })
+    const corpus = await listReferenceCorpus(jobId)
     assertCorpusDescriptionsReady(corpus)
     referenceManifest = buildManifestFromCorpus({
-      designSessionId,
+      designSessionId: jobId,
       draftMessageId,
       threadId,
       workspaceRoot: project.workspaceRoot,
@@ -886,36 +892,47 @@ export async function confirmDraftAndStartPlanning(
   }
 
   db.transaction(() => {
-    if (existingSession) {
-      saveDesignPlan(db, designSessionId, EMPTY_SAVED_PLAN)
-      db.update(designSessions).set(sessionValues).where(eq(designSessions.id, designSessionId)).run()
+    if (existingJob) {
+      saveJobPlanInTx(db, jobId, EMPTY_SAVED_PLAN)
+      db.update(threadJobs).set(jobValues).where(eq(threadJobs.id, jobId)).run()
     } else {
-      db.insert(designSessions).values({
-        id: designSessionId,
-        ...sessionValues,
-        createdAt: confirmedAt
-      }).run()
+      db.insert(threadJobs)
+        .values({
+          id: jobId,
+          ...jobValues,
+          createdAt: confirmedAt
+        })
+        .run()
     }
 
-    db.update(designSessions)
+    db.update(threadJobs)
       .set({
         referenceManifestJson: serializeJobReferenceManifest(referenceManifest),
         manifestRevision: 1,
         corpusRevision: 1,
         frozenCorpusRevision: 1,
+        planPhase: planProgress.phase,
+        planStatus: planProgress.status,
+        planContextsRegistered: planProgress.contextsRegistered,
+        planContextsTotal: planProgress.contextsTotal,
+        planMessage: planProgress.message ?? null,
+        planCountsJson: JSON.stringify({
+          milestones: planProgress.milestones,
+          slices: planProgress.slices,
+          tasks: planProgress.tasks
+        }),
         updatedAt: confirmedAt
       })
-      .where(eq(designSessions.id, designSessionId))
+      .where(eq(threadJobs.id, jobId))
       .run()
-
-    saveDesignAbilities(db, designSessionId, payloadWithAbilities.abilities)
-    saveDesignPlanProgress(db, designSessionId, planProgress)
   })
+
+  await saveJobAbilities(db, jobId, payloadWithAbilities.abilities)
 
   const confirmedPayload: TaskLaunchDraftPayload = {
     ...payloadWithAbilities,
     status: 'confirmed',
-    linkedPlanId: designSessionId,
+    linkedPlanId: jobId,
     requirementsContract: {
       ...payloadWithAbilities.requirementsContract,
       status: 'confirmed',
@@ -929,13 +946,13 @@ export async function confirmDraftAndStartPlanning(
     confirmedPayload
   )
 
-  const job = await getDesignSessionAsJob(username, threadId, designSessionId)
-  if (!job) throw AppError.internal('Failed to create design session', 'turn.unknown')
+  const job = await getThreadJob(username, threadId, jobId)
+  if (!job) throw AppError.internal('Failed to create planning job', 'turn.unknown')
 
-  scheduleDesignSessionPlanning(
+  scheduleJobPlanning(
     username,
     threadId,
-    designSessionId,
+    jobId,
     confirmedPayload,
     project.workspaceRoot,
     row.coreCode
@@ -945,11 +962,11 @@ export async function confirmDraftAndStartPlanning(
     to: WIZARD_PHASE_PLAN_GENERATING,
     coreCode: row.coreCode,
     activeDraftId: draftMessageId,
-    activePlanId: designSessionId,
+    activePlanId: jobId,
     handoff: buildDraftToPlanHandoff({
       draftMessageId,
       draftRevision: confirmedPayload.revision ?? 1,
-      planId: designSessionId,
+      planId: jobId,
       payload: confirmedPayload
     })
   })
@@ -979,17 +996,20 @@ export async function unlockDraftForEdit(
   await assertActiveDraft(username, threadId, draftMessageId)
   const payload = await loadDraftPayload(username, threadId, draftMessageId)
 
-  const designSessionId = row.activePlanId?.trim() || payload.linkedPlanId?.trim() || ''
-  if (!designSessionId || !isDesignSessionId(designSessionId)) {
+  const planId = row.activePlanId?.trim() || payload.linkedPlanId?.trim() || ''
+  if (!planId) {
     throw AppError.badRequest('No execution plan to unlock', 'draft.plan_not_ready')
   }
 
-  const sessionRow = await getDesignSessionRow(designSessionId)
-  if (sessionRow?.launchedJobId) {
+  const planJob = await getThreadJob(username, threadId, planId)
+  if (!planJob) {
+    throw AppError.badRequest('No execution plan to unlock', 'draft.plan_not_ready')
+  }
+  if (planJob.planConfirmedAt != null) {
     throw AppError.badRequest('Job already launched', 'job.already_launched')
   }
 
-  getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
+  getAppContext().runtimeRegistry.endJobPlanning(planId)
 
   const cancelledProgress: PlanProgressDto = {
     ...defaultPlanProgress(),
@@ -999,7 +1019,7 @@ export async function unlockDraftForEdit(
     message: null
   }
 
-  await updateDesignSessionRow(designSessionId, {
+  await updateJobRow(planId, {
     status: 'cancelled',
     phase: WIZARD_PHASE_DRAFT_REVIEW,
     planRevision: 0,
@@ -1008,10 +1028,10 @@ export async function unlockDraftForEdit(
     lastError: null
   })
 
-  const cancelledJob = await getDesignSessionAsJob(username, threadId, designSessionId)
+  const cancelledJob = await getThreadJob(username, threadId, planId)
   if (cancelledJob) {
-    emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: cancelledJob } })
-    emitJobEvent(designSessionId, { event: 'job_done', data: { job: cancelledJob } })
+    emitJobEvent(planId, { event: 'job_snapshot', data: { job: cancelledJob } })
+    emitJobEvent(planId, { event: 'job_done', data: { job: cancelledJob } })
   }
 
   const unlockedPayload = buildUnlockedDraftPayload(payload)
@@ -1081,14 +1101,7 @@ export async function confirmExecutionPlan(
   threadId: string,
   planOrSessionId: string
 ): Promise<ThreadJobDto> {
-  if (isDesignSessionId(planOrSessionId)) {
-    return launchJobFromDesignSession(username, threadId, planOrSessionId)
-  }
-
-  throw AppError.badRequest(
-    'Launch tasks through a DesignSession (ds-*); legacy job confirmation is not supported',
-    'job.invalid_status'
-  )
+  return launchJobFromDesignSession(username, threadId, planOrSessionId)
 }
 
 export async function updateDraftContent(
@@ -1249,10 +1262,7 @@ export async function updateJobPlan(
   await assertThreadWizardPhase(username, threadId, WIZARD_PHASE_PLAN_EDIT)
   await assertActivePlan(username, threadId, planOrSessionId)
 
-  const useDesignSession = isDesignSessionId(planOrSessionId)
-  const job = useDesignSession
-    ? await getDesignSessionAsJob(username, threadId, planOrSessionId)
-    : await getThreadJob(username, threadId, planOrSessionId)
+  const job = await getThreadJob(username, threadId, planOrSessionId)
   if (!job) throw AppError.notFound('Plan not found', 'job.not_found')
   if (job.status !== 'plan_editing') {
     throw AppError.badRequest(
@@ -1263,9 +1273,7 @@ export async function updateJobPlan(
   }
 
   const db = getDb()
-  const plan = useDesignSession
-    ? await loadDesignPlan(db, planOrSessionId)
-    : await (await import('../db/job-plan')).loadJobPlan(db, planOrSessionId)
+  const plan = await loadJobPlan(db, planOrSessionId)
   if (!plan) throw AppError.badRequest('Execution plan not generated', 'draft.plan_not_ready')
 
   const node = resolvePlanNode(plan, patch.nodeRef)
@@ -1275,11 +1283,7 @@ export async function updateJobPlan(
     node.kind === 'task' &&
     (patch.referenceIds !== undefined || patch.referenceReason !== undefined)
   ) {
-    const manifest = useDesignSession
-      ? await (
-          await import('../design-session/service')
-        ).loadDesignReferenceManifest(planOrSessionId)
-      : await loadJobReferenceManifest(planOrSessionId)
+    const manifest = await loadJobReferenceManifest(planOrSessionId)
     if (manifest && patch.referenceIds !== undefined) {
       const idErrors = validateTaskReferenceIds(manifest, patch.referenceIds)
       if (idErrors.length > 0) {
@@ -1376,36 +1380,25 @@ export async function updateJobPlan(
   }
 
   const nextPlan: SavedJobPlan = { ...plan, milestones }
-  if (useDesignSession) {
-    const session = await getDesignSessionRow(planOrSessionId)
-    if (!session) throw AppError.notFound('Design session not found', 'job.not_found')
-    if (patch.expectedPlanRevision === undefined) {
-      throw AppError.badRequest(
-        'expectedPlanRevision is required for design session plan edits',
-        'draft.invalid_payload'
-      )
-    }
-    if (session.planRevision !== patch.expectedPlanRevision) {
-      throw AppError.conflict('Execution plan revision has changed', {
-        turnErrorCode: 'draft.conflict',
-        expectedPlanRevision: patch.expectedPlanRevision,
-        currentPlanRevision: session.planRevision
-      })
-    }
-    const nextRevision = session.planRevision + 1
-    const updated = await updateDesignSessionRow(planOrSessionId, {
-      plan: nextPlan,
-      planRevision: nextRevision
-    })
-    if (!updated) throw AppError.internal('Failed to update execution plan', 'turn.unknown')
-    const full = await getDesignSessionAsJob(username, threadId, planOrSessionId)
-    if (full) emitJobEvent(planOrSessionId, { event: 'job_snapshot', data: { job: full } })
-    return full ?? updated
+  if (patch.expectedPlanRevision === undefined) {
+    throw AppError.badRequest(
+      'expectedPlanRevision is required for plan edits',
+      'draft.invalid_payload'
+    )
   }
-
-  const updated = await updateJobRow(planOrSessionId, { plan: nextPlan })
+  if ((job.planRevision ?? 0) !== patch.expectedPlanRevision) {
+    throw AppError.conflict('Execution plan revision has changed', {
+      turnErrorCode: 'draft.conflict',
+      expectedPlanRevision: patch.expectedPlanRevision,
+      currentPlanRevision: job.planRevision ?? 0
+    })
+  }
+  const nextRevision = (job.planRevision ?? 0) + 1
+  const updated = await updateJobRow(planOrSessionId, {
+    plan: nextPlan,
+    planRevision: nextRevision
+  })
   if (!updated) throw AppError.internal('Failed to update execution plan', 'turn.unknown')
-
   const full = await getThreadJob(username, threadId, planOrSessionId)
   if (full) emitJobEvent(planOrSessionId, { event: 'job_snapshot', data: { job: full } })
   return full ?? updated
@@ -1420,10 +1413,7 @@ export async function confirmPlanNode(
   await assertThreadWizardPhase(username, threadId, WIZARD_PHASE_PLAN_EDIT)
   await assertActivePlan(username, threadId, planOrSessionId)
 
-  const useDesignSession = isDesignSessionId(planOrSessionId)
-  const job = useDesignSession
-    ? await getDesignSessionAsJob(username, threadId, planOrSessionId)
-    : await getThreadJob(username, threadId, planOrSessionId)
+  const job = await getThreadJob(username, threadId, planOrSessionId)
   if (!job) throw AppError.notFound('Plan not found', 'job.not_found')
   if (job.status !== 'plan_editing') {
     throw AppError.badRequest(
@@ -1434,9 +1424,7 @@ export async function confirmPlanNode(
   }
 
   const db = getDb()
-  const plan = useDesignSession
-    ? await loadDesignPlan(db, planOrSessionId)
-    : await (await import('../db/job-plan')).loadJobPlan(db, planOrSessionId)
+  const plan = await loadJobPlan(db, planOrSessionId)
   if (!plan) throw AppError.badRequest('Execution plan not generated', 'draft.plan_not_ready')
 
   const node = resolvePlanNode(plan, nodeRef)
@@ -1465,23 +1453,16 @@ export async function confirmPlanNode(
   }
 
   const nextPlan: SavedJobPlan = { ...plan, milestones }
-  const updated = useDesignSession
-    ? await updateDesignSessionRow(planOrSessionId, { plan: nextPlan })
-    : await updateJobRow(planOrSessionId, { plan: nextPlan })
+  const updated = await updateJobRow(planOrSessionId, { plan: nextPlan })
   if (!updated) throw AppError.internal('Failed to confirm node', 'turn.unknown')
 
-  const full = useDesignSession
-    ? await getDesignSessionAsJob(username, threadId, planOrSessionId)
-    : await getThreadJob(username, threadId, planOrSessionId)
+  const full = await getThreadJob(username, threadId, planOrSessionId)
   if (full) emitJobEvent(planOrSessionId, { event: 'job_snapshot', data: { job: full } })
 
-  if (useDesignSession && isPlanFullyConfirmed(nextPlan)) {
+  if (isPlanFullyConfirmed(nextPlan)) {
     const row = await getThreadRow(username, threadId)
     if (row) {
-      await getDb()
-        .update(designSessions)
-        .set({ phase: 'ready_to_launch', updatedAt: nowSec() })
-        .where(eq(designSessions.id, planOrSessionId))
+      await updateJobRow(planOrSessionId, { phase: 'ready_to_launch' })
       await advanceWizardPhase(username, threadId, {
         to: WIZARD_PHASE_READY_TO_LAUNCH,
         coreCode: row.coreCode,

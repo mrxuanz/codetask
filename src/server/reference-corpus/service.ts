@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+﻿import { randomUUID } from 'crypto'
 import { and, asc, eq } from 'drizzle-orm'
 import type { DraftReference } from '@shared/reference-corpus'
 import {
@@ -24,10 +24,10 @@ import {
 import { getDb } from '../db'
 import { loadDesignPlan, saveDesignPlan } from '../db/design-plan'
 import {
-  designSessions,
+  threadJobs,
   draftReferences,
   type DraftReferenceRow,
-  type DesignSession
+  type ThreadJob
 } from '../db/schema'
 import { updateDesignSessionRow } from '../design-session/service'
 import { AppError } from '../error'
@@ -149,16 +149,16 @@ async function getDesignSessionForUser(
   username: string,
   threadId: string,
   designSessionId: string
-): Promise<DesignSession | null> {
+): Promise<ThreadJob | null> {
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
+    .from(threadJobs)
     .where(
       and(
-        eq(designSessions.id, designSessionId),
-        eq(designSessions.threadId, threadId),
-        eq(designSessions.username, username)
+        eq(threadJobs.id, designSessionId),
+        eq(threadJobs.threadId, threadId),
+        eq(threadJobs.username, username)
       )
     )
     .limit(1)
@@ -543,19 +543,19 @@ export async function removeCorpusItem(input: {
 async function markCorpusDirty(designSessionId: string): Promise<void> {
   const db = getDb()
   const rows = await db
-    .select({ corpusRevision: designSessions.corpusRevision })
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
+    .select({ corpusRevision: threadJobs.corpusRevision })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
     .limit(1)
   const row = rows[0]
   if (!row) return
   await db
-    .update(designSessions)
+    .update(threadJobs)
     .set({
       corpusRevision: (row.corpusRevision ?? 0) + 1,
       updatedAt: nowSec()
     })
-    .where(eq(designSessions.id, designSessionId))
+    .where(eq(threadJobs.id, designSessionId))
 }
 
 export { isManifestFresh, referenceManifestStaleReason } from './corpus-sync'
@@ -564,8 +564,8 @@ export async function invalidatePlanOnCorpusChange(designSessionId: string): Pro
   const db = getDb()
   const sessionRows = await db
     .select()
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
     .limit(1)
   const session = sessionRows[0]
   if (!session) return
@@ -580,12 +580,12 @@ export async function invalidatePlanOnCorpusChange(designSessionId: string): Pro
   if (missingIds.length > 0) {
     const idErrors = missingIds.map((id) => `referenceId "${id}" is not in the current corpus`)
     await db
-      .update(designSessions)
+      .update(threadJobs)
       .set({
-        lastError: idErrors.join('；'),
+        lastError: idErrors.join('; '),
         updatedAt: nowSec()
       })
-      .where(eq(designSessions.id, designSessionId))
+      .where(eq(threadJobs.id, designSessionId))
   }
 
   const cleared = clearPlanConfirmedFlags(plan)
@@ -597,9 +597,9 @@ export async function invalidatePlanOnCorpusChange(designSessionId: string): Pro
       : {}
 
   await db
-    .update(designSessions)
+    .update(threadJobs)
     .set({ ...phasePatch, updatedAt: nowSec() })
-    .where(eq(designSessions.id, designSessionId))
+    .where(eq(threadJobs.id, designSessionId))
 
   const job = await updateDesignSessionRow(designSessionId, { plan: cleared, ...phasePatch })
   if (job) {
@@ -622,9 +622,9 @@ export async function freezeReferenceCorpus(input: {
   const corpus = await listReferenceCorpus(input.designSessionId)
   assertCorpusDescriptionsReady(corpus)
   const sessionRows = await getDb()
-    .select({ corpusRevision: designSessions.corpusRevision })
-    .from(designSessions)
-    .where(eq(designSessions.id, input.designSessionId))
+    .select({ corpusRevision: threadJobs.corpusRevision })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, input.designSessionId))
     .limit(1)
   const corpusRevision = sessionRows[0]?.corpusRevision ?? 0
   const nextRevision = (session.manifestRevision ?? 0) + 1
@@ -632,21 +632,21 @@ export async function freezeReferenceCorpus(input: {
     designSessionId: input.designSessionId,
     draftMessageId: session.draftMessageId,
     threadId: input.threadId,
-    workspaceRoot: session.workspaceRoot,
+    workspaceRoot: session.workspacePath,
     corpus,
     manifestRevision: nextRevision
   })
 
   const db = getDb()
   await db
-    .update(designSessions)
+    .update(threadJobs)
     .set({
       referenceManifestJson: serializeJobReferenceManifest(manifest),
       manifestRevision: nextRevision,
       frozenCorpusRevision: corpusRevision,
       updatedAt: nowSec()
     })
-    .where(eq(designSessions.id, input.designSessionId))
+    .where(eq(threadJobs.id, input.designSessionId))
 
   const plan = await loadDesignPlan(db, input.designSessionId)
   if (plan?.tasks?.length) {
@@ -668,8 +668,8 @@ export async function loadFrozenManifest(
   const db = getDb()
   const rows = await db
     .select()
-    .from(designSessions)
-    .where(eq(designSessions.id, designSessionId))
+    .from(threadJobs)
+    .where(eq(threadJobs.id, designSessionId))
     .limit(1)
   const row = rows[0]
   if (!row?.referenceManifestJson) return null

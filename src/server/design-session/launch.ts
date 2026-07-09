@@ -8,7 +8,7 @@ import {
 import type { JobSnapshot } from '../../shared/contracts/job-snapshot'
 import type { ThreadJobAbilityDto } from '../jobs/types'
 import type { SavedJobPlan } from '../planner/plan-types'
-import type { DesignSession } from '../db/schema'
+import type { ThreadJob } from '../db/schema'
 import { AppError } from '../error'
 import { ReferenceFileMissingError } from '../jobs/reference-paths'
 import { referenceManifestStaleReason } from '../reference-corpus/corpus-sync'
@@ -29,7 +29,7 @@ export function assertManifestResolvedPathsReadable(manifest: JobReferenceManife
 }
 
 export function buildJobSnapshot(input: {
-  session: DesignSession
+  session: ThreadJob
   plan: SavedJobPlan
   abilities: ThreadJobAbilityDto[]
   manifest: JobReferenceManifest
@@ -39,7 +39,7 @@ export function buildJobSnapshot(input: {
     draftRevision: input.session.draftRevision,
     planRevision: input.session.planRevision,
     manifestRevision: input.session.manifestRevision,
-    workspaceRoot: input.session.workspaceRoot,
+    workspaceRoot: input.session.workspacePath,
     referenceManifest: input.manifest,
     executionPlan: input.plan,
     abilities: input.abilities
@@ -47,13 +47,13 @@ export function buildJobSnapshot(input: {
 }
 
 export function validateLaunchPreconditions(input: {
-  session: DesignSession
+  session: ThreadJob
   plan: SavedJobPlan | null
   manifest: JobReferenceManifest | null
 }): void {
   const { session, plan, manifest } = input
 
-  if (session.launchedJobId) {
+  if (session.planConfirmedAt != null || session.phase === 'archived') {
     throw AppError.badRequest('Design session already launched', 'job.already_launched')
   }
   if (session.status !== 'plan_editing') {
@@ -88,6 +88,6 @@ export function validateLaunchPreconditions(input: {
   assertManifestResolvedPathsReadable(manifest)
 }
 
-export function parseSessionManifest(session: DesignSession): JobReferenceManifest | null {
+export function parseSessionManifest(session: ThreadJob): JobReferenceManifest | null {
   return parseJobReferenceManifest(session.referenceManifestJson)
 }

@@ -136,6 +136,15 @@ export const threadJobs = sqliteTable(
     activeRunId: text('active_run_id'),
     terminalAt: integer('terminal_at'),
     runtimeBytes: integer('runtime_bytes').notNull().default(0),
+    phase: text('phase'),
+    draftRevision: integer('draft_revision').notNull().default(0),
+    planRevision: integer('plan_revision').notNull().default(0),
+    manifestRevision: integer('manifest_revision').notNull().default(0),
+    corpusRevision: integer('corpus_revision').notNull().default(0),
+    frozenCorpusRevision: integer('frozen_corpus_revision').notNull().default(0),
+    planArtifactId: text('plan_artifact_id'),
+    planArtifactPath: text('plan_artifact_path'),
+    planSummaryJson: text('plan_summary_json'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
@@ -271,61 +280,12 @@ export const jobPlanSlices = sqliteTable(
   (table) => [primaryKey({ columns: [table.jobId, table.milestoneIndex, table.sliceIndex] })]
 )
 
-export const designSessions = sqliteTable(
-  'design_sessions',
-  {
-    id: text('id').primaryKey(),
-    threadId: text('thread_id')
-      .notNull()
-      .references(() => threads.id, { onDelete: 'cascade' }),
-    username: text('username').notNull(),
-    draftMessageId: text('draft_message_id')
-      .notNull()
-      .references(() => threadMessages.id, { onDelete: 'restrict' }),
-    title: text('title').notNull(),
-    summary: text('summary').notNull().default(''),
-    workspaceRoot: text('workspace_root').notNull(),
-    phase: text('phase').notNull().default('plan_generating'),
-    draftRevision: integer('draft_revision').notNull().default(0),
-    planRevision: integer('plan_revision').notNull().default(0),
-    status: text('status').notNull(),
-    planPhase: text('plan_phase').notNull().default('idle'),
-    planStatus: text('plan_status').notNull().default('pending'),
-    planContextsRegistered: integer('plan_contexts_registered').notNull().default(0),
-    planContextsTotal: integer('plan_contexts_total').notNull().default(0),
-    planMessage: text('plan_message'),
-    planCountsJson: text('plan_counts_json').notNull().default('{}'),
-    taskPhase: text('task_phase').notNull().default('idle'),
-    taskStatus: text('task_status').notNull().default('pending'),
-    taskCurrentIndex: integer('task_current_index').notNull().default(0),
-    taskTotal: integer('task_total').notNull().default(0),
-    taskCurrentTaskId: text('task_current_task_id'),
-    taskMessage: text('task_message'),
-    taskMetaJson: text('task_meta_json').notNull().default('{}'),
-    referenceManifestJson: text('reference_manifest_json'),
-    manifestRevision: integer('manifest_revision').notNull().default(0),
-    corpusRevision: integer('corpus_revision').notNull().default(0),
-    frozenCorpusRevision: integer('frozen_corpus_revision').notNull().default(0),
-    planArtifactId: text('plan_artifact_id'),
-    planArtifactPath: text('plan_artifact_path'),
-    planSummaryJson: text('plan_summary_json'),
-    draftConfirmedAt: integer('draft_confirmed_at'),
-    launchedJobId: text('launched_job_id'),
-    activeRunId: text('active_run_id'),
-    lastError: text('last_error'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull()
-  },
-  (table) => [
-    uniqueIndex('idx_design_sessions_thread_draft').on(table.threadId, table.draftMessageId)
-  ]
-)
-
+/** Planner/wizard run ledger; design_session_id column retains name but FKs thread_jobs.id. */
 export const designRuns = sqliteTable('design_runs', {
   id: text('id').primaryKey(),
   designSessionId: text('design_session_id')
     .notNull()
-    .references(() => designSessions.id, { onDelete: 'cascade' }),
+    .references(() => threadJobs.id, { onDelete: 'cascade' }),
   kind: text('kind').notNull(),
   status: text('status').notNull(),
   startedAt: integer('started_at').notNull(),
@@ -337,88 +297,12 @@ export const designRuns = sqliteTable('design_runs', {
   error: text('error')
 })
 
-export const designAbilities = sqliteTable(
-  'design_abilities',
-  {
-    designSessionId: text('design_session_id')
-      .notNull()
-      .references(() => designSessions.id, { onDelete: 'cascade' }),
-    abilityCode: text('ability_code').notNull(),
-    sortOrder: integer('sort_order').notNull(),
-    label: text('label'),
-    recommendedCoreCode: text('recommended_core_code')
-  },
-  (table) => [primaryKey({ columns: [table.designSessionId, table.abilityCode] })]
-)
-
-export const designPlanMilestones = sqliteTable(
-  'design_plan_milestones',
-  {
-    designSessionId: text('design_session_id')
-      .notNull()
-      .references(() => designSessions.id, { onDelete: 'cascade' }),
-    milestoneIndex: integer('milestone_index').notNull(),
-    sortOrder: integer('sort_order').notNull(),
-    title: text('title').notNull().default(''),
-    description: text('description').notNull().default(''),
-    successCriteria: text('success_criteria').notNull().default(''),
-    confirmed: integer('confirmed')
-  },
-  (table) => [primaryKey({ columns: [table.designSessionId, table.milestoneIndex] })]
-)
-
-export const designPlanSlices = sqliteTable(
-  'design_plan_slices',
-  {
-    designSessionId: text('design_session_id')
-      .notNull()
-      .references(() => designSessions.id, { onDelete: 'cascade' }),
-    milestoneIndex: integer('milestone_index').notNull(),
-    sliceIndex: integer('slice_index').notNull(),
-    sortOrder: integer('sort_order').notNull(),
-    title: text('title').notNull().default(''),
-    description: text('description').notNull().default(''),
-    successCriteria: text('success_criteria').notNull().default(''),
-    dependsOnSliceRefsJson: text('depends_on_slice_refs_json'),
-    confirmed: integer('confirmed')
-  },
-  (table) => [
-    primaryKey({ columns: [table.designSessionId, table.milestoneIndex, table.sliceIndex] })
-  ]
-)
-
-export const designPlanTasks = sqliteTable(
-  'design_plan_tasks',
-  {
-    designSessionId: text('design_session_id')
-      .notNull()
-      .references(() => designSessions.id, { onDelete: 'cascade' }),
-    taskId: text('task_id').notNull(),
-    sortOrder: integer('sort_order').notNull(),
-    milestoneIndex: integer('milestone_index').notNull(),
-    sliceIndex: integer('slice_index').notNull(),
-    taskIndex: integer('task_index').notNull(),
-    title: text('title').notNull(),
-    description: text('description').notNull().default(''),
-    taskKind: text('task_kind').notNull(),
-    abilityCode: text('ability_code').notNull(),
-    contextMarkdown: text('context_markdown').notNull().default(''),
-    coreCode: text('core_code'),
-    successCriteria: text('success_criteria').notNull().default(''),
-    referenceIdsJson: text('reference_ids_json'),
-    referenceReason: text('reference_reason'),
-    dependsOnTaskRefsJson: text('depends_on_task_refs_json'),
-    canRunInParallel: integer('can_run_in_parallel').notNull().default(0),
-    confirmed: integer('confirmed')
-  },
-  (table) => [primaryKey({ columns: [table.designSessionId, table.taskId] })]
-)
-
+/** Reference corpus rows; design_session_id column retains name but FKs thread_jobs.id. */
 export const draftReferences = sqliteTable('draft_references', {
   id: text('id').primaryKey(),
   designSessionId: text('design_session_id')
     .notNull()
-    .references(() => designSessions.id, { onDelete: 'cascade' }),
+    .references(() => threadJobs.id, { onDelete: 'cascade' }),
   source: text('source').notNull(),
   name: text('name').notNull(),
   kind: text('kind').notNull(),
@@ -501,12 +385,7 @@ export type JobAbility = typeof jobAbilities.$inferSelect
 export type JobPlanTask = typeof jobPlanTasks.$inferSelect
 export type JobPlanMilestone = typeof jobPlanMilestones.$inferSelect
 export type JobPlanSlice = typeof jobPlanSlices.$inferSelect
-export type DesignSession = typeof designSessions.$inferSelect
 export type DraftReferenceRow = typeof draftReferences.$inferSelect
 export type DesignRun = typeof designRuns.$inferSelect
-export type DesignAbility = typeof designAbilities.$inferSelect
-export type DesignPlanTask = typeof designPlanTasks.$inferSelect
-export type DesignPlanMilestone = typeof designPlanMilestones.$inferSelect
-export type DesignPlanSlice = typeof designPlanSlices.$inferSelect
 export type WorkloadRun = typeof workloadRuns.$inferSelect
 export type WorkloadSlot = typeof workloadSlots.$inferSelect

@@ -1,9 +1,9 @@
-import type { DesignSession } from '../db/schema'
+import type { ThreadJob } from '../db/schema'
 import { collectFlatPlanReferenceIds } from '../../shared/job-references'
 import type { SavedJobPlan } from '../planner/plan-types'
 
 export type CorpusRevisionFields = Pick<
-  DesignSession,
+  ThreadJob,
   'corpusRevision' | 'frozenCorpusRevision' | 'manifestRevision'
 >
 

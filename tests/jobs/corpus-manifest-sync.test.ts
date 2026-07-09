@@ -10,18 +10,22 @@ import {
 import { validateLaunchPreconditions } from '../../src/server/design-session/launch'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 import type { SavedJobPlan } from '../../src/shared/contracts/plan'
-import type { DesignSession } from '../../src/server/db/schema'
+import type { ThreadJob } from '../../src/server/db/schema'
 import { AppError } from '../../src/server/error'
 
-test('migration 021 adds corpus revision columns', () => {
+test('migration 021 corpus revision columns land on thread_jobs after unify', () => {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   applyMigrations(sqlite)
 
-  const cols = sqlite.prepare(`PRAGMA table_info(design_sessions)`).all() as Array<{ name: string }>
+  const cols = sqlite.prepare(`PRAGMA table_info(thread_jobs)`).all() as Array<{ name: string }>
   const names = new Set(cols.map((col) => col.name))
   assert.ok(names.has('corpus_revision'))
   assert.ok(names.has('frozen_corpus_revision'))
+  const designSessions = sqlite
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'design_sessions'`)
+    .get()
+  assert.equal(designSessions, undefined)
   sqlite.close()
 })
 
@@ -62,7 +66,7 @@ test('findPlanReferenceIdsMissingFromCorpus detects removed refs', () => {
   assert.deepEqual(findPlanReferenceIdsMissingFromCorpus(plan, new Set(['ref-a'])), ['ref-missing'])
 })
 
-function sampleSession(overrides: Partial<DesignSession> = {}): DesignSession {
+function sampleSession(overrides: Partial<ThreadJob> = {}): ThreadJob {
   return {
     id: 'ds-test',
     threadId: 'thread-1',
@@ -70,7 +74,7 @@ function sampleSession(overrides: Partial<DesignSession> = {}): DesignSession {
     draftMessageId: 'msg-1',
     title: 'Test',
     summary: '',
-    workspaceRoot: '/workspace/project',
+    workspacePath: '/workspace/project',
     phase: 'ready_to_launch',
     draftRevision: 2,
     planRevision: 1,
@@ -96,7 +100,16 @@ function sampleSession(overrides: Partial<DesignSession> = {}): DesignSession {
     planArtifactPath: null,
     planSummaryJson: null,
     draftConfirmedAt: 1,
-    launchedJobId: null,
+    planConfirmedAt: null,
+    designSessionId: null,
+    snapshotDraftRevision: null,
+    snapshotPlanRevision: null,
+    snapshotManifestRevision: null,
+    executionLeaseOwner: null,
+    executionLeaseExpiresAt: null,
+    activeRunId: null,
+    terminalAt: null,
+    runtimeBytes: 0,
     lastError: null,
     createdAt: 1,
     updatedAt: 1,

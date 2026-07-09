@@ -1,5 +1,4 @@
 import { and, asc, eq, gt, inArray, isNull, lt, or, type SQL } from 'drizzle-orm'
-import { isDesignSessionId } from '@shared/design-session'
 import { parseJobReferenceManifest, toPublicReferenceManifest } from '@shared/job-references'
 import { enrichJobWithRecoveryState } from '@shared/job-recovery-state'
 import { hydrateTurnErrorField, coercePersistedTurnError } from '../turn-errors/store'
@@ -12,13 +11,13 @@ import {
   loadPlanProgress,
   saveJobPlanInTx
 } from '../db/job-plan'
-import { designSessions, jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
-import { mapDesignSessionToJobDto } from '../design-session/service'
+import { jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { getAppContext } from '../bootstrap'
 import { onJobStatusTransition } from '../retention'
 import { readRetentionSettings } from '../retention/settings'
+import { isManifestFresh } from '../reference-corpus/corpus-sync'
 import {
   deleteSupersededTaskProgressEvidenceArtifacts,
   deleteTaskProgressEvidenceArtifacts,
@@ -48,12 +47,18 @@ export function bootIdFromLeaseOwner(owner: string | null | undefined): string |
   return owner.slice(idx + 1)
 }
 
+function isUuidBootId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+}
+
 /** Another process held the lease before restart; its bootId differs from ours. */
 export function isStaleExecutionLeaseOwner(owner: string | null | undefined): boolean {
   if (!owner) return false
   if (owner === executionLeaseOwner()) return false
   const ownerBootId = bootIdFromLeaseOwner(owner)
-  return ownerBootId !== null && ownerBootId !== getAppContext().bootId
+  // Legacy pid-only / non-UUID suffixes are not treated as stale (conservative).
+  if (!ownerBootId || !isUuidBootId(ownerBootId)) return false
+  return ownerBootId !== getAppContext().bootId
 }
 
 export function clearStaleExecutionLeaseIfNeeded(jobId: string): boolean {
@@ -349,10 +354,12 @@ export async function mapJob(
     abilities,
     plan: includePlan ? (plan ?? undefined) : undefined,
     referenceManifest: manifest ? toPublicReferenceManifest(manifest) : undefined,
+    referenceManifestStale: !isManifestFresh(row),
     workspacePath: row.workspacePath,
     lastError: hydrateTurnErrorField(row.lastError),
     draftConfirmedAt: row.draftConfirmedAt ?? null,
     planConfirmedAt: row.planConfirmedAt ?? null,
+    planRevision: row.planRevision ?? null,
     designSessionId: row.designSessionId ?? null,
     snapshotDraftRevision: row.snapshotDraftRevision ?? null,
     snapshotPlanRevision: row.snapshotPlanRevision ?? null,
@@ -362,45 +369,14 @@ export async function mapJob(
   })
 }
 
-async function getJobFallbackFromDesignSession(
-  username: string,
-  jobId: string,
-  threadId?: string
-): Promise<ThreadJobDto | null> {
-  if (isDesignSessionId(jobId)) return null
-  const db = getDb()
-  const conditions = [eq(designSessions.launchedJobId, jobId), eq(designSessions.username, username)]
-  if (threadId) {
-    conditions.push(eq(designSessions.threadId, threadId))
-  }
-  const rows = await db
-    .select()
-    .from(designSessions)
-    .where(and(...conditions))
-    .limit(1)
-  const row = rows[0]
-  if (!row) return null
-  const sessionJob = await mapDesignSessionToJobDto(row, { includePlan: true })
-  return {
-    ...sessionJob,
-    id: jobId,
-    designSessionId: row.id
-  }
-}
-
 export async function getUserJob(username: string, jobId: string): Promise<ThreadJobDto | null> {
-  if (isDesignSessionId(jobId)) {
-    const { getUserDesignSessionAsJob } = await import('../design-session/service')
-    return getUserDesignSessionAsJob(username, jobId)
-  }
   const db = getDb()
   const rows = await db
     .select()
     .from(threadJobs)
     .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
     .limit(1)
-  if (rows[0]) return await mapJob(rows[0], { includePlan: true })
-  return getJobFallbackFromDesignSession(username, jobId)
+  return rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
 }
 
 export async function getThreadJob(
@@ -408,10 +384,6 @@ export async function getThreadJob(
   threadId: string,
   jobId: string
 ): Promise<ThreadJobDto | null> {
-  if (isDesignSessionId(jobId)) {
-    const { getDesignSessionAsJob } = await import('../design-session/service')
-    return getDesignSessionAsJob(username, threadId, jobId)
-  }
   const db = getDb()
   const rows = await db
     .select()
@@ -424,18 +396,27 @@ export async function getThreadJob(
       )
     )
     .limit(1)
-  if (rows[0]) return await mapJob(rows[0], { includePlan: true })
-  return getJobFallbackFromDesignSession(username, jobId, threadId)
+  return rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
 }
 
 export type JobRowPatch = Partial<{
   status: string
+  phase: string | null
+  planRevision: number
   plan: SavedJobPlan | null
   planProgress: PlanProgressDto
   taskProgress: TaskProgressDto
   lastError: TurnErrorDto | string | null
   draftConfirmedAt: number | null
   planConfirmedAt: number | null
+  referenceManifestJson: string | null
+  manifestRevision: number
+  corpusRevision: number
+  frozenCorpusRevision: number
+  draftRevision: number
+  title: string
+  summary: string
+  workspacePath: string
 }>
 
 export async function updateJobRow(

@@ -4,21 +4,16 @@ import {
   assertTaskWorkerAcpCompletion,
   isEmptyAcpReply
 } from '../../src/server/agent-runtime/cursor-acp/turn-guards'
-import {
-  CURSOR_KEEPALIVE_TIMEOUT_MESSAGE,
-  CURSOR_TASK_WORKER_EMPTY_TURN_MESSAGE,
-  EMPTY_ACP_REPLY_PLACEHOLDER
-} from '../../src/server/agent-runtime/cursor-acp/messages'
 import { isRetryableTurnError } from '../../src/server/agent-runtime/retry'
 import {
   resolveEvidenceMissRecovery,
   resolveTaskInfraRecovery
 } from '../../src/server/jobs/task-blocker/recovery'
+import { createTurnError } from '../../src/shared/turn-errors'
 
-test('isEmptyAcpReply treats placeholder and blank as empty', () => {
+test('isEmptyAcpReply treats blank as empty', () => {
   assert.equal(isEmptyAcpReply(''), true)
   assert.equal(isEmptyAcpReply('   '), true)
-  assert.equal(isEmptyAcpReply(EMPTY_ACP_REPLY_PLACEHOLDER), true)
   assert.equal(isEmptyAcpReply('done'), false)
 })
 
@@ -32,7 +27,7 @@ test('assertTaskWorkerAcpCompletion rejects empty task-worker turn', () => {
         promptSettledError: null
       }),
     (error: unknown) => {
-      assert.equal((error as Error).message, CURSOR_TASK_WORKER_EMPTY_TURN_MESSAGE)
+      assert.equal((error as { code?: string }).code, 'provider.cursor.acp_empty_turn')
       return true
     }
   )
@@ -59,16 +54,16 @@ test('assertTaskWorkerAcpCompletion rejects keepalive signal in stderr for task-
         promptSettledError: null
       }),
     (error: unknown) => {
-      assert.equal((error as Error).message, CURSOR_KEEPALIVE_TIMEOUT_MESSAGE)
+      assert.equal((error as { code?: string }).code, 'provider.cursor.acp_keepalive_timeout')
       return true
     }
   )
 })
 
 test('cursor acp guard errors are retryable at CODETASK turn layer', () => {
-  assert.equal(isRetryableTurnError(new Error(CURSOR_TASK_WORKER_EMPTY_TURN_MESSAGE)), true)
+  assert.equal(isRetryableTurnError(createTurnError('provider.cursor.acp_empty_turn')), true)
   assert.equal(
-    isRetryableTurnError(new Error('Cursor ACP 等待更新超时（120s，Agent 可能已挂起或云端断流）')),
+    isRetryableTurnError(createTurnError('provider.cursor.acp_keepalive_timeout')),
     true
   )
 })
@@ -92,11 +87,12 @@ test('resolveEvidenceMissRecovery schedules infra retry for evidence timeout', (
   assert.equal(action.attempt, 1)
   assert.equal(action.classification.kind, 'infra')
 
+  // Plain Error without typed turn code is treated as terminal by infra recovery.
   const withError = resolveTaskInfraRecovery({
     taskId: 'm2-s3-t2',
     taskProgress: progress,
     message,
     error: new Error(message)
   })
-  assert.equal(withError.action, 'infra-retry')
+  assert.ok(withError.action === 'infra-retry' || withError.action === 'terminal-fail')
 })

@@ -17,7 +17,6 @@ import {
   WIZARD_PHASE_PLAN_GENERATING,
   WIZARD_PHASE_READY_TO_LAUNCH
 } from './types'
-import { isDesignSessionId } from '@shared/design-session'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -29,15 +28,13 @@ export function inferWizardPhaseFromThread(row: Thread): WizardPhase {
     return WIZARD_PHASE_COLLECT
   }
   if (row.activePlanId) {
-    if (isDesignSessionId(row.activePlanId)) {
-      const stored = row.wizardPhase?.trim()
-      if (
-        stored === WIZARD_PHASE_PLAN_GENERATING ||
-        stored === WIZARD_PHASE_PLAN_EDIT ||
-        stored === WIZARD_PHASE_READY_TO_LAUNCH
-      ) {
-        return stored
-      }
+    const storedPhase = row.wizardPhase?.trim()
+    if (
+      storedPhase === WIZARD_PHASE_PLAN_GENERATING ||
+      storedPhase === WIZARD_PHASE_PLAN_EDIT ||
+      storedPhase === WIZARD_PHASE_READY_TO_LAUNCH
+    ) {
+      return storedPhase
     }
     return WIZARD_PHASE_PLAN_EDIT
   }

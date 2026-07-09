@@ -13,9 +13,12 @@ import {
   executionLeaseOwner,
   isStaleExecutionLeaseOwner
 } from '../../src/server/jobs/repository'
+import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'lease-user'
 const JOB_ID = 'job-lease-test'
+const THREAD_ID = 'thread-lease'
+const DRAFT_ID = 'draft-lease'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -30,20 +33,16 @@ describe('execution lease stale recovery', () => {
     bootstrapRuntime({ dataDir })
 
     const now = nowSec()
-    const bootId = getAppContext().bootId
-    await getDb()
-      .insert(threadJobs)
-      .values({
-        id: JOB_ID,
-        username: USERNAME,
-        threadId: 'thread-lease',
-        title: 'Lease test job',
-        status: 'running',
-        executionLeaseOwner: `999999-${bootId}-old`,
-        executionLeaseExpiresAt: now + 3600,
-        createdAt: now,
-        updatedAt: now
-      })
+    // Dead PID + different UUID bootId → stale under current process.
+    await seedJobGraph(getDb(), {
+      jobId: JOB_ID,
+      username: USERNAME,
+      threadId: THREAD_ID,
+      draftMessageId: DRAFT_ID,
+      status: 'running',
+      executionLeaseOwner: '999999-00000000-0000-4000-8000-000000000099',
+      executionLeaseExpiresAt: now + 3600
+    })
   })
 
   after(async () => {
@@ -59,15 +58,18 @@ describe('execution lease stale recovery', () => {
 
   it('detects stale bootId lease owners', () => {
     const currentBootId = getAppContext().bootId
-    assert.equal(isStaleExecutionLeaseOwner(`999999-${currentBootId}-old`), true)
+    assert.equal(isStaleExecutionLeaseOwner(`999999-${currentBootId}`), false)
+    assert.equal(
+      isStaleExecutionLeaseOwner('999999-00000000-0000-4000-8000-000000000001'),
+      true
+    )
     assert.equal(isStaleExecutionLeaseOwner(executionLeaseOwner()), false)
     assert.equal(isStaleExecutionLeaseOwner(null), false)
     assert.equal(isStaleExecutionLeaseOwner('pid-999999'), false)
   })
 
   it('rejects legacy pid-only lease as not stale', () => {
-    const currentBootId = getAppContext().bootId
-    assert.equal(isStaleExecutionLeaseOwner(`12345-${currentBootId}`), false)
+    assert.equal(isStaleExecutionLeaseOwner('12345-oldboot'), false)
   })
 
   it('clears stale lease left by a dead process', () => {

@@ -3,8 +3,11 @@ import test from 'node:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createDatabase, closeDatabaseForTests, getDb } from '../../src/server/db'
+import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
+import { getDb } from '../../src/server/db'
 import { threadJobs, threadMessages, threads, projects } from '../../src/server/db/schema'
+import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/jobs/reconcile'
+import { ensureStartupWorkloadReady } from '../../src/server/jobs/workload-slot'
 import {
   claimWorkloadSlotTx,
   getActiveRun,
@@ -19,24 +22,24 @@ import { registerRunRuntime, resetRuntimeSupervisorForTests } from '../../src/se
 
 let dataDir: string
 
-function setupDb(): void {
+async function setupDb(): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'codetask-run-lifecycle-'))
-  createDatabase(dataDir)
+  await resetAppContextForTests()
+  resetJobReconcileForTests()
+  bootstrapRuntime({ dataDir })
+  await ensureStartupWorkloadReady()
+  stopWorkloadReconcilerForTests()
 }
 
-function teardownDb(): void {
-  try {
-    closeDatabaseForTests()
-  } catch {
-    // ignore
-  }
+async function teardownDb(): Promise<void> {
+  resetWorkloadRunControllersForTests()
+  resetRuntimeSupervisorForTests()
+  await resetAppContextForTests()
   try {
     rmSync(dataDir, { recursive: true, force: true })
   } catch {
     // ignore
   }
-  resetWorkloadRunControllersForTests()
-  resetRuntimeSupervisorForTests()
 }
 
 async function seedJob(jobId: string): Promise<void> {
@@ -93,7 +96,7 @@ async function seedJob(jobId: string): Promise<void> {
 }
 
 test('finishPlanningRunLifecycle success closes and releases slot', async () => {
-  setupDb()
+  await setupDb()
   try {
     await seedJob('job-1')
     const run = await claimWorkloadSlotTx({
@@ -116,12 +119,12 @@ test('finishPlanningRunLifecycle success closes and releases slot', async () => 
     assert.equal(closed, true)
     assert.equal(await getActiveRun('thread_job', 'job-1'), null)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('finishPlanningRunLifecycle failure runs stop lifecycle with injectable deps', async () => {
-  setupDb()
+  await setupDb()
   try {
     await seedJob('job-1')
     const run = await claimWorkloadSlotTx({
@@ -168,12 +171,12 @@ test('finishPlanningRunLifecycle failure runs stop lifecycle with injectable dep
     assert.deepEqual(events, ['cancel', 'close', 'kill', 'waitClosed', 'close'])
     assert.equal(await getActiveRun('thread_job', 'job-1'), null)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('stopRunLifecycle skipRelease keeps slot until explicit release', async () => {
-  setupDb()
+  await setupDb()
   try {
     await seedJob('job-1')
     const run = await claimWorkloadSlotTx({
@@ -192,12 +195,12 @@ test('stopRunLifecycle skipRelease keeps slot until explicit release', async () 
     await stopRunLifecycle(run.runId, 'timeout', { sleep: async () => {} }, { skipRelease: true })
     assert.notEqual(await getActiveRun('thread_job', 'job-1'), null)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('finishExecutionRunLifecycle success closes runtime before releasing slot', async () => {
-  setupDb()
+  await setupDb()
   try {
     await seedJob('job-exec')
     const run = await claimWorkloadSlotTx({
@@ -229,12 +232,12 @@ test('finishExecutionRunLifecycle success closes runtime before releasing slot',
     assert.equal(closed, true)
     assert.equal(await getActiveRun('thread_job', 'job-exec'), null)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('finishExecutionRunLifecycle failure runs stop lifecycle before release', async () => {
-  setupDb()
+  await setupDb()
   try {
     await seedJob('job-exec-fail')
     const run = await claimWorkloadSlotTx({
@@ -297,12 +300,12 @@ test('finishExecutionRunLifecycle failure runs stop lifecycle before release', a
     ])
     assert.equal(await getActiveRun('thread_job', 'job-exec-fail'), null)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })
 
 test('finishPlanningRunLifecycle skips release when run already released', async () => {
-  setupDb()
+  await setupDb()
   try {
     await seedJob('job-1')
     const run = await claimWorkloadSlotTx({
@@ -327,6 +330,6 @@ test('finishPlanningRunLifecycle skips release when run already released', async
     await finishPlanningRunLifecycle(run.runId, 'planning_done', 'failure')
     assert.equal(closeCalls, 1)
   } finally {
-    teardownDb()
+  await teardownDb()
   }
 })

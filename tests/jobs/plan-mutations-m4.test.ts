@@ -58,7 +58,8 @@ test('migration 019 adds design plan artifact columns', () => {
   sqlite.pragma('foreign_keys = ON')
   applyMigrations(sqlite)
 
-  const cols = sqlite.prepare(`PRAGMA table_info(design_sessions)`).all() as Array<{ name: string }>
+  // After P10 (026), plan artifact columns live on thread_jobs.
+  const cols = sqlite.prepare(`PRAGMA table_info(thread_jobs)`).all() as Array<{ name: string }>
   const names = new Set(cols.map((col) => col.name))
   assert.ok(names.has('plan_artifact_id'))
   assert.ok(names.has('plan_summary_json'))
