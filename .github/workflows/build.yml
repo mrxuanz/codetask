@@ -55,5 +55,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact-name }}
-          path: dist/*.{exe,deb,AppImage,dmg,zip,portable}
+          # upload-artifact does not expand bash brace globs; list patterns explicitly
+          path: |
+            dist/*.exe
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.dmg
+            dist/*.zip
           if-no-files-found: error
