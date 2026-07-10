@@ -25,6 +25,7 @@ import {
 } from './acp-shared'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../delta-emit'
 import { assertTaskWorkerAcpCompletion } from './turn-guards'
+import { recordAcpToolCallActivity } from '../turn-scope'
 
 export interface CursorPromptInput {
   role: ConversationRole
@@ -369,6 +370,7 @@ export class CursorAcpSessionRuntime {
     let thinking = ''
     let promptSettled = false
     let promptSettledError: unknown | null = null
+    const openToolIds = new Set<string>()
 
     debugCursor('runtime prompt sending', { promptChars: userPrompt.length })
     const promptPromise = session.prompt(userPrompt).then(
@@ -390,6 +392,13 @@ export class CursorAcpSessionRuntime {
         if (message.kind === 'session_update') {
           turnScope.recordProgress('provider_event')
           const update = message.update
+          if (
+            update.sessionUpdate === 'tool_call' ||
+            update.sessionUpdate === 'tool_call_update'
+          ) {
+            recordAcpToolCallActivity(update, turnScope, openToolIds)
+            continue
+          }
           if (
             update.sessionUpdate === 'agent_thought_chunk' &&
             update.content.type === 'text' &&

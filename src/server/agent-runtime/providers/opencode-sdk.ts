@@ -11,7 +11,11 @@ import { createTurnError, TURN_CANCELLED, type TurnError } from '../../../shared
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
-import { assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
+import {
+  assertRoleTurnReply,
+  partialCompletedChunk,
+  recordOpencodeToolPartActivity
+} from '../turn-scope'
 import { createProviderTurnScope } from '../provider-turn'
 
 type NodeSpawn = typeof import('child_process').spawn
@@ -381,6 +385,7 @@ export async function* streamOpencodeTurn(
     const assistantMessageIds = new Set<string>()
     const textPartIds = new Set<string>()
     const reasoningPartIds = new Set<string>()
+    const openToolIds = new Set<string>()
 
     const emitReasoningDelta = function* (nextThinking: string): Generator<AgentTurnChunk> {
       if (!nextThinking || nextThinking === thinking) return
@@ -412,9 +417,25 @@ export async function* streamOpencodeTurn(
 
         if (event.type === 'message.part.updated') {
           const props = event.properties as {
-            part?: { id?: string; messageID?: string; type?: string; text?: string }
+            part?: {
+              id?: string
+              callID?: string
+              messageID?: string
+              type?: string
+              text?: string
+              tool?: string
+              state?: {
+                status?: string
+                title?: string
+                input?: { [key: string]: unknown }
+              }
+            }
           }
           const part = props.part
+          if (part?.type === 'tool') {
+            recordOpencodeToolPartActivity(part, turnScope, openToolIds)
+            continue
+          }
           const reasoningText = extractLooseReasoningText(part)
           if (reasoningText && part?.messageID && assistantMessageIds.has(part.messageID)) {
             if (part.id) reasoningPartIds.add(part.id)
