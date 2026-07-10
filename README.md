@@ -6,7 +6,13 @@ Language docs:
 - [中文文档](docs/README.zh-CN.md)
 - [日本語ドキュメント](docs/README.ja.md)
 
-A desktop AI task orchestration app for software delivery. It helps you break requirements into unattended Coding Plans before you step away — so agents can execute small tasks in the background while you are offline, and you review and fill gaps when you return.
+**Plan the work. Step away. Come back to review.**
+
+codetask is a desktop AI task orchestration app for software delivery. You freeze a requirements draft, a strong model turns it into a Coding Plan (Milestone → Slice → Task), and practical agent CLIs execute those small tasks unattended in an OS sandbox — while you are offline. When you return, the Tasks UI shows progress, evidence, and failures so you can retry, patch, and fill gaps in chat.
+
+![codetask Tasks view — job progress and Milestone / Slice / Task execution tree](docs/codetask-tasks-progress.png)
+
+Supports **Codex**, **Claude Code**, **OpenCode**, and **Cursor CLI** as planners and workers. Run as a native **Electron** app or headless **server** mode in the browser.
 
 ## Problem It Solves
 
@@ -20,7 +26,7 @@ codetask separates concerns: **you set direction, a strong model plans, practica
 
 Typical workflow:
 
-1. **Before leaving** — freeze a requirements draft in chat, confirm agent CLI choices (Codex / Cursor CLI, etc.), start the Planner to produce Milestone → Slice → Task plans
+1. **Before leaving** — freeze a requirements draft in chat, confirm agent CLI choices, start the Planner to produce Milestone → Slice → Task plans
 2. **While away** — the job queue runs tasks in dependency order inside an OS sandbox; Slice / Milestone verifiers run automatically
 3. **After return** — review the progress tree, evidence, and failures in the UI; confirm plans node by node, retry blocked tasks, and chat to fill gaps
 
@@ -35,19 +41,17 @@ Typical workflow:
 | Task execution     | `task-worker`                           | Practical / economical model + sandbox write | Each Task has isolated context; ~10 min per task   |
 | Stage verification | `slice-verifier` / `milestone-verifier` | Configurable                                 | Read-only verification + separate output directory |
 
-Configure Planner / Verifier CLIs separately under **Settings → Control Plane** (Codex, Claude Code, OpenCode, Cursor CLI). Each ability in the draft can specify `recommendedCoreCode` for execution — strong model for planning, practical model for work.
+Configure Planner / Verifier CLIs separately under **Settings → Control Plane**. Each ability in the draft can specify `recommendedCoreCode` for execution — strong model for planning, practical model for work.
 
 ### Coding Plan + SDK Execution (More Cost-Effective)
 
-For long-running software delivery, driving agents through a **Coding Plan** (structured Milestone → Slice → Task jobs) is often more affordable than calling model APIs turn-by-turn in your own app: each Task stays focused, you reuse existing CLI/SDK subscriptions, and you avoid re-sending bloated context on every request.
+For long-running software delivery, driving agents through a **Coding Plan** is often more affordable than calling model APIs turn-by-turn in your own app: each Task stays focused, you reuse existing CLI/SDK subscriptions, and you avoid re-sending bloated context on every request.
 
-codetask therefore uses **Agent SDKs / CLIs as the execution layer** — Codex SDK, Claude Agent SDK, OpenCode SDK, Cursor ACP — rather than embedding raw HTTP API calls. Providers plug into one unified runtime; pick the tool you already use and let the plan queue run unattended.
+codetask therefore uses **Agent SDKs / CLIs as the execution layer** — Codex SDK, Claude Agent SDK, OpenCode SDK, Cursor ACP — rather than embedding raw HTTP API calls.
 
 For **small, one-off work**, regular **conversation** is enough — no Coding Plan or Job needed. Use the structured pipeline when the requirement is long enough to benefit from unattended execution.
 
 ### Small Tasks, Anti Context Rot (inspired by GSD)
-
-Plan decomposition follows GSD (Get Shit Done) ideas:
 
 ```
 Milestone
@@ -81,7 +85,7 @@ Draft chat → confirm REQUIREMENTS CONTRACT → Planner generates plan
 
 1. **Draft** — Wizard guides freezing title, acceptance criteria, abilities, references
 2. **Planning** — Planner Agent calls `register_task_context` + `register_plan` into SQLite
-3. **Confirmation** — UI (`PlanReviewAccordion`, etc.) confirms each Milestone / Slice / Task
+3. **Confirmation** — UI confirms each Milestone / Slice / Task
 4. **Execution** — one running job per user; pause, resume, cancel, retry, and blocked recovery
 5. **Verification** — Verifier checks per layer; failed tasks can be rerun individually
 
