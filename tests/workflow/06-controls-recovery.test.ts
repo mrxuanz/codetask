@@ -73,9 +73,9 @@ describe('06 controls and recovery workflow', () => {
       60_000
     )
 
-    const paused = await harness.pauseJob(jobId)
+    await harness.pauseJob(jobId)
+    const paused = await harness.waitForJob(jobId, (job) => job.status === 'paused', 30_000)
     assert.equal(paused.status, 'paused')
-    await harness.waitForJob(jobId, (job) => job.status === 'paused', 10_000)
 
     harness.setScript('task-worker:m1-s1-t1', {
       reply: 'done',

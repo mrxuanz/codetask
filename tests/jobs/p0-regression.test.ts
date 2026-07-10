@@ -7,21 +7,17 @@ import { eq } from 'drizzle-orm'
 import { bootstrapRuntime, resetAppContextForTests, getAppContext } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import { jobTasks, threadJobs } from '../../src/server/db/schema'
-import { updateJobRow } from '../../src/server/jobs/repository'
+import { updateJobRow, isStaleExecutionLeaseOwner, executionLeaseOwner } from '../../src/server/jobs/repository'
 import { cleanupJobRuntimeTree, jobRuntimeDir } from '../../src/server/runtime/cleanup'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
-import { onJobReachedTerminal } from '../../src/server/retention/lifecycle'
 import { readRetentionSettings } from '../../src/server/retention/settings'
+import { getExecutionRunContext } from '../../src/server/jobs/execution-run-context'
 import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'txn-test-user'
 const JOB_ID = 'job-txn-atomic-test'
 const THREAD_ID = 'thread-txn'
 const DRAFT_ID = 'msg-txn'
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000)
-}
 
 describe('write path transaction atomicity', () => {
   let dataDir: string
@@ -172,7 +168,6 @@ describe('PID reuse zombie detection with bootId', () => {
   })
 
   it('same PID different bootId is detected as stale', () => {
-    const { isStaleExecutionLeaseOwner, executionLeaseOwner } = require('../../src/server/jobs/repository')
     const ownOwner = executionLeaseOwner()
     const [pid] = ownOwner.split('-')
     const fakeOwner = `${pid}-00000000-0000-4000-8000-000000000042`
@@ -183,7 +178,6 @@ describe('PID reuse zombie detection with bootId', () => {
   })
 
   it('legacy pid-only format is not stale (conservative)', () => {
-    const { isStaleExecutionLeaseOwner } = require('../../src/server/jobs/repository')
     assert.equal(isStaleExecutionLeaseOwner('pid-12345'), false)
     assert.equal(isStaleExecutionLeaseOwner('99999-oldboot'), false)
   })
@@ -242,7 +236,6 @@ describe('keepalive cross-process awareness', () => {
   })
 
   it('documents that role-worker keepalive is broken by design', () => {
-    const { getExecutionRunContext } = require('../../src/server/jobs/execution-run-context')
     assert.equal(getExecutionRunContext(), undefined)
   })
 })

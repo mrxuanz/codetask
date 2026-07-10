@@ -239,6 +239,18 @@ export class WorkflowHarness {
           await this.cancelJob(String(job.id)).catch(() => undefined)
         }
       }
+      const deadline = Date.now() + 5_000
+      while (Date.now() < deadline) {
+        const again = await this.json<{ jobs: Array<{ id: string; status: string }> }>(
+          'GET',
+          '/api/jobs?limit=50'
+        )
+        const active = (again.jobs ?? []).filter(
+          (job) => !['completed', 'failed', 'cancelled', 'paused'].includes(String(job.status))
+        )
+        if (active.length === 0) break
+        await sleep(100)
+      }
     } catch {
       /* best-effort, ignore errors */
     }

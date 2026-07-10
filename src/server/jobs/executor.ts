@@ -1628,7 +1628,10 @@ async function initializeExecutionState(
   return { jobId, username, job, plan, items, taskProgress, gate, dataDir, initialStatus }
 }
 
-function buildCompletedProgress(items: TaskProgressItemDto[]): TaskProgressDto {
+function buildCompletedProgress(
+  items: TaskProgressItemDto[],
+  prior?: TaskProgressDto
+): TaskProgressDto {
   return {
     phase: 'completed' as const,
     status: 'completed' as const,
@@ -1638,16 +1641,22 @@ function buildCompletedProgress(items: TaskProgressItemDto[]): TaskProgressDto {
     message: null,
     progressCode: 'execution.completed',
     progressParams: { done: items.length, total: items.length },
-    tasks: items
+    tasks: items,
+    slices: prior?.slices,
+    milestones: prior?.milestones,
+    repairGenerations: prior?.repairGenerations,
+    verificationAttempts: prior?.verificationAttempts,
+    verificationBundleHashes: prior?.verificationBundleHashes
   }
 }
 
 async function handleWorkflowCompletion(
   jobId: string,
   items: TaskProgressItemDto[],
-  gate: ReturnType<typeof buildGateStates>
+  gate: ReturnType<typeof buildGateStates>,
+  prior?: TaskProgressDto
 ): Promise<{ taskProgress: TaskProgressDto; items: TaskProgressItemDto[]; done: boolean }> {
-  const completedProgress = buildCompletedProgress(items)
+  const completedProgress = buildCompletedProgress(items, prior)
   const completed = await persistTaskProgress(
     jobId,
     completedProgress,
@@ -1695,7 +1704,8 @@ function syncLoopState(
 
 async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
   const jobId = ctx.jobId
-  let { plan, items, taskProgress, gate, job, dataDir } = ctx
+  let { plan, items, taskProgress, gate } = ctx
+  const { job, dataDir } = ctx
   const sliceToVerify = findSliceReadyForVerification(gate.slices)
   if (!sliceToVerify) return 'skip'
 
@@ -1969,7 +1979,8 @@ async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<
 
 async function processMilestoneVerificationStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
   const jobId = ctx.jobId
-  let { plan, items, taskProgress, gate, job, dataDir } = ctx
+  let { plan, items, taskProgress, gate } = ctx
+  const { job, dataDir } = ctx
   const milestoneToVerify = findMilestoneReadyForVerification(gate.milestones, gate.slices)
   if (!milestoneToVerify) return 'skip'
 
@@ -2439,7 +2450,7 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
     reconcileMilestoneStatuses(ctx.gate.milestones, ctx.gate.slices)
 
     if (isWorkflowComplete(ctx.gate.milestones, ctx.gate.slices)) {
-      const result = await handleWorkflowCompletion(jobId, ctx.items, ctx.gate)
+      const result = await handleWorkflowCompletion(jobId, ctx.items, ctx.gate, ctx.taskProgress)
       ctx.taskProgress = result.taskProgress
       ctx.items = result.items
       return
