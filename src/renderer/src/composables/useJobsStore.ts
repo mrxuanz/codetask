@@ -36,7 +36,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
   selectedJob: ComputedRef<ThreadJob | null>
   loadJobs: () => Promise<void>
   loadDetail: (id: string) => Promise<void>
-  applyJobPatch: (jobId: string, patch: Partial<ThreadJob>) => void
+  applyJobPatch: (job: ThreadJob) => void
   syncHubWatch: () => void
   startHubPolling: () => void
   stopHubPolling: () => void
