@@ -1,10 +1,5 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used)]
-use codeteam_sandbox_policy::config_types::ShellEnvironmentPolicy;
-use codeteam_sandbox_policy::config_types::WindowsSandboxLevel;
-use codeteam_sandbox_policy::error::CodexErr;
-use codeteam_sandbox_policy::error::Result;
-use codeteam_sandbox_policy::error::SandboxErr;
 use codeteam_sandbox_policy::models::PermissionProfile;
 use codeteam_sandbox_policy::permissions::FileSystemAccessMode;
 use codeteam_sandbox_policy::permissions::FileSystemPath;
@@ -13,15 +8,13 @@ use codeteam_sandbox_policy::permissions::FileSystemSandboxPolicy;
 use codeteam_sandbox_policy::permissions::FileSystemSpecialPath;
 use codeteam_sandbox_policy::permissions::NetworkSandboxPolicy;
 use codeteam_utils_absolute_path::AbsolutePathBuf;
-use codex_core::exec::ExecCapturePolicy;
-use codex_core::exec::ExecParams;
-use codex_core::exec::process_exec_tool_call;
-use codex_core::exec_env::create_env;
-use codex_core::sandboxing::SandboxPermissions;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
 use tempfile::NamedTempFile;
+use tokio::process::Command;
 
 // At least on GitHub CI, the arm64 tests appear to need longer timeouts.
 
@@ -42,9 +35,28 @@ const NETWORK_TIMEOUT_MS: u64 = 10_000;
 
 const BWRAP_UNAVAILABLE_ERR: &str = "bubblewrap is unavailable: no system bwrap was found";
 
+#[derive(Debug)]
+struct StreamOutput {
+    text: String,
+}
+
+#[derive(Debug)]
+struct CommandOutput {
+    exit_code: i32,
+    stdout: StreamOutput,
+    stderr: StreamOutput,
+}
+
+#[derive(Debug)]
+enum RunError {
+    /// Kept as `Sandbox(Timeout` so existing `#[should_panic]` expectations match.
+    Timeout,
+}
+
+type Result<T> = std::result::Result<T, RunError>;
+
 fn create_env_from_core_vars() -> HashMap<String, String> {
-    let policy = ShellEnvironmentPolicy::default();
-    create_env(&policy, /*thread_id*/ None)
+    std::env::vars().collect()
 }
 
 fn codeteam_linux_sandbox_exe() -> PathBuf {
@@ -66,11 +78,7 @@ async fn run_cmd(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) {
 }
 
 #[expect(clippy::expect_used)]
-async fn run_cmd_output(
-    cmd: &[&str],
-    writable_roots: &[PathBuf],
-    timeout_ms: u64,
-) -> codeteam_sandbox_policy::exec_output::ExecToolCallOutput {
+async fn run_cmd_output(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) -> CommandOutput {
     run_cmd_result_with_writable_roots(
         cmd,
         writable_roots,
@@ -79,7 +87,9 @@ async fn run_cmd_output(
         /*network_access*/ false,
     )
     .await
-    .expect("sandboxed command should execute")
+    .unwrap_or_else(|err| match err {
+        RunError::Timeout => panic!("Sandbox(Timeout)"),
+    })
 }
 
 async fn run_cmd_result_with_writable_roots(
@@ -88,7 +98,7 @@ async fn run_cmd_result_with_writable_roots(
     timeout_ms: u64,
     use_legacy_landlock: bool,
     network_access: bool,
-) -> Result<codeteam_sandbox_policy::exec_output::ExecToolCallOutput> {
+) -> Result<CommandOutput> {
     let writable_roots = writable_roots
         .iter()
         .map(|path| AbsolutePathBuf::try_from(path.as_path()).unwrap())
@@ -117,7 +127,7 @@ async fn run_cmd_result_with_permission_profile(
     permission_profile: PermissionProfile,
     timeout_ms: u64,
     use_legacy_landlock: bool,
-) -> Result<codeteam_sandbox_policy::exec_output::ExecToolCallOutput> {
+) -> Result<CommandOutput> {
     let cwd = AbsolutePathBuf::current_dir().expect("cwd should exist");
     run_cmd_result_with_permission_profile_for_cwd(
         cmd,
@@ -137,7 +147,7 @@ async fn run_cmd_result_with_cwd_and_writable_roots(
     timeout_ms: u64,
     use_legacy_landlock: bool,
     network_access: bool,
-) -> Result<codeteam_sandbox_policy::exec_output::ExecToolCallOutput> {
+) -> Result<CommandOutput> {
     let writable_roots = writable_roots
         .iter()
         .map(|path| AbsolutePathBuf::try_from(path.as_path()).unwrap())
@@ -169,37 +179,56 @@ async fn run_cmd_result_with_permission_profile_for_cwd(
     permission_profile: PermissionProfile,
     timeout_ms: u64,
     use_legacy_landlock: bool,
-) -> Result<codeteam_sandbox_policy::exec_output::ExecToolCallOutput> {
-    let sandbox_cwd = cwd.clone();
-    let params = ExecParams {
-        command: cmd.iter().copied().map(str::to_owned).collect(),
-        cwd,
-        expiration: timeout_ms.into(),
-        capture_policy: ExecCapturePolicy::ShellTool,
-        env: create_env_from_core_vars(),
-        network: None,
-        sandbox_permissions: SandboxPermissions::UseDefault,
-        windows_sandbox_level: WindowsSandboxLevel::Disabled,
-        windows_sandbox_private_desktop: false,
-        justification: None,
-        arg0: None,
+) -> Result<CommandOutput> {
+    let permission_profile_json = match serde_json::to_string(&permission_profile) {
+        Ok(json) => json,
+        Err(err) => panic!("permission profile should serialize: {err}"),
     };
-    let codeteam_linux_sandbox_exe = Some(codeteam_linux_sandbox_exe());
 
-    process_exec_tool_call(
-        params,
-        &permission_profile,
-        &sandbox_cwd,
-        &codeteam_linux_sandbox_exe,
-        use_legacy_landlock,
-        /*stdout_stream*/ None,
-    )
-    .await
+    let mut args = vec![
+        "--sandbox-policy-cwd".to_string(),
+        cwd.as_path().to_string_lossy().to_string(),
+        "--command-cwd".to_string(),
+        cwd.as_path().to_string_lossy().to_string(),
+        "--permission-profile".to_string(),
+        permission_profile_json,
+    ];
+    if use_legacy_landlock {
+        args.push("--use-legacy-landlock".to_string());
+    }
+    args.push("--".to_string());
+    args.extend(cmd.iter().map(|entry| (*entry).to_string()));
+
+    let mut command = Command::new(codeteam_linux_sandbox_exe());
+    command
+        .args(args)
+        .current_dir(cwd.as_path())
+        .env_clear()
+        .envs(create_env_from_core_vars())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
+        .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(err)) => panic!("sandbox command should execute: {err}"),
+        Err(_) => return Err(RunError::Timeout),
+    };
+
+    Ok(CommandOutput {
+        exit_code: output.status.code().unwrap_or(1),
+        stdout: StreamOutput {
+            text: String::from_utf8_lossy(&output.stdout).into_owned(),
+        },
+        stderr: StreamOutput {
+            text: String::from_utf8_lossy(&output.stderr).into_owned(),
+        },
+    })
 }
 
-fn is_bwrap_unavailable_output(
-    output: &codeteam_sandbox_policy::exec_output::ExecToolCallOutput,
-) -> bool {
+fn is_bwrap_unavailable_output(output: &CommandOutput) -> bool {
     output.stderr.text.contains(BWRAP_UNAVAILABLE_ERR)
         || (output
             .stderr
@@ -221,27 +250,19 @@ async fn should_skip_bwrap_tests() -> bool {
     .await
     {
         Ok(output) => is_bwrap_unavailable_output(&output),
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => {
-            is_bwrap_unavailable_output(&output)
-        }
         // Probe timeouts are not actionable for the bwrap-specific assertions below;
         // skip rather than fail the whole suite.
-        Err(CodexErr::Sandbox(SandboxErr::Timeout { .. })) => true,
-        Err(err) => panic!("bwrap availability probe failed unexpectedly: {err:?}"),
+        Err(RunError::Timeout) => true,
     }
 }
 
-fn expect_denied(
-    result: Result<codeteam_sandbox_policy::exec_output::ExecToolCallOutput>,
-    context: &str,
-) -> codeteam_sandbox_policy::exec_output::ExecToolCallOutput {
+fn expect_denied(result: Result<CommandOutput>, context: &str) -> CommandOutput {
     match result {
         Ok(output) => {
             assert_ne!(output.exit_code, 0, "{context}: expected nonzero exit code");
             output
         }
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
-        Err(err) => panic!("{context}: {err:?}"),
+        Err(RunError::Timeout) => panic!("{context}: Sandbox(Timeout)"),
     }
 }
 
@@ -426,42 +447,17 @@ async fn test_timeout() {
 /// suite remains green on leaner CI images.
 #[expect(clippy::expect_used)]
 async fn assert_network_blocked(cmd: &[&str]) {
-    let cwd = AbsolutePathBuf::current_dir().expect("cwd should exist");
-    let sandbox_cwd = cwd.clone();
-    let params = ExecParams {
-        command: cmd.iter().copied().map(str::to_owned).collect(),
-        cwd,
-        // Give the tool a generous 2-second timeout so even slow DNS timeouts
-        // do not stall the suite.
-        expiration: NETWORK_TIMEOUT_MS.into(),
-        capture_policy: ExecCapturePolicy::ShellTool,
-        env: create_env_from_core_vars(),
-        network: None,
-        sandbox_permissions: SandboxPermissions::UseDefault,
-        windows_sandbox_level: WindowsSandboxLevel::Disabled,
-        windows_sandbox_private_desktop: false,
-        justification: None,
-        arg0: None,
-    };
-
-    let codeteam_linux_sandbox_exe: Option<PathBuf> = Some(codeteam_linux_sandbox_exe());
-    let permission_profile = PermissionProfile::read_only();
-    let result = process_exec_tool_call(
-        params,
-        &permission_profile,
-        &sandbox_cwd,
-        &codeteam_linux_sandbox_exe,
+    let result = run_cmd_result_with_permission_profile(
+        cmd,
+        PermissionProfile::read_only(),
+        NETWORK_TIMEOUT_MS,
         /*use_legacy_landlock*/ false,
-        /*stdout_stream*/ None,
     )
     .await;
 
     let output = match result {
         Ok(output) => output,
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
-        _ => {
-            panic!("expected sandbox denied error, got: {result:?}");
-        }
+        Err(RunError::Timeout) => panic!("expected sandbox denied error, got: Timeout"),
     };
 
     dbg!(&output.stderr.text);
@@ -605,18 +601,17 @@ async fn sandbox_reports_codex_symlink_build_failure_without_panicking() {
     let dot_codex = tmpdir.path().join(".codeteam");
     symlink(&decoy, &dot_codex).expect("create .codeteam symlink");
 
-    let output = match run_cmd_result_with_writable_roots(
-        &["bash", "-lc", "true"],
-        &[tmpdir.path().to_path_buf()],
-        LONG_TIMEOUT_MS,
-        /*use_legacy_landlock*/ false,
-        /*network_access*/ true,
-    )
-    .await
-    {
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
-        result => panic!(".codeteam symlink build failure should deny: {result:?}"),
-    };
+    let output = expect_denied(
+        run_cmd_result_with_writable_roots(
+            &["bash", "-lc", "true"],
+            &[tmpdir.path().to_path_buf()],
+            LONG_TIMEOUT_MS,
+            /*use_legacy_landlock*/ false,
+            /*network_access*/ true,
+        )
+        .await,
+        ".codeteam symlink build failure should deny",
+    );
 
     assert_eq!(output.exit_code, 1);
     assert!(

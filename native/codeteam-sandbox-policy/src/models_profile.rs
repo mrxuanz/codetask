@@ -30,6 +30,29 @@ impl FileSystemPermissions {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    pub fn from_read_write_roots(
+        read: Option<Vec<AbsolutePathBuf>>,
+        write: Option<Vec<AbsolutePathBuf>>,
+    ) -> Self {
+        let mut entries = Vec::new();
+        if let Some(read) = read {
+            entries.extend(read.into_iter().map(|path| FileSystemSandboxEntry {
+                path: FileSystemPath::Path { path },
+                access: FileSystemAccessMode::Read,
+            }));
+        }
+        if let Some(write) = write {
+            entries.extend(write.into_iter().map(|path| FileSystemSandboxEntry {
+                path: FileSystemPath::Path { path },
+                access: FileSystemAccessMode::Write,
+            }));
+        }
+        Self {
+            entries,
+            glob_scan_max_depth: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -162,6 +185,23 @@ impl PermissionProfile {
             file_system: ManagedFileSystemPermissions::from_sandbox_policy(&file_system),
             network,
         }
+    }
+
+    pub fn from_runtime_permissions(
+        file_system_sandbox_policy: &FileSystemSandboxPolicy,
+        network_sandbox_policy: NetworkSandboxPolicy,
+    ) -> Self {
+        let enforcement = match file_system_sandbox_policy.kind {
+            FileSystemSandboxKind::Restricted | FileSystemSandboxKind::Unrestricted => {
+                SandboxEnforcement::Managed
+            }
+            FileSystemSandboxKind::ExternalSandbox => SandboxEnforcement::External,
+        };
+        Self::from_runtime_permissions_with_enforcement(
+            enforcement,
+            file_system_sandbox_policy,
+            network_sandbox_policy,
+        )
     }
 
     pub fn from_runtime_permissions_with_enforcement(
