@@ -183,7 +183,8 @@ export async function finishPlanningRunLifecycle(
     return
   }
 
-  if (outcome === 'success') {
+  if (outcome === 'success' || outcome === 'failure') {
+    // Planner turn already ended; release immediately so the planning queue can advance.
     await closeAndReleaseWorkloadSlot(runId, reason)
     return
   }

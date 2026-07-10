@@ -873,29 +873,7 @@ export async function confirmDraftAndStartPlanning(
 
   let referenceManifest
   try {
-    await syncCorpusFromDraftPayload({ designSessionId: jobId, payload: payloadWithAbilities })
-    const corpus = await listReferenceCorpus(jobId)
-    assertCorpusDescriptionsReady(corpus)
-    referenceManifest = buildManifestFromCorpus({
-      designSessionId: jobId,
-      draftMessageId,
-      threadId,
-      workspaceRoot: project.workspaceRoot,
-      corpus,
-      manifestRevision: 1
-    })
-  } catch (error) {
-    if (error instanceof ReferenceFileMissingError) {
-      throw AppError.badRequest('Reference file missing', 'draft.reference_not_found', {
-        referenceId: error.referenceId,
-        referenceName: error.referenceName,
-        path: error.relativePath
-      })
-    }
-    throw error
-  }
-
-  db.transaction(() => {
+    // Insert/update the job row before corpus sync so draft_references FK to thread_jobs succeeds.
     if (existingJob) {
       saveJobPlanInTx(db, jobId, EMPTY_SAVED_PLAN)
       db.update(threadJobs).set(jobValues).where(eq(threadJobs.id, jobId)).run()
@@ -909,6 +887,36 @@ export async function confirmDraftAndStartPlanning(
         .run()
     }
 
+    await syncCorpusFromDraftPayload({ designSessionId: jobId, payload: payloadWithAbilities })
+    const corpus = await listReferenceCorpus(jobId)
+    assertCorpusDescriptionsReady(corpus)
+    referenceManifest = buildManifestFromCorpus({
+      designSessionId: jobId,
+      draftMessageId,
+      threadId,
+      workspaceRoot: project.workspaceRoot,
+      corpus,
+      manifestRevision: 1
+    })
+  } catch (error) {
+    if (!existingJob) {
+      try {
+        db.delete(threadJobs).where(eq(threadJobs.id, jobId)).run()
+      } catch {
+        /* best-effort cleanup of the stub job row */
+      }
+    }
+    if (error instanceof ReferenceFileMissingError) {
+      throw AppError.badRequest('Reference file missing', 'draft.reference_not_found', {
+        referenceId: error.referenceId,
+        referenceName: error.referenceName,
+        path: error.relativePath
+      })
+    }
+    throw error
+  }
+
+  db.transaction(() => {
     db.update(threadJobs)
       .set({
         referenceManifestJson: serializeJobReferenceManifest(referenceManifest),

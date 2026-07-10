@@ -164,6 +164,14 @@ export async function reconcileOrphanRunningJobsOnStartupOnce(): Promise<void> {
 async function reconcileStalePlanningSessionIfNeeded(session: ThreadJob): Promise<void> {
   if (session.status !== 'planning') return
   if (isSessionPlanning(session.id)) return
+  // Queued for a planning slot — not an orphan; advancePlanningQueue starts these.
+  if (session.planStatus === 'pending') return
+  // Just created / about to claim: planStatus=running but no activeRunId yet.
+  // Only treat as orphan after a short grace so advancePlanningQueue cannot race create.
+  if (session.planStatus === 'running' && !session.activeRunId) {
+    const ageSec = nowSec() - (session.updatedAt ?? 0)
+    if (ageSec < 120) return
+  }
 
   const planProgress: PlanProgressDto = {
     ...defaultPlanProgress(),

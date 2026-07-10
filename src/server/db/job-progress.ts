@@ -96,6 +96,8 @@ function metaForStorage(progress: TaskProgressDto): TaskMeta {
   return {
     slices: progress.slices,
     milestones: progress.milestones,
+    repairGenerations: progress.repairGenerations,
+    verificationAttempts: progress.verificationAttempts,
     verificationBundleHashes: progress.verificationBundleHashes
   }
 }

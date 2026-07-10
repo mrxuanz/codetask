@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
 import {
@@ -22,7 +22,30 @@ export interface UseJobsStoreOptions {
   selectedJobId: Ref<string | null>
 }
 
-export function useJobsStore(options: UseJobsStoreOptions) {
+export function useJobsStore(options: UseJobsStoreOptions): {
+  statusFilter: Ref<string>
+  searchQuery: Ref<string>
+  jobs: Ref<ThreadJob[]>
+  total: Ref<number>
+  loadingList: Ref<boolean>
+  loadingDetail: Ref<boolean>
+  error: Ref<string | null>
+  actionError: Ref<string | null>
+  runningAction: Ref<string | null>
+  detail: Ref<ThreadJob | null>
+  selectedJob: ComputedRef<ThreadJob | null>
+  loadJobs: () => Promise<void>
+  loadDetail: (id: string) => Promise<void>
+  applyJobPatch: (jobId: string, patch: Partial<ThreadJob>) => void
+  syncHubWatch: () => void
+  startHubPolling: () => void
+  stopHubPolling: () => void
+  handlePause: () => Promise<void>
+  handleContinue: () => Promise<void>
+  handleCancel: () => Promise<void>
+  handleRestart: () => Promise<void>
+  handleDelete: () => Promise<void>
+} {
   const { selectedJobId } = options
   const router = useRouter()
   const hub = useJobEventHub()

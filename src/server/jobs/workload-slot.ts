@@ -89,7 +89,15 @@ export async function findDbPlanningSessionId(
   const rows = await getDb()
     .select({ id: threadJobs.id })
     .from(threadJobs)
-    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'planning')))
+    .where(
+      and(
+        eq(threadJobs.username, username),
+        eq(threadJobs.status, 'planning'),
+        // Waiting-for-slot jobs keep status=planning with planStatus=pending.
+        // They must not count as occupants or advancePlanningQueue never starts them.
+        eq(threadJobs.planStatus, 'running')
+      )
+    )
     .orderBy(threadJobs.updatedAt)
     .limit(1)
   const id = rows[0]?.id ?? null
@@ -99,7 +107,8 @@ export async function findDbPlanningSessionId(
 }
 
 export function workloadLeaseOwner(): string {
-  return `pid-${process.pid}`
+  // Must match workload-slot-store leaseOwner() (`${pid}-${bootId}`).
+  return `${process.pid}-${getAppContext().bootId}`
 }
 
 function nowSec(): number {

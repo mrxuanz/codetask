@@ -319,7 +319,7 @@ async function runDesignPlanner(
       ...defaultPlanProgress(),
       phase: 'idle',
       status: 'pending',
-      progressCode: 'execution.pending',
+      progressCode: 'plan.pending',
       progressParams: null,
       message: null
     }
@@ -328,6 +328,14 @@ async function runDesignPlanner(
       emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
       emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: updated } })
     }
+    const { advanceWorkloadQueue } = await import('../jobs/workload-slot-store')
+    await advanceWorkloadQueue(username).catch((error) => {
+      console.warn(
+        '[runDesignPlanner] advance queue after planning wait failed',
+        designSessionId,
+        error
+      )
+    })
     return
   }
 
@@ -698,6 +706,16 @@ export async function tryStartPendingDesignSessionPlanning(username: string): Pr
   const row = rows[0]
   if (!row) return
 
+  // User-paused planning wait uses the same planStatus=pending; do not auto-restart.
+  if (row.lastError) {
+    try {
+      const parsed = JSON.parse(row.lastError) as { code?: string }
+      if (parsed?.code === 'job.paused') return
+    } catch {
+      // ignore malformed lastError
+    }
+  }
+
   const { getMessage } = await import('../conversation/messages')
   const message = await getMessage(username, row.threadId, row.draftMessageId, {
     signAssets: false
@@ -760,7 +778,7 @@ export async function retryDesignSessionPlanning(
   const { getUserDesignSessionAsJob } = await import('./service')
   const session = await getUserDesignSessionAsJob(username, designSessionId)
   if (!session) throw AppError.notFound('Design session not found', 'design_session.not_found')
-  if (!['failed', 'cancelled', 'plan_editing', 'planning'].includes(session.status)) {
+  if (!['failed', 'cancelled', 'paused', 'plan_editing', 'planning'].includes(session.status)) {
     throw AppError.badRequest(
       `Status ${session.status} does not allow replanning`,
       'job.invalid_status',
