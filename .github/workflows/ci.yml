@@ -41,7 +41,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install bubblewrap
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04+ AppArmor blocks unprivileged userns required by bwrap.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
