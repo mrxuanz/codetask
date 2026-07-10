@@ -1,12 +1,18 @@
 # codetask（AI 任务编排）
 
-面向软件交付的桌面端 AI 任务编排应用。解决「晚上出门前 / 上班路上 / 人不在电脑前」时，如何提前把需求拆成可 unattended 执行的 Coding Plan，让机器在后台按小任务逐条落地，回来后只做查漏补缺。
-
 语言文档：
 
 - [English](../README.md)
 - 中文（本页）
 - [日本語](README.ja.md)
+
+**先把活规划好，人走开，回来再验收。**
+
+codetask 是面向软件交付的桌面端 AI 任务编排应用。你在对话里冻结需求草案，强模型拆成 Coding Plan（Milestone → Slice → Task），实用 Agent CLI 在 OS 沙箱里 unattended 逐条执行；回来后在 Tasks 页看进度树、证据与失败点，重试、补洞、对话查漏补缺。
+
+![codetask Tasks 视图 — 作业进度与 Milestone / Slice / Task 执行树](codetask-tasks-progress.png)
+
+支持 **Codex**、**Claude Code**、**OpenCode**、**Cursor CLI** 作为规划与执行引擎；可跑 **Electron** 桌面，也可 **Server** 模式用浏览器访问。
 
 ## 要解决什么问题
 

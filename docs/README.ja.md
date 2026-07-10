@@ -1,12 +1,18 @@
 # codetask（AI タスクオーケストレーション）
 
-ソフトウェア納品向けのデスクトップ AI タスクオーケストレーションアプリです。出かける前・通勤中・PC から離れている間に、要件を unattended 実行可能な Coding Plan に分解し、バックグラウンドで小タスクを順次実行。戻ったら UI で確認し、不足分を補完します。
-
 言語ドキュメント:
 
 - [English](../README.md)
 - [中文](README.zh-CN.md)
 - 日本語（このページ）
+
+**計画を固めて離席。戻ってレビュー。**
+
+codetask はソフトウェア納品向けのデスクトップ AI タスクオーケストレーションアプリです。チャットで要件草案を確定し、強いモデルが Coding Plan（Milestone → Slice → Task）に分解、実用的な Agent CLI が OS サンドボックス内で unattended 実行。戻ったら Tasks UI で進捗ツリー・証跡・失敗を確認し、再試行やチャットで不足を補完します。
+
+![codetask Tasks 画面 — ジョブ進捗と Milestone / Slice / Task 実行ツリー](codetask-tasks-progress.png)
+
+**Codex** / **Claude Code** / **OpenCode** / **Cursor CLI** に対応。**Electron** デスクトップ、または **Server** モードでブラウザから利用できます。
 
 ## 解決する課題
 
