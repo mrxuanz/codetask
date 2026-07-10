@@ -1960,6 +1960,12 @@ mod tests {
                     },
                     access: FileSystemAccessMode::Read,
                 },
+                FileSystemSandboxEntry {
+                    path: FileSystemPath::Special {
+                        value: FileSystemSpecialPath::project_roots(Some(".codeteam".into())),
+                    },
+                    access: FileSystemAccessMode::Read,
+                },
             ])
         );
     }
@@ -2060,6 +2066,7 @@ mod tests {
                 ".git".to_string(),
                 ".agents".to_string(),
                 ".codex".to_string(),
+                ".codeteam".to_string(),
             ]
         );
         assert!(!writable_roots[0].is_path_writable(&dot_git_config));
