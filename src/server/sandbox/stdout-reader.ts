@@ -12,6 +12,16 @@ export interface SandboxChunkReaderOptions {
   debugPrefix?: string
 }
 
+export function sandboxErrorFromErrorChunk(
+  chunk: Extract<AgentTurnChunk, { type: 'error' }>
+): SandboxError {
+  const code = chunk.error?.code ?? chunk.code
+  if (typeof code === 'string' && code.length > 0) {
+    return new SandboxError(chunk.message, code)
+  }
+  return new SandboxError(chunk.message, 'sandbox.sdk.error')
+}
+
 export function readStderrPreview(
   handle: SpawnedSandboxWorker['handle'],
   maxBytes = 64 * 1024
@@ -53,7 +63,7 @@ export async function* readSandboxChunks(
 
       const chunk = JSON.parse(line) as AgentTurnChunk
       if (chunk.type === 'error') {
-        throw new SandboxError(chunk.message, 'sandbox.sdk.error')
+        throw sandboxErrorFromErrorChunk(chunk)
       }
       yield chunk
 

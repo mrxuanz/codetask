@@ -5,6 +5,7 @@ import { SandboxError } from './types'
 import type { RunSandboxedTurnInput } from './orchestrator-local'
 import { getSandboxSupervisorManager } from './supervisor-manager'
 import type { SupervisorEvent } from '../../sandbox/supervisor-protocol'
+import { sandboxErrorFromErrorChunk } from './stdout-reader'
 
 const TURN_IDLE_TIMEOUT_MS = 25_000
 const MAX_PENDING_CHUNKS = 256
@@ -88,7 +89,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
         }
         pending.push(event.chunk)
         if (event.chunk.type === 'error') {
-          failure = new SandboxError(event.chunk.message, 'sandbox.sdk.error')
+          failure = sandboxErrorFromErrorChunk(event.chunk)
           finished = true
         }
         notify()
@@ -98,6 +99,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
           sessionId,
           code: event.code,
           status: event.status,
+          errorCode: event.errorCode,
           stderrPreview: event.stderr?.slice(0, 300)
         })
         if (event.status === 'cancelled') {
@@ -107,7 +109,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
         } else if (event.code !== 0 && event.code !== null) {
           failure = new SandboxError(
             event.stderr?.trim() || `sandbox worker exited ${event.code}`,
-            'sandbox.worker.exit'
+            event.errorCode ?? 'sandbox.worker.exit'
           )
         }
         finished = true

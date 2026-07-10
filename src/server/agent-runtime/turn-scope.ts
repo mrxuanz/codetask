@@ -373,3 +373,121 @@ export function recordCodexThreadItemActivity(
     }
   }
 }
+
+function extractOpencodeToolCommand(part: {
+  tool?: string
+  state?: {
+    status?: string
+    title?: string
+    input?: { [key: string]: unknown }
+  }
+}): string {
+  const input = part.state?.input
+  if (input && typeof input === 'object') {
+    for (const key of ['command', 'cmd', 'script'] as const) {
+      const value = input[key]
+      if (typeof value === 'string' && value.trim()) return value
+    }
+  }
+  if (typeof part.state?.title === 'string' && part.state.title.trim()) {
+    return part.state.title
+  }
+  return typeof part.tool === 'string' ? part.tool : ''
+}
+
+/**
+ * Feed OpenCode tool part status into the turn watchdog.
+ * Tracks open call IDs so repeated running updates do not double-count.
+ */
+export function recordOpencodeToolPartActivity(
+  part: {
+    id?: string
+    callID?: string
+    type?: string
+    tool?: string
+    state?: {
+      status?: string
+      title?: string
+      input?: { [key: string]: unknown }
+    }
+  },
+  scope: TurnScope,
+  openToolIds: Set<string>
+): void {
+  if (part.type !== 'tool' || !part.state?.status) return
+
+  const id = part.callID || part.id
+  if (!id) return
+
+  const status = part.state.status
+  if (status === 'pending' || status === 'running') {
+    if (!openToolIds.has(id)) {
+      openToolIds.add(id)
+      scope.recordProgress('tool_started')
+      scope.enterLongRunningTool(extractOpencodeToolCommand(part))
+    } else {
+      scope.recordProgress('tool_updated')
+    }
+    return
+  }
+
+  if (status === 'completed' || status === 'error') {
+    if (!openToolIds.has(id)) return
+    openToolIds.delete(id)
+    scope.exitLongRunningTool()
+    scope.recordProgress('tool_completed')
+  }
+}
+
+/**
+ * Feed Cursor ACP tool_call / tool_call_update into the turn watchdog.
+ */
+export function recordAcpToolCallActivity(
+  update: {
+    sessionUpdate?: string
+    toolCallId?: string
+    status?: string | null
+    title?: string | null
+    kind?: string | null
+  },
+  scope: TurnScope,
+  openToolIds: Set<string>
+): void {
+  if (
+    update.sessionUpdate !== 'tool_call' &&
+    update.sessionUpdate !== 'tool_call_update'
+  ) {
+    return
+  }
+
+  const id = update.toolCallId
+  if (!id) return
+
+  const status = update.status ?? (update.sessionUpdate === 'tool_call' ? 'pending' : null)
+  if (!status) {
+    if (openToolIds.has(id)) scope.recordProgress('tool_updated')
+    return
+  }
+
+  if (status === 'pending' || status === 'in_progress') {
+    if (!openToolIds.has(id)) {
+      openToolIds.add(id)
+      scope.recordProgress('tool_started')
+      const label =
+        (typeof update.title === 'string' && update.title.trim()) ||
+        (typeof update.kind === 'string' ? update.kind : '') ||
+        id
+      scope.enterLongRunningTool(label)
+    } else {
+      scope.recordProgress('tool_updated')
+    }
+    return
+  }
+
+  if (status === 'completed' || status === 'failed') {
+    if (!openToolIds.has(id)) return
+    openToolIds.delete(id)
+    scope.exitLongRunningTool()
+    scope.recordProgress('tool_completed')
+  }
+}

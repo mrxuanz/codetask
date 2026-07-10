@@ -1,7 +1,12 @@
-import type { TurnErrorCode } from './codes.ts'
+import { isTurnErrorCode, type TurnErrorCode } from './codes.ts'
 import type { TurnErrorDto } from './types.ts'
 import { isTurnError } from './turn-error.ts'
 import { isUserTurnCancellation, normalizeTurnError } from './normalize.ts'
+
+const GENERIC_SANDBOX_WRAPPER_CODES = new Set<string>([
+  'sandbox.sdk.error',
+  'sandbox.worker.exit'
+])
 
 const SANDBOX_NATIVE_NON_RETRY = new Set<string>([
   'sandbox.turn.cancelled',
@@ -41,6 +46,9 @@ const NON_RETRYABLE_TURN_CODES = new Set<TurnErrorCode>([
   'provider.codex.config_invalid',
   'provider.cli_auth_failed',
   'provider.opencode.cli_missing',
+  // Mid-turn OpenCode session_error is deterministic for the same prompt/command;
+  // infra-retry only burns 5min×N. Real hangs should surface as turn.timed_out via watchdog.
+  'provider.opencode.session_error',
   'task.infra_retry_exhausted',
   'task.terminal_failure',
   'workflow.deadlock',
@@ -68,7 +76,6 @@ const RETRYABLE_TURN_CODES = new Set<TurnErrorCode>([
   'provider.cursor.acp_stdio_unavailable',
   'provider.opencode.server_timeout',
   'provider.opencode.server_exited',
-  'provider.opencode.session_error',
   'turn.timed_out',
   'turn.empty_reply',
   'turn.incomplete',
@@ -122,7 +129,14 @@ export function isRetryableTurnError(error: unknown): boolean {
   const native = readSandboxNativeCode(error)
   if (native) {
     if (SANDBOX_NATIVE_NON_RETRY.has(native)) return false
+    // Generic wrappers often hide a provider TurnErrorCode — consult the DTO first.
+    if (GENERIC_SANDBOX_WRAPPER_CODES.has(native)) {
+      const wrapped = resolveTurnErrorDto(error).code
+      if (wrapped !== 'turn.unknown') return isRetryableTurnErrorCode(wrapped)
+      return true
+    }
     if (SANDBOX_NATIVE_RETRY.has(native)) return true
+    if (isTurnErrorCode(native)) return isRetryableTurnErrorCode(native)
   }
 
   const code = resolveTurnErrorDto(error).code
@@ -165,7 +179,6 @@ export function isNonRetryableSandboxError(error: unknown): boolean {
 }
 
 export function isRetryableSandboxError(error: unknown): boolean {
-  const native = readSandboxNativeCode(error)
-  if (native && SANDBOX_NATIVE_RETRY.has(native)) return true
-  return isSandboxError(error) && !isNonRetryableSandboxError(error) && isRetryableTurnError(error)
+  if (!isSandboxError(error) || isNonRetryableSandboxError(error)) return false
+  return isRetryableTurnError(error)
 }

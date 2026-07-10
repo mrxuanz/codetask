@@ -1,4 +1,4 @@
-import type { TurnErrorCode } from './codes.ts'
+import { isTurnErrorCode, TURN_ERROR_DEFAULT_MESSAGES, type TurnErrorCode } from './codes.ts'
 import type { TurnErrorDto } from './types.ts'
 import {
   createTurnError,
@@ -44,6 +44,15 @@ function isUserTurnCancellation(error: unknown): boolean {
   }
 
   return false
+}
+
+function matchExactDefaultMessage(message: string): TurnErrorCode | undefined {
+  for (const [code, defaultMessage] of Object.entries(TURN_ERROR_DEFAULT_MESSAGES) as Array<
+    [TurnErrorCode, string]
+  >) {
+    if (defaultMessage === message) return code
+  }
+  return undefined
 }
 
 function indicatesCursorAcpKeepaliveTimeout(message: string): boolean {
@@ -96,7 +105,13 @@ export function normalizeTurnError(error: unknown): TurnErrorDto {
     if (mapped) {
       return createTurnError(mapped, { detail: readErrorMessage(error) }).toDto()
     }
-    if (sandboxCode === 'sandbox.sdk.error') {
+    // Worker/supervisor may preserve the original TurnErrorCode on SandboxError.
+    if (isTurnErrorCode(sandboxCode)) {
+      return createTurnError(sandboxCode, {
+        message: readErrorMessage(error) || undefined
+      }).toDto()
+    }
+    if (sandboxCode === 'sandbox.sdk.error' || sandboxCode === 'sandbox.worker.exit') {
       return normalizeTurnError(new Error(readErrorMessage(error)))
     }
   }
@@ -108,6 +123,11 @@ export function normalizeTurnError(error: unknown): TurnErrorDto {
 
   const message =
     raw.replace(/^\[role-worker\]\s*/i, '').trim() || formatTurnErrorMessage('turn.unknown')
+
+  const matched = matchExactDefaultMessage(message)
+  if (matched) {
+    return createTurnError(matched, { detail: raw || undefined }).toDto()
+  }
 
   return {
     code: 'turn.unknown',

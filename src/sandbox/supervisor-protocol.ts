@@ -23,6 +23,8 @@ export type SupervisorEvent =
       code: number | null
       status: 'exited' | 'cancelled' | 'timed_out' | 'failed'
       stderr?: string
+      /** Preserved provider/turn error code when the worker failed with a typed error. */
+      errorCode?: string
     }
   | { type: 'error'; sessionId?: string; message: string; code?: string }
 
