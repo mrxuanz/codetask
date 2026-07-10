@@ -44,7 +44,7 @@ async function* readTurnChunks(
   handle: LaunchedSandbox['handle'],
   signal?: AbortSignal
 ): AsyncGenerator<AgentTurnChunk> {
-  let streamEnded = false
+  const streamEnded = false
 
   const abort = (): void => terminateSandboxTree(handle)
   signal?.addEventListener('abort', abort, { once: true })

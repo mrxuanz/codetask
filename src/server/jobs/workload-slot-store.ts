@@ -83,11 +83,11 @@ export function workloadLeaseTtlSec(): number {
 	  return 90 * 60
 }
 
-function ownerTable(_ownerKind: WorkloadOwnerKind) {
+function ownerTable(_ownerKind: WorkloadOwnerKind): typeof threadJobs {
   return threadJobs
 }
 
-function ownerIdColumn(_ownerKind: WorkloadOwnerKind) {
+function ownerIdColumn(_ownerKind: WorkloadOwnerKind): typeof threadJobs.id {
   return threadJobs.id
 }
 

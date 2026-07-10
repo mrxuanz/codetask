@@ -329,11 +329,7 @@ async function invokePlanCommit(
   const { flattenRegisteredPlan } = await import('../save-plan')
   const saved = flattenRegisteredPlan(session.registeredPlan!, session.taskContexts)
 
-  if (session.ownerKind === 'thread_job') {
-    const { commitPlanReadyFenced } = await import('../../jobs/service')
-    return commitPlanReadyFenced(session.ownerId, session.runId, saved, counts)
-  }
-
+  // Single commit path for all thread_job planning (design_session ownerKind is legacy-only).
   const { commitDesignPlanReady } = await import('../../design-session/planner')
   return commitDesignPlanReady(
     session.ownerId,

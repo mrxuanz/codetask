@@ -42,7 +42,7 @@ test('resolveJobStatusBadgeClass uses queue styling for pending', () => {
 })
 
 test('formatExecutionQueueLabel prefers queue position copy', () => {
-  const t = (key: string, params?: Record<string, unknown>) =>
+  const t = (key: string, params?: Record<string, unknown>): string =>
     key === 'workspace.tasks.queue.position'
       ? `#${params?.position}`
       : key

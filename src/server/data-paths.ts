@@ -4,7 +4,16 @@ import { join, posix } from 'path'
  * Central path resolver for everything under the app data directory.
  * All writers/readers of data/ subpaths must go through this module.
  */
-export function dataPaths(dataDir: string) {
+export function dataPaths(dataDir: string): {
+  dbFile: string
+  attachments: string
+  artifactsMessages: string
+  artifactsDesigns: string
+  runtimes: string
+  settingsFile: string
+  secretFile: string
+  sandboxHome: string
+} {
   return {
     dbFile: join(dataDir, 'db', 'app.db'),
     attachments: join(dataDir, 'blobs', 'attachments'),
