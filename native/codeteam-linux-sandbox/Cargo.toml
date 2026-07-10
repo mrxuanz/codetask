@@ -30,4 +30,6 @@ url = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 pretty_assertions = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true }

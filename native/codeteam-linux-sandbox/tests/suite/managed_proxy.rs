@@ -1,9 +1,7 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used)]
 
-use codeteam_sandbox_policy::config_types::ShellEnvironmentPolicy;
 use codeteam_sandbox_policy::models::PermissionProfile;
-use codex_core::exec_env::create_env;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::Read;
@@ -43,8 +41,7 @@ const PROXY_ENV_KEYS: &[&str] = &[
 ];
 
 fn create_env_from_core_vars() -> HashMap<String, String> {
-    let policy = ShellEnvironmentPolicy::default();
-    create_env(&policy, /*thread_id*/ None)
+    std::env::vars().collect()
 }
 
 fn strip_proxy_env(env: &mut HashMap<String, String>) {
