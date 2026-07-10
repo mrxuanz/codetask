@@ -48,7 +48,8 @@ jobs:
         run: npm run build
 
       - name: Package ${{ inputs.builder-args }}
-        run: node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }}
+        # --publish never: packaging only; Release workflow publishes via softprops/action-gh-release
+        run: node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --publish never
 
       - if: ${{ inputs.upload-artifact }}
         uses: actions/upload-artifact@v4

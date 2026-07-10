@@ -21,6 +21,7 @@ data/
 *.tsbuildinfo
 
 # Logs & caches
+logs_*/
 *.log*
 .eslintcache
 .prettiercache
