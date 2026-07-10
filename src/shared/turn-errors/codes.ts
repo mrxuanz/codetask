@@ -307,3 +307,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
 }
 
 export const TURN_ERROR_SCHEMA_VERSION = 1 as const
+
+export function isTurnErrorCode(code: string): code is TurnErrorCode {
+  return Object.prototype.hasOwnProperty.call(TURN_ERROR_DEFAULT_MESSAGES, code)
+}

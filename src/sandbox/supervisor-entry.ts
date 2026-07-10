@@ -6,6 +6,7 @@ import {
 import { compactTurnChunkForIpc } from '../server/agent-runtime/chunk-ipc'
 import { streamSandboxedConversationTurnLocal } from '../server/sandbox/orchestrator-local'
 import { SandboxError } from '../server/sandbox/types'
+import { sandboxErrorFromErrorChunk } from '../server/sandbox/stdout-reader'
 import { closeJobCursorSandbox } from '../server/sandbox/job-cursor-pool'
 import { sandboxTurnDebug } from '../server/debug/sandbox-turn'
 
@@ -109,7 +110,7 @@ async function runTurn(
       }
       if (chunk.type === 'completed') break
       if (chunk.type === 'error') {
-        throw new SandboxError(chunk.message, 'sandbox.sdk.error')
+        throw sandboxErrorFromErrorChunk(chunk)
       }
     }
 
@@ -117,9 +118,11 @@ async function runTurn(
     send({ type: 'exit', sessionId, code: 0, status: 'exited' })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const errorCode = error instanceof SandboxError ? error.code : undefined
     sandboxTurnDebug('supervisor-entry: runTurn failed', {
       sessionId,
       message,
+      errorCode,
       stack: error instanceof Error ? error.stack?.slice(0, 400) : undefined
     })
     const status =
@@ -139,7 +142,8 @@ async function runTurn(
       sessionId,
       code: -1,
       status,
-      stderr: message
+      stderr: message,
+      errorCode
     })
   } finally {
     activeSessions.delete(sessionId)

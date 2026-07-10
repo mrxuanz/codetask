@@ -5,7 +5,11 @@ import { serializeStoredTurnError } from './storage.ts'
 import { createTurnError } from './turn-error.ts'
 
 export type { TurnErrorCode, TurnErrorParams } from './codes.ts'
-export { TURN_ERROR_DEFAULT_MESSAGES, TURN_ERROR_SCHEMA_VERSION } from './codes.ts'
+export {
+  TURN_ERROR_DEFAULT_MESSAGES,
+  TURN_ERROR_SCHEMA_VERSION,
+  isTurnErrorCode
+} from './codes.ts'
 
 export type { TurnErrorDto, StoredTurnErrorPayload } from './types.ts'
 export { fromTurnErrorDto, toTurnErrorDto } from './types.ts'

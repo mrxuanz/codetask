@@ -27,9 +27,9 @@ import { mergeProviderReadRoots, resolveProviderReadRoots } from './provider-rea
 import { resolveRuntimeReadRoots } from './runtime-read-roots'
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from './session-state'
 import { SandboxError } from './types'
+import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { streamJobCursorSandboxTurn } from './job-cursor-pool'
 import { throwIfSandboxTurnAborted } from './turn-guards'
-import { readStderrPreview } from './stdout-reader'
 export interface RunSandboxedTurnInput {
   role: ConversationRole
   coreCode: SupportedCoreCode
@@ -87,7 +87,7 @@ async function* readWorkerJsonl(
       const chunk = JSON.parse(line) as AgentTurnChunk
       if (chunk.type === 'error') {
         sdkFailed = true
-        throw new SandboxError(chunk.message, 'sandbox.sdk.error')
+        throw sandboxErrorFromErrorChunk(chunk)
       }
       yield chunk
       if (chunk.type === 'completed') {

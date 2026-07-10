@@ -4,7 +4,9 @@ import { TurnError } from '../../src/shared/turn-errors/turn-error.ts'
 import {
   TurnScope,
   assertRoleTurnReply,
-  partialCompletedChunk
+  partialCompletedChunk,
+  recordAcpToolCallActivity,
+  recordOpencodeToolPartActivity
 } from '../../src/server/agent-runtime/turn-scope'
 import { ProgressGuard } from '../../src/server/agent-runtime/progress-guard'
 
@@ -179,5 +181,97 @@ describe('turn-scope', () => {
       if (prevStalled === undefined) delete process.env.CODETASK_TURN_STALLED_MS
       else process.env.CODETASK_TURN_STALLED_MS = prevStalled
     }
+  })
+
+  it('recordOpencodeToolPartActivity tracks running tools without double-counting', () => {
+    const guard = new ProgressGuard('task-worker')
+    const turnScope = new TurnScope({
+      role: 'task-worker',
+      progressGuard: guard
+    })
+    const openToolIds = new Set<string>()
+
+    recordOpencodeToolPartActivity(
+      {
+        type: 'tool',
+        id: 'part-1',
+        callID: 'call-1',
+        tool: 'bash',
+        state: { status: 'running', title: 'npm run dev', input: { command: 'npm run dev' } }
+      },
+      turnScope,
+      openToolIds
+    )
+    recordOpencodeToolPartActivity(
+      {
+        type: 'tool',
+        id: 'part-1',
+        callID: 'call-1',
+        tool: 'bash',
+        state: { status: 'running', title: 'npm run dev', input: { command: 'npm run dev' } }
+      },
+      turnScope,
+      openToolIds
+    )
+    assert.equal(openToolIds.has('call-1'), true)
+
+    recordOpencodeToolPartActivity(
+      {
+        type: 'tool',
+        id: 'part-1',
+        callID: 'call-1',
+        tool: 'bash',
+        state: { status: 'completed', title: 'npm run dev', input: { command: 'npm run dev' } }
+      },
+      turnScope,
+      openToolIds
+    )
+    assert.equal(openToolIds.size, 0)
+    turnScope.dispose()
+  })
+
+  it('recordAcpToolCallActivity tracks tool_call lifecycle', () => {
+    const guard = new ProgressGuard('task-worker')
+    const turnScope = new TurnScope({
+      role: 'task-worker',
+      progressGuard: guard
+    })
+    const openToolIds = new Set<string>()
+
+    recordAcpToolCallActivity(
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-1',
+        status: 'in_progress',
+        title: 'Running npm test'
+      },
+      turnScope,
+      openToolIds
+    )
+    assert.equal(openToolIds.has('tc-1'), true)
+
+    recordAcpToolCallActivity(
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-1',
+        status: 'in_progress',
+        title: 'Running npm test'
+      },
+      turnScope,
+      openToolIds
+    )
+    assert.equal(openToolIds.size, 1)
+
+    recordAcpToolCallActivity(
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-1',
+        status: 'completed'
+      },
+      turnScope,
+      openToolIds
+    )
+    assert.equal(openToolIds.size, 0)
+    turnScope.dispose()
   })
 })
