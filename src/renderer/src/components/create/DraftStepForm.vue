@@ -211,12 +211,12 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
       </p>
     </div>
 
-    <div class="shrink-0 border-b border-border px-4 py-3">
-      <ol class="flex gap-2">
+    <div class="shrink-0 border-b border-border px-2 py-2 sm:px-4 sm:py-3">
+      <ol class="flex gap-1 sm:gap-2">
         <li v-for="(label, index) in stepLabels" :key="index" class="flex flex-1 items-center">
           <button
             type="button"
-            class="flex w-full items-center justify-center gap-2 rounded-md px-2 py-2 text-xs transition-colors"
+            class="flex w-full items-center justify-center gap-1 rounded-md px-1 py-2 text-xs transition-colors sm:gap-2 sm:px-2"
             :class="
               cn(
                 stepStatus(index) === 'current' && 'bg-primary/10 font-medium text-primary',
@@ -239,13 +239,13 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
             >
               {{ index + 1 }}
             </span>
-            <span class="truncate">{{ label }}</span>
+            <span class="hidden truncate sm:inline">{{ label }}</span>
           </button>
         </li>
       </ol>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+    <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
       <div v-if="ws.currentStep.value === 0" class="mx-auto max-w-lg py-8">
         <p class="text-sm leading-relaxed text-muted-foreground">
           {{ t('workspace.create.step0Hint') }}

@@ -77,7 +77,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="flex min-h-0 min-w-0 flex-1 flex-col border-l border-border bg-background">
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col border-border bg-background xl:border-l">
     <DraftStepForm
       :thread-id="threadId"
       :wizard-phase="wizardPhase"

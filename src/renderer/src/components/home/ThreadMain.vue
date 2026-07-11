@@ -104,7 +104,7 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
   </div>
 
   <div v-else-if="!activeThread" class="flex h-full min-h-0 flex-1 flex-col">
-    <header class="flex h-12 items-center justify-between border-b border-border px-4">
+    <header class="flex h-12 items-center justify-between gap-2 border-b border-border px-3 sm:px-4">
       <h1 class="text-sm font-medium">{{ activeProject.title }}</h1>
       <Button type="button" variant="outline" size="sm" @click="handleNewThread">
         {{ t('workspace.newThread') }}
@@ -117,11 +117,11 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
 
   <div v-else class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
     <header
-      class="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4"
+      class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3 sm:px-4"
     >
       <div class="flex min-w-0 items-center gap-2">
         <h1 class="truncate text-sm font-medium">{{ threadTitle }}</h1>
-        <span class="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        <span class="hidden shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground sm:inline">
           {{ activeProject.title }}
         </span>
         <span v-if="coreSwitching" class="text-xs text-muted-foreground">

@@ -38,7 +38,7 @@ const { t } = useI18n()
 
 <template>
   <div :class="cn('flex flex-col', fillHeight && 'min-h-0 flex-1')">
-    <div class="shrink-0 space-y-2 border-b border-border px-4 py-3">
+    <div class="shrink-0 space-y-2 border-b border-border px-3 py-3 sm:px-4">
       <div class="flex items-center gap-2">
         <Button
           type="button"
@@ -62,7 +62,7 @@ const { t } = useI18n()
     </div>
 
     <div
-      :class="cn('space-y-2 overflow-y-auto px-4 py-3', fillHeight ? 'min-h-0 flex-1' : 'max-h-72')"
+      :class="cn('space-y-2 overflow-y-auto px-3 py-3 sm:px-4', fillHeight ? 'min-h-0 flex-1' : 'max-h-72')"
     >
       <ErrorAlert v-if="error" :message="error" />
       <div class="flex items-center justify-between">
@@ -103,7 +103,10 @@ const { t } = useI18n()
       </ul>
     </div>
 
-    <div v-if="hideFooter !== true" class="shrink-0 space-y-3 border-t border-border px-4 py-3">
+    <div
+      v-if="hideFooter !== true"
+      class="shrink-0 space-y-3 border-t border-border px-3 py-3 sm:px-4"
+    >
       <div v-if="showCreateFolder !== false" class="flex items-center gap-2">
         <Input
           :model-value="newFolderName"
@@ -122,12 +125,13 @@ const { t } = useI18n()
           {{ t('folderPicker.createAndAdd') }}
         </Button>
       </div>
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <span class="truncate text-xs text-muted-foreground">
           {{ t('folderPicker.currentDirectory', { path: currentPath || '—' }) }}
         </span>
         <Button
           type="button"
+          class="w-full sm:w-auto"
           :disabled="submitting || !currentPath"
           @click="emit('select', currentPath)"
         >
