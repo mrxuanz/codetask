@@ -45,6 +45,7 @@ const completedContext = ref<CompletedContext | null>(null)
 const draftWorkspaceRef = ref<InstanceType<typeof DraftPlanWorkspace> | null>(null)
 const draftListRef = ref<InstanceType<typeof CreateDraftList> | null>(null)
 const createProjectDialogOpen = ref(false)
+const compactPane = ref<'chat' | 'draft'>('chat')
 /** Mirrors DraftPlanWorkspace first-load gate (reactive via workspaceReadyChange). */
 const workspaceReady = ref(false)
 
@@ -120,6 +121,7 @@ watch(
     const thread = workspace.threads.value.find((item) => item.id === threadId)
     if (!thread || !isCreateTaskThread(thread)) return
     resumeDraftId.value = thread.activeDraftId ?? null
+    compactPane.value = thread.activeDraftId ? 'draft' : 'chat'
     completedContext.value = null
     phase.value = 'workspace'
   }
@@ -145,7 +147,10 @@ watch(
     if (phase.value !== 'workspace' || !draftWorkspaceRef.value) return
     const prevSet = new Set(prev ?? [])
     const newId = ids.find((id) => !prevSet.has(id))
-    if (newId) void draftWorkspaceRef.value.onDraftCreated(newId)
+    if (newId) {
+      compactPane.value = 'draft'
+      void draftWorkspaceRef.value.onDraftCreated(newId)
+    }
   }
 )
 
@@ -162,6 +167,7 @@ function goToList(): void {
   const thread = activeThread.value
   const hadMessages = messages.value.length > 0
   resumeDraftId.value = null
+  compactPane.value = 'chat'
   completedContext.value = null
   phase.value = 'list'
   void (async () => {
@@ -201,6 +207,7 @@ function handleContinueDraft(entry: DraftListEntry): void {
   workspace.setActiveProjectId(entry.projectId)
   workspace.setActiveThreadId(entry.threadId)
   resumeDraftId.value = entry.messageId
+  compactPane.value = 'draft'
   const completedJobId = resolveCompletedJobId(entry)
   if (entry.launched && completedJobId) {
     openCompleted(entry)
@@ -212,6 +219,7 @@ function handleContinueDraft(entry: DraftListEntry): void {
 
 function handleCreateNew(): void {
   resumeDraftId.value = null
+  compactPane.value = 'chat'
   completedContext.value = null
   workspace.setActiveThreadId(null)
   createProjectDialogOpen.value = true
@@ -227,6 +235,7 @@ async function handleSelectProject(projectId: string): Promise<void> {
     workspace.setActiveProjectId(projectId)
     await workspace.createNewThread(projectId, THREAD_KIND_CREATE_TASK)
     resumeDraftId.value = null
+    compactPane.value = 'chat'
     completedContext.value = null
     createProjectDialogOpen.value = false
     phase.value = 'workspace'
@@ -240,6 +249,7 @@ async function handleAddProject(workspaceRoot: string): Promise<void> {
   try {
     await workspace.addLocalProject(workspaceRoot, { threadKind: THREAD_KIND_CREATE_TASK })
     resumeDraftId.value = null
+    compactPane.value = 'chat'
     completedContext.value = null
     createProjectDialogOpen.value = false
     phase.value = 'workspace'
@@ -292,23 +302,44 @@ function handlePlanConfirmed(payload: {
 <template>
   <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
     <header
-      class="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4"
+      class="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1 sm:px-4"
     >
       <div class="flex min-w-0 items-center gap-2">
         <h1 class="truncate text-sm font-medium">{{ t('workspace.nav.createTask') }}</h1>
         <span
           v-if="activeProject && (phase === 'workspace' || phase === 'completed')"
-          class="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+          class="hidden shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground sm:inline"
         >
           {{ activeProject.title }}
         </span>
       </div>
       <div
         v-if="phase === 'workspace' || phase === 'completed'"
-        class="flex shrink-0 items-center gap-2"
+        class="flex shrink-0 items-center gap-1 sm:gap-2"
       >
+        <template v-if="phase === 'workspace'">
+          <Button
+            type="button"
+            :variant="compactPane === 'chat' ? 'outline' : 'ghost'"
+            size="sm"
+            class="px-2 xl:hidden"
+            @click="compactPane = 'chat'"
+          >
+            {{ t('workspace.nav.chat') }}
+          </Button>
+          <Button
+            type="button"
+            :variant="compactPane === 'draft' ? 'outline' : 'ghost'"
+            size="sm"
+            class="px-2 xl:hidden"
+            @click="compactPane = 'draft'"
+          >
+            {{ t('workspace.draftPanel.title') }}
+          </Button>
+        </template>
         <Button type="button" variant="outline" size="sm" @click="goToList">
-          {{ t('workspace.create.backToDraftList') }}
+          <span class="hidden sm:inline">{{ t('workspace.create.backToDraftList') }}</span>
+          <span class="sm:hidden">{{ t('workspace.tasks.backToList') }}</span>
         </Button>
       </div>
     </header>
@@ -342,8 +373,11 @@ function handlePlanConfirmed(payload: {
         <ErrorAlert :message="selectedCore?.reason ?? t('workspace.coreUnavailable')" />
       </div>
 
-      <div class="flex min-h-0 flex-1">
-        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div class="flex min-h-0 min-w-0 flex-1">
+        <div
+          class="flex min-h-0 min-w-0 flex-1 flex-col"
+          :class="compactPane === 'draft' ? 'max-xl:hidden' : ''"
+        >
           <ChatMessages
             :messages="messages"
             :loading="loading"
@@ -367,6 +401,7 @@ function handlePlanConfirmed(payload: {
           :messages="messages"
           :cores="cores"
           :initial-draft-id="resumeDraftId"
+          :class="compactPane === 'chat' ? 'max-xl:hidden' : ''"
           @draft-updated="handleDraftUpdated"
           @plan-confirmed="handlePlanConfirmed"
           @workspace-ready-change="handleWorkspaceReadyChange"

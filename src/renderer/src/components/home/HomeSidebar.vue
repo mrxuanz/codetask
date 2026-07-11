@@ -2,7 +2,15 @@
 import { computed, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronRight, Folder, ListTodo, MessageSquare, Plus, Settings } from 'lucide-vue-next'
+import {
+  ChevronRight,
+  Folder,
+  ListTodo,
+  MessageSquare,
+  Plus,
+  Settings,
+  X
+} from 'lucide-vue-next'
 import ThreadSidebarItem from '@renderer/components/home/ThreadSidebarItem.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Tooltip from '@renderer/components/ui/Tooltip.vue'
@@ -19,6 +27,14 @@ import { cn } from '@renderer/lib/utils'
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+
+const props = defineProps<{
+  mobileOpen?: boolean
+}>()
+
+const emit = defineEmits<{
+  close: []
+}>()
 
 const workspace = useHomeWorkspace()
 
@@ -109,6 +125,7 @@ async function handleCreateThread(projectId: string): Promise<void> {
   if (route.path !== '/home' && route.path !== '/home/') {
     await router.push('/home')
   }
+  emit('close')
 }
 
 function onContextMenuSelect(actionId: string): void {
@@ -180,12 +197,27 @@ const confirmDeleteMessage = computed(() => {
 
 <template>
   <aside
-    class="flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden border-r border-border bg-muted/25"
+    :class="
+      cn(
+        'fixed inset-y-0 left-0 z-50 flex h-full min-h-0 w-[min(18rem,88vw)] shrink-0 flex-col overflow-hidden border-r border-border bg-background shadow-xl transition-transform duration-200 md:static md:z-auto md:w-64 md:translate-x-0 md:bg-muted/25 md:shadow-none xl:w-72',
+        props.mobileOpen ? 'translate-x-0' : '-translate-x-full'
+      )
+    "
   >
     <div class="border-b border-border px-3 py-3">
-      <p class="px-2 text-[11px] font-semibold tracking-wide text-muted-foreground">
-        {{ t('workspace.section.workspace') }}
-      </p>
+      <div class="flex items-center justify-between gap-2 px-2">
+        <p class="text-[11px] font-semibold tracking-wide text-muted-foreground">
+          {{ t('workspace.section.workspace') }}
+        </p>
+        <button
+          type="button"
+          class="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+          :aria-label="t('folderPicker.close')"
+          @click="emit('close')"
+        >
+          <X class="size-4" aria-hidden="true" />
+        </button>
+      </div>
       <div class="mt-2 grid gap-1">
         <button
           v-for="item in navItems"
@@ -199,7 +231,7 @@ const confirmDeleteMessage = computed(() => {
                 : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'
             )
           "
-          @click="router.push(item.to)"
+          @click="router.push(item.to); emit('close')"
         >
           <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
           <span>{{ t(item.labelKey) }}</span>
@@ -268,6 +300,7 @@ const confirmDeleteMessage = computed(() => {
                 () => {
                   workspace.setActiveProjectId(project.id)
                   router.push('/home')
+                  emit('close')
                 }
               "
               @contextmenu="openProjectContextMenu($event, project)"
@@ -313,6 +346,7 @@ const confirmDeleteMessage = computed(() => {
                 () => {
                   workspace.setActiveThreadId(thread.id)
                   router.push(isCreateTaskThread(thread) ? '/home/create' : '/home')
+                  emit('close')
                 }
               "
               @contextmenu="openThreadContextMenu($event, thread)"

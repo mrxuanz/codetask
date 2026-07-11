@@ -49,7 +49,7 @@ onMounted(() => {
 <template>
   <div
     ref="scrollRoot"
-    class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 sm:px-6"
+    class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 sm:px-6 sm:py-4"
     @scroll="onScroll"
   >
     <div
@@ -66,7 +66,7 @@ onMounted(() => {
             :class="
               cn(
                 'flex w-full flex-col',
-                message.role === 'user' ? 'max-w-[80%] items-end' : 'max-w-full items-start'
+                message.role === 'user' ? 'max-w-[92%] items-end sm:max-w-[80%]' : 'max-w-full items-start'
               )
             "
           >
@@ -155,7 +155,7 @@ onMounted(() => {
 
       <div v-if="pendingReply && !streamingMessageId" class="flex w-full justify-start">
         <div
-          class="max-w-[80%] rounded-2xl border border-transparent bg-muted/60 px-3 py-2 text-sm"
+          class="max-w-[92%] rounded-2xl border border-transparent bg-muted/60 px-3 py-2 text-sm sm:max-w-[80%]"
         >
           <span class="inline-flex gap-1 text-muted-foreground" aria-hidden="true">
             <span class="size-1.5 animate-pulse rounded-full bg-current" />
