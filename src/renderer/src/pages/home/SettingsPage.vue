@@ -177,17 +177,19 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-    <aside class="w-56 shrink-0 border-r border-border p-3">
-      <p class="px-2 py-2 text-[11px] font-semibold tracking-wide text-muted-foreground">
+  <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row">
+    <aside
+      class="w-full shrink-0 border-b border-border p-2 lg:w-48 lg:border-r lg:border-b-0 lg:p-3 xl:w-56"
+    >
+      <p class="px-2 py-1 text-[11px] font-semibold tracking-wide text-muted-foreground lg:py-2">
         {{ t('workspace.settings.sidebar') }}
       </p>
-      <div class="space-y-1">
+      <div class="flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
         <button
           v-for="item in sections"
           :key="item.key"
           type="button"
-          class="flex h-9 w-full items-center rounded-md px-2.5 text-sm transition-colors"
+          class="flex h-9 w-auto shrink-0 items-center rounded-md px-2.5 text-sm transition-colors lg:w-full"
           :class="
             section === item.key
               ? 'bg-muted font-medium text-foreground'
@@ -201,11 +203,11 @@ onMounted(() => {
     </aside>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <header class="flex h-12 shrink-0 items-center border-b border-border px-6">
+      <header class="flex h-12 shrink-0 items-center border-b border-border px-4 sm:px-6">
         <h1 class="text-sm font-medium">{{ t('workspace.settings.title') }}</h1>
       </header>
 
-      <div class="p-6">
+      <div class="p-3 sm:p-5 lg:p-6">
         <div class="mx-auto flex max-w-4xl flex-col gap-6">
           <div v-if="loading" class="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner class="size-4" />

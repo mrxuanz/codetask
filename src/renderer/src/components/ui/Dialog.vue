@@ -25,7 +25,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
   <Teleport to="body">
     <div
       v-if="open"
-      class="fixed inset-0 z-50 flex items-start justify-center bg-black/30 p-6 pt-[12vh]"
+      class="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-0 sm:items-start sm:p-6 sm:pt-[12vh]"
     >
       <button
         type="button"
@@ -38,7 +38,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
         aria-modal="true"
         :class="
           cn(
-            'relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-xl',
+            'relative z-10 max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-hidden rounded-t-xl border border-border bg-card shadow-xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-xl',
             props.class
           )
         "

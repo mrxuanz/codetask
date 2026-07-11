@@ -18,8 +18,8 @@ const maxWidthClass = computed(() => {
 </script>
 
 <template>
-  <main :class="cn('relative flex min-h-screen items-center justify-center p-4', props.class)">
-    <div class="absolute right-4 top-4">
+  <main :class="cn('relative flex min-h-[100dvh] items-center justify-center px-4 pb-4 pt-16 sm:p-4', props.class)">
+    <div class="absolute right-3 top-3 sm:right-4 sm:top-4">
       <LanguageSwitcher />
     </div>
     <div :class="cn('w-full', maxWidthClass)">
