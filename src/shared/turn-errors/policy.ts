@@ -76,6 +76,7 @@ const RETRYABLE_TURN_CODES = new Set<TurnErrorCode>([
   'provider.cursor.acp_stdio_unavailable',
   'provider.opencode.server_timeout',
   'provider.opencode.server_exited',
+  'provider.opencode.stream_disconnected',
   'turn.timed_out',
   'turn.empty_reply',
   'turn.incomplete',

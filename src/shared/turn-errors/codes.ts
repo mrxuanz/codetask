@@ -39,6 +39,7 @@ export type TurnErrorCode =
   | 'provider.opencode.not_authenticated'
   | 'provider.opencode.server_timeout'
   | 'provider.opencode.server_exited'
+  | 'provider.opencode.stream_disconnected'
   | 'provider.opencode.session_error'
   | 'provider.rate_limited'
   | 'provider.cli_auth_failed'
@@ -195,6 +196,8 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
     'OpenCode is not authenticated. Configure authentication or set an API key environment variable.',
   'provider.opencode.server_timeout': 'Timed out waiting for OpenCode server to start',
   'provider.opencode.server_exited': 'OpenCode server exited unexpectedly',
+  'provider.opencode.stream_disconnected':
+    'OpenCode stream disconnected before completion (network or HTTP timeout)',
   'provider.opencode.session_error': 'OpenCode session error',
   'provider.rate_limited': 'Rate limited; retry later',
   'provider.cli_auth_failed': 'CLI authentication failed; check API key or sign-in status',

@@ -363,6 +363,9 @@ export function useHomeChat(
                 resultThread = event.data.thread
               }
               break
+            case 'heartbeat':
+              // Keeps the SSE idle watchdog alive; no UI update.
+              break
             case 'error':
               patchThreadRuntime(threadId, {
                 coreCode: coreCode,

@@ -46,6 +46,8 @@ const jaMessages: Record<TurnErrorCode, string> = {
     'OpenCode が認証されていません。認証を構成するか API key 環境変数を設定してください。',
   'provider.opencode.server_timeout': 'OpenCode server の起動待ちがタイムアウトしました',
   'provider.opencode.server_exited': 'OpenCode server が異常終了しました',
+  'provider.opencode.stream_disconnected':
+    'OpenCode ストリームが完了前に切断されました（ネットワークまたは HTTP タイムアウト）',
   'provider.opencode.session_error': 'OpenCode セッションエラー',
   'provider.rate_limited': 'レート制限に達しました。後で再試行してください',
   'provider.cli_auth_failed':
