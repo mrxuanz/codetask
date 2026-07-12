@@ -368,7 +368,12 @@ export function recordCodexThreadItemActivity(
     scope.recordProgress('mcp_call')
     if (item.status === 'in_progress') {
       scope.recordProgress('tool_started')
+      const label =
+        [item.server, item.tool].filter((part) => typeof part === 'string' && part.trim()).join('/') ||
+        'mcp'
+      scope.enterLongRunningTool(label)
     } else {
+      scope.exitLongRunningTool()
       scope.recordProgress('tool_completed')
     }
   }
@@ -424,7 +429,11 @@ export function recordOpencodeToolPartActivity(
     if (!openToolIds.has(id)) {
       openToolIds.add(id)
       scope.recordProgress('tool_started')
-      scope.enterLongRunningTool(extractOpencodeToolCommand(part))
+      // Interactive question hangs the turn with no UI; do not grant stall grace.
+      const command = extractOpencodeToolCommand(part)
+      if (command !== 'question' && part.tool !== 'question') {
+        scope.enterLongRunningTool(command)
+      }
     } else {
       scope.recordProgress('tool_updated')
     }

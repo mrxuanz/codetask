@@ -71,7 +71,26 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
     }
 
     return streamSSE(c, async (stream) => {
+      // Keep the renderer SSE idle watchdog alive during long tool/LLM gaps
+      // (e.g. OpenCode read/explore). Must be < SSE_IDLE_TIMEOUT_MS (45s).
+      const HEARTBEAT_MS = 15_000
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+      const stopHeartbeat = (): void => {
+        if (!heartbeatTimer) return
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+      }
       try {
+        heartbeatTimer = setInterval(() => {
+          void stream
+            .writeSSE({
+              event: 'heartbeat',
+              data: JSON.stringify({ ts: Date.now() })
+            })
+            .catch(() => stopHeartbeat())
+        }, HEARTBEAT_MS)
+        heartbeatTimer.unref?.()
+
         for await (const chunk of streamSendMessage(username, threadId, body.message!, {
           generateDraft: body.generateDraft === true,
           createTaskMode: body.createTaskMode === true,
@@ -90,6 +109,8 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
           event: 'error',
           data: JSON.stringify({ error: turnError, message: turnError.message })
         })
+      } finally {
+        stopHeartbeat()
       }
     })
   })

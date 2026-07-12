@@ -7,7 +7,7 @@ import { buildOpencodeMcpServers } from '../mcp'
 import { resolveOpencodeExecutable } from '../../sandbox/provider-auth/paths'
 import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
 import { throwSdkTurnError } from '../errors'
-import { createTurnError, TURN_CANCELLED, type TurnError } from '../../../shared/turn-errors.ts'
+import { createTurnError, isTurnError, TURN_CANCELLED, type TurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
@@ -17,6 +17,17 @@ import {
   recordOpencodeToolPartActivity
 } from '../turn-scope'
 import { createProviderTurnScope } from '../provider-turn'
+import {
+  buildOpencodeAutoQuestionAnswers,
+  resolveOpencodePermissionConfig,
+  resolveOpencodeToolsConfig
+} from './opencode-config'
+import {
+  createOpencodeLongTurnFetch,
+  isTransientOpencodeTransportDetail
+} from './opencode-transport'
+
+export { isTransientOpencodeTransportDetail } from './opencode-transport'
 
 type NodeSpawn = typeof import('child_process').spawn
 
@@ -37,8 +48,34 @@ function buildOpencodeConfig(input: AgentTurnInput): Config {
 
   return {
     model: input.model,
-    permission: 'allow',
+    permission: resolveOpencodePermissionConfig(),
+    tools: resolveOpencodeToolsConfig(),
     ...(mcp ? { mcp } : {})
+  }
+}
+
+/**
+ * Auto-answer OpenCode `question` so the turn continues (do not reject).
+ * See `./opencode-config.ts` for issue/PR notes and policy.
+ */
+async function autoReplyOpencodeQuestion(
+  client: OpencodeClient,
+  cwd: string,
+  requestID: string,
+  questions: ReadonlyArray<{
+    options?: Array<{ label?: string }>
+    multiple?: boolean
+    custom?: boolean
+  }>
+): Promise<void> {
+  try {
+    await client.question.reply({
+      requestID,
+      directory: cwd,
+      answers: buildOpencodeAutoQuestionAnswers(questions)
+    })
+  } catch {
+    // best-effort — turn may already be aborted
   }
 }
 
@@ -66,10 +103,27 @@ async function pickEphemeralPort(): Promise<number> {
 
 function formatOpencodeError(error: unknown): string {
   if (typeof error === 'string') return error
-  if (error && typeof error === 'object' && 'message' in error) {
-    return String((error as { message: unknown }).message)
+  if (error && typeof error === 'object') {
+    const withCause = error as { message?: unknown; cause?: unknown }
+    const message = typeof withCause.message === 'string' ? withCause.message : ''
+    const cause =
+      withCause.cause && typeof withCause.cause === 'object' && 'message' in withCause.cause
+        ? String((withCause.cause as { message: unknown }).message)
+        : withCause.cause
+          ? String(withCause.cause)
+          : ''
+    if (message && cause) return `${message}: ${cause}`
+    if (message) return message
+    if (cause) return cause
   }
   return 'OpenCode request failed'
+}
+
+function createOpencodeSessionTurnError(detail: string): TurnError {
+  if (isTransientOpencodeTransportDetail(detail)) {
+    return createTurnError('provider.opencode.stream_disconnected', { detail })
+  }
+  return createTurnError('provider.opencode.session_error', { detail })
 }
 
 function extractPartsText(parts: Part[] | undefined): string {
@@ -300,9 +354,9 @@ async function ensureOpencodeSession(
     directory: cwd
   })
   if (created.error || !created.data?.id) {
-    throw createTurnError('provider.opencode.session_error', {
-      detail: formatOpencodeError(created.error ?? 'OpenCode session creation failed')
-    })
+    throw createOpencodeSessionTurnError(
+      formatOpencodeError(created.error ?? 'OpenCode session creation failed')
+    )
   }
   return created.data.id
 }
@@ -327,9 +381,14 @@ export async function* streamOpencodeTurn(
     signal: options?.signal
   })
 
+  // Node undici's default 300s bodyTimeout aborts long session.prompt waits;
+  // OpenCode SDK's req.timeout=false only works on Bun. Use an Agent with
+  // timeouts disabled so planner/task turns can run past five minutes.
+  const longTurnFetch = createOpencodeLongTurnFetch()
   const client = createOpencodeClient({
     baseUrl: server.url,
-    directory: input.cwd
+    directory: input.cwd,
+    fetch: longTurnFetch.fetch
   })
 
   const eventAbort = new AbortController()
@@ -371,6 +430,9 @@ export async function* streamOpencodeTurn(
         sessionID: sessionId,
         directory: input.cwd,
         system: input.systemPrompt,
+        // Per-prompt tools disable (session permission path). Still may be
+        // ignored on older OpenCode builds — auto-reply remains the safety net.
+        tools: resolveOpencodeToolsConfig(),
         parts: [{ type: 'text', text: input.prompt }]
       },
       {
@@ -412,8 +474,28 @@ export async function* streamOpencodeTurn(
         if (winner.next.done) break
 
         const event = winner.next.value as Event
-        turnScope.recordProgress('provider_event')
+        // Only count this session — other sessions on the shared event bus
+        // must not keep the stall watchdog artificially alive.
         if (!isSessionEvent(event, sessionId)) continue
+        turnScope.recordProgress('provider_event')
+
+        if (event.type === 'question.asked' || event.type === 'question.v2.asked') {
+          const props = event.properties as {
+            id?: string
+            requestID?: string
+            questions?: Array<{
+              options?: Array<{ label?: string }>
+              multiple?: boolean
+              custom?: boolean
+            }>
+          }
+          const requestID = props.id ?? props.requestID
+          if (requestID) {
+            void autoReplyOpencodeQuestion(client, input.cwd, requestID, props.questions ?? [])
+          }
+          turnScope.recordProgress('tool_updated')
+          continue
+        }
 
         if (event.type === 'message.part.updated') {
           const props = event.properties as {
@@ -522,9 +604,9 @@ export async function* streamOpencodeTurn(
 
         if (event.type === 'session.error') {
           const props = event.properties as { error?: { message?: string } }
-          throw createTurnError('provider.opencode.session_error', {
-            detail: props.error?.message ?? 'OpenCode session error'
-          })
+          throw createOpencodeSessionTurnError(
+            props.error?.message ?? 'OpenCode session error'
+          )
         }
 
         if (event.type === 'session.idle') {
@@ -554,9 +636,7 @@ export async function* streamOpencodeTurn(
       promptResult = await turnScope.race(promptPromise)
     }
     if (promptResult?.error) {
-      throw createTurnError('provider.opencode.session_error', {
-        detail: formatOpencodeError(promptResult.error)
-      })
+      throw createOpencodeSessionTurnError(formatOpencodeError(promptResult.error))
     }
 
     if (!reply.trim()) {
@@ -594,6 +674,7 @@ export async function* streamOpencodeTurn(
     turnScope.dispose()
     options?.signal?.removeEventListener('abort', abortTurn)
     abortTurn()
+    longTurnFetch.close()
     server.close()
   }
 }
@@ -601,6 +682,11 @@ export async function* streamOpencodeTurn(
 function throwOpencodeError(error: unknown): never {
   if (error instanceof Error && error.name === 'AbortError') {
     throw TURN_CANCELLED
+  }
+  if (isTurnError(error)) throw error
+  const detail = formatOpencodeError(error)
+  if (isTransientOpencodeTransportDetail(detail)) {
+    throw createOpencodeSessionTurnError(detail)
   }
   throwSdkTurnError(error)
 }

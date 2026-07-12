@@ -170,4 +170,33 @@ describe('progress-guard', () => {
       else process.env.CODETASK_LONG_TOOL_CAP_MS = prevCap
     }
   })
+
+  it('counts provider_event and heartbeat as progress (stream liveness)', async () => {
+    const prevWindow = process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
+    const prevStalled = process.env.CODETASK_TURN_STALLED_MS
+    process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = '25'
+    process.env.CODETASK_TURN_STALLED_MS = '50'
+
+    try {
+      const guard = new ProgressGuard('planner')
+      let stalled = false
+      guard.on('stalled', () => {
+        stalled = true
+      })
+      guard.start()
+
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      guard.recordActivity('provider_event')
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      guard.recordActivity('heartbeat')
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      assert.equal(stalled, false)
+      guard.dispose()
+    } finally {
+      if (prevWindow === undefined) delete process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
+      else process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = prevWindow
+      if (prevStalled === undefined) delete process.env.CODETASK_TURN_STALLED_MS
+      else process.env.CODETASK_TURN_STALLED_MS = prevStalled
+    }
+  })
 })

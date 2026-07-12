@@ -39,6 +39,7 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'provider.opencode.not_authenticated': 'OpenCode 未认证，请配置认证或设置 API key 环境变量。',
   'provider.opencode.server_timeout': '等待 OpenCode server 启动超时',
   'provider.opencode.server_exited': 'OpenCode server 异常退出',
+  'provider.opencode.stream_disconnected': 'OpenCode 流式连接中断（网络或 HTTP 超时），请稍后重试',
   'provider.opencode.session_error': 'OpenCode 会话错误',
   'provider.rate_limited': '请求过于频繁，请稍后重试',
   'provider.cli_auth_failed': 'CLI 鉴权失败，请检查 API Key 或登录状态',
