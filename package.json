@@ -59,7 +59,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@hono/node-server": "^2.0.5",
     "@openai/codex-sdk": "^0.141.0",
-    "@opencode-ai/sdk": "^1.17.9",
+    "@opencode-ai/sdk": "^1.17.18",
     "@tailwindcss/vite": "^4.3.1",
     "@vueuse/core": "^14.3.0",
     "better-sqlite3": "^12.11.1",

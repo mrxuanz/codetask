@@ -255,7 +255,7 @@ function prepareOpencode(runtimeRoot: string): ProviderAuthPrepared {
     runtimeAuthPath: materialized.runtimeConfigDir,
     warnings: materialized.configCopied
       ? [
-          'OpenCode config/auth snapshotted to runtime XDG directories; inner permission=allow; MCP injected via OPENCODE_CONFIG_CONTENT.'
+          'OpenCode config/auth snapshotted to runtime XDG directories; question denied + auto-replied if asked; MCP injected via OPENCODE_CONFIG_CONTENT.'
         ]
       : ['OpenCode config directory is empty (will rely on environment variable API key)']
   }

@@ -54,8 +54,6 @@ const taskParametersOpen = ref(false)
 
 const statusFilters = computed(() => [
   { value: 'all', label: t('workspace.tasks.filters.all') },
-  { value: 'planning', label: t('workspace.tasks.filters.planning') },
-  { value: 'plan_editing', label: t('workspace.tasks.filters.planEditing') },
   { value: 'running', label: t('workspace.tasks.filters.running') },
   { value: 'paused', label: t('workspace.tasks.filters.paused') },
   { value: 'failed', label: t('workspace.tasks.filters.failed') },
@@ -101,12 +99,11 @@ const canPause = computed(() => hasAction('pause'))
 const canContinue = computed(() => hasAction('continue'))
 const canRetryTask = computed(() => {
   if (!hasAction('retry_failed_task')) return false
-  const task = selectedTask.value
-  if (!task) return false
   const failedTaskId = selectedJob.value?.recovery?.failedTaskId
-  return !failedTaskId || task.id === failedTaskId
+  if (!failedTaskId) return false
+  if (selectedTask.value) return selectedTask.value.id === failedTaskId
+  return true
 })
-const canCancel = computed(() => hasAction('cancel'))
 const canRestart = computed(() => hasAction('restart'))
 const canDelete = computed(() => hasAction('delete'))
 
@@ -127,12 +124,13 @@ function closeTaskParameters(): void {
 
 async function handleRetryTask(): Promise<void> {
   const job = selectedJob.value
-  const task = selectedTask.value
-  if (!job || !task) return
+  if (!job) return
+  const taskId = selectedTask.value?.id ?? job.recovery?.failedTaskId
+  if (!taskId) return
   runningAction.value = 'retry_task'
   actionError.value = null
   try {
-    await retryTaskJob(job.id, task.id)
+    await retryTaskJob(job.id, taskId)
     await store.loadDetail(job.id)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : 'Failed to retry task'
@@ -326,15 +324,6 @@ watch(searchQuery, () => void debouncedSearch())
                     @click="store.handleRestart()"
                   >
                     {{ t('workspace.tasks.actions.restart') }}
-                  </Button>
-                  <Button
-                    v-if="canCancel"
-                    size="sm"
-                    variant="outline"
-                    :disabled="runningAction === 'cancel'"
-                    @click="store.handleCancel()"
-                  >
-                    {{ t('workspace.tasks.actions.cancel') }}
                   </Button>
                   <Button
                     v-if="canDelete"

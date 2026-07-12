@@ -18,7 +18,6 @@ export type JobNextAction =
   | 'continue'
   | 'retry_failed_task'
   | 'restart'
-  | 'cancel'
   | 'delete'
   | 'pause'
 
@@ -26,7 +25,6 @@ export type JobAvailableAction =
   | 'continue'
   | 'retry_failed_task'
   | 'restart'
-  | 'cancel'
   | 'delete'
   | 'pause'
 
@@ -258,19 +256,18 @@ function resolveRecoveryReason(input: {
 function resolveNextAction(input: {
   lifecycle: JobLifecycle
   recoverable: boolean
-  failureKind: FailureKind | null
-  retryableTaskId: string | null
+  retryableTask: TaskProgressItemDto | null
 }): JobNextAction | null {
   if (input.lifecycle === 'paused' && input.recoverable) return 'continue'
-  if (input.lifecycle === 'failed' && input.recoverable) {
-    if (input.failureKind === 'infra_retryable' && input.retryableTaskId) {
-      return 'retry_failed_task'
-    }
-    return 'continue'
+  if (input.lifecycle === 'failed') {
+    // Failed subtask → retry only. Interrupted/deadlock → continue only.
+    // Never expose both; they both re-enter execution and conflict in the UI.
+    if (input.retryableTask?.status === 'failed') return 'retry_failed_task'
+    if (input.recoverable) return 'continue'
+    return 'restart'
   }
-  if (input.retryableTaskId) return 'retry_failed_task'
   if (input.lifecycle === 'running' || input.lifecycle === 'pending') return null
-  if (input.lifecycle === 'failed' || input.lifecycle === 'cancelled') return 'restart'
+  if (input.lifecycle === 'cancelled') return 'restart'
   return null
 }
 
@@ -278,12 +275,11 @@ function deriveAvailableActions(input: {
   lifecycle: JobLifecycle
   status: ThreadJobStatus
   recoverable: boolean
-  retryableTaskId: string | null
+  retryableTask: TaskProgressItemDto | null
 }): JobAvailableAction[] {
   const actions: JobAvailableAction[] = []
 
   if (input.lifecycle === 'running' || input.lifecycle === 'pending') {
-    actions.push('cancel')
     if (input.status === 'running' || input.status === 'pending') {
       actions.push('pause')
     }
@@ -296,8 +292,11 @@ function deriveAvailableActions(input: {
   }
 
   if (input.lifecycle === 'failed') {
-    if (input.recoverable) actions.push('continue')
-    if (input.retryableTaskId) actions.push('retry_failed_task')
+    if (input.retryableTask?.status === 'failed') {
+      actions.push('retry_failed_task')
+    } else if (input.recoverable) {
+      actions.push('continue')
+    }
     actions.push('restart', 'delete')
     return actions
   }
@@ -367,8 +366,8 @@ export function deriveJobRecoveryState(
     nextAction: resolveNextAction({
       lifecycle,
       recoverable,
-      failureKind,
-      retryableTaskId: retryableTask?.id ?? null
+      retryableTask:
+        lifecycle === 'failed' || lifecycle === 'paused' ? retryableTask : null
     }),
     failedTaskId,
     autoRetryAttempt: failedTaskId ? readTaskInfraAttempt(job, failedTaskId) : 0,
@@ -406,8 +405,8 @@ export function deriveJobRecoveryState(
     lifecycle,
     status: job.status,
     recoverable,
-    retryableTaskId:
-      lifecycle === 'failed' || lifecycle === 'paused' ? (retryableTask?.id ?? null) : null
+    retryableTask:
+      lifecycle === 'failed' || lifecycle === 'paused' ? retryableTask : null
   })
 
   return {
