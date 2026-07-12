@@ -3,7 +3,6 @@ import type { ComputedRef, Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
 import {
-  cancelJob,
   continueJob,
   deleteJob,
   fetchJob,
@@ -42,7 +41,6 @@ export function useJobsStore(options: UseJobsStoreOptions): {
   stopHubPolling: () => void
   handlePause: () => Promise<void>
   handleContinue: () => Promise<void>
-  handleCancel: () => Promise<void>
   handleRestart: () => Promise<void>
   handleDelete: () => Promise<void>
 } {
@@ -252,10 +250,6 @@ export function useJobsStore(options: UseJobsStoreOptions): {
     await runAction('continue', continueJob)
   }
 
-  async function handleCancel(): Promise<void> {
-    await runAction('cancel', cancelJob)
-  }
-
   async function handleRestart(): Promise<void> {
     await runAction('restart', restartJob)
   }
@@ -297,7 +291,6 @@ export function useJobsStore(options: UseJobsStoreOptions): {
     stopHubPolling,
     handlePause,
     handleContinue,
-    handleCancel,
     handleRestart,
     handleDelete
   }

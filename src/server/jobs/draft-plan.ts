@@ -21,7 +21,7 @@ import {
   normalizeDraftStatus
 } from '../conversation/draft/status'
 import { getMessage, listMessages, updateMessagePayload } from '../conversation/messages'
-import { getThreadRow } from '../threads/service'
+import { getThreadRow, toThreadDto } from '../threads/service'
 import { THREAD_KIND_CREATE_TASK } from '../threads/types'
 import { getProject } from '../projects/service'
 import { defaultPlanProgress, defaultTaskProgress } from '../planner/save-plan'
@@ -988,6 +988,63 @@ export async function confirmDraftAndStartPlanning(
 
 const EMPTY_SAVED_PLAN: SavedJobPlan = { milestones: [], tasks: [] }
 
+/**
+ * After a job is deleted, clear stale draft locks (linkedPlanId / confirmed status)
+ * and ensure the wizard is back on draft review. DB triggers already null activePlanId.
+ */
+export async function releaseDraftAfterJobDeleted(
+  username: string,
+  threadId: string,
+  jobId: string,
+  draftMessageId?: string | null
+): Promise<void> {
+  const row = await getThreadRow(username, threadId)
+  if (!row) return
+
+  const messages = await listMessages(username, threadId, 200, { signAssets: false })
+  const drafts = messages.filter((message) => message.kind === 'task-launch-draft')
+  let unlockedDraftId: string | null = null
+
+  for (const draft of drafts) {
+    const payload = draft.payload as TaskLaunchDraftPayload | undefined
+    if (!payload?.draftId) continue
+    const linked = payload.linkedPlanId?.trim()
+    const isLinkedJob = linked === jobId
+    const isJobDraft =
+      Boolean(draftMessageId) && draft.id === draftMessageId && !isDraftEditable(payload)
+    if (!isLinkedJob && !isJobDraft) continue
+
+    await persistDraftPayload(username, threadId, draft.id, buildUnlockedDraftPayload(payload))
+    unlockedDraftId = draft.id
+  }
+
+  const phase = resolveWizardPhase(row)
+  const stillOnPlanPhase =
+    phase === WIZARD_PHASE_PLAN_GENERATING ||
+    phase === WIZARD_PHASE_PLAN_EDIT ||
+    phase === WIZARD_PHASE_READY_TO_LAUNCH
+  const shouldResetPhase =
+    row.activePlanId === jobId || stillOnPlanPhase || Boolean(unlockedDraftId)
+
+  if (!shouldResetPhase) return
+
+  const latest = await getThreadRow(username, threadId)
+  if (!latest) return
+
+  await advanceWizardPhase(username, threadId, {
+    to: WIZARD_PHASE_DRAFT_REVIEW,
+    coreCode: latest.coreCode,
+    activeDraftId: unlockedDraftId ?? latest.activeDraftId ?? draftMessageId ?? null,
+    activePlanId: null,
+    handoff: buildRollbackHandoff({
+      from: resolveWizardPhase(latest),
+      to: WIZARD_PHASE_DRAFT_REVIEW,
+      reason: 'Linked job deleted; draft unlocked for editing',
+      draftMessageId: unlockedDraftId ?? latest.activeDraftId ?? draftMessageId ?? undefined
+    })
+  })
+}
+
 export async function unlockDraftForEdit(
   username: string,
   threadId: string,
@@ -996,58 +1053,61 @@ export async function unlockDraftForEdit(
   const row = await getThreadRow(username, threadId)
   if (!row) throw AppError.notFound('Thread not found', 'thread.not_found')
 
-  const phase = resolveWizardPhase(row)
-  if (
-    phase !== WIZARD_PHASE_PLAN_GENERATING &&
-    phase !== WIZARD_PHASE_PLAN_EDIT &&
-    phase !== WIZARD_PHASE_READY_TO_LAUNCH
-  ) {
-    throw AppError.badRequest('Draft is not locked', 'draft.not_locked')
-  }
-
   await assertActiveDraft(username, threadId, draftMessageId)
   const payload = await loadDraftPayload(username, threadId, draftMessageId)
+  const phase = resolveWizardPhase(row)
 
   const planId = row.activePlanId?.trim() || payload.linkedPlanId?.trim() || ''
-  if (!planId) {
-    throw AppError.badRequest('No execution plan to unlock', 'draft.plan_not_ready')
+  const planJob = planId ? await getThreadJob(username, threadId, planId) : null
+
+  const payloadLocked = !isDraftEditable(payload) || Boolean(payload.linkedPlanId?.trim())
+  const phaseLocked =
+    phase === WIZARD_PHASE_PLAN_GENERATING ||
+    phase === WIZARD_PHASE_PLAN_EDIT ||
+    phase === WIZARD_PHASE_READY_TO_LAUNCH
+  const threadLocked = Boolean(row.activePlanId?.trim())
+
+  // Idempotent: already fully unlocked (e.g. after job delete cleared activePlanId).
+  if (!payloadLocked && !phaseLocked && !threadLocked) {
+    const draft = await getMessage(username, threadId, draftMessageId)
+    if (!draft) throw AppError.notFound('Task draft message not found', 'draft.not_found')
+    return { draft, thread: toThreadDto(row) }
   }
 
-  const planJob = await getThreadJob(username, threadId, planId)
-  if (!planJob) {
-    throw AppError.badRequest('No execution plan to unlock', 'draft.plan_not_ready')
-  }
-  if (planJob.planConfirmedAt != null) {
+  if (planJob?.planConfirmedAt != null) {
     throw AppError.badRequest('Job already launched', 'job.already_launched')
   }
 
-  getAppContext().runtimeRegistry.endJobPlanning(planId)
+  // Stale lock after job delete: plan row is gone but draft still has linkedPlanId.
+  // Clear draft + phase without requiring a live plan job.
+  if (planJob) {
+    getAppContext().runtimeRegistry.endJobPlanning(planId)
 
-  const cancelledProgress: PlanProgressDto = {
-    ...defaultPlanProgress(),
-    phase: 'idle',
-    status: 'failed',
-    progressCode: 'plan.draft_unlocked',
-    message: null
-  }
+    const cancelledProgress: PlanProgressDto = {
+      ...defaultPlanProgress(),
+      phase: 'idle',
+      status: 'failed',
+      progressCode: 'plan.draft_unlocked',
+      message: null
+    }
 
-  await updateJobRow(planId, {
-    status: 'cancelled',
-    phase: WIZARD_PHASE_DRAFT_REVIEW,
-    planRevision: 0,
-    plan: EMPTY_SAVED_PLAN,
-    planProgress: cancelledProgress,
-    lastError: null
-  })
+    await updateJobRow(planId, {
+      status: 'cancelled',
+      phase: WIZARD_PHASE_DRAFT_REVIEW,
+      planRevision: 0,
+      plan: EMPTY_SAVED_PLAN,
+      planProgress: cancelledProgress,
+      lastError: null
+    })
 
-  const cancelledJob = await getThreadJob(username, threadId, planId)
-  if (cancelledJob) {
-    emitJobEvent(planId, { event: 'job_snapshot', data: { job: cancelledJob } })
-    emitJobEvent(planId, { event: 'job_done', data: { job: cancelledJob } })
+    const cancelledJob = await getThreadJob(username, threadId, planId)
+    if (cancelledJob) {
+      emitJobEvent(planId, { event: 'job_snapshot', data: { job: cancelledJob } })
+      emitJobEvent(planId, { event: 'job_done', data: { job: cancelledJob } })
+    }
   }
 
   const unlockedPayload = buildUnlockedDraftPayload(payload)
-
   const draftResult = await persistDraftPayload(username, threadId, draftMessageId, unlockedPayload)
 
   const thread = await advanceWizardPhase(username, threadId, {
@@ -1058,7 +1118,9 @@ export async function unlockDraftForEdit(
     handoff: buildRollbackHandoff({
       from: phase,
       to: WIZARD_PHASE_DRAFT_REVIEW,
-      reason: 'User unlocked draft from Web UI; execution plan cleared',
+      reason: planJob
+        ? 'User unlocked draft from Web UI; execution plan cleared'
+        : 'User unlocked draft from Web UI; stale plan link cleared',
       draftMessageId,
       draftRevision: unlockedPayload.revision ?? null
     })
