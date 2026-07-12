@@ -7,10 +7,6 @@ import {
   type TurnError
 } from './turn-error.ts'
 
-function readErrorName(error: unknown): string | undefined {
-  return error instanceof Error ? error.name : undefined
-}
-
 function readErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message.trim()
   return String(error ?? '').trim()
@@ -31,8 +27,6 @@ function readAcpRequestErrorCode(error: unknown): number | undefined {
 }
 
 function isUserTurnCancellation(error: unknown): boolean {
-  if (readErrorName(error) === 'AbortError') return true
-
   const sandboxCode = readSandboxErrorCode(error)
   if (sandboxCode === 'sandbox.turn.cancelled') return true
 

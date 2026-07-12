@@ -164,11 +164,17 @@ export default {
         pause: '一時停止',
         resume: '再開',
         continue: '続行',
-        restart: '再起動',
+        restart: '進捗を消去して最初から実行',
         cancel: 'キャンセル',
         delete: '削除'
       },
       actionFailed: 'タスク操作に失敗しました',
+      recovery: {
+        retry: '続行すると、完了済みタスクを保持したまま失敗地点から再試行します。',
+        remediate: '続行すると、補修タスクを先に実行してから失敗地点に戻ります。',
+        resume: '続行すると、完了済みタスクを保持したまま最新の中断地点から再開します。',
+        needs_attention: '外部依存または手動条件を解決してから、中断地点より続行してください。'
+      },
       progress: {
         label: '完了率',
         planLabel: '計画生成',

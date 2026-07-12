@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { TurnError } from '../../src/shared/turn-errors/turn-error.ts'
 import {
   TurnScope,
   assertRoleTurnReply,
@@ -9,8 +8,25 @@ import {
   recordOpencodeToolPartActivity
 } from '../../src/server/agent-runtime/turn-scope'
 import { ProgressGuard } from '../../src/server/agent-runtime/progress-guard'
+import { createTurnError } from '../../src/shared/turn-errors.ts'
 
 describe('turn-scope', () => {
+  it('preserves an explicit external abort reason', async () => {
+    const controller = new AbortController()
+    const reason = createTurnError('task.evidence_timeout', { params: { taskId: 't1' } })
+    const turnScope = new TurnScope({
+      role: 'task-worker',
+      externalSignal: controller.signal
+    })
+    turnScope.arm()
+
+    const raced = turnScope.race(new Promise<never>(() => {}))
+    controller.abort(reason)
+
+    await assert.rejects(raced, (error: unknown) => error === reason)
+    turnScope.dispose()
+  })
+
   it('process-bound races prompt against process exit without idle timers', async () => {
     const turnScope = new TurnScope({
       role: 'task-worker',
@@ -140,42 +156,30 @@ describe('turn-scope', () => {
     turnScope.dispose()
   })
 
-  it('progress guard stalled triggers grace cancel', async () => {
+  it('progress guard reports suspected stall without cancelling the turn', async () => {
     const prevWindow = process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
     const prevStalled = process.env.CODETASK_TURN_STALLED_MS
     process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = '20'
     process.env.CODETASK_TURN_STALLED_MS = '40'
 
-    const prevGrace = process.env.CODETASK_TURN_SOFT_GRACE_MS
-    process.env.CODETASK_TURN_SOFT_GRACE_MS = '10'
-
     try {
       const guard = new ProgressGuard('conversation')
       const turnScope = new TurnScope({
         role: 'conversation',
-        progressGuard: guard,
-        onCancel: async () => {}
+        progressGuard: guard
       })
       turnScope.arm()
 
-      await assert.rejects(
-        () =>
-          turnScope.race(
-            new Promise<string>((resolve) => {
-              setTimeout(() => resolve('late'), 500)
-            })
-          ),
-        (error: unknown) => {
-          assert.ok(error instanceof TurnError)
-          assert.equal(error.code, 'turn.timed_out')
-          return true
-        }
+      const result = await turnScope.race(
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve('still-running'), 120)
+        })
       )
-      assert.equal(turnScope.graceCancelled, true)
+      assert.equal(result, 'still-running')
+      assert.equal(turnScope.suspectedStall, true)
+      assert.equal(turnScope.graceCancelled, false)
       turnScope.dispose()
     } finally {
-      if (prevGrace === undefined) delete process.env.CODETASK_TURN_SOFT_GRACE_MS
-      else process.env.CODETASK_TURN_SOFT_GRACE_MS = prevGrace
       if (prevWindow === undefined) delete process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
       else process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = prevWindow
       if (prevStalled === undefined) delete process.env.CODETASK_TURN_STALLED_MS

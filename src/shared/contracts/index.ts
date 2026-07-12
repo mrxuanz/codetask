@@ -7,6 +7,7 @@ export type {
   JobLifecycle,
   JobNextAction,
   JobRecoveryDto,
+  JobRecoveryStrategy,
   JobRecoveryStateFields
 } from '../job-recovery-state'
 export type {

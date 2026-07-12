@@ -49,7 +49,8 @@ export class ProgressGuard {
   private readonly _role: ConversationRole
   private readonly _stalledListeners = new Set<StalledListener>()
   private _openToolCount = 0
-  private _windowHadActivity = false
+  private _windowHadProgress = false
+  private _windowHadLiveness = false
   private _stalledAccum = 0
   private _tickTimer: ReturnType<typeof setInterval> | null = null
   private _started = false
@@ -90,14 +91,16 @@ export class ProgressGuard {
       case 'tool_updated':
       case 'text_delta':
       case 'thinking_delta':
-      // Provider stream liveness — must count. OpenCode/ACP often emit only
-      // provider_event / heartbeat while a model thinks or a subagent runs;
-      // ignoring them made ProgressGuard treat healthy turns as stalled.
-      case 'provider_event':
-      case 'heartbeat':
       case 'mcp_call':
       case 'shell_running':
-        this._windowHadActivity = true
+        this._windowHadProgress = true
+        this._windowHadLiveness = true
+        break
+      // Transport activity proves that the connection is alive, not that the
+      // task is advancing. It must never hide a logical stall.
+      case 'provider_event':
+      case 'heartbeat':
+        this._windowHadLiveness = true
         break
     }
   }
@@ -171,7 +174,7 @@ export class ProgressGuard {
 
   private _isProgressing(): boolean {
     if (this._isToolGraceActive()) return true
-    return this._windowHadActivity
+    return this._windowHadProgress
   }
 
   private _tick(windowMs = progressWindowMs()): void {
@@ -193,7 +196,9 @@ export class ProgressGuard {
       }
     }
 
-    this._windowHadActivity = false
+    const transportAlive = this._windowHadLiveness
+    this._windowHadProgress = false
+    this._windowHadLiveness = false
 
     const threshold = stalledAfterMsForRole(this._role)
     if (this._stalledAccum >= threshold) {
@@ -203,7 +208,8 @@ export class ProgressGuard {
         thresholdMs: threshold,
         openToolCount: this._openToolCount,
         longRunningTool: this._longRunningTool,
-        toolGraceActive: graceActive
+        toolGraceActive: graceActive,
+        transportAlive
       })
       this._emitStalled()
     }

@@ -3,10 +3,10 @@ import { RequestError, type ActiveSession, type ClientContext } from '@agentclie
 import type { ConversationRole } from '../roles'
 import type { CursorAcpMcpServer } from '../mcp'
 import type { AgentTurnChunk } from '../types'
-import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { TurnErrorCode } from '../../../shared/turn-errors/codes.ts'
 import { classifyCursorAcpError } from './errors'
-import { createProviderTurnScope } from '../provider-turn'
+import { abortReason, createProviderTurnScope } from '../provider-turn'
 import { createAsyncQueue } from './async-queue'
 import {
   applyCursorModel,
@@ -340,23 +340,19 @@ export class CursorAcpSessionRuntime {
       child.once('exit', onExit)
     })
 
-    const turnScope = createProviderTurnScope(input.role, { signal: input.signal }, {
-      processExit: exitPromise,
-      onSoftCancel: async () => {
-        if (this.activeTaskSession) {
-          await cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
-        }
-      },
-      onHardCancel: () => {
-        killChildTree(child)
+    const turnScope = createProviderTurnScope(
+      input.role,
+      { signal: input.signal },
+      {
+        processExit: exitPromise
       }
-    })
+    )
     turnScope.arm()
 
     input.signal?.addEventListener('abort', onAbort, { once: true })
     if (input.signal?.aborted) {
       onAbort()
-      throw TURN_CANCELLED
+      throw abortReason(input.signal)
     }
 
     const session = await this.openTaskSession(input)
@@ -392,10 +388,7 @@ export class CursorAcpSessionRuntime {
         if (message.kind === 'session_update') {
           turnScope.recordProgress('provider_event')
           const update = message.update
-          if (
-            update.sessionUpdate === 'tool_call' ||
-            update.sessionUpdate === 'tool_call_update'
-          ) {
+          if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
             recordAcpToolCallActivity(update, turnScope, openToolIds)
             continue
           }
@@ -451,7 +444,7 @@ export class CursorAcpSessionRuntime {
         return
       }
       if (aborted) {
-        throw TURN_CANCELLED
+        throw abortReason(input.signal)
       }
       const dto = classifyCursorAcpError(error, {
         phase: error instanceof RequestError ? 'rpc' : 'prompt',

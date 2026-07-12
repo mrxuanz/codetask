@@ -186,11 +186,17 @@ export default {
         pause: 'Pause',
         resume: 'Resume',
         continue: 'Continue',
-        restart: 'Restart',
+        restart: 'Clear progress and start over',
         cancel: 'Cancel',
         delete: 'Delete'
       },
       actionFailed: 'Task action failed',
+      recovery: {
+        retry: 'Continue retries from the failed checkpoint without clearing completed tasks.',
+        remediate: 'Continue runs remediation tasks first, then returns to the failed checkpoint.',
+        resume: 'Continue resumes from the latest checkpoint without clearing completed tasks.',
+        needs_attention: 'Resolve the external dependency, then continue from the checkpoint.'
+      },
       progress: {
         label: 'Completion',
         planLabel: 'Plan generation',

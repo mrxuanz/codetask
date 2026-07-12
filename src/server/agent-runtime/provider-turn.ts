@@ -1,3 +1,4 @@
+import { TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
 import { getExecutionRunContext } from '../jobs/execution-run-context'
@@ -6,10 +7,21 @@ import { ProgressGuard } from './progress-guard'
 import { TurnScope } from './turn-scope'
 
 export interface ProviderTurnContext {
-  signal?: AbortSignal
-  onSoftCancel?: () => void
-  onHardCancel?: () => void
   processExit?: Promise<never>
+}
+
+export function abortReason(signal?: AbortSignal): Error {
+  return signal?.reason instanceof Error ? signal.reason : TURN_CANCELLED
+}
+
+export function forwardAbortSignal(
+  signal: AbortSignal | undefined,
+  controller: AbortController
+): () => void {
+  const abort = (): void => controller.abort(abortReason(signal))
+  signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted) abort()
+  return abort
 }
 
 export function createProviderTurnScope(
@@ -26,13 +38,6 @@ export function createProviderTurnScope(
       const ectx = getExecutionRunContext()
       if (ectx?.runId) {
         void refreshWorkloadLease(ectx.runId)
-      }
-    },
-    onCancel: async (mode) => {
-      if (mode === 'soft') {
-        ctx.onSoftCancel?.()
-      } else {
-        ctx.onHardCancel?.()
       }
     }
   })

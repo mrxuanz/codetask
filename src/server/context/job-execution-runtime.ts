@@ -66,8 +66,8 @@ export class JobExecutionRuntimeRegistry {
     }
   }
 
-  abortActiveTurn(jobId: string): void {
-    this.runtimes.get(jobId)?.abortController?.abort()
+  abortActiveTurn(jobId: string, reason?: unknown): void {
+    this.runtimes.get(jobId)?.abortController?.abort(reason)
   }
 
   resumeExecution(jobId: string): void {
