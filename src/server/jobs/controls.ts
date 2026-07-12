@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { eq } from 'drizzle-orm'
 import { isPlanningJobStatus } from '@shared/design-session'
 import { deriveJobRecoveryState } from '@shared/job-recovery-state'
-import { JOB_PAUSED } from '../../shared/turn-errors.ts'
+import { JOB_CANCELLED, JOB_PAUSED } from '../../shared/turn-errors.ts'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
@@ -42,13 +42,13 @@ export function clearAbortController(jobId: string): void {
   executionRuntime().clearAbortController(jobId)
 }
 
-export function abortActiveTurn(jobId: string): void {
-  executionRuntime().abortActiveTurn(jobId)
+export function abortActiveTurn(jobId: string, reason?: unknown): void {
+  executionRuntime().abortActiveTurn(jobId, reason)
 }
 
 export function pauseJobExecution(jobId: string): void {
   executionRuntime().setControl(jobId, 'paused')
-  abortActiveTurn(jobId)
+  abortActiveTurn(jobId, JOB_PAUSED)
   clearAbortController(jobId)
   cancelJobSandboxTurns(jobId)
 }
@@ -108,9 +108,7 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
     return updated
   }
 
-  if (
-    !['plan_ready', 'running', 'paused', 'pending'].includes(job.status)
-  ) {
+  if (!['plan_ready', 'running', 'paused', 'pending'].includes(job.status)) {
     throw AppError.badRequest(`Job status ${job.status} cannot be paused`, 'job.invalid_status', {
       status: job.status
     })
@@ -131,11 +129,13 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
     const updated = await updateJobRowForSnapshot(jobId, { status: 'pausing' })
     if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
+    abortActiveTurn(jobId, JOB_PAUSED)
+    cancelJobSandboxTurns(jobId)
     return updated
   }
 
   executionRuntime().setControl(jobId, 'paused')
-  abortActiveTurn(jobId)
+  abortActiveTurn(jobId, JOB_PAUSED)
   clearAbortController(jobId)
   cancelJobSandboxTurns(jobId)
 
@@ -436,7 +436,7 @@ export async function cancelJob(username: string, jobId: string): Promise<Thread
   }
 
   executionRuntime().setControl(jobId, 'cancelling')
-  abortActiveTurn(jobId)
+  abortActiveTurn(jobId, JOB_CANCELLED)
   clearAbortController(jobId)
   cancelJobSandboxTurns(jobId)
 
@@ -554,7 +554,7 @@ export async function deleteJob(username: string, jobId: string): Promise<void> 
 
   if (isJobExecuting(jobId)) {
     executionRuntime().setControl(jobId, 'cancelling')
-    abortActiveTurn(jobId)
+    abortActiveTurn(jobId, JOB_CANCELLED)
     clearAbortController(jobId)
     cancelJobSandboxTurns(jobId)
     executionRuntime().dropRuntime(jobId)

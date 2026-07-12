@@ -3,11 +3,15 @@ import { throwSdkTurnError } from '../errors'
 import { buildClaudeMcpServers } from '../mcp'
 import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
 import { CLI_FULL_ACCESS_BUILTINS } from '../roles'
-import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
-import { recordClaudeStreamActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { createProviderTurnScope } from '../provider-turn'
+import {
+  recordClaudeStreamActivity,
+  assertRoleTurnReply,
+  partialCompletedChunk
+} from '../turn-scope'
+import { abortReason, createProviderTurnScope, forwardAbortSignal } from '../provider-turn'
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
@@ -32,19 +36,12 @@ export async function* streamClaudeTurn(
   const turnAbort = new AbortController()
   const externalSignal = options?.signal
   if (externalSignal?.aborted) {
-    throw TURN_CANCELLED
+    throw abortReason(externalSignal)
   }
-  externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
+  forwardAbortSignal(externalSignal, turnAbort)
 
-  const turnScope = createProviderTurnScope(input.role, options, {
-    onSoftCancel: () => {
-      turnAbort.abort()
-      queryHandle?.close()
-    }
-  })
+  const turnScope = createProviderTurnScope(input.role, options, {})
   turnScope.arm()
-
-  let queryHandle: ReturnType<typeof query> | null = null
 
   const stream = query({
     prompt: input.prompt,
@@ -74,8 +71,6 @@ export async function* streamClaudeTurn(
         : {})
     }
   })
-  queryHandle = stream
-
   let sessionId = input.runtimeSessionId ?? null
   const messageIterator = stream[Symbol.asyncIterator]()
   let streamEndedNormally = false
@@ -178,7 +173,7 @@ export async function* streamClaudeTurn(
       return
     }
     if (turnAbort.signal.aborted || options?.signal?.aborted) {
-      throw TURN_CANCELLED
+      throw abortReason(options?.signal ?? turnAbort.signal)
     }
     throwSdkTurnError(error)
   } finally {

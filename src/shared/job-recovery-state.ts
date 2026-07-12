@@ -19,6 +19,8 @@ export type JobNextAction = 'continue' | 'restart' | 'delete' | 'pause'
 
 export type JobAvailableAction = 'continue' | 'restart' | 'delete' | 'pause'
 
+export type JobRecoveryStrategy = 'retry' | 'remediate' | 'resume' | 'needs_attention'
+
 export interface ExecutionProgressDto {
   completedCount: number
   total: number
@@ -37,6 +39,7 @@ export interface JobFailureDto {
 
 export interface JobRecoveryDto {
   recoverable: boolean
+  strategy: JobRecoveryStrategy | null
   reason: string | null
   nextAction: JobNextAction | null
   failedTaskId: string | null
@@ -104,9 +107,7 @@ function isWorkflowDeadlockOnly(job: Pick<ThreadJobDto, 'taskProgress' | 'lastEr
   return matchesWorkflowProgressCode(job.taskProgress.progressCode, 'workflow.deadlock')
 }
 
-function readGateFailureId(
-  job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>
-): string | null {
+function readGateFailureId(job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>): string | null {
   const fromParams = job.taskProgress.progressParams?.id
   if (typeof fromParams === 'string' && fromParams.trim()) return fromParams
   const lastErrorDto =
@@ -204,9 +205,7 @@ function mapBlockerToFailureKind(
   }
 }
 
-function mapGateProgressToFailureKind(
-  progressCode: string | null | undefined
-): FailureKind {
+function mapGateProgressToFailureKind(progressCode: string | null | undefined): FailureKind {
   if (
     progressCode === 'execution.slice_inconclusive_exhausted' ||
     progressCode === 'execution.milestone_inconclusive_exhausted'
@@ -308,8 +307,7 @@ function resolveNextAction(input: {
 }): JobNextAction | null {
   if (input.lifecycle === 'paused' && input.recoverable) return 'continue'
   if (input.lifecycle === 'failed') {
-    if (input.recoverable) return 'continue'
-    return 'restart'
+    return 'continue'
   }
   if (input.lifecycle === 'running' || input.lifecycle === 'pending') return null
   if (input.lifecycle === 'cancelled') return 'restart'
@@ -336,12 +334,9 @@ function deriveAvailableActions(input: {
   }
 
   if (input.lifecycle === 'failed') {
-    // Unified failure actions: Continue when recoverable, always Restart + Delete.
-    // "Retry subtask" is gone — continue covers breakpoint resume / re-queue / re-inject.
-    if (input.recoverable) {
-      actions.push('continue')
-    }
-    actions.push('restart', 'delete')
+    // Every execution failure has one recovery entry point. The backend owns
+    // the breakpoint strategy; the UI must not infer it from task/gate shape.
+    actions.push('continue', 'restart', 'delete')
     return actions
   }
 
@@ -359,14 +354,25 @@ function deriveAvailableActions(input: {
   return actions
 }
 
-function isJobRecoverable(
-  job: Pick<ThreadJobDto, 'status' | 'taskProgress' | 'lastError'>
-): boolean {
+function isJobRecoverable(job: Pick<ThreadJobDto, 'status'>): boolean {
   if (job.status === 'paused') return true
-  if (job.status !== 'failed') return false
-  if (isWorkflowDeadlockOnly(job)) return true
-  if (isGateFailureRecoverable(job)) return true
-  return findPrimaryRecoverableTask(job.taskProgress.tasks, job) !== null
+  return job.status === 'failed'
+}
+
+function resolveRecoveryStrategy(input: {
+  lifecycle: JobLifecycle
+  failureKind: FailureKind | null
+  workflowDeadlock: boolean
+}): JobRecoveryStrategy | null {
+  if (input.lifecycle === 'paused' || input.workflowDeadlock) return 'resume'
+  if (input.lifecycle !== 'failed') return null
+  if (input.failureKind === 'dependency_missing' || input.failureKind === 'task_repairable') {
+    return 'remediate'
+  }
+  if (input.failureKind === 'gate_blocked') return 'remediate'
+  if (input.failureKind === 'human_blocked') return 'needs_attention'
+  if (input.failureKind === 'infra_retryable') return 'retry'
+  return 'resume'
 }
 
 export function deriveJobRecoveryState(
@@ -408,6 +414,7 @@ export function deriveJobRecoveryState(
 
   const recovery: JobRecoveryDto = {
     recoverable,
+    strategy: resolveRecoveryStrategy({ lifecycle, failureKind, workflowDeadlock }),
     reason: resolveRecoveryReason({
       lifecycle,
       task: recoverableTask,

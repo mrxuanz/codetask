@@ -282,7 +282,7 @@ describe('deriveJobRecoveryState', () => {
     assert.deepEqual(state.availableActions, ['pause', 'delete'])
   })
 
-  it('hides continue for human-blocked tasks', () => {
+  it('keeps continue visible for human-blocked tasks after the prerequisite is resolved', () => {
     const state = deriveJobRecoveryState(
       baseJob({
         taskProgress: {
@@ -321,7 +321,8 @@ describe('deriveJobRecoveryState', () => {
     )
 
     assert.equal(state.failure.kind, 'human_blocked')
-    assert.equal(state.recovery.recoverable, false)
-    assert.deepEqual(state.availableActions, ['restart', 'delete'])
+    assert.equal(state.recovery.recoverable, true)
+    assert.equal(state.recovery.strategy, 'needs_attention')
+    assert.deepEqual(state.availableActions, ['continue', 'restart', 'delete'])
   })
 })

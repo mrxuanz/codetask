@@ -185,11 +185,17 @@ export default {
         pause: '暂停',
         resume: '恢复',
         continue: '继续',
-        restart: '重启',
+        restart: '清空进度从头执行',
         cancel: '取消',
         delete: '删除'
       },
       actionFailed: '任务操作失败',
+      recovery: {
+        retry: '点击继续将从失败断点重试，已完成任务不会清空。',
+        remediate: '点击继续将先执行补救任务，再回到失败断点。',
+        resume: '点击继续将从最近断点恢复，已完成任务不会清空。',
+        needs_attention: '请先处理外部依赖或人工条件，完成后点击继续从断点重试。'
+      },
       progress: {
         label: '占用百分比',
         planLabel: '计划生成',

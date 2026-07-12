@@ -1,10 +1,7 @@
 import type { TaskProgressDto, TaskProgressItemDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import type { TurnErrorCode } from '../../shared/turn-errors/codes'
-import {
-  deriveJobRecoveryState,
-  isGateFailureProgressCode
-} from '../../shared/job-recovery-state'
+import { deriveJobRecoveryState, isGateFailureProgressCode } from '../../shared/job-recovery-state'
 import { coerceTurnErrorField } from '../../shared/turn-errors/storage'
 import { createTurnError } from '../../shared/turn-errors/turn-error.ts'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
@@ -217,12 +214,6 @@ export function prepareContinueFailedExecution(
   plan: SavedJobPlan
 ): { plan: SavedJobPlan; taskProgress: TaskProgressDto } {
   const state = deriveJobRecoveryState(job)
-  if (!state.recovery.recoverable) {
-    throw createTurnError('task.execution_failed', {
-      detail: 'Job failure is not recoverable'
-    })
-  }
-
   if (isGateFailureProgressCode(job.taskProgress.progressCode)) {
     return prepareGateContinueExecution(job, plan)
   }
@@ -252,9 +243,19 @@ export function prepareContinueFailedExecution(
   }
 
   if (!failedTaskId) {
-    throw createTurnError('task.execution_failed', {
-      detail: 'No failed subtask to continue'
-    })
+    const { progress } = prepareInterruptedExecutionResume(taskProgress)
+    return {
+      plan: currentPlan,
+      taskProgress: {
+        ...progress,
+        phase: 'running',
+        status: 'running',
+        message: null,
+        progressCode: 'execution.resuming',
+        progressParams: job.taskProgress.progressParams ?? null,
+        currentTaskId: null
+      }
+    }
   }
 
   const task = taskProgress.tasks.find((item) => item.id === failedTaskId)
@@ -284,10 +285,9 @@ export function prepareContinueFailedExecution(
 
   const failureKind = state.failure.kind
   if (failureKind === 'human_blocked' || isHumanBlockedTask(task)) {
-    throw createTurnError('task.terminal_failure', {
-      params: { taskId: failedTaskId },
-      detail: state.failure.message ?? 'Human intervention required'
-    })
+    // Continue means "the external prerequisite has been addressed; retry the
+    // same breakpoint". It must not force the user to clear completed work.
+    return prepareManualTaskRetry(currentPlan, taskProgress, failedTaskId)
   }
 
   // Class A: timeout / false-cancel / infra / exhausted auto-retry → re-queue from breakpoint.

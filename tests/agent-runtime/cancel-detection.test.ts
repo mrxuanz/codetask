@@ -5,10 +5,10 @@ import { isUserTurnCancellation } from '../../src/server/agent-runtime/cancel-de
 import { SandboxError } from '../../src/server/sandbox/types.ts'
 
 describe('isUserTurnCancellation', () => {
-  it('detects AbortError by name without relying on message text', () => {
+  it('does not guess user intent from AbortError names or message text', () => {
     const abortErr = new Error('x')
     abortErr.name = 'AbortError'
-    assert.equal(isUserTurnCancellation(abortErr), true)
+    assert.equal(isUserTurnCancellation(abortErr), false)
     assert.equal(isUserTurnCancellation(new Error('This operation was aborted')), false)
     assert.equal(isUserTurnCancellation(new Error('The operation was aborted.')), false)
   })

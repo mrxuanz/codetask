@@ -76,9 +76,7 @@ const showExecutionProgress = computed(
     selectedJob.value?.status === 'paused'
 )
 const showPlanProgress = computed(
-  () =>
-    selectedJob.value?.status === 'planning' ||
-    selectedJob.value?.status === 'plan_editing'
+  () => selectedJob.value?.status === 'planning' || selectedJob.value?.status === 'plan_editing'
 )
 
 const standaloneLastError = computed(() => {
@@ -99,6 +97,11 @@ const canPause = computed(() => hasAction('pause'))
 const canContinue = computed(() => hasAction('continue'))
 const canRestart = computed(() => hasAction('restart'))
 const canDelete = computed(() => hasAction('delete'))
+const recoveryHint = computed(() => {
+  if (selectedJob.value?.status !== 'failed') return ''
+  const strategy = selectedJob.value.recovery?.strategy ?? 'resume'
+  return t(`workspace.tasks.recovery.${strategy}`)
+})
 
 function selectJob(jobId: string): void {
   selectedTask.value = null
@@ -302,6 +305,9 @@ watch(searchQuery, () => void debouncedSearch())
                     {{ t('workspace.tasks.actions.delete') }}
                   </Button>
                 </div>
+                <p v-if="recoveryHint" class="basis-full text-xs text-muted-foreground">
+                  {{ recoveryHint }}
+                </p>
               </div>
 
               <div v-if="showPlanProgress" class="space-y-1">
