@@ -185,7 +185,6 @@ export default {
         pause: '暂停',
         resume: '恢复',
         continue: '继续',
-        retryTask: '重试子任务',
         restart: '重启',
         cancel: '取消',
         delete: '删除'

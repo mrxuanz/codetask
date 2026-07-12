@@ -38,8 +38,6 @@ export function initJobVerifier(): void {
   getAppContext()
 }
 
-const VERIFIER_VERDICT_WAIT_FULL_MS = 20 * 60 * 1000
-
 function sliceVerdictsFromProgress(
   slices?: TaskProgressSliceDto[]
 ): Record<string, SliceVerificationRecordDto> {
@@ -57,14 +55,16 @@ function startVerdictWait<T>(input: {
   signal: AbortSignal
   register: (handlers: { resolve: (value: T) => void; reject: (error: Error) => void }) => void
   unregister: (sessionId: string) => void
-  fullTimeoutMs?: number
+  /** Optional initial arm. Production omits — timer starts only via resetTimeout after turn complete. */
+  initialTimeoutMs?: number | null
 }): {
   promise: Promise<T>
   resetTimeout: (timeoutMs: number) => void
   cancel: () => void
 } {
-  const fullTimeoutMs = input.fullTimeoutMs ?? VERIFIER_VERDICT_WAIT_FULL_MS
-  let activeTimeoutMs = fullTimeoutMs
+  // Same policy as task evidence wait: do not wall-clock kill an active verifier turn.
+  // ProgressGuard handles mid-turn stall; grace arms only after the turn completes.
+  const initialTimeoutMs = input.initialTimeoutMs ?? null
   let timer: ReturnType<typeof setTimeout> | undefined
   let onAbort: (() => void) | undefined
   let rejectPromise: ((error: Error) => void) | undefined
@@ -78,25 +78,29 @@ function startVerdictWait<T>(input: {
     input.unregister(input.sessionId)
   }
 
-  const scheduleTimeout = (): void => {
+  const scheduleTimeout = (timeoutMs: number): void => {
     if (timer !== undefined) clearTimeout(timer)
     timer = setTimeout(() => {
       cleanup()
       rejectPromise?.(
         createTurnError('task.verifier_evidence_timeout', {
-          params: { scope: input.scopeLabel, id: input.targetId }
+          params: { scope: input.scopeLabel, id: input.targetId },
+          detail: 'Timed out waiting for verifier completion after turn completed'
         })
       )
-    }, activeTimeoutMs)
+    }, timeoutMs)
   }
 
   const promise = new Promise<T>((resolve, reject) => {
     rejectPromise = reject
-    scheduleTimeout()
+    if (initialTimeoutMs != null) {
+      scheduleTimeout(initialTimeoutMs)
+    }
 
     onAbort = (): void => {
+      if (settled) return
       cleanup()
-      reject(createTurnError('turn.cancelled'))
+      reject(createTurnError('job.cancelled'))
     }
     input.signal.addEventListener('abort', onAbort, { once: true })
 
@@ -118,14 +122,18 @@ function startVerdictWait<T>(input: {
 
   const resetTimeout = (timeoutMs: number): void => {
     if (settled) return
-    activeTimeoutMs = timeoutMs
-    scheduleTimeout()
+    scheduleTimeout(timeoutMs)
   }
 
   const cancel = (): void => {
     if (settled) return
     cleanup()
-    rejectPromise?.(createTurnError('turn.cancelled'))
+    rejectPromise?.(
+      createTurnError('task.verifier_evidence_timeout', {
+        params: { scope: input.scopeLabel, id: input.targetId },
+        detail: 'Verifier wait cancelled by executor'
+      })
+    )
   }
 
   return { promise, resetTimeout, cancel }

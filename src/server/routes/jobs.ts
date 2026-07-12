@@ -32,8 +32,7 @@ import {
   pauseJob,
   restartJob,
   resumePausedJob,
-  continueFailedJob,
-  retryTaskJob
+  continueFailedJob
 } from '../jobs/controls'
 import { AppError } from '../error'
 import { ok } from '../response'
@@ -367,12 +366,6 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
   routes.post('/:jobId/continue', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const job = await continueFailedJob(username, c.req.param('jobId'))
-    return c.json(ok({ job }))
-  })
-
-  routes.post('/:jobId/tasks/:taskId/retry', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const job = await retryTaskJob(username, c.req.param('jobId'), c.req.param('taskId'))
     return c.json(ok({ job }))
   })
 

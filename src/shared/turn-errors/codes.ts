@@ -210,7 +210,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'settings.mcp.invalid_root_key': 'Invalid MCP config root key',
   'settings.mcp.save_failed': 'Failed to save MCP settings',
   'task.execution_failed': 'Task execution failed',
-  'task.evidence_timeout': 'Timed out waiting for task evidence',
+  'task.evidence_timeout': 'Timed out waiting for report_task_result after turn completed',
   'task.evidence_missing': 'Structured evidence package missing',
   'task.verifier_evidence_timeout': 'Timed out waiting for verifier completion signal',
   'task.infra_retry':
