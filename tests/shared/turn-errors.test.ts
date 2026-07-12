@@ -19,11 +19,11 @@ test('normalizeTurnError maps Cursor keepalive failures to acp_keepalive_timeout
   assert.match(dto.message, /cloud connection timed out/i)
 })
 
-test('normalizeTurnError maps AbortError to turn.cancelled', () => {
+test('normalizeTurnError does not guess that an unowned AbortError is a user cancellation', () => {
   const dto = normalizeTurnError(
     Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
   )
-  assert.equal(dto.code, 'turn.cancelled')
+  assert.equal(dto.code, 'turn.unknown')
 })
 
 test('TurnError round-trips through storage', () => {

@@ -1,12 +1,16 @@
 import { throwSdkTurnError } from '../errors'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
 import { buildCodexTurnPlan } from './codex-policy'
-import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot } from '../delta-emit'
 import { extractCodexReasoningText } from '../reasoning-text'
-import { recordCodexThreadItemActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { createProviderTurnScope } from '../provider-turn'
+import {
+  recordCodexThreadItemActivity,
+  assertRoleTurnReply,
+  partialCompletedChunk
+} from '../turn-scope'
+import { abortReason, createProviderTurnScope, forwardAbortSignal } from '../provider-turn'
 
 function extractAgentText(item: { type?: string; text?: string }): string | null {
   if (item.type === 'agent_message' && item.text) {
@@ -81,13 +85,11 @@ export async function* streamCodexTurn(
   const turnAbort = new AbortController()
   const externalSignal = options?.signal
   if (externalSignal?.aborted) {
-    throw TURN_CANCELLED
+    throw abortReason(externalSignal)
   }
-  externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
+  forwardAbortSignal(externalSignal, turnAbort)
 
-  const turnScope = createProviderTurnScope(input.role, options, {
-    onSoftCancel: () => turnAbort.abort()
-  })
+  const turnScope = createProviderTurnScope(input.role, options, {})
   turnScope.arm()
 
   const streamed = await thread.runStreamed(prompt, { signal: turnAbort.signal })
@@ -190,7 +192,7 @@ export async function* streamCodexTurn(
         replyChars: reply.length,
         aborted: true
       })
-      throw TURN_CANCELLED
+      throw abortReason(externalSignal ?? turnAbort.signal)
     }
     sandboxTurnDebug('codex: turn error', {
       role: plan.role,

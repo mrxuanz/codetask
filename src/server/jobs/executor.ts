@@ -166,13 +166,12 @@ export function initJobExecutor(_ctx: AppContext): void {
 
 function mergeAbortSignals(...signals: AbortSignal[]): AbortSignal {
   const controller = new AbortController()
-  const onAbort = (): void => controller.abort()
   for (const signal of signals) {
     if (signal.aborted) {
-      controller.abort()
+      controller.abort(signal.reason)
       return controller.signal
     }
-    signal.addEventListener('abort', onAbort, { once: true })
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
   }
   return controller.signal
 }
@@ -1384,7 +1383,12 @@ async function executeSingleTask(
   const evidenceWait = startTaskEvidenceWait(sessionId, job.id, taskId, jobSignal, {
     onTimeout: () => {
       evidenceTimedOut = true
-      turnAbort.abort()
+      turnAbort.abort(
+        createTurnError('task.evidence_timeout', {
+          params: { taskId },
+          detail: 'Timed out waiting for report_task_result after turn completed'
+        })
+      )
     }
   })
   const assignedReferencesMarkdown =

@@ -7,7 +7,12 @@ import { buildOpencodeMcpServers } from '../mcp'
 import { resolveOpencodeExecutable } from '../../sandbox/provider-auth/paths'
 import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
 import { throwSdkTurnError } from '../errors'
-import { createTurnError, isTurnError, TURN_CANCELLED, type TurnError } from '../../../shared/turn-errors.ts'
+import {
+  createTurnError,
+  isTurnError,
+  TURN_CANCELLED,
+  type TurnError
+} from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
@@ -16,7 +21,7 @@ import {
   partialCompletedChunk,
   recordOpencodeToolPartActivity
 } from '../turn-scope'
-import { createProviderTurnScope } from '../provider-turn'
+import { abortReason, createProviderTurnScope } from '../provider-turn'
 import {
   buildOpencodeAutoQuestionAnswers,
   resolveOpencodePermissionConfig,
@@ -394,16 +399,15 @@ export async function* streamOpencodeTurn(
   const eventAbort = new AbortController()
   const promptAbort = new AbortController()
   const abortTurn = (): void => {
-    eventAbort.abort()
-    promptAbort.abort()
+    const reason = abortReason(options?.signal)
+    eventAbort.abort(reason)
+    promptAbort.abort(reason)
   }
   options?.signal?.addEventListener('abort', abortTurn, { once: true })
   if (options?.signal?.aborted) abortTurn()
 
   const turnScope = createProviderTurnScope(input.role, options, {
-    processExit: server.processExit,
-    onSoftCancel: () => abortTurn(),
-    onHardCancel: () => server.close()
+    processExit: server.processExit
   })
 
   let sessionId = input.runtimeSessionId ?? ''
@@ -604,9 +608,7 @@ export async function* streamOpencodeTurn(
 
         if (event.type === 'session.error') {
           const props = event.properties as { error?: { message?: string } }
-          throw createOpencodeSessionTurnError(
-            props.error?.message ?? 'OpenCode session error'
-          )
+          throw createOpencodeSessionTurnError(props.error?.message ?? 'OpenCode session error')
         }
 
         if (event.type === 'session.idle') {

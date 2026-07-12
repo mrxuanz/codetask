@@ -171,7 +171,7 @@ describe('progress-guard', () => {
     }
   })
 
-  it('counts provider_event and heartbeat as progress (stream liveness)', async () => {
+  it('does not treat provider_event and heartbeat liveness as semantic progress', async () => {
     const prevWindow = process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
     const prevStalled = process.env.CODETASK_TURN_STALLED_MS
     process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = '25'
@@ -190,7 +190,7 @@ describe('progress-guard', () => {
       await new Promise((resolve) => setTimeout(resolve, 30))
       guard.recordActivity('heartbeat')
       await new Promise((resolve) => setTimeout(resolve, 30))
-      assert.equal(stalled, false)
+      assert.equal(stalled, true)
       guard.dispose()
     } finally {
       if (prevWindow === undefined) delete process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
