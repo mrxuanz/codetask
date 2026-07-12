@@ -656,15 +656,23 @@ export async function deleteJob(username: string, jobId: string): Promise<void> 
 
   const ctx = getAppContext()
   const db = getDb()
+  const threadId = job.threadId
+  const draftMessageId = job.draftMessageId
   await db.delete(threadJobs).where(eq(threadJobs.id, jobId))
 
   ctx.eventBus.clearJob(jobId)
-  await purgeJobFilesystem(ctx.dataDir, job.threadId, jobId).catch((error) => {
+  await purgeJobFilesystem(ctx.dataDir, threadId, jobId).catch((error) => {
     console.warn('[jobs] failed to purge job filesystem state', jobId, error)
   })
 
   const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
   await stopAndReleaseActiveRun('thread_job', jobId, 'deleted')
+
+  // Trigger clears threads.active_plan_id; also clear draft linkedPlanId so Unlock UI matches server.
+  const { releaseDraftAfterJobDeleted } = await import('./draft-plan')
+  await releaseDraftAfterJobDeleted(username, threadId, jobId, draftMessageId).catch((error) => {
+    console.warn('[jobs] failed to release draft after job delete', jobId, error)
+  })
 }
 
 export function markJobExecuting(jobId: string, username?: string): boolean {

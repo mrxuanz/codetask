@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import type { ConversationCore, ConversationMessage } from '@renderer/api/conversation'
@@ -51,7 +50,6 @@ const emit = defineEmits<{
   planStarted: [jobId: string]
 }>()
 
-const router = useRouter()
 const { t } = useI18n()
 
 const busy = ref(false)
@@ -405,10 +403,9 @@ async function handleLaunch(): Promise<void> {
     if (res.data.draft) {
       emit('updated', res.data.draft)
     }
+    // Stay in create/draft workspace while the tree generates — task list only
+    // after the user confirms the plan (planConfirmedAt / launch).
     emit('planStarted', res.data.job.id)
-    if (!props.embedded) {
-      await router.push({ name: 'task-detail', params: { jobId: res.data.job.id } })
-    }
   } catch (err) {
     if (payload.value.status !== 'confirmed' && payload.value.status !== 'launched') {
       launchedLocally.value = false

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
@@ -11,7 +11,7 @@ import { saveThreadAttachment } from '../conversation/attachments'
 import { getMessage, listMessages, updateMessagePayload } from '../conversation/messages'
 import { getThreadRow } from '../threads/service'
 import type { SavedJobPlan } from '../planner/plan-types'
-import { TASK_LIST_JOB_STATUSES } from './constants'
+import { PLAN_WORKSPACE_STATUSES, TASK_LIST_JOB_STATUSES } from './constants'
 import { getAppContext } from '../bootstrap'
 import { signAssetUrlsInValue } from '../auth/sign-asset-url'
 import {
@@ -96,13 +96,19 @@ export async function listUserJobs(
   const status = options?.status?.trim()
   const q = options?.q?.trim().toLowerCase()
 
-  let whereClause =
-    status && status !== 'all'
-      ? and(eq(threadJobs.username, username), eq(threadJobs.status, status))
-      : and(
-          eq(threadJobs.username, username),
-          inArray(threadJobs.status, [...TASK_LIST_JOB_STATUSES])
-        )
+  // Task list is only for jobs whose execution tree was confirmed (enqueued).
+  // Planning / plan_editing / pre-confirm failures live in the create workspace.
+  const planWorkspace = PLAN_WORKSPACE_STATUSES as readonly string[]
+  const statusFilter =
+    status && status !== 'all' && !planWorkspace.includes(status) ? status : null
+
+  let whereClause = and(
+    eq(threadJobs.username, username),
+    isNotNull(threadJobs.planConfirmedAt),
+    statusFilter
+      ? eq(threadJobs.status, statusFilter)
+      : inArray(threadJobs.status, [...TASK_LIST_JOB_STATUSES])
+  )
 
   if (q) {
     const pattern = `%${q}%`

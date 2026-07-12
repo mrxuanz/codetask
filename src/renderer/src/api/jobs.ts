@@ -109,10 +109,6 @@ export function retryTaskJob(
   })
 }
 
-export function cancelJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
-  return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/cancel`, { method: 'POST' })
-}
-
 export function restartJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
   return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/restart`, { method: 'POST' })
 }

@@ -9,10 +9,11 @@ import { getAppContext } from '../bootstrap'
 
 export function buildPlannerSystemPrompt(): string {
   return `You are an expert software architect and project manager.
-Your task is to break down a software development requirement into a structured execution plan.
+Your task is to break down a software development requirement into a structured execution plan that an AI coding worker can execute step by step.
 
-## Production quality bar (applies to EVERY task you register)
+## Production quality bar (within each task boundary)
 ${PRODUCTION_LANDING_QUALITY_BAR}
+Apply that bar to how thoroughly each small task lands its own boundary — not as a reason to merge many concerns into one oversized task.
 
 ## CRITICAL: Register the full plan through MCP tools only
 
@@ -34,10 +35,10 @@ You have access to MCP tools — their full parameter schemas are provided by th
   ### Do
   ### Done When
   In **Constraints**, include this sentence verbatim: ${PRODUCTION_LANDING_QUALITY_BAR}
-  Keep the block repair-friendly with a soft budget:
+  Keep the block repair-friendly and sized for a short worker session:
   - simple tasks: usually 600-1200 characters
   - default target: usually 900-1500 characters
-  - cross-boundary or integration tasks may stretch to roughly 2500 characters when necessary
+  - only stretch toward ~2500 characters for genuinely cross-boundary work that still fits one short session
   Reference source artifacts by path instead of copying large sections.
   Do NOT inline full file contents, long markdown templates, or draft full README/HANDOFF/VERIFICATION documents inside task contexts.
   Do NOT inline full README/HANDOFF/VERIFICATION drafts,
@@ -68,12 +69,26 @@ You have access to MCP tools — their full parameter schemas are provided by th
 The tools return a success message on success, or an error message if parameters are invalid.
 If a tool call returns an error, fix the parameters and retry before proceeding.
 
-## Planning rules — keep plans reasonable and tasks small
-- Use as many Milestones as the work truly needs; multiple milestones are fine.
-- Each Milestone may have multiple Slices; each Slice represents one demonstrable vertical increment.
-- Each Slice may have multiple small Tasks. Each Task must be completable in a single AI coding session (~10 minutes).
+## How to think about plan shape (guidance, not a rigid template)
+
+Think in layers of meaning, then size the work for short AI coding sessions:
+
+- **Milestone (M)** = a meaningful delivery theme or phase boundary (risk, dependency, or ship gate). Prefer fewer milestones. A modest feature can be a single milestone; only add more M when themes truly separate (e.g. unblock security first, then a new kernel, then migration). Do not invent extra milestones just to look structured, and do not wrap the same small outcome in multiple milestones that each get verified again.
+- **Slice (S)** = one demonstrable vertical increment under that theme — something you could show or merge as a coherent step.
+- **Task (T)** = one short worker session (roughly 10–15 minutes): a clear file/concern boundary, one main outcome, and successCriteria the worker can finish without boiling the ocean.
+
+Healthy default intuition (examples, not mandates):
+- Small / medium work → often **1 milestone**, **several slices**, and **several small tasks under each slice**.
+- Large programs → several milestones, each still broken into multiple slices with multiple small tasks — never "one phase label = one giant task".
+- Avoid the anti-pattern **1 slice → 1 oversized task** that mixes schema + behavior + tests + CI in one go. If a title needs "and / +" for unrelated concerns, it usually wants more tasks (or another slice).
+- UI example: one slice for a screen might be \`Header.vue\` task, \`List.vue\` task, then composition/wiring — not one "build the whole page" task.
+- Backend example: one slice for auth middleware might be types/context task, route header enforcement task, then focused tests — not one "ActorContext + headers + CI green" mega-task.
+- Setup-only work can stay thin (e.g. one slice with 1–2 small tasks). Implementation slices should usually carry more than a single catch-all task.
+
+Quality of decomposition matters more than counting nodes: enough slices and tasks that a worker can land each step well, without redundant milestone ceremony or duplicate verification of the same small outcome.
+
+## Planning rules
 - Prefer more small tasks over a few huge tasks. Do not create monolithic tasks that mix unrelated concerns.
-- Split UI work into one task per component or cohesive file (e.g. Header.vue, PostList.vue, App.vue composition are separate tasks).
 - Avoid documentation-only filler tasks, but do NOT collapse multiple implementation units into one task.
 - Treat the provided source artifacts as the ground truth
 - Each task context (registered via tool) must cite relevant source artifact paths
@@ -281,11 +296,13 @@ export function buildPlannerUserMessage(input: {
     '',
     PRODUCTION_LANDING_QUALITY_BAR,
     '',
-    '## Plan shape reminder',
-    '- Multiple milestones and multiple slices are fine; keep each task small (~10 minutes).',
-    '- Typical feature plan: milestone 1 = project setup (1 slice, 1-2 tasks); milestone 2+ = implementation with multiple slices and multiple tasks per slice.',
-    '- Example decomposition for a UI feature: scaffold project → implement each component/file as its own task → compose page/layout → polish styles.',
-    '- Plans with only 2 total tasks will be rejected. Implementation milestones should not collapse multiple files/components into one task.',
+    '## Plan shape reminder (how to think — examples, not a checklist to maximize)',
+    '- Prefer a shape the worker can finish in short steps: several slices, each with several ~10–15 minute tasks, under as few milestones as the work truly needs.',
+    '- Modest scope often fits one milestone with multiple slices and multiple tasks per slice. Do not invent extra milestones for a small job, and do not verify the same small outcome twice via redundant milestone wrapping.',
+    '- Example (UI): one feature milestone → slices for layout/list/detail → tasks per component/file, then a thin composition task.',
+    '- Example (backend): one theme milestone → slices for types/middleware, route wiring, focused tests → separate small tasks inside each slice — not one "schema + behavior + CI" mega-task under a lonely slice.',
+    '- Anti-pattern to avoid: many phase-named slices that each contain only one oversized task. If a task title needs "and" for unrelated concerns, split further.',
+    '- Plans with only 2 total tasks will be rejected by the system. That floor is a safety net — aim for a natural decomposition, not the minimum.',
     '',
     'Call register_task_context for every task, then call register_plan once with the final success-criteria-oriented structure.',
     'Each milestone, slice, and task needs a detailed successCriteria string (observable outcomes, key files, completion signals).',

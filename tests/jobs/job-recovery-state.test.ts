@@ -147,7 +147,7 @@ describe('deriveJobRecoveryState', () => {
     assert.equal(state.recovery.reason, 'task_infra_failure')
     assert.equal(state.recovery.nextAction, 'retry_failed_task')
     assert.equal(state.recovery.autoRetryAttempt, 2)
-    assert.ok(state.availableActions.includes('continue'))
+    assert.ok(!state.availableActions.includes('continue'))
     assert.ok(state.availableActions.includes('retry_failed_task'))
     assert.ok(state.availableActions.includes('restart'))
   })
@@ -223,7 +223,7 @@ describe('deriveJobRecoveryState', () => {
     assert.ok(state.availableActions.includes('restart'))
   })
 
-  it('offers pause and cancel for running jobs', () => {
+  it('offers pause for running jobs without cancel', () => {
     const state = deriveJobRecoveryState(
       baseJob({
         status: 'running',
@@ -251,6 +251,6 @@ describe('deriveJobRecoveryState', () => {
     )
 
     assert.equal(state.lifecycle, 'running')
-    assert.deepEqual(state.availableActions, ['cancel', 'pause', 'delete'])
+    assert.deepEqual(state.availableActions, ['pause', 'delete'])
   })
 })
