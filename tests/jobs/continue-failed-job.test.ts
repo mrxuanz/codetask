@@ -198,3 +198,40 @@ test('prepareContinueFailedExecution resets infra retry tasks to retry-queued', 
   assert.equal(task?.status, 'queued')
   assert.equal(task?.executionStatus, 'retry-queued')
 })
+
+test('prepareContinueFailedExecution resumes slice gate failures without restart', () => {
+  const job = failedJob()
+  job.lastError = createTurnError('task.terminal_failure', {
+    params: { taskId: 'm1-s1' }
+  }).toDto()
+  job.taskProgress = {
+    ...job.taskProgress,
+    progressCode: 'execution.slice_blocked',
+    progressParams: { id: 'm1-s1' },
+    slices: [
+      {
+        id: 'm1-s1',
+        runtimeStatus: 'verification-blocked',
+        verificationStatus: 'blocked'
+      }
+    ],
+    tasks: job.taskProgress.tasks.map((task) => ({
+      ...task,
+      status: 'completed' as const,
+      executionStatus: 'completed' as const,
+      evidence: null,
+      errorMessage: null
+    })),
+    repairGenerations: {
+      'slice:m1-s1': 3
+    }
+  }
+
+  const prepared = prepareContinueFailedExecution(job, plan)
+  assert.equal(prepared.taskProgress.phase, 'running')
+  assert.equal(prepared.taskProgress.status, 'running')
+  assert.equal(prepared.taskProgress.progressCode, 'execution.resuming')
+  const slice = prepared.taskProgress.slices?.find((item) => item.id === 'm1-s1')
+  assert.equal(slice?.verificationStatus, 'ready-for-verification')
+  assert.equal(prepared.taskProgress.repairGenerations?.['slice:m1-s1'], undefined)
+})

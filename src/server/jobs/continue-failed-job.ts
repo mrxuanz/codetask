@@ -1,10 +1,14 @@
 import type { TaskProgressDto, TaskProgressItemDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import type { TurnErrorCode } from '../../shared/turn-errors/codes'
-import { deriveJobRecoveryState } from '../../shared/job-recovery-state'
+import {
+  deriveJobRecoveryState,
+  isGateFailureProgressCode
+} from '../../shared/job-recovery-state'
 import { coerceTurnErrorField } from '../../shared/turn-errors/storage'
 import { createTurnError } from '../../shared/turn-errors/turn-error.ts'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
+import { repairGenerationKey } from './repair-tasks'
 import type { TaskEvidencePacket } from './task-blocker/types'
 import {
   applyTaskInfraRetryItem,
@@ -14,6 +18,7 @@ import {
   injectPrepTasksForRecovery,
   injectRepairTasksForRecovery,
   resetTaskItemForManualRetry,
+  resetTaskRecoveryCounters,
   resolveTaskRecoveryAction
 } from './task-blocker'
 
@@ -54,6 +59,11 @@ const MANUAL_CONTINUE_ERROR_CODES = new Set<TurnErrorCode>([
   'job.cancelled',
   'job.paused',
   'task.execution_failed',
+  'task.evidence_timeout',
+  'task.evidence_missing',
+  'task.infra_retry',
+  'task.infra_retry_exhausted',
+  'task.terminal_failure',
   'turn.timed_out',
   'turn.incomplete',
   'turn.empty_reply'
@@ -64,12 +74,22 @@ function readTaskErrorCode(task: TaskProgressItemDto): TurnErrorCode | null {
   return coerceTurnErrorField(task.errorMessage)?.code ?? null
 }
 
+function isHumanBlockedTask(task: TaskProgressItemDto): boolean {
+  const kind = task.evidence?.recovery?.kind ?? task.evidence?.blockerKind
+  return kind === 'dependency-human' || task.evidence?.recovery?.action === 'pause-human'
+}
+
 function isExecutionFailureRetryable(task: TaskProgressItemDto): boolean {
   if (task.status !== 'failed') return false
-  if (task.executionStatus === 'blocked') return false
-  if (task.evidence?.recovery?.action === 'terminal-fail') return false
+  if (task.executionStatus === 'blocked' && isHumanBlockedTask(task)) return false
   if (task.evidence?.recovery?.action === 'pause-human') return false
+  if (isHumanBlockedTask(task)) return false
   if (task.executionStatus === 'failed') return true
+  if (task.evidence?.recovery?.action === 'terminal-fail') {
+    // Manual continue after auto-retry / generation exhaustion: re-queue from breakpoint.
+    const kind = task.evidence?.recovery?.kind ?? task.evidence?.blockerKind
+    return kind === 'infra' || kind == null
+  }
   const code = readTaskErrorCode(task)
   return code !== null && MANUAL_CONTINUE_ERROR_CODES.has(code)
 }
@@ -80,10 +100,15 @@ function prepareManualTaskRetry(
   failedTaskId: string
 ): { plan: SavedJobPlan; taskProgress: TaskProgressDto } {
   const items = resetTaskItemForManualRetry(taskProgress.tasks, failedTaskId)
+  const withCounters = resetTaskRecoveryCounters({ ...taskProgress, tasks: items }, failedTaskId, [
+    'infra',
+    'prep',
+    'repair'
+  ])
   return {
     plan,
     taskProgress: {
-      ...taskProgress,
+      ...withCounters,
       tasks: items,
       phase: 'running',
       status: 'running',
@@ -108,6 +133,85 @@ function syntheticPacket(task: TaskProgressItemDto): TaskEvidencePacket {
   }
 }
 
+function readGateId(job: ThreadJobDto): string | null {
+  const fromParams = job.taskProgress.progressParams?.id
+  if (typeof fromParams === 'string' && fromParams.trim()) return fromParams
+  const lastErrorDto =
+    typeof job.lastError === 'object' && job.lastError
+      ? job.lastError
+      : coerceTurnErrorField(job.lastError)
+  const fromError = lastErrorDto?.params?.taskId
+  if (typeof fromError === 'string' && fromError.trim()) return fromError
+  return null
+}
+
+function resetGateVerificationInProgress(
+  taskProgress: TaskProgressDto,
+  gateId: string
+): TaskProgressDto {
+  const isMilestone = /^m\d+$/i.test(gateId)
+  const slices = taskProgress.slices?.map((slice) => {
+    if (slice.id !== gateId && !(isMilestone && slice.id.startsWith(`${gateId}-`))) {
+      return { ...slice }
+    }
+    return {
+      ...slice,
+      runtimeStatus: 'ready-for-verification',
+      verificationStatus: 'ready-for-verification'
+    }
+  })
+  const milestones = taskProgress.milestones?.map((milestone) => {
+    if (milestone.id !== gateId) return { ...milestone }
+    return {
+      ...milestone,
+      verificationStatus: 'ready-for-verification'
+    }
+  })
+
+  const repairGenerations = { ...(taskProgress.repairGenerations ?? {}) }
+  if (isMilestone) {
+    delete repairGenerations[repairGenerationKey('milestone', gateId)]
+  } else {
+    delete repairGenerations[repairGenerationKey('slice', gateId)]
+  }
+
+  return {
+    ...taskProgress,
+    slices,
+    milestones,
+    repairGenerations,
+    phase: 'running',
+    status: 'running',
+    message: null,
+    progressCode: 'execution.resuming',
+    progressParams: { id: gateId },
+    currentTaskId: null
+  }
+}
+
+function prepareGateContinueExecution(
+  job: ThreadJobDto,
+  plan: SavedJobPlan
+): { plan: SavedJobPlan; taskProgress: TaskProgressDto } {
+  const gateId = readGateId(job)
+  if (!gateId) {
+    throw createTurnError('task.execution_failed', {
+      detail: 'No gate id to continue from verification failure'
+    })
+  }
+
+  let taskProgress: TaskProgressDto = {
+    ...job.taskProgress,
+    tasks: job.taskProgress.tasks.map((task) => ({ ...task }))
+  }
+  taskProgress = resetGateVerificationInProgress(taskProgress, gateId)
+
+  return {
+    plan: clonePlan(plan),
+    taskProgress
+  }
+}
+
 export function prepareContinueFailedExecution(
   job: ThreadJobDto,
   plan: SavedJobPlan
@@ -117,6 +221,10 @@ export function prepareContinueFailedExecution(
     throw createTurnError('task.execution_failed', {
       detail: 'Job failure is not recoverable'
     })
+  }
+
+  if (isGateFailureProgressCode(job.taskProgress.progressCode)) {
+    return prepareGateContinueExecution(job, plan)
   }
 
   const currentPlan = clonePlan(plan)
@@ -175,51 +283,72 @@ export function prepareContinueFailedExecution(
   }
 
   const failureKind = state.failure.kind
-  if (failureKind === 'human_blocked') {
+  if (failureKind === 'human_blocked' || isHumanBlockedTask(task)) {
     throw createTurnError('task.terminal_failure', {
       params: { taskId: failedTaskId },
       detail: state.failure.message ?? 'Human intervention required'
     })
   }
 
+  // Class A: timeout / false-cancel / infra / exhausted auto-retry → re-queue from breakpoint.
   if (isExecutionFailureRetryable(task)) {
     return prepareManualTaskRetry(currentPlan, taskProgress, failedTaskId)
   }
 
   if (failureKind === 'infra_retryable' || task.executionStatus === 'retry-queued') {
-    const items = resetTaskItemForManualRetry(taskProgress.tasks, failedTaskId).map((item) =>
-      item.id === failedTaskId
-        ? { ...item, status: 'queued' as const, executionStatus: 'retry-queued' }
-        : item
-    )
-    return {
-      plan: currentPlan,
-      taskProgress: {
-        ...taskProgress,
-        tasks: items,
-        phase: 'running',
-        status: 'running',
-        message: null,
-        progressCode: 'execution.recovery_infra_retry',
-        progressParams: { id: failedTaskId },
-        currentTaskId: null,
-        total: items.length
+    const looksInfra =
+      task.executionStatus === 'retry-queued' ||
+      task.evidence?.blockerKind === 'infra' ||
+      task.evidence?.recovery?.kind === 'infra'
+    if (looksInfra) {
+      const items = resetTaskItemForManualRetry(taskProgress.tasks, failedTaskId).map((item) =>
+        item.id === failedTaskId
+          ? { ...item, status: 'queued' as const, executionStatus: 'retry-queued' }
+          : item
+      )
+      const withCounters = resetTaskRecoveryCounters(
+        { ...taskProgress, tasks: items },
+        failedTaskId,
+        ['infra']
+      )
+      return {
+        plan: currentPlan,
+        taskProgress: {
+          ...withCounters,
+          tasks: items,
+          phase: 'running',
+          status: 'running',
+          message: null,
+          progressCode: 'execution.recovery_infra_retry',
+          progressParams: { id: failedTaskId },
+          currentTaskId: null,
+          total: items.length
+        }
       }
     }
   }
 
+  // Class B: structural blocker → inject prep/repair ahead of the blocked task.
+  // Reset generation counters so manual continue can re-inject after exhaustion.
+  taskProgress = resetTaskRecoveryCounters(taskProgress, failedTaskId, ['infra', 'prep', 'repair'])
   const packet = syntheticPacket(task)
+
   const recovery = resolveTaskRecoveryAction({
     packet,
     taskId: failedTaskId,
     taskProgress
   })
 
-  if (recovery.action === 'terminal-fail' || recovery.action === 'pause-human') {
+  if (recovery.action === 'pause-human') {
     throw createTurnError('task.terminal_failure', {
       params: { taskId: failedTaskId },
       detail: recovery.message
     })
+  }
+
+  if (recovery.action === 'terminal-fail') {
+    // Last resort: still re-queue so Continue is never a dead end for non-human failures.
+    return prepareManualTaskRetry(currentPlan, taskProgress, failedTaskId)
   }
 
   if (recovery.action === 'infra-retry') {
@@ -336,5 +465,5 @@ export function prepareContinueFailedExecution(
     }
   }
 
-  throw createTurnError('task.execution_failed', { detail: 'Unable to continue execution' })
+  return prepareManualTaskRetry(currentPlan, taskProgress, failedTaskId)
 }

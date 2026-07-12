@@ -119,7 +119,7 @@ import {
   resolveTaskRecoveryAction,
   sleepMs
 } from './task-blocker'
-import { MAX_PAUSING_TURN_ATTEMPTS, TASK_EVIDENCE_GRACE_MS, TASK_EVIDENCE_WAIT_FULL_MS } from './recovery-limits'
+import { MAX_PAUSING_TURN_ATTEMPTS, TASK_EVIDENCE_GRACE_MS } from './recovery-limits'
 import { resolveVerifierInfraRecovery, withVerifierInfraAttempt } from './verification-recovery'
 import {
   createTurnError,
@@ -989,6 +989,7 @@ function startTaskEvidenceWait(
   taskId: string,
   signal: AbortSignal,
   options?: {
+    /** Optional initial arm. Production omits this — timer starts only via resetTimeout after turn complete. */
     timeoutMs?: number
     onTimeout?: () => void
   }
@@ -997,9 +998,11 @@ function startTaskEvidenceWait(
   cancel: () => void
   resetTimeout: (timeoutMs: number) => void
 } {
-  const defaultTimeout =
-    options?.timeoutMs ?? getTaskEvidenceWaitTimeoutForTests() ?? TASK_EVIDENCE_WAIT_FULL_MS
-  let activeTimeoutMs = defaultTimeout
+  // Do NOT arm a wall-clock kill when the task starts. Active turns are guarded by
+  // ProgressGuard (60min idle stall). This wait only times out after the turn
+  // completes without report_task_result (see resetTimeout → grace).
+  // Test override shortens post-complete grace only — never mid-turn kill.
+  const initialTimeoutMs = options?.timeoutMs ?? null
   let timer: ReturnType<typeof setTimeout> | undefined
   let onAbort: (() => void) | undefined
   let rejectPromise: ((error: Error) => void) | undefined
@@ -1013,7 +1016,7 @@ function startTaskEvidenceWait(
     unregisterTaskMcpSession(sessionId)
   }
 
-  const scheduleTimeout = (): void => {
+  const scheduleTimeout = (timeoutMs: number): void => {
     if (timer !== undefined) clearTimeout(timer)
     timer = setTimeout(() => {
       cleanup()
@@ -1021,18 +1024,22 @@ function startTaskEvidenceWait(
       rejectPromise?.(
         createTurnError('task.evidence_timeout', {
           params: { taskId },
-          detail: 'Timed out waiting for report_task_result'
+          detail: 'Timed out waiting for report_task_result after turn completed'
         })
       )
-    }, activeTimeoutMs)
+    }, timeoutMs)
   }
 
   const promise = new Promise<TaskEvidencePacket>((resolve, reject) => {
     rejectPromise = reject
 
-    scheduleTimeout()
+    if (initialTimeoutMs != null) {
+      scheduleTimeout(initialTimeoutMs)
+    }
 
     onAbort = (): void => {
+      // Timeout path settles first then aborts the turn; do not overwrite evidence_timeout.
+      if (settled) return
       cleanup()
       reject(createTurnError('job.cancelled'))
     }
@@ -1060,13 +1067,18 @@ function startTaskEvidenceWait(
   const cancel = (): void => {
     if (settled) return
     cleanup()
-    rejectPromise?.(createTurnError('turn.cancelled'))
+    // Not user cancel — wait was torn down by the executor (turn ended/errored).
+    rejectPromise?.(
+      createTurnError('task.evidence_missing', {
+        params: { taskId },
+        detail: 'Evidence wait cancelled by executor'
+      })
+    )
   }
 
   const resetTimeout = (timeoutMs: number): void => {
     if (settled) return
-    activeTimeoutMs = timeoutMs
-    scheduleTimeout()
+    scheduleTimeout(timeoutMs)
   }
 
   return { promise, cancel, resetTimeout }
@@ -1368,8 +1380,12 @@ async function executeSingleTask(
   }
 
   const mcpUrl = buildTaskWorkerMcpUrl({ sessionId, jobId: job.id, taskId })
+  let evidenceTimedOut = false
   const evidenceWait = startTaskEvidenceWait(sessionId, job.id, taskId, jobSignal, {
-    onTimeout: () => turnAbort.abort()
+    onTimeout: () => {
+      evidenceTimedOut = true
+      turnAbort.abort()
+    }
   })
   const assignedReferencesMarkdown =
     referenceIds.length > 0 && referenceManifest
@@ -1458,6 +1474,22 @@ async function executeSingleTask(
         lastError: cancelled.error,
         taskProgress: { ...taskProgress, tasks: itemsNext }
       }
+    }
+
+    // Evidence wait timeout aborts the agent turn; do not mislabel AbortError as user cancel.
+    if (evidenceTimedOut) {
+      return buildTaskInfraRecoveryResult({
+        items: itemsNext,
+        taskId,
+        taskProgress,
+        plan,
+        gate,
+        message: 'Timed out waiting for report_task_result',
+        error: createTurnError('task.evidence_timeout', {
+          params: { taskId },
+          detail: 'Timed out waiting for report_task_result'
+        })
+      })
     }
 
     const message = turnErrorMessage(error)

@@ -100,15 +100,6 @@ export function continueJob(jobId: string): Promise<ApiResponse<{ job: ThreadJob
   return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/continue`, { method: 'POST' })
 }
 
-export function retryTaskJob(
-  jobId: string,
-  taskId: string
-): Promise<ApiResponse<{ job: ThreadJobDto }>> {
-  return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/tasks/${taskId}/retry`, {
-    method: 'POST'
-  })
-}
-
 export function restartJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
   return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/restart`, { method: 'POST' })
 }

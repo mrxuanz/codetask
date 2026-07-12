@@ -164,7 +164,6 @@ export default {
         pause: '一時停止',
         resume: '再開',
         continue: '続行',
-        retryTask: 'サブタスクを再試行',
         restart: '再起動',
         cancel: 'キャンセル',
         delete: '削除'

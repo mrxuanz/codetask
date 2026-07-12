@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
-import { retryTaskJob, type ThreadJob } from '@renderer/api/jobs'
+import { type ThreadJob } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import TaskParameterPanel from '@renderer/components/tasks/TaskParameterPanel.vue'
@@ -97,13 +97,6 @@ const hasAction = (action: string): boolean => jobHasAction(selectedJob.value, a
 
 const canPause = computed(() => hasAction('pause'))
 const canContinue = computed(() => hasAction('continue'))
-const canRetryTask = computed(() => {
-  if (!hasAction('retry_failed_task')) return false
-  const failedTaskId = selectedJob.value?.recovery?.failedTaskId
-  if (!failedTaskId) return false
-  if (selectedTask.value) return selectedTask.value.id === failedTaskId
-  return true
-})
 const canRestart = computed(() => hasAction('restart'))
 const canDelete = computed(() => hasAction('delete'))
 
@@ -120,23 +113,6 @@ function handleSelectTask(task: UnifiedTaskNode): void {
 
 function closeTaskParameters(): void {
   taskParametersOpen.value = false
-}
-
-async function handleRetryTask(): Promise<void> {
-  const job = selectedJob.value
-  if (!job) return
-  const taskId = selectedTask.value?.id ?? job.recovery?.failedTaskId
-  if (!taskId) return
-  runningAction.value = 'retry_task'
-  actionError.value = null
-  try {
-    await retryTaskJob(job.id, taskId)
-    await store.loadDetail(job.id)
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : 'Failed to retry task'
-  } finally {
-    runningAction.value = null
-  }
 }
 
 onMounted(() => {
@@ -306,15 +282,6 @@ watch(searchQuery, () => void debouncedSearch())
                     @click="store.handleContinue()"
                   >
                     {{ t('workspace.tasks.actions.continue') }}
-                  </Button>
-                  <Button
-                    v-if="canRetryTask"
-                    size="sm"
-                    variant="outline"
-                    :disabled="runningAction === 'retry_task'"
-                    @click="handleRetryTask()"
-                  >
-                    {{ t('workspace.tasks.actions.retryTask') }}
                   </Button>
                   <Button
                     v-if="canRestart"
