@@ -90,6 +90,13 @@ export class ProgressGuard {
       case 'tool_updated':
       case 'text_delta':
       case 'thinking_delta':
+      // Provider stream liveness — must count. OpenCode/ACP often emit only
+      // provider_event / heartbeat while a model thinks or a subagent runs;
+      // ignoring them made ProgressGuard treat healthy turns as stalled.
+      case 'provider_event':
+      case 'heartbeat':
+      case 'mcp_call':
+      case 'shell_running':
         this._windowHadActivity = true
         break
     }
