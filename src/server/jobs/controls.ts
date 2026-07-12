@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import { isPlanningJobStatus } from '@shared/design-session'
 import { deriveJobRecoveryState } from '@shared/job-recovery-state'
 import { JOB_PAUSED } from '../../shared/turn-errors.ts'
-import { resetTaskItemForManualRetry, resetTaskRecoveryCounters } from './task-blocker'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
@@ -398,96 +397,6 @@ async function continueJobExecution(
 
 export async function continueJob(username: string, jobId: string): Promise<ThreadJobDto> {
   return continueFailedJob(username, jobId)
-}
-
-export async function retryTaskJob(
-  username: string,
-  jobId: string,
-  taskId: string
-): Promise<ThreadJobDto> {
-  const job = await getUserJob(username, jobId)
-  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
-  if (isJobExecuting(jobId)) {
-    throw AppError.badRequest('Job is executing; cannot retry subtask now', 'job.invalid_status', {
-      status: job.status
-    })
-  }
-
-  const task = job.taskProgress.tasks.find((item) => item.id === taskId)
-  if (!task) throw AppError.notFound('Subtask not found', 'job.subtask_not_found')
-  const state = deriveJobRecoveryState(job)
-  const canRetry =
-    state.availableActions.includes('retry_failed_task') &&
-    (task.status === 'failed' ||
-      task.executionStatus === 'retry-queued' ||
-      task.executionStatus === 'waiting-on-repair')
-  if (!canRetry) {
-    throw AppError.badRequest(
-      'This subtask cannot be retried in the current job state',
-      'job.invalid_status',
-      { status: job.status }
-    )
-  }
-
-  const plan = await loadPlan(jobId)
-  if (!plan?.tasks?.length) {
-    throw AppError.badRequest('Job plan is empty', 'job.plan_empty')
-  }
-
-  const items = resetTaskItemForManualRetry(job.taskProgress.tasks, taskId)
-  let taskProgress = resetTaskRecoveryCounters({ ...job.taskProgress, tasks: items }, taskId, [
-    'infra'
-  ])
-  taskProgress = {
-    ...taskProgress,
-    phase: 'running',
-    status: 'running',
-    currentTaskId: null,
-    message: null,
-    progressCode: 'execution.recovery_infra_retry',
-    progressParams: { id: taskId },
-    tasks: items
-  }
-
-  const claim = await claimJobSlotOrEnqueue(username, jobId)
-  if (claim === 'queued') {
-    const queued = await updateJobRowForSnapshot(jobId, {
-      status: 'pending',
-      taskProgress,
-      lastError: null
-    })
-    if (!queued) throw AppError.internal('Failed to retry subtask', 'job.invalid_status')
-    emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: queued } })
-    return queued
-  }
-
-  const leased = await acquireExecutionLease(username, jobId)
-  if (!leased) {
-    const queued = await updateJobRowForSnapshot(jobId, {
-      status: 'pending',
-      taskProgress,
-      lastError: null
-    })
-    if (!queued) throw AppError.internal('Failed to retry subtask', 'job.invalid_status')
-    emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: queued } })
-    return queued
-  }
-
-  executionRuntime().setControl(jobId, 'running')
-  const updated = await updateJobRowForSnapshot(jobId, {
-    status: 'running',
-    taskProgress,
-    lastError: null
-  })
-  if (!updated) throw AppError.internal('Failed to retry subtask', 'job.invalid_status')
-
-  emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress } })
-  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-
-  await requestJobExecutionResume(username, jobId)
-  return updated
 }
 
 export async function cancelJob(username: string, jobId: string): Promise<ThreadJobDto> {

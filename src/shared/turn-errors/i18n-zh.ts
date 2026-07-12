@@ -52,7 +52,7 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'settings.mcp.invalid_root_key': 'MCP 配置根键无效',
   'settings.mcp.save_failed': '保存 MCP 设置失败',
   'task.execution_failed': '任务执行失败',
-  'task.evidence_timeout': '等待任务证据超时',
+  'task.evidence_timeout': '任务结束后等待交卷超时（未收到 report_task_result）',
   'task.evidence_missing': '缺少结构化证据包',
   'task.infra_retry': '任务工具层故障，自动重试 ({attempt}/{maxAttempts})',
   'task.infra_retry_exhausted': '任务工具层故障重试已达上限',

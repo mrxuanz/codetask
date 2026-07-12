@@ -186,7 +186,6 @@ export default {
         pause: 'Pause',
         resume: 'Resume',
         continue: 'Continue',
-        retryTask: 'Retry task',
         restart: 'Restart',
         cancel: 'Cancel',
         delete: 'Delete'

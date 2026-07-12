@@ -61,7 +61,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'settings.mcp.invalid_root_key': 'MCP 設定のルートキーが無効です',
   'settings.mcp.save_failed': 'MCP 設定の保存に失敗しました',
   'task.execution_failed': 'タスク実行に失敗しました',
-  'task.evidence_timeout': 'タスク証跡の待機がタイムアウトしました',
+  'task.evidence_timeout': 'ターン完了後の証跡提出待機がタイムアウトしました',
   'task.evidence_missing': '構造化証跡パッケージがありません',
   'task.infra_retry': 'ツール層のインフラ障害。自動再試行 ({attempt}/{maxAttempts})',
   'task.infra_retry_exhausted': 'ツール層インフラの再試行上限に達しました',
