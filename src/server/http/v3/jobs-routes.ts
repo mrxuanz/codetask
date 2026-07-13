@@ -123,21 +123,29 @@ export function createJobsRoutes(
     },
 
     async getJob(request: HttpRequest, actor: ActorContext): Promise<HttpResponse> {
-      const job = queryService.getJob(request.params.id, actor)
+      const job = await queryService.getTaskJob(request.params.id, actor)
       if (!job) {
         return { status: 404, body: { error: 'Job not found' } }
       }
       return {
         status: 200,
         body: { job },
-        headers: { 'ETag': `"${job.stateRevision}"` }
+        headers:
+          typeof job.stateRevision === 'number'
+            ? { 'ETag': `"${job.stateRevision}"` }
+            : undefined
       }
     },
 
     async listJobs(request: HttpRequest, actor: ActorContext): Promise<HttpResponse> {
-      const projectId = request.query?.projectId
-      const jobs = queryService.listJobs(actor, projectId)
-      return { status: 200, body: { jobs } }
+      const result = await queryService.listTaskJobs(actor, {
+        projectId: request.query?.projectId,
+        status: request.query?.status,
+        page: request.query?.page ? Number.parseInt(request.query.page, 10) : undefined,
+        limit: request.query?.limit ? Number.parseInt(request.query.limit, 10) : undefined,
+        q: request.query?.q
+      })
+      return { status: 200, body: result }
     }
   }
 }

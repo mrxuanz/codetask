@@ -54,7 +54,12 @@ export async function resumeJobQueueForUser(username: string): Promise<void> {
 export async function resumeJobQueuesAfterServerReady(supervisor?: {
   ensureReady(): Promise<void>
 }): Promise<void> {
-  await ensureStartupWorkloadReady()
+  try {
+    await ensureStartupWorkloadReady()
+  } catch (error) {
+    console.warn('[jobs] startup workload gate failed; queue resume skipped', error)
+    return
+  }
   if (supervisor) {
     try {
       await supervisor.ensureReady()

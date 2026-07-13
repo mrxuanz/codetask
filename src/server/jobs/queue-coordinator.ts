@@ -7,7 +7,7 @@ import {
   findInMemoryExecutionOccupant
 } from './workload-slot'
 
-async function startPendingJob(username: string, jobId: string): Promise<void> {
+export async function startPendingExecutionJob(username: string, jobId: string): Promise<void> {
   const job = await getUserJob(username, jobId)
   if (!job || job.status !== 'pending') return
   if (!job.plan?.tasks?.length) {
@@ -76,7 +76,7 @@ export async function advanceExecutionQueue(username: string): Promise<void> {
   const nextId = await findNextPendingJobId(username)
   if (!nextId) return
 
-  await startPendingJob(username, nextId)
+  await startPendingExecutionJob(username, nextId)
 }
 
 export async function advancePlanningQueue(username: string): Promise<void> {

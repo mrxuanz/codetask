@@ -137,13 +137,13 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     ]
   })
 
-  const startupReconcile = trackStartupTask(
-    startupCoordinator.ensureReady().catch((error: unknown) => {
-      bootstrapLogger.error('startup coordinator failed', {
-        error: error instanceof Error ? error.message : String(error)
-      })
+  const startupReconcile = startupCoordinator.ensureReady()
+  void startupReconcile.catch((error: unknown) => {
+    bootstrapLogger.error('startup coordinator failed', {
+      error: error instanceof Error ? error.message : String(error)
     })
-  )
+  })
+  trackStartupTask(startupReconcile.catch(() => undefined))
 
   bindStartupWorkloadGate(startupReconcile)
 
@@ -174,7 +174,17 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
   startRetentionJanitor()
   startAuthJanitor()
-  startWorkloadReconciler()
+  trackStartupTask(
+    startupReconcile
+      .then(() => {
+        startWorkloadReconciler()
+      })
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('workload reconciler startup skipped', {
+          error: error instanceof Error ? error.message : String(error)
+        })
+      })
+  )
 
   trackStartupTask(
     import('./agent-runtime/cursor-acp/conversation-cursor-reaper')
@@ -192,10 +202,21 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   )
 
   trackStartupTask(
-    import('./jobs/executor')
+    startupReconcile
+      .then(() => import('./jobs/executor'))
       .then((module) => module.initJobExecutor(ctx))
       .catch((error: unknown) => {
         bootstrapLogger.warn('executor startup failed', {
+          error: error instanceof Error ? error.message : String(error)
+        })
+      })
+  )
+
+  trackStartupTask(
+    import('./application/control-plane-runtime')
+      .then((module) => module.bootstrapControlPlaneRuntime(ctx, startupReconcile))
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('control-plane runtime startup failed', {
           error: error instanceof Error ? error.message : String(error)
         })
       })
@@ -219,6 +240,9 @@ export async function resetAppContextForTests(): Promise<void> {
   const { stopConversationCursorReaperForTests } =
     await import('./agent-runtime/cursor-acp/conversation-cursor-reaper')
   stopConversationCursorReaperForTests()
+
+  const { resetControlPlaneRuntimeForTests } = await import('./application/control-plane-runtime')
+  await resetControlPlaneRuntimeForTests()
 
   if (appContext) {
     await Promise.allSettled([runRetentionJanitorPass(), runAuthJanitorPass()])

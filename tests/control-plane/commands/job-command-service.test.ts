@@ -15,6 +15,7 @@ import {
   hashCanonicalCommand
 } from '../../../src/server/application/utils/canonical-json'
 import type { RuntimeController } from '../../../src/server/application/ports/runtime-controller'
+import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:')
@@ -28,6 +29,7 @@ function seedJob(
   db: Database.Database,
   opts: {
     id?: string
+    username?: string
     state?: string
     stateRevision?: number
     controlIntent?: string
@@ -37,6 +39,12 @@ function seedJob(
   } = {}
 ): void {
   const now = Date.now()
+  const jobId = opts.id ?? 'job-1'
+  seedOwnedThreadJob(db, {
+    jobId,
+    username: opts.username ?? 'u1',
+    status: opts.state === 'execution_running' ? 'running' : 'pending'
+  })
   db.prepare(
     `INSERT INTO control_jobs (
       id, thread_id, project_id, draft_message_id, state, state_revision,
@@ -44,10 +52,10 @@ function seedJob(
       created_at_ms, updated_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    opts.id ?? 'job-1',
-    'thread-1',
-    'project-1',
-    'draft-1',
+    jobId,
+    `thread-${jobId}`,
+    `project-${jobId}`,
+    `draft-${jobId}`,
     opts.state ?? 'execution_queued',
     opts.stateRevision ?? 1,
     opts.controlIntent ?? 'none',
@@ -231,6 +239,20 @@ describe('JobCommandService', () => {
             idempotencyKey: randomUUID()
           }),
         /job.revision_conflict/
+      )
+    })
+
+    it('should reject commands for another users job', async () => {
+      seedJob(rawDb, { state: 'execution_queued', stateRevision: 1, username: 'owner-1' })
+      await assert.rejects(
+        () =>
+          service.requestPause({
+            actor: { username: 'owner-2', requestId: 'r1' },
+            jobId: 'job-1',
+            expectedRevision: 1,
+            idempotencyKey: randomUUID()
+          }),
+        /job.not_found/
       )
     })
 

@@ -26,6 +26,22 @@ import {
   LegacyApiBlockedError
 } from '../../../scripts/control-plane/legacy-api-guard'
 
+const UNSAFE_AUTHORITATIVE_ENV = 'CODETASK_ALLOW_UNSAFE_V3_AUTHORITATIVE'
+
+function withUnsafeAuthoritative<T>(fn: () => T): T {
+  const previous = process.env[UNSAFE_AUTHORITATIVE_ENV]
+  process.env[UNSAFE_AUTHORITATIVE_ENV] = '1'
+  try {
+    return fn()
+  } finally {
+    if (previous === undefined) {
+      delete process.env[UNSAFE_AUTHORITATIVE_ENV]
+    } else {
+      process.env[UNSAFE_AUTHORITATIVE_ENV] = previous
+    }
+  }
+}
+
 describe('Migration copy', () => {
   it('should map legacy running job to failed/recoverable', () => {
     const result = mapLegacyJob({ id: 'job-1', status: 'running' })
@@ -125,7 +141,7 @@ describe('Migration CLI helpers', () => {
 })
 
 describe('Cutover marker', () => {
-  it('should allow preparing -> copied -> v3_authoritative transitions', () => {
+  it('should allow preparing -> copied and block authoritative by default', () => {
     const preparing = createInitialMarker()
     assert.equal(canUpgradeTo(preparing, 'copied'), true)
     assert.equal(canUpgradeTo(preparing, 'v3_authoritative'), false)
@@ -135,6 +151,13 @@ describe('Cutover marker', () => {
     if (copied.ok) {
       assert.equal(copied.marker.value, 'copied')
       assert.equal(canUpgradeTo(copied.marker, 'v3_authoritative'), true)
+      const blockedAuthoritative = upgradeMarker(copied.marker, 'v3_authoritative', {
+        hasConflicts: false
+      })
+      assert.equal(blockedAuthoritative.ok, false)
+      if (!blockedAuthoritative.ok) {
+        assert.ok(blockedAuthoritative.reason.includes('migration.authoritative_disabled'))
+      }
     }
   })
 
@@ -191,7 +214,9 @@ describe('Legacy API', () => {
     assert.equal(copied.ok, true)
     if (!copied.ok) return
 
-    const authoritative = upgradeMarker(copied.marker, 'v3_authoritative', { hasConflicts: false })
+    const authoritative = withUnsafeAuthoritative(() =>
+      upgradeMarker(copied.marker, 'v3_authoritative', { hasConflicts: false })
+    )
     assert.equal(authoritative.ok, true)
     if (!authoritative.ok) return
 

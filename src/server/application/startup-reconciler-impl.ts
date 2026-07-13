@@ -15,7 +15,9 @@ export class StartupReconciler {
     private readonly clock: Clock,
     private readonly idGenerator: IdGenerator,
     private readonly logger: SafeLogger
-  ) {}
+  ) {
+    void this.idGenerator
+  }
 
   async reconcileAll(): Promise<readonly ReconcileDecision[]> {
     const jobs = this.jobRepository.getJobsForReconciliation()
@@ -117,7 +119,14 @@ export class StartupReconciler {
 
   private settleInterruptedFailure(job: JobAggregateView, reason: InterruptionReason): void {
     this.jobRepository.transaction(() => {
-      const failureId = this.idGenerator.generate()
+      const failureId = this.jobRepository.insertFailure({
+        jobId: job.id,
+        code: 'run.interrupted',
+        recoverability: 'recoverable',
+        reason,
+        runKind: null
+      })
+
       const cas = this.jobRepository.compareAndSetJob({
         jobId: job.id,
         expectedRevision: job.stateRevision,
@@ -134,14 +143,6 @@ export class StartupReconciler {
       })
 
       if (cas.ok) {
-        this.jobRepository.insertFailure({
-          jobId: job.id,
-          code: 'run.interrupted',
-          recoverability: 'recoverable',
-          reason,
-          runKind: null
-        })
-
         this.jobRepository.appendOutbox({
           topic: `job:${job.id}`,
           eventType: 'job.changed',
@@ -154,8 +155,51 @@ export class StartupReconciler {
   }
 
   private settleRuntimeLost(job: JobAggregateView, reason: 'child_closed' | 'owner_missing'): void {
-    this.logger.info('Settling runtime lost', { jobId: job.id, reason })
-    // Runtime lost is handled by RuntimeExited command in PR3
-    // For now, just log - the actual convergence happens via RuntimeExited
+    this.jobRepository.transaction(() => {
+      const failureId = this.jobRepository.insertFailure({
+        jobId: job.id,
+        code: 'runtime.lost',
+        recoverability: 'recoverable',
+        reason,
+        runKind: null
+      })
+
+      const cas = this.jobRepository.compareAndSetJob({
+        jobId: job.id,
+        expectedRevision: job.stateRevision,
+        expectedState: job.state,
+        expectedActiveRunId: job.activeRunId,
+        next: {
+          state: 'failed',
+          controlIntent: 'none',
+          resumeTarget: null,
+          activeRunId: null,
+          lastFailureId: failureId,
+          terminalAtMs: this.clock.nowMs()
+        }
+      })
+
+      if (!cas.ok) {
+        this.logger.warn('Runtime lost settlement raced', { jobId: job.id, reason })
+        return
+      }
+
+      if (job.activeRunId !== null) {
+        this.jobRepository.markRunState(job.activeRunId, 'interrupted', reason)
+      }
+
+      this.jobRepository.appendOutbox({
+        topic: `job:${job.id}`,
+        eventType: 'job.changed',
+        entityId: job.id,
+        aggregateRevision: cas.newRevision,
+        payload: {
+          type: 'job.changed',
+          entityId: job.id,
+          revision: cas.newRevision,
+          changed: ['state', 'failure']
+        }
+      })
+    })
   }
 }

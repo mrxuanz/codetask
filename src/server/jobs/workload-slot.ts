@@ -20,9 +20,7 @@ export function bindStartupWorkloadGate(promise: Promise<void>): void {
         }, STARTUP_GATE_TIMEOUT_MS)
         timer.unref?.()
       })
-    ]).catch((error) => {
-      console.warn('[workload-slot] startup gate released after error', error)
-    })
+    ])
     startupGateBound = true
   }
 }
