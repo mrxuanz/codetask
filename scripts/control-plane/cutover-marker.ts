@@ -9,6 +9,8 @@
 
 export type SchemaGeneration = 'preparing' | 'copied' | 'v3_authoritative'
 
+const UNSAFE_AUTHORITATIVE_ENV = 'CODETASK_ALLOW_UNSAFE_V3_AUTHORITATIVE'
+
 export interface CutoverMarker {
   readonly key: 'control_schema_generation'
   readonly value: SchemaGeneration
@@ -44,6 +46,13 @@ export function upgradeMarker(
 
   if (!canUpgradeTo(marker, target)) {
     return { ok: false, reason: 'migration.invalid_transition' }
+  }
+
+  if (target === 'v3_authoritative' && process.env[UNSAFE_AUTHORITATIVE_ENV] !== '1') {
+    return {
+      ok: false,
+      reason: `migration.authoritative_disabled: set ${UNSAFE_AUTHORITATIVE_ENV}=1 after implementing production cutover`
+    }
   }
 
   return {

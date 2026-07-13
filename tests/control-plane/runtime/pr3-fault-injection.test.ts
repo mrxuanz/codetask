@@ -16,6 +16,7 @@ import { StartupReconciler } from '../../../src/server/application/startup-recon
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
 import type { RuntimeController } from '../../../src/server/application/ports/runtime-controller'
+import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 /**
  * C7–C9 PR3 fault-injection windows (implementation guide §9.7).
@@ -32,6 +33,7 @@ function createTestDb(): Database.Database {
 function seedJob(
   db: Database.Database,
   opts: {
+    username?: string
     state: string
     stateRevision?: number
     controlIntent?: string
@@ -40,6 +42,12 @@ function seedJob(
   }
 ): void {
   const now = Date.now()
+  const jobId = 'job-1'
+  seedOwnedThreadJob(db, {
+    jobId,
+    username: opts.username ?? 'u1',
+    status: opts.state === 'execution_running' ? 'running' : 'pending'
+  })
   db.prepare(
     `INSERT INTO control_jobs (
       id, thread_id, project_id, draft_message_id, state, state_revision,
@@ -47,10 +55,10 @@ function seedJob(
       created_at_ms, updated_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    'job-1',
-    'thread-1',
-    'project-1',
-    'draft-1',
+    jobId,
+    `thread-${jobId}`,
+    `project-${jobId}`,
+    `draft-${jobId}`,
     opts.state,
     opts.stateRevision ?? 1,
     opts.controlIntent ?? 'none',

@@ -116,6 +116,11 @@ export interface JobRepository {
     readonly jobId: string
   }): JobAggregateView | null
 
+  listOwnedAggregates(input: {
+    readonly actor: ActorContext
+    readonly projectId?: string
+  }): readonly JobAggregateView[]
+
   compareAndSetJob(input: JobCasInput): JobCasResult
 
   insertFailure(input: InsertFailureInput): string
@@ -123,6 +128,14 @@ export interface JobRepository {
   appendOutbox(input: AppendOutboxInput): number
 
   getUndispatchedEvents(batchSize: number): readonly OutboxEvent[]
+
+  listOwnedOutboxEvents(input: {
+    readonly actor: ActorContext
+    readonly afterEventId: number
+    readonly limit: number
+  }): readonly OutboxEvent[]
+
+  getOwnedOutboxLatestEventId(input: { readonly actor: ActorContext }): number
 
   markDispatched(eventIds: readonly number[]): void
 
@@ -142,12 +155,14 @@ export interface JobRepository {
 
   createSlot(input: CreateSlotInput): void
 
+  releaseSlot(runId: string): void
+
   markRunState(runId: string, state: string, stopReason?: string | null): void
 
   /**
    * Atomically verify worker fence (run_id + fence_token + generation + revision)
    * and bump revision in a single SQL statement. Returns stale_run if the run
-   * is no longer active/pausing, revision_conflict if job revision changed,
+   * is no longer startable/active/pausing, revision_conflict if job revision changed,
    * or fence_mismatch if run/fence/generation don't match.
    */
   workerFence(input: WorkerFence): WorkerFenceResult

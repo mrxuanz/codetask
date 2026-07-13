@@ -4,17 +4,16 @@
  * CI gate: forbidden legacy write/recovery symbols must not appear outside
  * allowed paths (migration scripts, adapters, docs).
  *
- * Scoped enforcement (pragmatic first cut):
- * - enrichJobWithRecoveryState: forbidden under src/renderer (production path)
- * - remaining symbols listed in legacy-write-symbols.rg.txt are scanned under
- *   src/renderer as well so renderer production cannot reintroduce them.
+ * Scoped enforcement:
+ * - renderer production paths
+ * - control-plane application layer
+ * - V3 HTTP layer
  *
  * Usage:
  *   node scripts/control-plane/legacy-write-guard.mjs
  */
 
-import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { exit } from 'node:process'
@@ -23,7 +22,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '../..')
 const symbolsFile = join(__dirname, 'legacy-write-symbols.rg.txt')
 
-const SEARCH_ROOTS = ['src/renderer']
+const SEARCH_ROOTS = ['src/renderer', 'src/server/application', 'src/server/http/v3']
 
 const ALLOWED_PATH_PREFIXES = [
   'scripts/control-plane/',
@@ -48,41 +47,59 @@ function isAllowedPath(filePath) {
   )
 }
 
-function rg(pattern, searchRoot) {
-  try {
-    const output = execFileSync(
-      'rg',
-      ['-n', '--glob', '!**/node_modules/**', pattern, searchRoot],
-      {
-        cwd: root,
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe']
-      }
-    )
-    return output.trim()
-  } catch (error) {
-    if (error && typeof error === 'object' && 'status' in error && error.status === 1) {
-      return ''
+function listFiles(dir) {
+  const entries = readdirSync(join(root, dir), { withFileTypes: true })
+  const files = []
+
+  for (const entry of entries) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.git')) continue
+
+    const relPath = join(dir, entry.name)
+    const absPath = join(root, relPath)
+    if (entry.isDirectory()) {
+      files.push(...listFiles(relPath))
+      continue
     }
-    throw error
+    if (!entry.isFile()) continue
+
+    const stats = statSync(absPath)
+    if (stats.size > 1_000_000) continue
+    files.push(relPath)
   }
+
+  return files
 }
 
-function parseMatches(output) {
-  if (!output) return []
-  return output
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => {
-      const match = /^([^:]+):(\d+):(.*)$/.exec(line)
-      if (!match) return null
-      return {
-        file: relative(root, join(root, match[1])).split(sep).join('/'),
-        line: Number(match[2]),
-        text: match[3]
+function findMatches(pattern, searchRoot) {
+  const regex = new RegExp(pattern)
+  const matches = []
+
+  for (const file of listFiles(searchRoot)) {
+    const text = readFileSync(join(root, file), 'utf8')
+    const lines = text.split(/\r?\n/)
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]
+      const trimmed = line.trim()
+      if (
+        trimmed.startsWith('//') ||
+        trimmed.startsWith('/*') ||
+        trimmed.startsWith('*') ||
+        trimmed.startsWith('*/')
+      ) {
+        continue
       }
-    })
-    .filter(Boolean)
+      if (regex.test(line)) {
+        matches.push({
+          file: relative(root, join(root, file)).split(sep).join('/'),
+          line: index + 1,
+          text: line
+        })
+      }
+    }
+  }
+
+  return matches
 }
 
 const symbols = loadSymbols()
@@ -90,9 +107,7 @@ let hasErrors = false
 
 for (const symbol of symbols) {
   for (const searchRoot of SEARCH_ROOTS) {
-    const matches = parseMatches(rg(symbol, searchRoot)).filter(
-      (entry) => entry && !isAllowedPath(entry.file)
-    )
+    const matches = findMatches(symbol, searchRoot).filter((entry) => !isAllowedPath(entry.file))
     if (matches.length === 0) continue
     hasErrors = true
     console.error(`\nForbidden legacy symbol "${symbol}" found outside allowed paths:`)
@@ -107,4 +122,4 @@ if (hasErrors) {
   exit(1)
 }
 
-console.log('✅ legacy write guard passed (renderer production paths clean)')
+console.log('✅ legacy write guard passed (renderer/app/v3 production paths clean)')

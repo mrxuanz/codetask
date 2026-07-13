@@ -6,6 +6,7 @@ import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
+import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:')
@@ -19,6 +20,7 @@ function seedJob(
   db: Database.Database,
   opts: {
     id?: string
+    username?: string
     state?: string
     stateRevision?: number
     controlIntent?: string
@@ -27,6 +29,12 @@ function seedJob(
   } = {}
 ): void {
   const now = Date.now()
+  const jobId = opts.id ?? 'job-1'
+  seedOwnedThreadJob(db, {
+    jobId,
+    username: opts.username ?? 'u1',
+    status: opts.state === 'execution_running' ? 'running' : 'pending'
+  })
   db.prepare(
     `INSERT INTO control_jobs (
       id, thread_id, project_id, draft_message_id, state, state_revision,
@@ -34,10 +42,10 @@ function seedJob(
       created_at_ms, updated_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    opts.id ?? 'job-1',
-    'thread-1',
-    'project-1',
-    'draft-1',
+    jobId,
+    `thread-${jobId}`,
+    `project-${jobId}`,
+    `draft-${jobId}`,
     opts.state ?? 'execution_queued',
     opts.stateRevision ?? 1,
     opts.controlIntent ?? 'none',
@@ -220,6 +228,30 @@ describe('JobRepository', () => {
     })
   })
 
+  describe('ownership', () => {
+    it('should hide jobs from other users', () => {
+      seedJob(rawDb, { id: 'job-1', username: 'owner-1' })
+
+      const hidden = repo.getOwnedAggregate({
+        actor: { username: 'owner-2', requestId: 'r1' },
+        jobId: 'job-1'
+      })
+
+      assert.equal(hidden, null)
+    })
+
+    it('should list only actor-owned jobs', () => {
+      seedJob(rawDb, { id: 'job-1', username: 'owner-1' })
+      seedJob(rawDb, { id: 'job-2', username: 'owner-2' })
+
+      const jobs = repo.listOwnedAggregates({
+        actor: { username: 'owner-1', requestId: 'r1' }
+      })
+
+      assert.deepEqual(jobs.map((job) => job.id), ['job-1'])
+    })
+  })
+
   describe('worker fence', () => {
     it('should succeed with correct fence token', () => {
       seedJob(rawDb, {
@@ -378,6 +410,87 @@ describe('JobRepository', () => {
       if (stored) {
         assert.notEqual(stored.requestHash, 'hash-different')
       }
+    })
+  })
+
+  describe('outbox visibility', () => {
+    it('should replay only actor-owned outbox events', () => {
+      seedJob(rawDb, { id: 'job-1', username: 'owner-1' })
+      seedJob(rawDb, { id: 'job-2', username: 'owner-2' })
+
+      repo.appendOutbox({
+        topic: 'job:job-1',
+        eventType: 'job.changed',
+        entityId: 'job-1',
+        aggregateRevision: 2,
+        payload: { type: 'job.changed', entityId: 'job-1', revision: 2, changed: ['state'] }
+      })
+      repo.appendOutbox({
+        topic: 'job:job-2',
+        eventType: 'job.changed',
+        entityId: 'job-2',
+        aggregateRevision: 2,
+        payload: { type: 'job.changed', entityId: 'job-2', revision: 2, changed: ['state'] }
+      })
+
+      const visible = repo.listOwnedOutboxEvents({
+        actor: { username: 'owner-1', requestId: 'r1' },
+        afterEventId: 0,
+        limit: 10
+      })
+
+      assert.deepEqual(visible.map((event) => event.entityId), ['job-1'])
+    })
+
+    it('should expose latest visible event id for actor cursor reset', () => {
+      seedJob(rawDb, { id: 'job-1', username: 'owner-1' })
+      seedJob(rawDb, { id: 'job-2', username: 'owner-2' })
+
+      repo.appendOutbox({
+        topic: 'job:job-2',
+        eventType: 'job.changed',
+        entityId: 'job-2',
+        aggregateRevision: 2,
+        payload: { type: 'job.changed', entityId: 'job-2', revision: 2, changed: ['state'] }
+      })
+      repo.appendOutbox({
+        topic: 'job:job-1',
+        eventType: 'job.changed',
+        entityId: 'job-1',
+        aggregateRevision: 2,
+        payload: { type: 'job.changed', entityId: 'job-1', revision: 2, changed: ['state'] }
+      })
+
+      const latestOwner1 = repo.getOwnedOutboxLatestEventId({
+        actor: { username: 'owner-1', requestId: 'r1' }
+      })
+      const latestOwner2 = repo.getOwnedOutboxLatestEventId({
+        actor: { username: 'owner-2', requestId: 'r2' }
+      })
+
+      assert.equal(latestOwner1, 2)
+      assert.equal(latestOwner2, 1)
+    })
+  })
+
+  describe('slot release', () => {
+    it('should release control resource slot by run id', () => {
+      seedJob(rawDb, { id: 'job-1', state: 'execution_running', activeRunId: 'run-1' })
+      seedRun(rawDb, { id: 'run-1', jobId: 'job-1' })
+      repo.createSlot({
+        jobId: 'job-1',
+        runId: 'run-1',
+        pool: 'default'
+      })
+
+      repo.releaseSlot('run-1')
+
+      const row = rawDb
+        .prepare(`SELECT state, released_at_ms FROM control_resource_slots WHERE run_id = ?`)
+        .get('run-1') as { state: string; released_at_ms: number | null } | undefined
+
+      assert.equal(row?.state, 'released')
+      assert.ok((row?.released_at_ms ?? 0) > 0)
     })
   })
 })

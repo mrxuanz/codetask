@@ -687,23 +687,10 @@ export function scheduleDesignSessionPlanning(
   void runDesignPlanner(username, threadId, designSessionId, draft, workspacePath, coreCode)
 }
 
-export async function tryStartPendingDesignSessionPlanning(username: string): Promise<void> {
-  const db = getDb()
-  const rows = await db
-    .select()
-    .from(threadJobs)
-    .where(
-      and(
-        eq(threadJobs.username, username),
-        eq(threadJobs.status, 'planning'),
-        eq(threadJobs.planStatus, 'pending'),
-        isNull(threadJobs.activeRunId)
-      )
-    )
-    .orderBy(asc(threadJobs.updatedAt))
-    .limit(1)
-
-  const row = rows[0]
+async function startDesignSessionPlanningRow(
+  username: string,
+  row: typeof threadJobs.$inferSelect
+): Promise<void> {
   if (!row) return
 
   // User-paused planning wait uses the same planStatus=pending; do not auto-restart.
@@ -754,6 +741,51 @@ export async function tryStartPendingDesignSessionPlanning(username: string): Pr
     row.workspacePath,
     threadRow.coreCode
   )
+}
+
+export async function tryStartDesignSessionPlanning(
+  username: string,
+  designSessionId: string
+): Promise<void> {
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(threadJobs)
+    .where(
+      and(
+        eq(threadJobs.id, designSessionId),
+        eq(threadJobs.username, username),
+        eq(threadJobs.status, 'planning'),
+        eq(threadJobs.planStatus, 'pending'),
+        isNull(threadJobs.activeRunId)
+      )
+    )
+    .limit(1)
+
+  const row = rows[0]
+  if (!row) return
+  await startDesignSessionPlanningRow(username, row)
+}
+
+export async function tryStartPendingDesignSessionPlanning(username: string): Promise<void> {
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(threadJobs)
+    .where(
+      and(
+        eq(threadJobs.username, username),
+        eq(threadJobs.status, 'planning'),
+        eq(threadJobs.planStatus, 'pending'),
+        isNull(threadJobs.activeRunId)
+      )
+    )
+    .orderBy(asc(threadJobs.updatedAt))
+    .limit(1)
+
+  const row = rows[0]
+  if (!row) return
+  await startDesignSessionPlanningRow(username, row)
 }
 
 export function scheduleDesignSessionPlanRegeneration(

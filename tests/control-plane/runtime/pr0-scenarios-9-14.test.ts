@@ -18,6 +18,7 @@ import { checkMilestoneReadiness } from '../../../src/server/application/verific
 import { EventReducer } from '../../../src/renderer/src/stores/event-reducer'
 import { canonicalJson } from '../../../src/server/application/utils/canonical-json'
 import type { JsonValue } from '../../../src/server/application/utils/canonical-json'
+import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 /**
  * PR0 scenarios 9–14 — cutover wrap-up C2.
@@ -35,6 +36,7 @@ function seedJob(
   db: Database.Database,
   opts: {
     id?: string
+    username?: string
     state?: string
     stateRevision?: number
     controlIntent?: string
@@ -43,6 +45,12 @@ function seedJob(
   } = {}
 ): void {
   const now = Date.now()
+  const jobId = opts.id ?? 'job-1'
+  seedOwnedThreadJob(db, {
+    jobId,
+    username: opts.username ?? 'u1',
+    status: opts.state === 'execution_running' ? 'running' : 'pending'
+  })
   db.prepare(
     `INSERT INTO control_jobs (
       id, thread_id, project_id, draft_message_id, state, state_revision,
@@ -50,10 +58,10 @@ function seedJob(
       title, requirements_summary, created_at_ms, updated_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    opts.id ?? 'job-1',
-    'thread-1',
-    'project-1',
-    'draft-1',
+    jobId,
+    `thread-${jobId}`,
+    `project-${jobId}`,
+    `draft-${jobId}`,
     opts.state ?? 'execution_running',
     opts.stateRevision ?? 1,
     opts.controlIntent ?? 'none',
@@ -104,6 +112,30 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
   })
 
   describe('Scenario 9: runtime child closed convergence', () => {
+    it('should allow runtime start to claim a starting run', () => {
+      seedJob(rawDb, { state: 'execution_running', stateRevision: 1, activeRunId: 'run-1' })
+      seedRun(rawDb, { state: 'starting' })
+      const { service } = createInternalService(rawDb)
+
+      const result = service.runtimeStarted({
+        jobId: 'job-1',
+        expectedRevision: 1,
+        runId: 'run-1',
+        fenceToken: 'fence-1',
+        executionGeneration: 0,
+        payload: {
+          provider: 'test-provider',
+          runtimeInstanceId: 'rt-1'
+        }
+      })
+
+      assert.equal(result.runState, 'active')
+      const run = rawDb.prepare(`SELECT state FROM control_job_runs WHERE id = 'run-1'`).get() as {
+        state: string
+      }
+      assert.equal(run.state, 'active')
+    })
+
     it('should not keep Job running without active run/slot/runtime', () => {
       seedJob(rawDb, { state: 'execution_running', stateRevision: 1, activeRunId: 'run-1' })
       seedRun(rawDb)
@@ -235,10 +267,6 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
 
       const r1 = service.reportNoProgress(envelope)
       assert.equal(r1.eventCount, 1)
-      const r2 = service.reportNoProgress(envelope)
-      assert.equal(r2.eventCount, 2)
-      const r3 = service.reportNoProgress(envelope)
-      assert.equal(r3.eventCount, 3)
 
       const job = jobRepository.getOwnedAggregate({
         actor: { username: 'system', requestId: '' },
@@ -263,8 +291,6 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
           workIdentity: 'identity-1'
         }
       }
-      service.reportNoProgress(envelope)
-      service.reportNoProgress(envelope)
       service.reportNoProgress(envelope)
       const count = rawDb
         .prepare(

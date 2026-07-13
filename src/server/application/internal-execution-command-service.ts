@@ -32,8 +32,6 @@ export type InternalExecutionCommandServiceDeps = {
 }
 
 export class InternalExecutionCommandServiceImpl implements InternalExecutionCommandService {
-  private readonly noProgressCounts = new Map<string, number>()
-
   constructor(private readonly deps: InternalExecutionCommandServiceDeps) {}
 
   runtimeStarted(input: WorkerCommandEnvelope<RuntimeStartedPayload>): RuntimeStartedResult {
@@ -226,13 +224,7 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
 
   reportNoProgress(input: WorkerCommandEnvelope<ReportNoProgressPayload>): NoProgressResult {
     return this.deps.jobRepository.transaction(() => {
-      const key = `${input.jobId}:${input.payload.decisionKey}`
-      const count = (this.noProgressCounts.get(key) ?? 0) + 1
-      this.noProgressCounts.set(key, count)
-
-      if (count < 3) {
-        return { revision: input.expectedRevision, eventCount: count }
-      }
+      const count = 1
 
       const fence = this.deps.jobRepository.workerFence({
         jobId: input.jobId,
@@ -279,7 +271,6 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
         return { revision: fence.newRevision, eventCount: count }
       }
 
-      this.noProgressCounts.delete(key)
       this.deps.jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',

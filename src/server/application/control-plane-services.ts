@@ -10,18 +10,11 @@ import {
 } from '../infra/sqlite/control-plane/job-repository'
 import { SqliteTaskRepository } from '../infra/sqlite/control-plane/task-repository'
 import { EvidenceRepository } from '../infra/sqlite/control-plane/evidence-repository'
-import {
-  parseJobState,
-  parseControlIntent,
-  parseResumeTarget
-} from '../infra/sqlite/control-plane/parsers'
-import { controlJobs } from '../infra/sqlite/control-plane/schema'
-import { eq } from 'drizzle-orm'
-import type { JobAggregateView } from './ports/job-repository'
 import type { RuntimeController } from './ports/runtime-controller'
 import { JobCommandServiceImpl } from './job-command-service'
 import { JobQueryServiceImpl, type JobDto, type JobQueryService } from './job-query-service'
 import { SafeLoggerImpl } from './safe-logger'
+import { isV3Authoritative } from './cutover-state'
 
 export interface ControlPlaneAppContext {
   readonly db: AppDatabase
@@ -42,44 +35,6 @@ function createControlPlaneDb(appDb: AppDatabase): ControlPlaneDatabase {
   return drizzle(client, { schema: controlPlaneSchema })
 }
 
-function listJobAggregates(
-  cpDb: ControlPlaneDatabase,
-  projectId?: string
-): readonly JobAggregateView[] {
-  const base = cpDb
-    .select({
-      id: controlJobs.id,
-      threadId: controlJobs.threadId,
-      projectId: controlJobs.projectId,
-      state: controlJobs.state,
-      stateRevision: controlJobs.stateRevision,
-      controlIntent: controlJobs.controlIntent,
-      resumeTarget: controlJobs.resumeTarget,
-      currentPlanRevision: controlJobs.currentPlanRevision,
-      executionGeneration: controlJobs.executionGeneration,
-      activeRunId: controlJobs.activeRunId,
-      lastFailureId: controlJobs.lastFailureId
-    })
-    .from(controlJobs)
-
-  const results =
-    projectId !== undefined ? base.where(eq(controlJobs.projectId, projectId)).all() : base.all()
-
-  return results.map((row) => ({
-    id: row.id,
-    threadId: row.threadId,
-    projectId: row.projectId,
-    state: parseJobState(row.state),
-    stateRevision: row.stateRevision,
-    controlIntent: parseControlIntent(row.controlIntent),
-    resumeTarget: row.resumeTarget ? parseResumeTarget(row.resumeTarget) : null,
-    currentPlanRevision: row.currentPlanRevision,
-    executionGeneration: row.executionGeneration,
-    activeRunId: row.activeRunId,
-    lastFailureId: row.lastFailureId
-  }))
-}
-
 const noopRuntimeController: RuntimeController = {
   notifyPauseRequested(jobId: string): void {
     console.info('[control-plane] pause requested', { jobId })
@@ -87,6 +42,13 @@ const noopRuntimeController: RuntimeController = {
   async closeThenRelease(runId: string, reason: string): Promise<void> {
     console.info('[control-plane] closeThenRelease', { runId, reason })
   }
+}
+
+let runtimeController: RuntimeController = noopRuntimeController
+
+export function registerControlPlaneRuntimeController(controller: RuntimeController): void {
+  runtimeController = controller
+  cached = null
 }
 
 export function getControlPlaneServices(ctx: ControlPlaneAppContext): ControlPlaneServices {
@@ -107,16 +69,36 @@ export function getControlPlaneServices(ctx: ControlPlaneAppContext): ControlPla
     clock: { nowMs: () => Date.now() },
     idGenerator: { generate: () => randomUUID() },
     logger,
-    runtimeController: noopRuntimeController
+    runtimeController
   })
 
   const queryService = new JobQueryServiceImpl({
-    getJobAggregate: (jobId: string) =>
+    getJobAggregate: (actor: { username: string }, jobId: string) =>
       jobRepository.getOwnedAggregate({
-        actor: { username: 'system', requestId: '' },
+        actor: { username: actor.username, requestId: '' },
         jobId
       }),
-    listJobAggregates: (projectId?: string) => listJobAggregates(cpDb, projectId),
+    listJobAggregates: (actor: { username: string }, projectId?: string) =>
+      jobRepository.listOwnedAggregates({
+        actor: { username: actor.username, requestId: '' },
+        ...(projectId !== undefined ? { projectId } : {})
+      }),
+    getLegacyJobSnapshot: async (actor: { username: string }, jobId: string) => {
+      const { getUserJob } = await import('../jobs/service')
+      return getUserJob(actor.username, jobId)
+    },
+    listLegacyJobSnapshots: async (
+      actor: { username: string },
+      options
+    ) => {
+      const { listUserJobs } = await import('../jobs/service')
+      return listUserJobs(actor.username, {
+        status: options?.status,
+        page: options?.page,
+        limit: options?.limit,
+        q: options?.q
+      })
+    },
     getJobTimestamps: (jobId: string) => jobRepository.getJobTimestamps(jobId)
   })
 
@@ -164,6 +146,9 @@ export function tryGetControlJob(
   jobId: string,
   username = 'system'
 ): JobDto | null {
+  if (!isV3Authoritative(ctx.db)) {
+    return null
+  }
   const services = tryGetControlPlaneServices(ctx)
   if (services === null) return null
   try {
@@ -176,4 +161,5 @@ export function tryGetControlJob(
 /** Reset cached services (tests only). */
 export function resetControlPlaneServicesForTests(): void {
   cached = null
+  runtimeController = noopRuntimeController
 }
