@@ -121,9 +121,12 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
       boundPort = port
       bindChanged = cli.port !== port
       initConversationMcpBackend(port)
-      void import('../server/jobs/job-queue').then((module) =>
-        module.resumeJobQueuesAfterServerReady(supervisor)
-      )
+      void import('../server/jobs/job-queue')
+        .then((module) => module.resumeJobQueuesAfterServerReady(supervisor))
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          console.warn(`[jobs] queue resume deferred: ${message}`)
+        })
       break
     } catch (error) {
       if (!isAddressInUse(error)) throw error
@@ -183,6 +186,13 @@ export async function stopAppServer(): Promise<void> {
     stopWorkloadReconcilerForTests()
   } catch (error) {
     console.warn('[server] failed to stop workload reconciler', error)
+  }
+
+  try {
+    const { shutdownControlPlaneRuntime } = await import('../server/application/control-plane-runtime')
+    await shutdownControlPlaneRuntime('app_shutdown')
+  } catch (error) {
+    console.warn('[server] failed to shutdown control-plane runtime', error)
   }
 
   // 3) Abort in-memory execution loops, then release this process's workload slots/leases

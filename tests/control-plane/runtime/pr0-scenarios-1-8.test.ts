@@ -17,6 +17,7 @@ import { validateTaskResult } from '../../../src/server/domain/tasks/validate-ta
 import { reduceJobSnapshot } from '../../../src/renderer/src/stores/entity-store'
 import { EventReducer } from '../../../src/renderer/src/stores/event-reducer'
 import type { RuntimeController } from '../../../src/server/application/ports/runtime-controller'
+import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 /**
  * PR0 scenarios 1–8 — cutover wrap-up C1.
@@ -35,6 +36,7 @@ function seedJob(
   db: Database.Database,
   opts: {
     id?: string
+    username?: string
     state?: string
     stateRevision?: number
     controlIntent?: string
@@ -44,6 +46,12 @@ function seedJob(
   } = {}
 ): void {
   const now = Date.now()
+  const jobId = opts.id ?? 'job-1'
+  seedOwnedThreadJob(db, {
+    jobId,
+    username: opts.username ?? 'u1',
+    status: opts.state === 'execution_running' ? 'running' : 'pending'
+  })
   db.prepare(
     `INSERT INTO control_jobs (
       id, thread_id, project_id, draft_message_id, state, state_revision,
@@ -51,10 +59,10 @@ function seedJob(
       created_at_ms, updated_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    opts.id ?? 'job-1',
-    'thread-1',
-    'project-1',
-    'draft-1',
+    jobId,
+    `thread-${jobId}`,
+    `project-${jobId}`,
+    `draft-${jobId}`,
     opts.state ?? 'execution_queued',
     opts.stateRevision ?? 1,
     opts.controlIntent ?? 'none',

@@ -25,8 +25,21 @@ export interface SseConnection {
   close(): void
 }
 
+export function formatSseJsonEvent(input: {
+  readonly event: string
+  readonly data: unknown
+  readonly id?: number
+}): string {
+  const idPrefix = input.id !== undefined ? `id: ${input.id}\n` : ''
+  return `${idPrefix}event: ${input.event}\ndata: ${JSON.stringify(input.data)}\n\n`
+}
+
 export function formatSseEvent(event: SseEnvelope): string {
-  return `id: ${event.eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+  return formatSseJsonEvent({
+    id: event.eventId,
+    event: event.type,
+    data: event
+  })
 }
 
 export function detectGap(currentRevision: number, incomingRevision: number): boolean {

@@ -9,7 +9,7 @@ export interface EventEnvelope {
 
 export type EventHandler = (event: EventEnvelope) => void
 
-export type ResyncReason = 'event_gap'
+export type ResyncReason = 'event_gap' | 'resync_required'
 
 export type ResyncCallback = (info: {
   readonly reason: ResyncReason
@@ -35,6 +35,12 @@ export class EventReducer {
     this.needsResync = false
   }
 
+  resetCursor(nextLastEventId = 0): void {
+    this.lastEventId =
+      Number.isInteger(nextLastEventId) && nextLastEventId > 0 ? nextLastEventId : 0
+    this.needsResync = false
+  }
+
   registerHandler(eventType: string, handler: EventHandler): void {
     const handlers = this.handlers.get(eventType) ?? []
     handlers.push(handler)
@@ -42,6 +48,10 @@ export class EventReducer {
   }
 
   reduce(event: EventEnvelope): void {
+    if (event.eventId <= this.lastEventId) {
+      return
+    }
+
     if (event.eventId > this.lastEventId + 1) {
       this.handleGap(event.eventId)
       return

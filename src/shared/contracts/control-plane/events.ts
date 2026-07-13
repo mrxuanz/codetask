@@ -25,6 +25,22 @@ export type JobChangedEvent = Static<typeof JobChangedEventSchema>
 
 export type ChangedField = 'state' | 'tasks' | 'plan' | 'failure' | 'actions'
 
+export const ResyncRequiredReasonSchema = Type.Union([
+  Type.Literal('cursor_too_old'),
+  Type.Literal('slow_consumer')
+])
+
+export const ResyncRequiredEventSchema = Type.Object(
+  {
+    reason: ResyncRequiredReasonSchema,
+    restartFromEventId: Type.Integer({ minimum: 0 })
+  },
+  { additionalProperties: false }
+)
+
+export type ResyncRequiredReason = Static<typeof ResyncRequiredReasonSchema>
+export type ResyncRequiredEvent = Static<typeof ResyncRequiredEventSchema>
+
 export function jobChangedEvent(
   jobId: string,
   revision: number,

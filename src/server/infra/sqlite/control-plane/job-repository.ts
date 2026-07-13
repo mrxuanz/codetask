@@ -1,4 +1,4 @@
-import { eq, and, isNull, sql } from 'drizzle-orm'
+import { eq, and, isNull, sql, type SQL } from 'drizzle-orm'
 import { type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import type {
   JobRepository,
@@ -33,10 +33,63 @@ export type ControlPlaneDatabase = BetterSQLite3Database<typeof controlPlaneSche
 export type AppTransaction = Parameters<Parameters<ControlPlaneDatabase['transaction']>[0]>[0]
 export type DbExecutor = ControlPlaneDatabase | AppTransaction
 
+const INTERNAL_ACTORS = new Set(['system', 'worker'])
+
+function isInternalActor(username: string): boolean {
+  return INTERNAL_ACTORS.has(username)
+}
+
+function ownerVisibilityPredicate(actor: ActorContext) {
+  if (isInternalActor(actor.username)) {
+    return null
+  }
+
+  return sql`EXISTS (
+    SELECT 1
+    FROM thread_jobs tj
+    WHERE tj.id = ${controlJobs.id}
+      AND tj.username = ${actor.username}
+  )`
+}
+
+function toAggregate(row: {
+  id: string
+  threadId: string
+  projectId: string
+  state: string
+  stateRevision: number
+  controlIntent: string
+  resumeTarget: string | null
+  currentPlanRevision: number | null
+  executionGeneration: number
+  activeRunId: string | null
+  lastFailureId: string | null
+}): JobAggregateView {
+  return {
+    id: row.id,
+    threadId: row.threadId,
+    projectId: row.projectId,
+    state: parseJobState(row.state),
+    stateRevision: row.stateRevision,
+    controlIntent: parseControlIntent(row.controlIntent),
+    resumeTarget: row.resumeTarget ? parseResumeTarget(row.resumeTarget) : null,
+    currentPlanRevision: row.currentPlanRevision,
+    executionGeneration: row.executionGeneration,
+    activeRunId: row.activeRunId,
+    lastFailureId: row.lastFailureId
+  }
+}
+
 export class SqliteJobRepository implements JobRepository {
   constructor(private readonly db: DbExecutor) {}
 
   getOwnedAggregate(input: { readonly actor: ActorContext; readonly jobId: string }): JobAggregateView | null {
+    const predicates: SQL[] = [eq(controlJobs.id, input.jobId)]
+    const ownership = ownerVisibilityPredicate(input.actor)
+    if (ownership !== null) {
+      predicates.push(ownership)
+    }
+
     const result = this.db
       .select({
         id: controlJobs.id,
@@ -52,24 +105,46 @@ export class SqliteJobRepository implements JobRepository {
         lastFailureId: controlJobs.lastFailureId
       })
       .from(controlJobs)
-      .where(eq(controlJobs.id, input.jobId))
+      .where(and(...predicates))
       .get()
 
     if (!result) return null
 
-    return {
-      id: result.id,
-      threadId: result.threadId,
-      projectId: result.projectId,
-      state: parseJobState(result.state),
-      stateRevision: result.stateRevision,
-      controlIntent: parseControlIntent(result.controlIntent),
-      resumeTarget: result.resumeTarget ? parseResumeTarget(result.resumeTarget) : null,
-      currentPlanRevision: result.currentPlanRevision,
-      executionGeneration: result.executionGeneration,
-      activeRunId: result.activeRunId,
-      lastFailureId: result.lastFailureId
+    return toAggregate(result)
+  }
+
+  listOwnedAggregates(input: {
+    readonly actor: ActorContext
+    readonly projectId?: string
+  }): readonly JobAggregateView[] {
+    const predicates: SQL[] = []
+    if (input.projectId !== undefined) {
+      predicates.push(eq(controlJobs.projectId, input.projectId))
     }
+
+    const ownership = ownerVisibilityPredicate(input.actor)
+    if (ownership !== null) {
+      predicates.push(ownership)
+    }
+
+    const query = this.db
+      .select({
+        id: controlJobs.id,
+        threadId: controlJobs.threadId,
+        projectId: controlJobs.projectId,
+        state: controlJobs.state,
+        stateRevision: controlJobs.stateRevision,
+        controlIntent: controlJobs.controlIntent,
+        resumeTarget: controlJobs.resumeTarget,
+        currentPlanRevision: controlJobs.currentPlanRevision,
+        executionGeneration: controlJobs.executionGeneration,
+        activeRunId: controlJobs.activeRunId,
+        lastFailureId: controlJobs.lastFailureId
+      })
+      .from(controlJobs)
+
+    const results = predicates.length > 0 ? query.where(and(...predicates)).all() : query.all()
+    return results.map((row) => toAggregate(row))
   }
 
   compareAndSetJob(input: JobCasInput): JobCasResult {
@@ -170,6 +245,66 @@ export class SqliteJobRepository implements JobRepository {
       .orderBy(controlOutboxEvents.eventId)
       .limit(batchSize)
       .all()
+  }
+
+  listOwnedOutboxEvents(input: {
+    readonly actor: ActorContext
+    readonly afterEventId: number
+    readonly limit: number
+  }): readonly OutboxEvent[] {
+    const predicates: SQL[] = [sql`${controlOutboxEvents.eventId} > ${input.afterEventId}`]
+    const ownership = isInternalActor(input.actor.username)
+      ? null
+      : sql`EXISTS (
+          SELECT 1
+          FROM thread_jobs tj
+          WHERE tj.id = ${controlOutboxEvents.entityId}
+            AND tj.username = ${input.actor.username}
+        )`
+    if (ownership !== null) {
+      predicates.push(ownership)
+    }
+
+    return this.db
+      .select({
+        eventId: controlOutboxEvents.eventId,
+        topic: controlOutboxEvents.topic,
+        eventType: controlOutboxEvents.eventType,
+        entityId: controlOutboxEvents.entityId,
+        aggregateRevision: controlOutboxEvents.aggregateRevision,
+        payloadJson: controlOutboxEvents.payloadJson
+      })
+      .from(controlOutboxEvents)
+      .where(and(...predicates))
+      .orderBy(controlOutboxEvents.eventId)
+      .limit(input.limit)
+      .all()
+  }
+
+  getOwnedOutboxLatestEventId(input: { readonly actor: ActorContext }): number {
+    const predicates: SQL[] = []
+    const ownership = isInternalActor(input.actor.username)
+      ? null
+      : sql`EXISTS (
+          SELECT 1
+          FROM thread_jobs tj
+          WHERE tj.id = ${controlOutboxEvents.entityId}
+            AND tj.username = ${input.actor.username}
+        )`
+    if (ownership !== null) {
+      predicates.push(ownership)
+    }
+
+    const query = this.db
+      .select({
+        eventId: sql<number>`COALESCE(MAX(${controlOutboxEvents.eventId}), 0)`
+      })
+      .from(controlOutboxEvents)
+
+    const result =
+      predicates.length > 0 ? query.where(and(...predicates)).get() : query.get()
+
+    return result?.eventId ?? 0
   }
 
   markDispatched(eventIds: readonly number[]): void {
@@ -378,6 +513,20 @@ export class SqliteJobRepository implements JobRepository {
       .run()
   }
 
+  releaseSlot(runId: string): void {
+    const now = Date.now()
+    this.db
+      .update(controlResourceSlots)
+      .set({
+        state: 'released',
+        releasedAtMs: now
+      })
+      .where(
+        and(eq(controlResourceSlots.runId, runId), sql`${controlResourceSlots.state} != 'released'`)
+      )
+      .run()
+  }
+
   markRunState(runId: string, state: string, stopReason: string | null = null): void {
     const now = Date.now()
     const ended =
@@ -413,7 +562,7 @@ export class SqliteJobRepository implements JobRepository {
                 AND r.job_id = ${input.jobId}
                 AND r.fence_token = ${input.fenceToken}
                 AND r.execution_generation = ${input.executionGeneration}
-                AND r.state IN ('active', 'pausing')
+                AND r.state IN ('starting', 'retrying', 'active', 'pausing')
             )
           RETURNING state_revision`
     ) as Array<{ state_revision: number }>
@@ -427,7 +576,14 @@ export class SqliteJobRepository implements JobRepository {
       ) as Array<{ state: string; fence_token: string; execution_generation: number }>
 
       const firstRun = run[0]
-      if (run.length === 0 || firstRun === undefined || firstRun.state === 'active' || firstRun.state === 'pausing') {
+      if (
+        run.length === 0 ||
+        firstRun === undefined ||
+        firstRun.state === 'starting' ||
+        firstRun.state === 'retrying' ||
+        firstRun.state === 'active' ||
+        firstRun.state === 'pausing'
+      ) {
         // Run doesn't exist or is active but fence/generation mismatch
         if (firstRun !== undefined && firstRun.fence_token !== input.fenceToken) {
           return { ok: false, reason: 'fence_mismatch' }

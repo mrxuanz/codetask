@@ -1,7 +1,7 @@
 /**
  * Production Tasks store (C10–C13).
  *
- * - List/detail still load legacy ThreadJob for progress projections.
+ * - List/detail load `/api/v3/jobs` snapshots with legacy display projection overlaid by V3 control fields.
  * - Actions prefer server `availableActions` (no recovery补算).
  * - When `stateRevision` is present, commands go through `/api/v3`.
  */
@@ -9,8 +9,6 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
 import {
-  fetchJobs,
-  fetchJob,
   pauseJob,
   continueJob,
   resumeJob,
@@ -19,14 +17,21 @@ import {
   type ThreadJob
 } from '@renderer/api/jobs'
 import {
+  fetchV3Jobs,
+  fetchV3Job,
   pauseV3Job,
   continueV3Job,
   cancelV3Job,
   restartExecutionV3Job
 } from '@renderer/api/v3-jobs'
+import {
+  connectControlPlaneEventsStream,
+  ControlPlaneEventsResyncRequiredError
+} from '@renderer/api/v3-events'
 import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
 import type { JobSseEvent } from '@renderer/api/jobs'
+import { EventReducer } from '@renderer/stores/event-reducer'
 import { JobsStore } from '@renderer/stores/jobs-store'
 import {
   canCancel,
@@ -68,6 +73,13 @@ function mapLegacyStatusToState(status: string): string {
     default:
       return status
   }
+}
+
+function hasV3Projection(job: ThreadJob | null | undefined): job is ThreadJob & {
+  stateRevision: number
+  availableActions: readonly string[]
+} {
+  return job?.stateRevision !== undefined && Array.isArray(job.availableActions)
 }
 
 export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOptions): {
@@ -120,7 +132,11 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let hubRelease: (() => void) | null = null
   let hubListRelease: (() => void) | null = null
+  let streamAbort: AbortController | null = null
+  let streamRetryTimer: ReturnType<typeof setTimeout> | null = null
   let loadDetailToken = 0
+  let loadJobsToken = 0
+  const eventReducer = new EventReducer()
 
   const selectedJob = computed(() =>
     selectedJobId.value
@@ -161,9 +177,31 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     } as ThreadJob
   }
 
-  function applyJobPatch(job: ThreadJob): void {
-    if (job.stateRevision !== undefined && job.availableActions) {
-      v3Store.mergeJob(
+  const debouncedRefreshJobs = useDebounceFn(() => void loadJobs({ silent: true }), 150)
+  const debouncedRefreshSelectedDetail = useDebounceFn((jobId: string) => {
+    if (selectedJobId.value === jobId) {
+      void loadDetail(jobId, { silent: true })
+    }
+  }, 100)
+
+  function scheduleResync(jobId?: string): void {
+    eventReducer.clearNeedsResync()
+    debouncedRefreshJobs()
+    if (jobId) {
+      debouncedRefreshSelectedDetail(jobId)
+      return
+    }
+    if (selectedJobId.value) {
+      debouncedRefreshSelectedDetail(selectedJobId.value)
+    }
+  }
+
+  function mergeIncomingJob(
+    existing: ThreadJob | null | undefined,
+    job: ThreadJob
+  ): ThreadJob | null {
+    if (hasV3Projection(job)) {
+      const decision = v3Store.mergeJob(
         {
           id: job.id,
           state: mapLegacyStatusToState(job.status),
@@ -172,21 +210,44 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
         },
         'authoritative_snapshot'
       )
+      if (decision.kind === 'ignore_stale') {
+        return existing ?? null
+      }
+      if (decision.kind === 'resync') {
+        scheduleResync(job.id)
+        return existing ?? null
+      }
     }
+    return mergeJobPatch(existing, job)
+  }
+
+  function applyJobPatch(job: ThreadJob): void {
+    const currentDetail = detail.value?.id === job.id ? detail.value : null
+    const nextDetail = mergeIncomingJob(currentDetail, job)
+    const nextSelected = mergeIncomingJob(selectedJobId.value === job.id ? currentDetail : null, job)
+
     if (detail.value?.id === job.id) {
-      detail.value = mergeJobPatch(detail.value, job)
+      if (nextDetail) {
+        detail.value = nextDetail
+      }
     } else if (selectedJobId.value === job.id) {
-      detail.value = mergeJobPatch(detail.value, job)
+      if (nextSelected) {
+        detail.value = nextSelected
+      }
     }
     const idx = jobs.value.findIndex((item) => item.id === job.id)
     if (idx >= 0) {
-      jobs.value[idx] = mergeJobPatch(jobs.value[idx], job)
+      const nextListItem = mergeIncomingJob(jobs.value[idx], job)
+      if (nextListItem) {
+        jobs.value[idx] = nextListItem
+      }
     }
   }
 
   function syncHubWatch(): void {
     hubRelease?.()
     hubRelease = null
+    if (hasV3Projection(selectedJob.value)) return
     const jobId = selectedJobId.value
     const status = selectedJob.value?.status
     if (!jobId || !status || !jobNeedsRealtimeWatch(status)) return
@@ -208,12 +269,17 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }
 
   async function loadJobs(options?: { silent?: boolean }): Promise<void> {
+    const token = ++loadJobsToken
     const silent = options?.silent ?? false
     if (!silent) loadingList.value = true
     error.value = null
     try {
-      const res = await fetchJobs(statusFilter.value, 1, 50, searchQuery.value)
+      const res = await fetchV3Jobs(statusFilter.value, 1, 50, searchQuery.value)
+      if (token !== loadJobsToken) return
+      const currentById = new Map(jobs.value.map((job) => [job.id, job] as const))
       jobs.value = res.data.jobs
+        .map((job) => mergeIncomingJob(currentById.get(job.id), job))
+        .filter((job): job is ThreadJob => job !== null)
       total.value = res.data.total
       const currentId = selectedJobId.value
       const stillExists = currentId ? res.data.jobs.some((job) => job.id === currentId) : false
@@ -234,9 +300,12 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     const silent = options?.silent ?? false
     if (!silent) loadingDetail.value = true
     try {
-      const res = await fetchJob(jobId)
+      const res = await fetchV3Job(jobId)
       if (token !== loadDetailToken) return
-      applyJobPatch(res.data.job)
+      const merged = mergeIncomingJob(detail.value?.id === jobId ? detail.value : null, res.data.job)
+      if (merged) {
+        applyJobPatch(merged)
+      }
       syncHubWatch()
     } catch (err) {
       if (token !== loadDetailToken) return
@@ -249,13 +318,83 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
+  eventReducer.setResyncCallback((info) => {
+    eventReducer.resetCursor(info.newEventId)
+    streamAbort?.abort()
+    scheduleResync()
+  })
+  eventReducer.registerHandler('job.changed', (event) => {
+    debouncedRefreshJobs()
+    debouncedRefreshSelectedDetail(event.entityId)
+  })
+
+  function startV3EventsStream(): void {
+    streamAbort?.abort()
+    if (streamRetryTimer) {
+      clearTimeout(streamRetryTimer)
+      streamRetryTimer = null
+    }
+
+    const controller = new AbortController()
+    streamAbort = controller
+
+    void connectControlPlaneEventsStream(
+      (event) => {
+        eventReducer.reduce({
+          eventId: event.eventId,
+          topic: event.topic,
+          type: event.type,
+          entityId: event.entityId,
+          revision: event.revision,
+          payload: event.payload
+        })
+      },
+      {
+        signal: controller.signal,
+        lastEventId: eventReducer.getLastEventId()
+      }
+    )
+      .catch((error) => {
+        if (error instanceof ControlPlaneEventsResyncRequiredError) {
+          eventReducer.resetCursor(error.restartFromEventId)
+          scheduleResync()
+          return
+        }
+        if (!controller.signal.aborted) {
+          console.warn('[control-plane-events] stream ended', error)
+        }
+      })
+      .finally(() => {
+        if (streamAbort === controller) {
+          streamAbort = null
+          streamRetryTimer = window.setTimeout(() => {
+            startV3EventsStream()
+          }, 3000)
+        }
+      })
+  }
+
   function startHubPolling(): void {
+    startV3EventsStream()
     hubListRelease = hub.onAnyJobEvent((envelope) => {
       if (!envelope.topic.startsWith('job:')) return
-      void loadJobs({ silent: true })
+      if (hasV3Projection(selectedJob.value) || jobs.value.some((job) => hasV3Projection(job))) {
+        return
+      }
+      debouncedRefreshJobs()
+      if (selectedJobId.value && envelope.topic === `job:${selectedJobId.value}`) {
+        debouncedRefreshSelectedDetail(selectedJobId.value)
+      }
     })
     pollTimer = setInterval(() => {
-      if (!hub.connected.value) {
+      const usingLegacyHub = !hasV3Projection(selectedJob.value) && !jobs.value.some((job) => hasV3Projection(job))
+      if (!streamAbort && !usingLegacyHub) {
+        void loadJobs({ silent: true })
+        const jobId = selectedJobId.value
+        if (jobId) void loadDetail(jobId, { silent: true })
+        return
+      }
+      if (usingLegacyHub && !hub.connected.value) {
         void loadJobs({ silent: true })
         const jobId = selectedJobId.value
         if (jobId) void loadDetail(jobId, { silent: true })
@@ -268,6 +407,12 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     hubRelease?.()
     hubListRelease = null
     hubRelease = null
+    streamAbort?.abort()
+    streamAbort = null
+    if (streamRetryTimer) {
+      clearTimeout(streamRetryTimer)
+      streamRetryTimer = null
+    }
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null

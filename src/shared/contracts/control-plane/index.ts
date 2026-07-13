@@ -70,7 +70,11 @@ export {
 
 export {
   JobChangedEventSchema,
+  ResyncRequiredReasonSchema,
+  ResyncRequiredEventSchema,
   type JobChangedEvent,
   type ChangedField,
+  type ResyncRequiredReason,
+  type ResyncRequiredEvent,
   jobChangedEvent
 } from './events'

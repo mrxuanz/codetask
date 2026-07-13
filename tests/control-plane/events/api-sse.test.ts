@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { JobEventHub } from '@server/application/job-event-hub'
+import {
+  parseControlPlaneJobChangedEnvelope,
+  parseControlPlaneResyncRequiredEvent
+} from '../../../src/renderer/src/api/v3-events'
 import { EventReducer } from '../../../src/renderer/src/stores/event-reducer'
 import { reduceJobSnapshot } from '../../../src/renderer/src/stores/entity-store'
 import {
@@ -92,6 +96,89 @@ describe('Renderer event-reducer gap', () => {
     assert.equal(resyncEvents[0]?.reason, 'event_gap')
     assert.equal(resyncEvents[0]?.lastEventId, 1)
     assert.equal(resyncEvents[0]?.newEventId, 3)
+  })
+
+  it('should ignore duplicate replayed event ids', () => {
+    const reducer = new EventReducer()
+    let handled = 0
+    reducer.registerHandler('job.changed', () => {
+      handled += 1
+    })
+
+    reducer.reduce({
+      eventId: 1,
+      topic: 'job:job-1',
+      type: 'job.changed',
+      entityId: 'job-1',
+      revision: 1,
+      payload: {}
+    })
+
+    reducer.reduce({
+      eventId: 1,
+      topic: 'job:job-1',
+      type: 'job.changed',
+      entityId: 'job-1',
+      revision: 1,
+      payload: {}
+    })
+
+    assert.equal(handled, 1)
+  })
+})
+
+describe('Renderer V3 event parsing', () => {
+  it('should parse valid control-plane job.changed envelope', () => {
+    const envelope = parseControlPlaneJobChangedEnvelope({
+      eventId: 5,
+      topic: 'job:job-1',
+      type: 'job.changed',
+      entityId: 'job-1',
+      revision: 7,
+      payload: {
+        eventId: 5,
+        topic: 'job:job-1',
+        type: 'job.changed',
+        entityId: 'job-1',
+        revision: 7,
+        changed: ['state', 'tasks']
+      }
+    })
+
+    assert.notEqual(envelope, null)
+    assert.deepEqual(envelope?.changed, ['state', 'tasks'])
+  })
+
+  it('should reject mismatched payload metadata', () => {
+    const envelope = parseControlPlaneJobChangedEnvelope({
+      eventId: 5,
+      topic: 'job:job-1',
+      type: 'job.changed',
+      entityId: 'job-1',
+      revision: 7,
+      payload: {
+        eventId: 6,
+        topic: 'job:job-1',
+        type: 'job.changed',
+        entityId: 'job-1',
+        revision: 7,
+        changed: ['state']
+      }
+    })
+
+    assert.equal(envelope, null)
+  })
+
+  it('should parse resync_required payload', () => {
+    const payload = parseControlPlaneResyncRequiredEvent({
+      reason: 'cursor_too_old',
+      restartFromEventId: 42
+    })
+
+    assert.deepEqual(payload, {
+      reason: 'cursor_too_old',
+      restartFromEventId: 42
+    })
   })
 })
 
