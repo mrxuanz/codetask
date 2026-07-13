@@ -78,7 +78,8 @@ describe('JobQueryService task snapshots', () => {
       id: 'job-1',
       state: 'paused',
       stateRevision: 7,
-      activeRunId: 'run-1'
+      activeRunId: 'run-1',
+      lastFailureId: 'failure-1'
     })
     const legacy = makeLegacyJob({
       id: 'job-1',
@@ -91,7 +92,12 @@ describe('JobQueryService task snapshots', () => {
       listJobAggregates: () => [aggregate],
       getLegacyJobSnapshot: async () => legacy,
       listLegacyJobSnapshots: async () => ({ jobs: [legacy], total: 1 }),
-      getJobTimestamps: () => ({ createdAtMs: 11, updatedAtMs: 22, terminalAtMs: null })
+      getJobTimestamps: () => ({ createdAtMs: 11, updatedAtMs: 22, terminalAtMs: null }),
+      getJobFailure: () => ({
+        code: 'runtime.interrupted',
+        recoverability: 'recoverable',
+        reason: 'The runtime exited unexpectedly.'
+      })
     })
 
     const control = service.getJob('job-1', { username: 'u1' })
@@ -105,6 +111,11 @@ describe('JobQueryService task snapshots', () => {
     assert.equal(task?.stateRevision, 7)
     assert.equal(task?.activeRunId, 'run-1')
     assert.deepEqual(task?.availableActions, control?.availableActions)
+    assert.deepEqual(control?.failure, {
+      code: 'runtime.interrupted',
+      recoverability: 'recoverable',
+      reason: 'The runtime exited unexpectedly.'
+    })
     assert.equal(task?.createdAtMs, 11)
     assert.equal(task?.updatedAtMs, 22)
   })

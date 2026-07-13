@@ -9,11 +9,20 @@ export interface EventHubConfig {
 interface Subscription {
   readonly connectionId: string
   readonly callback: (event: SseEnvelope) => void
+  readonly onOverflow: (info: SlowConsumerInfo) => void
+  queue: SseEnvelope[]
+  queuedBytes: number
+  lastDeliveredEventId: number
+}
+
+export interface SlowConsumerInfo {
+  readonly lastDeliveredEventId: number
+  readonly latestEventId: number
 }
 
 export class EventHub {
   private subscriptions = new Map<string, Subscription>()
-  private queue: SseEnvelope[] = []
+  private dispatching = false
   private readonly config: EventHubConfig
   private readonly logger: SafeLogger
 
@@ -22,8 +31,19 @@ export class EventHub {
     this.logger = logger
   }
 
-  subscribe(connectionId: string, callback: (event: SseEnvelope) => void): () => void {
-    const sub: Subscription = { connectionId, callback }
+  subscribe(
+    connectionId: string,
+    callback: (event: SseEnvelope) => void,
+    onOverflow: (info: SlowConsumerInfo) => void = () => {}
+  ): () => void {
+    const sub: Subscription = {
+      connectionId,
+      callback,
+      onOverflow,
+      queue: [],
+      queuedBytes: 0,
+      lastDeliveredEventId: 0
+    }
     this.subscriptions.set(connectionId, sub)
 
     return () => {
@@ -32,73 +52,79 @@ export class EventHub {
   }
 
   publish(event: SseEnvelope): void {
-    // Coalesce: only keep latest event per entity
-    const existingIndex = this.queue.findIndex(
-      (e) => e.entityId === event.entityId && e.topic === event.topic
-    )
-
-    if (existingIndex >= 0) {
-      // Replace with newer event (higher revision)
-      const existing = this.queue[existingIndex]
-      if (existing && event.revision > existing.revision) {
-        this.queue[existingIndex] = event
-      }
-    } else {
-      this.queue.push(event)
+    for (const sub of [...this.subscriptions.values()]) {
+      this.enqueue(sub, event)
     }
-
-    // Enforce queue limits
-    this.enforceLimits()
-
-    // Dispatch to subscribers
     this.dispatch()
   }
 
   private dispatch(): void {
-    while (this.queue.length > 0) {
-      const event = this.queue.shift()
-      if (!event) break
-
-      const deadSubs: string[] = []
-      for (const sub of this.subscriptions.values()) {
-        try {
-          sub.callback(event)
-        } catch {
-          deadSubs.push(sub.connectionId)
+    if (this.dispatching) return
+    this.dispatching = true
+    try {
+      for (;;) {
+        let delivered = false
+        for (const sub of [...this.subscriptions.values()]) {
+          const event = sub.queue.shift()
+          if (!event) continue
+          sub.queuedBytes -= this.serializedBytes(event)
+          delivered = true
+          try {
+            sub.lastDeliveredEventId = event.eventId
+            sub.callback(event)
+          } catch {
+            this.subscriptions.delete(sub.connectionId)
+          }
         }
+        if (!delivered) return
       }
-
-      // Clean up dead subscriptions
-      for (const id of deadSubs) {
-        this.subscriptions.delete(id)
-      }
+    } finally {
+      this.dispatching = false
     }
   }
 
-  private enforceLimits(): void {
-    // Enforce count limit
-    while (this.queue.length > this.config.maxQueueSize) {
-      const dropped = this.queue.shift()
-      if (dropped) {
-        this.logger.warn('Event queue overflow, dropped oldest', {
-          entityId: dropped.entityId,
-          revision: dropped.revision
-        })
-      }
+  private enqueue(sub: Subscription, event: SseEnvelope): void {
+    const existingIndex = sub.queue.findIndex(
+      (pending) => pending.entityId === event.entityId && pending.topic === event.topic
+    )
+
+    if (existingIndex >= 0) {
+      const existing = sub.queue[existingIndex]
+      if (!existing || event.revision <= existing.revision) return
+      sub.queuedBytes -= this.serializedBytes(existing)
+      sub.queue[existingIndex] = event
+      sub.queuedBytes += this.serializedBytes(event)
+    } else {
+      sub.queue.push(event)
+      sub.queuedBytes += this.serializedBytes(event)
     }
 
-    // Enforce bytes limit (approximate)
-    let totalBytes = 0
-    for (let i = this.queue.length - 1; i >= 0; i--) {
-      totalBytes += JSON.stringify(this.queue[i]).length
-      if (totalBytes > this.config.maxQueueBytes) {
-        const dropped = this.queue.splice(0, i + 1)
-        this.logger.warn('Event queue byte limit exceeded, dropped oldest', {
-          droppedCount: dropped.length
-        })
-        break
-      }
+    if (sub.queue.length > this.config.maxQueueSize || sub.queuedBytes > this.config.maxQueueBytes) {
+      this.closeSlowConsumer(sub, event.eventId)
     }
+  }
+
+  private closeSlowConsumer(sub: Subscription, latestEventId: number): void {
+    if (!this.subscriptions.delete(sub.connectionId)) return
+    sub.queue = []
+    sub.queuedBytes = 0
+    this.logger.warn('Event connection overflow; requiring resync', {
+      connectionId: sub.connectionId,
+      lastDeliveredEventId: sub.lastDeliveredEventId,
+      latestEventId
+    })
+    try {
+      sub.onOverflow({
+        lastDeliveredEventId: sub.lastDeliveredEventId,
+        latestEventId
+      })
+    } catch {
+      // The connection was already closed; it is isolated from other subscribers.
+    }
+  }
+
+  private serializedBytes(event: SseEnvelope): number {
+    return JSON.stringify(event).length
   }
 
   getSubscriberCount(): number {
@@ -106,6 +132,10 @@ export class EventHub {
   }
 
   getQueueSize(): number {
-    return this.queue.length
+    let size = 0
+    for (const sub of this.subscriptions.values()) {
+      size += sub.queue.length
+    }
+    return size
   }
 }

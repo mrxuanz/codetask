@@ -10,7 +10,7 @@ import {
   loadDesignReferenceManifest
 } from '../design-session/service'
 import { scheduleDesignSessionPlanRegeneration } from '../design-session/planner'
-import { emitJobEvent, getThreadJob, updateJobRow } from '../jobs/service'
+import { emitJobEvent, getThreadJob, updateJobRow } from '../legacy-control-plane/service'
 import type { PlannerRegisteredPlan } from '../planner/plan-types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import {
@@ -23,7 +23,7 @@ import {
 import { validatePlanAbilityCodes } from '../planner/plan-ability-validation'
 import { flattenRegisteredPlan } from '../planner/save-plan'
 import { putDesignPlanArtifact } from '../retention/design-plan-artifacts'
-import type { ThreadJobDto } from '../jobs/types'
+import type { ThreadJobDto } from '../legacy-control-plane/types'
 import {
   assertThreadWizardPhase,
   assertActivePlan,

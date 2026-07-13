@@ -1,6 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
 import type { getDb } from './index'
-import type { PlanProgressDto, ThreadJobAbilityDto } from '../jobs/types'
+import type { PlanProgressDto, ThreadJobAbilityDto } from '../legacy-control-plane/types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import type {
   FlatTaskPlan,

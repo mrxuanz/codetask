@@ -10,6 +10,7 @@ import { createApiRoutes } from './routes/api'
 
 export {
   bootstrapRuntime,
+  ensureRuntimeReady,
   getAppContext,
   resetAppContextForTests,
   type AppContext,

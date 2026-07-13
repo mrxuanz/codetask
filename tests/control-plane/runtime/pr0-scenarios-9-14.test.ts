@@ -12,6 +12,7 @@ import { VerificationRepository } from '../../../src/server/infra/sqlite/control
 import { EvidenceRepository } from '../../../src/server/infra/sqlite/control-plane/evidence-repository'
 import { InternalExecutionCommandServiceImpl } from '../../../src/server/application/internal-execution-command-service'
 import { JobEventHub } from '../../../src/server/application/job-event-hub'
+import { EventHub } from '../../../src/server/application/event-hub'
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
 import { checkMilestoneReadiness } from '../../../src/server/application/verification-gate'
@@ -136,6 +137,27 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
       assert.equal(run.state, 'active')
     })
 
+    it('records child close even when it arrives before RuntimeStarted', () => {
+      seedJob(rawDb, { state: 'execution_running', stateRevision: 1, activeRunId: 'run-1' })
+      seedRun(rawDb, { state: 'starting' })
+      const { service, jobRepository } = createInternalService(rawDb)
+
+      service.runtimeExited({
+        jobId: 'job-1',
+        expectedRevision: 1,
+        runId: 'run-1',
+        fenceToken: 'fence-1',
+        executionGeneration: 0,
+        payload: { runtimeInstanceId: 'rt-before-start', exitKind: 'error', exitCode: 1 }
+      })
+
+      assert.equal(jobRepository.getAggregate('job-1')?.state, 'failed')
+      const instance = rawDb
+        .prepare(`SELECT state FROM control_runtime_instances WHERE id = 'rt-before-start'`)
+        .get() as { state: string }
+      assert.equal(instance.state, 'closed')
+    })
+
     it('should not keep Job running without active run/slot/runtime', () => {
       seedJob(rawDb, { state: 'execution_running', stateRevision: 1, activeRunId: 'run-1' })
       seedRun(rawDb)
@@ -155,10 +177,7 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
       })
 
       assert.ok(result.decision === 'job_failed' || result.decision === 'retry_scheduled')
-      const job = jobRepository.getOwnedAggregate({
-        actor: { username: 'system', requestId: '' },
-        jobId: 'job-1'
-      })
+      const job = jobRepository.getAggregate('job-1')
       assert.notEqual(job?.state, 'execution_running')
       assert.equal(job?.activeRunId, null)
     })
@@ -268,10 +287,7 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
       const r1 = service.reportNoProgress(envelope)
       assert.equal(r1.eventCount, 1)
 
-      const job = jobRepository.getOwnedAggregate({
-        actor: { username: 'system', requestId: '' },
-        jobId: 'job-1'
-      })
+      const job = jobRepository.getAggregate('job-1')
       assert.equal(job?.state, 'failed')
     })
 
@@ -302,26 +318,58 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
   })
 
   describe('Scenario 13: production hub flood', () => {
-    it('must not silently drop events', () => {
-      const hub = new JobEventHub({ maxQueueSize: 2, coalesceWindowMs: 0 })
-      const sent: unknown[] = []
-      hub.registerConnection('job:job-1', {
-        send(event: unknown) {
-          sent.push(event)
-        }
-      })
-      hub.push('job:job-1', 1, { revision: 1 })
-      hub.push('job:job-1', 2, { revision: 2 })
-      hub.push('job:job-1', 3, { revision: 3 })
-      assert.ok(
-        sent.some(
-          (e) =>
-            typeof e === 'object' &&
-            e !== null &&
-            'type' in e &&
-            (e as { type: string }).type === 'resync_required'
-        )
+    it('closes only the slow production EventHub subscriber with resync metadata', () => {
+      const hub = new EventHub(
+        { maxQueueSize: 2, maxQueueBytes: 1024 },
+        { debug() {}, info() {}, warn() {}, error() {} }
       )
+      const slowEvents: number[] = []
+      const fastEvents: number[] = []
+      const resync: Array<{ lastDeliveredEventId: number; latestEventId: number }> = []
+      let flooded = false
+
+      hub.subscribe(
+        'slow',
+        (event) => {
+          slowEvents.push(event.eventId)
+          if (!flooded) {
+            flooded = true
+            for (const eventId of [2, 3, 4]) {
+              hub.publish({
+                eventId,
+                topic: `job:job-${eventId}`,
+                type: 'job.changed',
+                entityId: `job-${eventId}`,
+                revision: eventId,
+                payload: {}
+              })
+            }
+          }
+        },
+        (info) => resync.push(info)
+      )
+      hub.publish({
+        eventId: 1,
+        topic: 'job:job-1',
+        type: 'job.changed',
+        entityId: 'job-1',
+        revision: 1,
+        payload: {}
+      })
+      hub.subscribe('fast', (event) => fastEvents.push(event.eventId))
+      hub.publish({
+        eventId: 5,
+        topic: 'job:job-5',
+        type: 'job.changed',
+        entityId: 'job-5',
+        revision: 5,
+        payload: {}
+      })
+
+      assert.deepEqual(slowEvents, [1])
+      assert.deepEqual(resync, [{ lastDeliveredEventId: 1, latestEventId: 4 }])
+      assert.deepEqual(fastEvents, [5])
+      assert.equal(hub.getSubscriberCount(), 1)
     })
 
     it('must maintain fairness across topics', () => {

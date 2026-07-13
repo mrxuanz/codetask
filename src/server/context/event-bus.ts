@@ -1,5 +1,5 @@
 import type { HubEvent, HubTopic } from '@shared/contracts/job-event-hub'
-import type { JobSseEvent } from '../jobs/types'
+import type { JobSseEvent } from '../legacy-control-plane/types'
 
 const MAX_QUEUE_EVENTS = 64
 

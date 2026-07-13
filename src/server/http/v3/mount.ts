@@ -12,7 +12,7 @@ import {
 import { createJobsRoutes, type HttpRequest } from './jobs-routes'
 import { fail, ok } from '../../response'
 import { code } from '../../error'
-import { DomainError } from '../../domain/jobs/job-errors'
+import { CommandError, DomainError, commandError } from '../../domain/jobs/job-errors'
 import { formatSseEvent, formatSseJsonEvent, type SseEnvelope } from './sse-envelope'
 
 const CONTROL_PLANE_REPLAY_LIMIT = 100
@@ -82,10 +82,18 @@ function mapRouteError(error: unknown): { status: number; body: ReturnType<typeo
     }
   }
 
-  if (error instanceof DomainError) {
+  if (error instanceof CommandError) {
     return {
-      status: 409,
-      body: fail(code.CONFLICT, error.code, error.details)
+      status: error.httpStatus,
+      body: fail(
+        error.httpStatus === 404
+          ? code.NOT_FOUND
+          : error.httpStatus === 400
+            ? code.BAD_REQUEST
+            : code.CONFLICT,
+        error.code,
+        error.details
+      )
     }
   }
 
@@ -122,8 +130,14 @@ function wrapSuccessBody(body: unknown): unknown {
 
 function parseLastEventId(header: string | undefined): number {
   if (!header) return 0
-  const parsed = Number.parseInt(header, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  if (!/^\d+$/.test(header)) {
+    throw commandError('contract.invalid_payload', { field: 'Last-Event-ID' })
+  }
+  const parsed = Number(header)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw commandError('contract.invalid_payload', { field: 'Last-Event-ID' })
+  }
+  return parsed
 }
 
 export function mountV3Routes(ctx: AppContext): Hono {
@@ -163,9 +177,17 @@ export function mountV3Routes(ctx: AppContext): Hono {
   }
 
   routes.get('/events', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
+    let username: string
+    let lastEventId: number
+    try {
+      username = await requireUsername(c.req.header('Authorization'))
+      lastEventId = parseLastEventId(c.req.header('last-event-id'))
+    } catch (error) {
+      const mapped = mapRouteError(error)
+      if (mapped) return c.json(mapped.body, mapped.status as ContentfulStatusCode)
+      throw error
+    }
     const actor = toActor(username, c.req.header('x-request-id') ?? crypto.randomUUID())
-    const lastEventId = parseLastEventId(c.req.header('last-event-id'))
 
     const stream = new ReadableStream({
       start(controller) {
@@ -204,37 +226,51 @@ export function mountV3Routes(ctx: AppContext): Hono {
           }
         }
 
-        const closeWithResync = (reason: 'cursor_too_old' | 'slow_consumer') => {
+        const closeWithResync = (
+          reason: 'cursor_too_old' | 'slow_consumer',
+          cursor = lastSentEventId,
+          latestEventId = getControlPlaneLatestEventId(ctx, actor)
+        ) => {
           if (closed) return
           enqueue(
             formatSseJsonEvent({
               event: 'resync_required',
               data: {
                 reason,
-                restartFromEventId: getControlPlaneLatestEventId(ctx, actor)
+                restartFromEventId: latestEventId,
+                lastDeliveredEventId: cursor,
+                latestEventId
               }
             })
           )
           cleanup()
         }
 
-        unsubscribe = subscribeControlPlaneEvents(ctx, actor, connectionId, (event) => {
-          if (closed) return
-          if (!replayReady) {
-            liveBuffer.push(event)
-            return
+        unsubscribe = subscribeControlPlaneEvents(
+          ctx,
+          actor,
+          connectionId,
+          (event) => {
+            if (closed) return
+            if (!replayReady) {
+              liveBuffer.push(event)
+              return
+            }
+            if (event.eventId <= lastSentEventId) {
+              return
+            }
+            if (!enqueue(formatSseEvent(event))) {
+              return
+            }
+            lastSentEventId = event.eventId
+            if ((controller.desiredSize ?? 1) < 0) {
+              closeWithResync('slow_consumer')
+            }
+          },
+          ({ lastDeliveredEventId, latestEventId }) => {
+            closeWithResync('slow_consumer', lastDeliveredEventId, latestEventId)
           }
-          if (event.eventId <= lastSentEventId) {
-            return
-          }
-          if (!enqueue(formatSseEvent(event))) {
-            return
-          }
-          lastSentEventId = event.eventId
-          if ((controller.desiredSize ?? 1) < 0) {
-            closeWithResync('slow_consumer')
-          }
-        })
+        )
 
         const initialEvents = getControlPlaneReplayEvents(
           ctx,

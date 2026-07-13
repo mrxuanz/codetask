@@ -4,8 +4,8 @@ import {
   resolveStaleExecutionJobAction,
   readPausingAttempt,
   withPausingAttempt
-} from '../../src/server/jobs/execution-recovery'
-import { pausingAttemptKey } from '../../src/server/jobs/recovery-limits'
+} from '../../src/server/legacy-control-plane/execution-recovery'
+import { pausingAttemptKey } from '../../src/server/legacy-control-plane/recovery-limits'
 
 test('resolveStaleExecutionJobAction keeps user paused jobs untouched', () => {
   assert.equal(resolveStaleExecutionJobAction({ status: 'paused' }), 'noop')

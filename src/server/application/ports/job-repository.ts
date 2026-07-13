@@ -1,5 +1,6 @@
 import type { JobState, ControlIntent, ResumeTarget } from '@shared/contracts/control-plane'
 import type { ActiveRunSummary } from '../../domain/jobs/job-invariants'
+import type { ControlPlaneTransaction } from './unit-of-work'
 
 export interface ActorContext {
   readonly username: string
@@ -22,6 +23,7 @@ export interface JobAggregateView {
 
 export interface JobCasInput {
   readonly jobId: string
+  readonly updatedAtMs: number
   readonly expectedRevision: number
   readonly expectedState: JobState
   readonly expectedActiveRunId: string | null
@@ -41,11 +43,13 @@ export type JobCasResult =
   | { readonly ok: false; readonly reason: 'revision_conflict' | 'state_conflict' }
 
 export interface InsertFailureInput {
+  readonly id: string
   readonly jobId: string
   readonly code: string
   readonly recoverability: string
   readonly reason: string | null
   readonly runKind: string | null
+  readonly createdAtMs: number
 }
 
 export interface AppendOutboxInput {
@@ -54,6 +58,7 @@ export interface AppendOutboxInput {
   readonly entityId: string
   readonly aggregateRevision: number
   readonly payload: unknown
+  readonly createdAtMs: number
 }
 
 export interface DedupLookup {
@@ -74,6 +79,8 @@ export interface StoreDedupInput {
   readonly requestHash: string
   readonly response: unknown
   readonly responseRevision: number
+  readonly createdAtMs: number
+  readonly expiresAtMs: number
 }
 
 export interface WorkerFence {
@@ -82,10 +89,15 @@ export interface WorkerFence {
   readonly runId: string
   readonly fenceToken: string
   readonly executionGeneration: number
+  readonly updatedAtMs: number
 }
 
 export type WorkerFenceResult =
   | { readonly ok: true; readonly newRevision: number }
+  | { readonly ok: false; readonly reason: 'stale_run' | 'revision_conflict' | 'fence_mismatch' }
+
+export type WorkerFenceAssertion =
+  | { readonly ok: true }
   | { readonly ok: false; readonly reason: 'stale_run' | 'revision_conflict' | 'fence_mismatch' }
 
 export interface OutboxEvent {
@@ -98,22 +110,38 @@ export interface OutboxEvent {
 }
 
 export interface CreateRunInput {
+  readonly id: string
   readonly jobId: string
   readonly kind: 'planning' | 'execution'
   readonly fenceToken: string
   readonly executionGeneration: number
+  readonly startedAtMs: number
+  readonly pendingAttemptId: string
+  readonly lifecycleOperationId: string
 }
 
 export interface CreateSlotInput {
+  readonly id: string
   readonly jobId: string
   readonly runId: string
   readonly pool: string
+  readonly createdAtMs: number
 }
 
 export interface JobRepository {
   getOwnedAggregate(input: {
     readonly actor: ActorContext
     readonly jobId: string
+  }): JobAggregateView | null
+
+  /** Internal read by id — no ownership filter (scheduler/reconciler/runtime bridge). */
+  getAggregate(jobId: string): JobAggregateView | null
+
+  getWorkerAggregate(input: {
+    readonly jobId: string
+    readonly runId: string
+    readonly fenceToken: string
+    readonly executionGeneration: number
   }): JobAggregateView | null
 
   listOwnedAggregates(input: {
@@ -123,7 +151,7 @@ export interface JobRepository {
 
   compareAndSetJob(input: JobCasInput): JobCasResult
 
-  insertFailure(input: InsertFailureInput): string
+  insertFailure(input: InsertFailureInput): void
 
   appendOutbox(input: AppendOutboxInput): number
 
@@ -137,7 +165,7 @@ export interface JobRepository {
 
   getOwnedOutboxLatestEventId(input: { readonly actor: ActorContext }): number
 
-  markDispatched(eventIds: readonly number[]): void
+  markDispatched(input: { readonly eventIds: readonly number[]; readonly dispatchedAtMs: number }): void
 
   getDedup(input: DedupLookup): StoredCommandResult | null
 
@@ -151,13 +179,42 @@ export interface JobRepository {
 
   getJobTimestamps(jobId: string): { createdAtMs: number; updatedAtMs: number; terminalAtMs: number | null } | null
 
-  createRun(input: CreateRunInput): string
+  createRun(input: CreateRunInput): void
 
   createSlot(input: CreateSlotInput): void
 
-  releaseSlot(runId: string): void
+  releaseSlot(input: { readonly runId: string; readonly releasedAtMs: number }): void
 
-  markRunState(runId: string, state: string, stopReason?: string | null): void
+  markRunState(input: {
+    readonly runId: string
+    readonly state: string
+    readonly stopReason?: string | null
+    readonly updatedAtMs: number
+  }): void
+
+  markRunActive(input: {
+    readonly runId: string
+    readonly runtimeInstanceId: string
+    readonly updatedAtMs: number
+  }): void
+
+  createRuntimeInstance(input: {
+    readonly id: string
+    readonly runId: string
+    readonly ownerBootId: string
+    readonly provider: string
+    readonly pidOrHandleRef?: string | undefined
+    readonly startedAtMs: number
+  }): void
+
+  closeRuntimeInstance(input: {
+    readonly id: string
+    readonly runId: string
+    readonly closedAtMs: number
+    readonly exitKind: string
+    readonly exitCode?: number | undefined
+    readonly signal?: string | undefined
+  }): void
 
   /**
    * Atomically verify worker fence (run_id + fence_token + generation + revision)
@@ -167,9 +224,11 @@ export interface JobRepository {
    */
   workerFence(input: WorkerFence): WorkerFenceResult
 
+  assertWorkerFence(input: Omit<WorkerFence, 'updatedAtMs'>): WorkerFenceAssertion
+
   /**
    * Execute a synchronous transaction. The callback must not contain await.
    * All repository methods called within the callback will participate in the same transaction.
    */
-  transaction<T>(fn: () => T): T
+  transaction<T>(fn: (tx: ControlPlaneTransaction) => T): T
 }

@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'crypto'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { runMigrations } from '../../../src/server/db/migrations/runner'
@@ -102,6 +103,7 @@ describe('JobRepository', () => {
 
       const result = repo.compareAndSetJob({
         jobId: 'job-1',
+        updatedAtMs: Date.now(),
         expectedRevision: 1,
         expectedState: 'execution_queued',
         expectedActiveRunId: null,
@@ -124,6 +126,7 @@ describe('JobRepository', () => {
 
       const result = repo.compareAndSetJob({
         jobId: 'job-1',
+        updatedAtMs: Date.now(),
         expectedRevision: 1,
         expectedState: 'execution_queued',
         expectedActiveRunId: null,
@@ -146,6 +149,7 @@ describe('JobRepository', () => {
 
       const result = repo.compareAndSetJob({
         jobId: 'job-1',
+        updatedAtMs: Date.now(),
         expectedRevision: 1,
         expectedState: 'execution_running',
         expectedActiveRunId: null,
@@ -173,6 +177,7 @@ describe('JobRepository', () => {
 
       const result = repo.compareAndSetJob({
         jobId: 'job-1',
+        updatedAtMs: Date.now(),
         expectedRevision: 1,
         expectedState: 'execution_running',
         expectedActiveRunId: 'run-2',
@@ -195,6 +200,7 @@ describe('JobRepository', () => {
 
       const result1 = repo.compareAndSetJob({
         jobId: 'job-1',
+        updatedAtMs: Date.now(),
         expectedRevision: 1,
         expectedState: 'execution_queued',
         expectedActiveRunId: null,
@@ -210,6 +216,7 @@ describe('JobRepository', () => {
 
       const result2 = repo.compareAndSetJob({
         jobId: 'job-1',
+        updatedAtMs: Date.now(),
         expectedRevision: 1,
         expectedState: 'execution_queued',
         expectedActiveRunId: null,
@@ -267,7 +274,8 @@ describe('JobRepository', () => {
         expectedRevision: 1,
         runId: 'run-1',
         fenceToken: 'fence-1',
-        executionGeneration: 0
+        executionGeneration: 0,
+        updatedAtMs: Date.now()
       })
 
       assert.equal(result.ok, true)
@@ -288,7 +296,8 @@ describe('JobRepository', () => {
         expectedRevision: 1,
         runId: 'run-stale',
         fenceToken: 'fence-1',
-        executionGeneration: 0
+        executionGeneration: 0,
+        updatedAtMs: Date.now()
       })
 
       assert.equal(result.ok, false)
@@ -309,7 +318,8 @@ describe('JobRepository', () => {
         expectedRevision: 1,
         runId: 'run-1',
         fenceToken: 'fence-wrong',
-        executionGeneration: 0
+        executionGeneration: 0,
+        updatedAtMs: Date.now()
       })
 
       assert.equal(result.ok, false)
@@ -331,7 +341,8 @@ describe('JobRepository', () => {
         expectedRevision: 1,
         runId: 'run-1',
         fenceToken: 'fence-uuid-1',
-        executionGeneration: 1
+        executionGeneration: 1,
+        updatedAtMs: Date.now()
       })
 
       assert.equal(result.ok, false)
@@ -351,7 +362,8 @@ describe('JobRepository', () => {
         expectedRevision: 1,
         runId: 'run-1',
         fenceToken: 'fence-uuid-1',
-        executionGeneration: 0
+        executionGeneration: 0,
+        updatedAtMs: Date.now()
       })
 
       assert.equal(result.ok, false)
@@ -361,13 +373,16 @@ describe('JobRepository', () => {
 
   describe('dedup', () => {
     it('should return stored result for same key and hash', () => {
+      const now = Date.now()
       repo.storeDedup({
         actorUsername: 'alice',
         idempotencyKey: 'key-1',
         commandType: 'request_pause',
         requestHash: 'hash-1',
         response: { ok: true },
-        responseRevision: 2
+        responseRevision: 2,
+        createdAtMs: now,
+        expiresAtMs: now + 60_000
       })
 
       const result = repo.getDedup({
@@ -392,13 +407,16 @@ describe('JobRepository', () => {
     })
 
     it('should detect key reuse with different hash', () => {
+      const now = Date.now()
       repo.storeDedup({
         actorUsername: 'alice',
         idempotencyKey: 'key-1',
         commandType: 'request_pause',
         requestHash: 'hash-1',
         response: { ok: true },
-        responseRevision: 2
+        responseRevision: 2,
+        createdAtMs: now,
+        expiresAtMs: now + 60_000
       })
 
       const stored = repo.getDedup({
@@ -423,6 +441,7 @@ describe('JobRepository', () => {
         eventType: 'job.changed',
         entityId: 'job-1',
         aggregateRevision: 2,
+        createdAtMs: Date.now(),
         payload: { type: 'job.changed', entityId: 'job-1', revision: 2, changed: ['state'] }
       })
       repo.appendOutbox({
@@ -430,6 +449,7 @@ describe('JobRepository', () => {
         eventType: 'job.changed',
         entityId: 'job-2',
         aggregateRevision: 2,
+        createdAtMs: Date.now(),
         payload: { type: 'job.changed', entityId: 'job-2', revision: 2, changed: ['state'] }
       })
 
@@ -451,6 +471,7 @@ describe('JobRepository', () => {
         eventType: 'job.changed',
         entityId: 'job-2',
         aggregateRevision: 2,
+        createdAtMs: Date.now(),
         payload: { type: 'job.changed', entityId: 'job-2', revision: 2, changed: ['state'] }
       })
       repo.appendOutbox({
@@ -458,6 +479,7 @@ describe('JobRepository', () => {
         eventType: 'job.changed',
         entityId: 'job-1',
         aggregateRevision: 2,
+        createdAtMs: Date.now(),
         payload: { type: 'job.changed', entityId: 'job-1', revision: 2, changed: ['state'] }
       })
 
@@ -477,13 +499,16 @@ describe('JobRepository', () => {
     it('should release control resource slot by run id', () => {
       seedJob(rawDb, { id: 'job-1', state: 'execution_running', activeRunId: 'run-1' })
       seedRun(rawDb, { id: 'run-1', jobId: 'job-1' })
+      const now = Date.now()
       repo.createSlot({
+        id: randomUUID(),
         jobId: 'job-1',
         runId: 'run-1',
-        pool: 'default'
+        pool: 'default',
+        createdAtMs: now
       })
 
-      repo.releaseSlot('run-1')
+      repo.releaseSlot({ runId: 'run-1', releasedAtMs: now })
 
       const row = rawDb
         .prepare(`SELECT state, released_at_ms FROM control_resource_slots WHERE run_id = ?`)

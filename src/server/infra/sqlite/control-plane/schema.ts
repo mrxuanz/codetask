@@ -119,7 +119,8 @@ export const controlTaskAttempts = sqliteTable(
     failureId: text('failure_id'),
     startedAtMs: integer('started_at_ms').notNull(),
     endedAtMs: integer('ended_at_ms'),
-    resultHash: text('result_hash')
+    resultHash: text('result_hash'),
+    resultRevision: integer('result_revision').notNull()
   },
   (table) => [
     uniqueIndex('idx_control_task_attempts_unique').on(
@@ -264,6 +265,10 @@ export const controlJobFailures = sqliteTable('control_job_failures', {
 export const controlSchemaMeta = sqliteTable('control_schema_meta', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+  sourceMigration: integer('source_migration').notNull(),
+  copyReportHash: text('copy_report_hash'),
+  backupId: text('backup_id'),
+  validationSummaryJson: text('validation_summary_json'),
   updatedAtMs: integer('updated_at_ms').notNull()
 })
 

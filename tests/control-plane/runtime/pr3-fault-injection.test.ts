@@ -134,10 +134,7 @@ describe('C7 kill windows', () => {
       new SafeLoggerImpl()
     )
     await reconciler.reconcileAll()
-    const job = jobRepository.getOwnedAggregate({
-      actor: { username: 'system', requestId: '' },
-      jobId: 'job-1'
-    })
+    const job = jobRepository.getAggregate('job-1')
     assert.equal(job?.state, 'failed')
     assert.notEqual(job?.state, 'paused')
   })
@@ -169,10 +166,7 @@ describe('C7 kill windows', () => {
       new SafeLoggerImpl()
     )
     await reconciler.reconcileAll()
-    const job = jobRepository.getOwnedAggregate({
-      actor: { username: 'system', requestId: '' },
-      jobId: 'job-1'
-    })
+    const job = jobRepository.getAggregate('job-1')
     assert.equal(job?.state, 'paused')
   })
 
@@ -212,10 +206,7 @@ describe('C7 kill windows', () => {
       new SafeLoggerImpl()
     )
     await reconciler.reconcileAll()
-    const job = jobRepository.getOwnedAggregate({
-      actor: { username: 'system', requestId: '' },
-      jobId: 'job-1'
-    })
+    const job = jobRepository.getAggregate('job-1')
     assert.equal(job?.state, 'failed')
     assert.equal(job?.activeRunId, null)
   })
@@ -236,10 +227,7 @@ describe('C8 runtime child closed → RuntimeExited', () => {
       payload: { runtimeInstanceId: 'rt-1', exitKind: 'signal', signal: 'SIGTERM' }
     })
     assert.ok(result.decision === 'job_failed' || result.decision === 'retry_scheduled')
-    const job = jobRepository.getOwnedAggregate({
-      actor: { username: 'system', requestId: '' },
-      jobId: 'job-1'
-    })
+    const job = jobRepository.getAggregate('job-1')
     assert.notEqual(job?.state, 'execution_running')
     assert.equal(job?.activeRunId, null)
   })

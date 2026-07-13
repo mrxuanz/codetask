@@ -6,11 +6,47 @@ function tableExists(db: Parameters<Migration['up']>[0], table: string): boolean
   )
 }
 
+function columnExists(
+  db: Parameters<Migration['up']>[0],
+  table: string,
+  column: string
+): boolean {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(
+    (row) => row.name === column
+  )
+}
+
 export const migration027ControlPlaneSchema: Migration = {
   version: 27,
   name: 'control_plane_schema',
   up(db) {
-    if (tableExists(db, 'control_jobs')) return
+    if (tableExists(db, 'control_jobs')) {
+      if (!columnExists(db, 'control_task_attempts', 'result_revision')) {
+        db.exec('ALTER TABLE control_task_attempts ADD COLUMN result_revision INTEGER NOT NULL DEFAULT 0')
+      }
+      if (tableExists(db, 'control_schema_meta')) {
+        if (!columnExists(db, 'control_schema_meta', 'source_migration')) {
+          db.exec(
+            'ALTER TABLE control_schema_meta ADD COLUMN source_migration INTEGER NOT NULL DEFAULT 27'
+          )
+        }
+        if (!columnExists(db, 'control_schema_meta', 'copy_report_hash')) {
+          db.exec('ALTER TABLE control_schema_meta ADD COLUMN copy_report_hash TEXT')
+        }
+        if (!columnExists(db, 'control_schema_meta', 'backup_id')) {
+          db.exec('ALTER TABLE control_schema_meta ADD COLUMN backup_id TEXT')
+        }
+        if (!columnExists(db, 'control_schema_meta', 'validation_summary_json')) {
+          db.exec('ALTER TABLE control_schema_meta ADD COLUMN validation_summary_json TEXT')
+        }
+        db.prepare(
+          `INSERT OR IGNORE INTO control_schema_meta
+            (key, value, source_migration, updated_at_ms)
+           VALUES (?, ?, ?, ?)`
+        ).run('control_schema_generation', 'preparing', 27, Date.now())
+      }
+      return
+    }
 
     db.exec(`
       -- ============================================================
@@ -74,7 +110,8 @@ export const migration027ControlPlaneSchema: Migration = {
         heartbeat_at_ms         INTEGER,
         stop_reason             TEXT,
         started_at_ms           INTEGER NOT NULL CHECK (started_at_ms >= 0),
-        ended_at_ms             INTEGER CHECK (ended_at_ms IS NULL OR ended_at_ms >= 0)
+        ended_at_ms             INTEGER CHECK (ended_at_ms IS NULL OR ended_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       CREATE UNIQUE INDEX idx_control_job_runs_fence
@@ -97,7 +134,8 @@ export const migration027ControlPlaneSchema: Migration = {
         closed_at_ms        INTEGER CHECK (closed_at_ms IS NULL OR closed_at_ms >= 0),
         exit_kind           TEXT,
         exit_code           INTEGER,
-        signal              TEXT
+        signal              TEXT,
+        FOREIGN KEY (run_id) REFERENCES control_job_runs(id)
       );
 
       CREATE UNIQUE INDEX idx_control_runtime_instances_run_active
@@ -122,7 +160,8 @@ export const migration027ControlPlaneSchema: Migration = {
         core_code           TEXT,
         created_at_ms       INTEGER NOT NULL CHECK (created_at_ms >= 0),
         updated_at_ms       INTEGER NOT NULL CHECK (updated_at_ms >= 0),
-        PRIMARY KEY (job_id, execution_generation, task_id)
+        PRIMARY KEY (job_id, execution_generation, task_id),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       -- ============================================================
@@ -142,7 +181,11 @@ export const migration027ControlPlaneSchema: Migration = {
         failure_id          TEXT,
         started_at_ms       INTEGER NOT NULL CHECK (started_at_ms >= 0),
         ended_at_ms         INTEGER CHECK (ended_at_ms IS NULL OR ended_at_ms >= 0),
-        result_hash         TEXT
+        result_hash         TEXT,
+        result_revision     INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (run_id) REFERENCES control_job_runs(id),
+        FOREIGN KEY (job_id, execution_generation, task_id)
+          REFERENCES control_job_tasks(job_id, execution_generation, task_id)
       );
 
       CREATE UNIQUE INDEX idx_control_task_attempts_unique
@@ -174,7 +217,8 @@ export const migration027ControlPlaneSchema: Migration = {
             AND result_hash IS NOT NULL
             AND ended_at_ms IS NOT NULL
           )
-        )
+        ),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       CREATE UNIQUE INDEX idx_control_verifications_unique
@@ -189,7 +233,8 @@ export const migration027ControlPlaneSchema: Migration = {
         plan_revision   INTEGER NOT NULL CHECK (plan_revision >= 1),
         status          TEXT NOT NULL CHECK (status IN ('draft','confirmed','superseded')),
         content_hash    TEXT NOT NULL,
-        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0)
+        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       -- ============================================================
@@ -202,7 +247,8 @@ export const migration027ControlPlaneSchema: Migration = {
         milestone_id    TEXT NOT NULL,
         title           TEXT NOT NULL,
         sort_order      INTEGER NOT NULL,
-        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0)
+        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       -- ============================================================
@@ -216,7 +262,8 @@ export const migration027ControlPlaneSchema: Migration = {
         slice_id        TEXT NOT NULL,
         title           TEXT NOT NULL,
         sort_order      INTEGER NOT NULL,
-        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0)
+        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       -- ============================================================
@@ -229,7 +276,8 @@ export const migration027ControlPlaneSchema: Migration = {
         task_id         TEXT NOT NULL,
         ability_code    TEXT,
         core_code       TEXT,
-        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0)
+        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       -- ============================================================
@@ -242,7 +290,9 @@ export const migration027ControlPlaneSchema: Migration = {
         pool            TEXT NOT NULL,
         state           TEXT NOT NULL CHECK (state IN ('active','released')),
         created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0),
-        released_at_ms  INTEGER CHECK (released_at_ms IS NULL OR released_at_ms >= 0)
+        released_at_ms  INTEGER CHECK (released_at_ms IS NULL OR released_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE,
+        FOREIGN KEY (run_id) REFERENCES control_job_runs(id)
       );
 
       CREATE UNIQUE INDEX idx_control_resource_slots_run
@@ -296,16 +346,21 @@ export const migration027ControlPlaneSchema: Migration = {
         recoverability  TEXT NOT NULL CHECK (recoverability IN ('recoverable','non_recoverable')),
         reason          TEXT,
         run_kind        TEXT CHECK (run_kind IS NULL OR run_kind IN ('planning','execution')),
-        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0)
+        created_at_ms   INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        FOREIGN KEY (job_id) REFERENCES control_jobs(id) ON DELETE CASCADE
       );
 
       -- ============================================================
       -- control_schema_meta
       -- ============================================================
       CREATE TABLE control_schema_meta (
-        key           TEXT PRIMARY KEY,
-        value         TEXT NOT NULL,
-        updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0)
+        key                     TEXT PRIMARY KEY,
+        value                   TEXT NOT NULL,
+        source_migration        INTEGER NOT NULL,
+        copy_report_hash        TEXT,
+        backup_id               TEXT,
+        validation_summary_json TEXT,
+        updated_at_ms           INTEGER NOT NULL CHECK (updated_at_ms >= 0)
       );
 
       -- ============================================================
@@ -318,5 +373,9 @@ export const migration027ControlPlaneSchema: Migration = {
         created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0)
       );
     `)
+    db.prepare(
+      `INSERT INTO control_schema_meta (key, value, source_migration, updated_at_ms)
+       VALUES (?, ?, ?, ?)`
+    ).run('control_schema_generation', 'preparing', 27, Date.now())
   }
 }

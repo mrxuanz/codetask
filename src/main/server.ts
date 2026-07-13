@@ -1,7 +1,8 @@
 import { join } from 'path'
 import { serve, type ServerType } from '@hono/node-server'
 import { is } from '@electron-toolkit/utils'
-import { bootstrapRuntime, createApp } from '../server'
+import { bootstrapRuntime, createApp, ensureRuntimeReady } from '../server'
+import { isV3Authoritative } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
 import {
   getSandboxSupervisorManager,
@@ -83,6 +84,8 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   )
 
   const ctx = bootstrapRuntime({ dataDir, mode: cli.mode })
+  // Do not expose HTTP until database facts, reconciliation, and outbox are ready.
+  await ensureRuntimeReady(ctx)
 
   if (cli.mode === 'server') {
     const { getBootstrap } = await import('../server/auth/service')
@@ -120,13 +123,17 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
       activeServer = await listen(app, cli.host, port)
       boundPort = port
       bindChanged = cli.port !== port
+      const { startControlPlaneScheduler } = await import('../server/application/control-plane-runtime')
+      await startControlPlaneScheduler(ctx)
       initConversationMcpBackend(port)
-      void import('../server/jobs/job-queue')
-        .then((module) => module.resumeJobQueuesAfterServerReady(supervisor))
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error)
-          console.warn(`[jobs] queue resume deferred: ${message}`)
-        })
+      if (!isV3Authoritative(ctx.db)) {
+        void import('../server/legacy-control-plane/job-queue')
+          .then((module) => module.resumeJobQueuesAfterServerReady(supervisor))
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error)
+            console.warn(`[jobs] queue resume deferred: ${message}`)
+          })
+      }
       break
     } catch (error) {
       if (!isAddressInUse(error)) throw error
@@ -182,7 +189,7 @@ export async function stopAppServer(): Promise<void> {
   }
 
   try {
-    const { stopWorkloadReconcilerForTests } = await import('../server/jobs/reconcile')
+    const { stopWorkloadReconcilerForTests } = await import('../server/legacy-control-plane/reconcile')
     stopWorkloadReconcilerForTests()
   } catch (error) {
     console.warn('[server] failed to stop workload reconciler', error)
@@ -195,45 +202,10 @@ export async function stopAppServer(): Promise<void> {
     console.warn('[server] failed to shutdown control-plane runtime', error)
   }
 
-  // 3) Abort in-memory execution loops, then release this process's workload slots/leases
-  try {
-    const { getAppContext } = await import('../server/bootstrap')
-    getAppContext().executionRuntime.dropAll()
-  } catch (error) {
-    console.warn('[server] failed to abort in-memory execution runtimes', error)
-  }
-
-  try {
-    const { getAppContext } = await import('../server/bootstrap')
-    const owner = `${process.pid}-${getAppContext().bootId}`
-    const { listActiveWorkloadSlots, releaseWorkloadSlot } = await import(
-      '../server/jobs/workload-slot-store'
-    )
-    const { clearExecutionLease } = await import('../server/jobs/repository')
-    const slots = await listActiveWorkloadSlots({})
-    for (const slot of slots) {
-      if (slot.leaseOwner !== owner) continue
-      try {
-        await releaseWorkloadSlot(slot.runId, {
-          reason: 'process_shutdown',
-          status: 'released',
-          skipQueueAdvance: true
-        })
-        if (slot.ownerKind === 'thread_job') {
-          await clearExecutionLease(slot.ownerId)
-        }
-      } catch (error) {
-        console.warn('[server] failed to release workload slot on shutdown', slot.runId, error)
-      }
-    }
-  } catch (error) {
-    console.warn('[server] failed to drain workload slots on shutdown', error)
-  }
-
-  // 4) Reap sandbox children
+  // 3) Reap sandbox children
   await shutdownSandboxSupervisor()
 
-  // 5) Close DB last
+  // 4) Close DB last
   try {
     const { closeDatabaseForTests } = await import('../server/db')
     closeDatabaseForTests()

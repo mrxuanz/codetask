@@ -10,15 +10,22 @@ export interface JobDto {
   readonly state: JobState
   readonly stateRevision: number
   readonly controlIntent: string
-  readonly resumeTarget: string | null
+  readonly resumeTarget: ResumeTarget | null
   readonly currentPlanRevision: number | null
   readonly executionGeneration: number
   readonly activeRunId: string | null
   readonly lastFailureId: string | null
+  readonly failure: JobFailureProjection | null
   readonly availableActions: readonly JobAction[]
   readonly createdAtMs: number
   readonly updatedAtMs: number
   readonly terminalAtMs: number | null
+}
+
+export interface JobFailureProjection {
+  readonly code: string
+  readonly recoverability: string
+  readonly reason: string | null
 }
 
 export interface JobQueryService {
@@ -46,6 +53,7 @@ export interface JobQueryDependencies {
     options?: TaskJobListOptions
   ) => Promise<{ jobs: ThreadJobDto[]; total: number }>
   readonly getJobTimestamps: (jobId: string) => { createdAtMs: number; updatedAtMs: number; terminalAtMs: number | null } | null
+  readonly getJobFailure?: (failureId: string) => JobFailureProjection | null
 }
 
 export interface TaskJobListOptions {
@@ -167,6 +175,8 @@ export class JobQueryServiceImpl implements JobQueryService {
       executionGeneration: job.executionGeneration,
       activeRunId: job.activeRunId,
       lastFailureId: job.lastFailureId,
+      failure:
+        job.lastFailureId === null ? null : (this.deps.getJobFailure?.(job.lastFailureId) ?? null),
       availableActions: actions,
       createdAtMs: timestamps?.createdAtMs ?? 0,
       updatedAtMs: timestamps?.updatedAtMs ?? 0,
