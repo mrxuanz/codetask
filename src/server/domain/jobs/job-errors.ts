@@ -1,13 +1,21 @@
-import type { JobState, JobAction, JobCommandType } from '../../../shared/contracts/control-plane/primitives'
-
-export type TransitionCommand = JobAction | Extract<JobCommandType, 'acknowledge_pause'>
-
-export type TransitionError = {
-  readonly code: 'job.action_not_allowed' | 'job.invalid_resume_target'
-  readonly state: JobState
-  readonly command: TransitionCommand
+export class DomainError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(message)
+    this.name = 'DomainError'
+  }
 }
 
-export type DomainResult<T, E> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: E }
+export function commandError(code: string, details?: Record<string, unknown>): DomainError {
+  return new DomainError(code, code, details)
+}
+
+export function fromTransitionError(error: { code: string; state: string; command: string }): DomainError {
+  return new DomainError(error.code, `${error.command} not allowed in state ${error.state}`, {
+    state: error.state,
+    command: error.command
+  })
+}

@@ -1,11 +1,10 @@
-import { eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import {
   validateJobInvariant,
   type InvariantViolation,
   type ActiveRunSummary
 } from '../../../domain/jobs/job-invariants'
-import type { JobAggregate } from '../../../domain/jobs/job-state-machine'
 import type {
   JobState,
   ControlIntent,
@@ -41,6 +40,10 @@ type RunRow = {
   readonly id: string
   readonly state: string
   readonly fenceToken: string
+  readonly executionGeneration: number
+  readonly currentRuntimeInstanceId: string | null
+  readonly pendingAttemptId: string | null
+  readonly lifecycleOperationId: string | null
 }
 
 function parseJobRow(input: unknown): JobRow {
@@ -78,25 +81,40 @@ function parseRunRow(input: unknown): RunRow | null {
   if (input === null || input === undefined) return null
   if (typeof input !== 'object') return null
   const r = input as Record<string, unknown>
-  if (typeof r.id !== 'string' || typeof r.state !== 'string' || typeof r.fenceToken !== 'string') {
+  if (
+    typeof r.id !== 'string' ||
+    typeof r.state !== 'string' ||
+    typeof r.fenceToken !== 'string' ||
+    typeof r.executionGeneration !== 'number'
+  ) {
     return null
   }
-  return { id: r.id, state: r.state, fenceToken: r.fenceToken }
+  return {
+    id: r.id,
+    state: r.state,
+    fenceToken: r.fenceToken,
+    executionGeneration: r.executionGeneration,
+    currentRuntimeInstanceId: (r.currentRuntimeInstanceId === null || typeof r.currentRuntimeInstanceId === 'string') ? r.currentRuntimeInstanceId : null,
+    pendingAttemptId: (r.pendingAttemptId === null || typeof r.pendingAttemptId === 'string') ? r.pendingAttemptId : null,
+    lifecycleOperationId: (r.lifecycleOperationId === null || typeof r.lifecycleOperationId === 'string') ? r.lifecycleOperationId : null
+  }
 }
 
-function toJobAggregate(row: JobRow): JobAggregate {
+function toJobAggregate(row: JobRow): {
+  readonly id: string
+  readonly state: JobState
+  readonly controlIntent: ControlIntent
+  readonly resumeTarget: ResumeTarget | null
+  readonly executionGeneration: number
+  readonly activeRunId: string | null
+} {
   return {
     id: row.id,
-    threadId: row.threadId,
-    projectId: row.projectId,
     state: row.state as JobState,
-    stateRevision: row.stateRevision,
     controlIntent: row.controlIntent as ControlIntent,
     resumeTarget: row.resumeTarget as ResumeTarget | null,
-    currentPlanRevision: row.currentPlanRevision,
     executionGeneration: row.executionGeneration,
-    activeRunId: row.activeRunId,
-    lastFailureId: row.lastFailureId
+    activeRunId: row.activeRunId
   }
 }
 
@@ -134,17 +152,24 @@ export function createInvariantSweep(
             .select({
               id: controlJobRuns.id,
               state: controlJobRuns.state,
-              fenceToken: controlJobRuns.fenceToken
+              fenceToken: controlJobRuns.fenceToken,
+              executionGeneration: controlJobRuns.executionGeneration,
+              currentRuntimeInstanceId: controlJobRuns.currentRuntimeInstanceId,
+              pendingAttemptId: controlJobRuns.pendingAttemptId,
+              lifecycleOperationId: controlJobRuns.lifecycleOperationId
             })
             .from(controlJobRuns)
             .where(eq(controlJobRuns.id, job.activeRunId))
             .limit(1)
             .all()
 
-          activeRun = parseRunRow(runRows[0] as unknown)
+          activeRun = parseRunRow(runRows[0] as unknown) as ActiveRunSummary | null
         }
 
-        const violations = validateJobInvariant(job, activeRun)
+        const violations = validateJobInvariant(
+          job as Parameters<typeof validateJobInvariant>[0],
+          activeRun
+        )
         if (violations.length > 0) {
           quarantined.push({ jobId: job.id, violations })
         }

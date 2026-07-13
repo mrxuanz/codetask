@@ -41,7 +41,7 @@ function nowSec(): number {
 }
 
 export async function reconcileStaleJobIfNeeded(
-  username: string,
+  _username: string,
   job: ThreadJobDto
 ): Promise<ThreadJobDto> {
   const action = resolveStaleExecutionJobAction(job)
@@ -75,28 +75,27 @@ export async function reconcileStaleJobIfNeeded(
     return updated
   }
 
+  // Auto-resume removed: interrupted jobs are now settled to failed/recoverable
+  // The user must explicitly Continue to resume execution
   const taskProgress: TaskProgressDto = {
     ...progress,
     phase: 'running',
-    status: 'running',
+    status: 'failed',
     message: null,
     progressCode: 'execution.interrupted_resume',
     progressParams: null
   }
 
-  const { acquireExecutionLease, clearStaleExecutionLeaseIfNeeded } = await import('./repository')
-  clearStaleExecutionLeaseIfNeeded(job.id)
-  if (!acquireExecutionLease(username, job.id)) {
-    console.warn('[reconcile] could not acquire execution lease after interrupted resume', job.id)
-  }
-
   const updated = await updateJobRowForSnapshot(job.id, {
-    status: 'running',
+    status: 'failed',
     taskProgress,
-    lastError: null
+    lastError: createTurnError('turn.unknown', {
+      detail: 'Execution interrupted - use Continue to resume'
+    }).toDto()
   })
   if (!updated) return job
 
+  await clearExecutionLease(job.id)
   emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
   return updated
 }

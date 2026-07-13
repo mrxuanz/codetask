@@ -28,21 +28,18 @@ export const JOB_ACTIONS = [
 export type JobAction = (typeof JOB_ACTIONS)[number]
 
 export type ControlIntent = 'none' | 'pause'
-
 export type ResumeTarget = 'planning_queued' | 'execution_queued'
-
 export type RunKind = 'planning' | 'execution'
-
 export type Recoverability = 'recoverable' | 'non_recoverable'
 
-export const JOB_COMMAND_TYPES = [
-  'request_pause',
-  'continue_job',
-  'cancel_job',
-  'restart_execution',
-  'acknowledge_pause',
-  'checkpoint_task',
-  'interrupt_run'
-] as const
+export function isTerminal(state: JobState): boolean {
+  return state === 'succeeded' || state === 'failed' || state === 'cancelled'
+}
 
-export type JobCommandType = (typeof JOB_COMMAND_TYPES)[number]
+export function isRunning(state: JobState): boolean {
+  return state === 'planning_running' || state === 'execution_running'
+}
+
+export function isQueued(state: JobState): boolean {
+  return state === 'planning_queued' || state === 'execution_queued'
+}

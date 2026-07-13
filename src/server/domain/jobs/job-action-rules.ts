@@ -1,4 +1,4 @@
-import type { JobState, JobAction, Recoverability } from '../../../shared/contracts/control-plane/primitives'
+import type { JobAction, JobState, Recoverability } from '@shared/contracts/control-plane'
 
 export interface ActionRuleContext {
   readonly state: JobState
@@ -29,18 +29,4 @@ export function availableActions(context: ActionRuleContext): readonly JobAction
     case 'succeeded':
       return ['delete']
   }
-}
-
-const TERMINAL_STATES: ReadonlySet<JobState> = new Set<JobState>([
-  'succeeded',
-  'failed',
-  'cancelled'
-])
-
-export function isTerminal(state: JobState): boolean {
-  return TERMINAL_STATES.has(state)
-}
-
-export function isActive(state: JobState): boolean {
-  return !isTerminal(state) && state !== 'paused' && state !== 'pausing' && state !== 'applying_changes'
 }

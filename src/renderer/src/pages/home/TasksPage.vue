@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useDebounceFn } from '@vueuse/core'
 import { type ThreadJob } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
@@ -25,16 +24,15 @@ import {
   type JobProgressSnapshot,
   type UnifiedTaskNode
 } from '@renderer/lib/jobProgress'
-import { jobHasAction } from '@shared/job-recovery-state'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
-import { useJobsStore } from '@renderer/composables/useJobsStore'
+import { useControlPlaneJobsStore } from '@renderer/composables/useControlPlaneJobsStore'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
 const selectedJobId = computed(() => (route.params.jobId as string) || null)
-const store = useJobsStore({ selectedJobId })
+const store = useControlPlaneJobsStore({ selectedJobId })
 
 const {
   statusFilter,
@@ -46,7 +44,13 @@ const {
   error,
   actionError,
   runningAction,
-  selectedJob
+  selectedJob,
+  canPause,
+  canContinue,
+  canRestart,
+  canCancelAction,
+  canDeleteAction,
+  pauseButtonText
 } = store
 
 const selectedTask = ref<UnifiedTaskNode | null>(null)
@@ -91,17 +95,8 @@ const standaloneLastError = computed(() => {
 const planTree = computed(() => buildPlanTree(selectedJob.value, t))
 const activeTaskId = computed(() => selectedJob.value?.taskProgress?.currentTaskId ?? null)
 
-const hasAction = (action: string): boolean => jobHasAction(selectedJob.value, action as never)
-
-const canPause = computed(() => hasAction('pause'))
-const canContinue = computed(() => hasAction('continue'))
-const canRestart = computed(() => hasAction('restart'))
-const canDelete = computed(() => hasAction('delete'))
-const recoveryHint = computed(() => {
-  if (selectedJob.value?.status !== 'failed') return ''
-  const strategy = selectedJob.value.recovery?.strategy ?? 'resume'
-  return t(`workspace.tasks.recovery.${strategy}`)
-})
+const canDelete = canDeleteAction
+const canCancel = canCancelAction
 
 function selectJob(jobId: string): void {
   selectedTask.value = null
@@ -126,11 +121,6 @@ onMounted(() => {
 onUnmounted(() => {
   store.stopHubPolling()
 })
-
-watch(statusFilter, () => void store.loadJobs())
-
-const debouncedSearch = useDebounceFn(() => void store.loadJobs(), 300)
-watch(searchQuery, () => void debouncedSearch())
 </script>
 
 <template>
@@ -268,6 +258,12 @@ watch(searchQuery, () => void debouncedSearch())
                   >
                     {{ jobStatusLabel(selectedJob.status, t, selectedJob) }}
                   </span>
+                  <span
+                    v-if="pauseButtonText"
+                    class="rounded-md px-2.5 py-1 text-xs text-muted-foreground"
+                  >
+                    {{ pauseButtonText }}
+                  </span>
                   <Button
                     v-if="canPause"
                     size="sm"
@@ -285,6 +281,15 @@ watch(searchQuery, () => void debouncedSearch())
                     @click="store.handleContinue()"
                   >
                     {{ t('workspace.tasks.actions.continue') }}
+                  </Button>
+                  <Button
+                    v-if="canCancel"
+                    size="sm"
+                    variant="outline"
+                    :disabled="runningAction === 'cancel'"
+                    @click="store.handleCancel()"
+                  >
+                    {{ t('workspace.tasks.actions.cancel', 'Cancel') }}
                   </Button>
                   <Button
                     v-if="canRestart"
@@ -305,9 +310,6 @@ watch(searchQuery, () => void debouncedSearch())
                     {{ t('workspace.tasks.actions.delete') }}
                   </Button>
                 </div>
-                <p v-if="recoveryHint" class="basis-full text-xs text-muted-foreground">
-                  {{ recoveryHint }}
-                </p>
               </div>
 
               <div v-if="showPlanProgress" class="space-y-1">

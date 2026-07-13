@@ -4,7 +4,6 @@ import type { SliceVerificationRecordDto, TaskBlockerKind, TaskEvidenceDto } fro
 import type { TurnErrorDto } from './turn-errors'
 import type {
   ExecutionProgressDto,
-  JobAvailableAction,
   JobFailureDto,
   JobLifecycle,
   JobRecoveryDto
@@ -130,7 +129,14 @@ export interface ThreadJobDto {
 
   recovery?: JobRecoveryDto
 
-  availableActions?: JobAvailableAction[]
+  /**
+   * Server-authoritative actions. Legacy recovery may emit JobAvailableAction;
+   * control-plane jobs attach V3 JobAction values from JobQueryService.
+   */
+  availableActions?: readonly string[]
+
+  /** Present when a control_jobs row exists (V3 aggregate revision). */
+  stateRevision?: number
 
   /** Present when status is `pending` and the job is in the execution FIFO queue. */
   queue?: ExecutionQueueDto

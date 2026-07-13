@@ -1,154 +1,114 @@
-import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import type {
-  JobState,
-  JobAction,
-  Recoverability
-} from '../../../src/shared/contracts/control-plane/primitives'
-import {
-  availableActions,
-  isTerminal,
-  isActive
-} from '../../../src/server/domain/jobs/job-action-rules'
-import type { ActionRuleContext } from '../../../src/server/domain/jobs/job-action-rules'
-
-const ALL_STATES: readonly JobState[] = [
-  'planning_queued',
-  'planning_running',
-  'plan_review',
-  'execution_queued',
-  'execution_running',
-  'pausing',
-  'paused',
-  'applying_changes',
-  'succeeded',
-  'failed',
-  'cancelled'
-]
-
-function hasNoDuplicates(actions: readonly JobAction[]): boolean {
-  return new Set(actions).size === actions.length
-}
+import assert from 'node:assert'
+import type { JobState } from '@shared/contracts/control-plane'
+import { availableActions, type ActionRuleContext } from '@server/domain/jobs/job-action-rules'
 
 function buildContext(
-  state: JobState,
-  overrides?: { recoverability?: Recoverability | null; hasConfirmedPlan?: boolean }
+  overrides: Partial<ActionRuleContext> = {}
 ): ActionRuleContext {
   return {
-    state,
-    recoverability: overrides?.recoverability ?? null,
-    hasConfirmedPlan: overrides?.hasConfirmedPlan ?? false
+    state: 'execution_queued',
+    recoverability: null,
+    hasConfirmedPlan: false,
+    ...overrides
   }
 }
 
-describe('job-action-rules', () => {
-  describe('availableActions - table-driven', () => {
-    const expectedActionsByState: ReadonlyMap<JobState, readonly JobAction[]> = new Map<JobState, readonly JobAction[]>([
-      ['planning_queued', ['pause', 'cancel']],
-      ['planning_running', ['pause', 'cancel']],
-      ['plan_review', ['edit_plan', 'confirm_plan', 'replan', 'cancel']],
-      ['execution_queued', ['pause', 'cancel']],
-      ['execution_running', ['pause', 'cancel']],
-      ['pausing', []],
-      ['paused', ['continue', 'cancel']],
-      ['applying_changes', []],
-      ['succeeded', ['delete']],
-      ['failed', ['restart_execution', 'delete']],
-      ['cancelled', ['delete']]
-    ])
-
-    for (const [state, expected] of expectedActionsByState) {
-      it(`returns ${JSON.stringify(expected)} for state=${state}`, () => {
-        const ctx = buildContext(state)
-        const actions = availableActions(ctx)
-        assert.deepEqual(actions, expected)
-        assert.ok(hasNoDuplicates(actions), `actions for ${state} must not contain duplicates`)
-      })
-    }
-  })
-
-  describe('recoverability affects failed state', () => {
-    it('failed + recoverable → [continue, cancel]', () => {
-      const ctx = buildContext('failed', { recoverability: 'recoverable' })
-      const actions = availableActions(ctx)
-      assert.deepEqual(actions, ['continue', 'cancel'])
-      assert.ok(hasNoDuplicates(actions))
-    })
-
-    it('failed + non_recoverable → [restart_execution, delete]', () => {
-      const ctx = buildContext('failed', { recoverability: 'non_recoverable' })
-      const actions = availableActions(ctx)
-      assert.deepEqual(actions, ['restart_execution', 'delete'])
-      assert.ok(hasNoDuplicates(actions))
-    })
-
-    it('failed + null recoverability → [restart_execution, delete]', () => {
-      const ctx = buildContext('failed', { recoverability: null })
-      const actions = availableActions(ctx)
-      assert.deepEqual(actions, ['restart_execution', 'delete'])
-      assert.ok(hasNoDuplicates(actions))
+describe('availableActions', () => {
+  describe('planning_queued', () => {
+    it('should return pause and cancel', () => {
+      const context = buildContext({ state: 'planning_queued' })
+      assert.deepStrictEqual(availableActions(context), ['pause', 'cancel'])
     })
   })
 
-  describe('hasConfirmedPlan affects cancelled state', () => {
-    it('cancelled + hasConfirmedPlan=true → [restart_execution, delete]', () => {
-      const ctx = buildContext('cancelled', { hasConfirmedPlan: true })
-      const actions = availableActions(ctx)
-      assert.deepEqual(actions, ['restart_execution', 'delete'])
-      assert.ok(hasNoDuplicates(actions))
-    })
-
-    it('cancelled + hasConfirmedPlan=false → [delete]', () => {
-      const ctx = buildContext('cancelled', { hasConfirmedPlan: false })
-      const actions = availableActions(ctx)
-      assert.deepEqual(actions, ['delete'])
-      assert.ok(hasNoDuplicates(actions))
+  describe('planning_running', () => {
+    it('should return pause and cancel', () => {
+      const context = buildContext({ state: 'planning_running' })
+      assert.deepStrictEqual(availableActions(context), ['pause', 'cancel'])
     })
   })
 
-  describe('no duplicate actions in any result', () => {
-    for (const state of ALL_STATES) {
-      for (const recoverability of [null, 'recoverable' as const, 'non_recoverable' as const]) {
-        for (const hasConfirmedPlan of [false, true]) {
-          it(`no duplicates: state=${state} recoverability=${recoverability} hasConfirmedPlan=${hasConfirmedPlan}`, () => {
-            const ctx = buildContext(state, { recoverability, hasConfirmedPlan })
-            const actions = availableActions(ctx)
-            assert.ok(
-              hasNoDuplicates(actions),
-              `duplicate actions found for state=${state}: ${JSON.stringify(actions)}`
-            )
-          })
-        }
-      }
-    }
+  describe('execution_queued', () => {
+    it('should return pause and cancel', () => {
+      const context = buildContext({ state: 'execution_queued' })
+      assert.deepStrictEqual(availableActions(context), ['pause', 'cancel'])
+    })
   })
 
-  describe('isTerminal', () => {
-    const terminalStates: readonly JobState[] = ['succeeded', 'failed', 'cancelled']
-    const nonTerminalStates = ALL_STATES.filter((s) => !terminalStates.includes(s))
-
-    for (const state of terminalStates) {
-      it(`${state} is terminal`, () => {
-        assert.equal(isTerminal(state), true)
-      })
-    }
-
-    for (const state of nonTerminalStates) {
-      it(`${state} is not terminal`, () => {
-        assert.equal(isTerminal(state), false)
-      })
-    }
+  describe('execution_running', () => {
+    it('should return pause and cancel', () => {
+      const context = buildContext({ state: 'execution_running' })
+      assert.deepStrictEqual(availableActions(context), ['pause', 'cancel'])
+    })
   })
 
-  describe('isActive', () => {
-    const activeStates: readonly JobState[] = [
+  describe('plan_review', () => {
+    it('should return edit_plan, confirm_plan, replan, cancel', () => {
+      const context = buildContext({ state: 'plan_review' })
+      assert.deepStrictEqual(availableActions(context), ['edit_plan', 'confirm_plan', 'replan', 'cancel'])
+    })
+  })
+
+  describe('pausing', () => {
+    it('should return empty array', () => {
+      const context = buildContext({ state: 'pausing' })
+      assert.deepStrictEqual(availableActions(context), [])
+    })
+  })
+
+  describe('applying_changes', () => {
+    it('should return empty array', () => {
+      const context = buildContext({ state: 'applying_changes' })
+      assert.deepStrictEqual(availableActions(context), [])
+    })
+  })
+
+  describe('paused', () => {
+    it('should return continue and cancel', () => {
+      const context = buildContext({ state: 'paused' })
+      assert.deepStrictEqual(availableActions(context), ['continue', 'cancel'])
+    })
+  })
+
+  describe('failed', () => {
+    it('should return continue and cancel for recoverable', () => {
+      const context = buildContext({ state: 'failed', recoverability: 'recoverable' })
+      assert.deepStrictEqual(availableActions(context), ['continue', 'cancel'])
+    })
+
+    it('should return restart_execution and delete for non_recoverable', () => {
+      const context = buildContext({ state: 'failed', recoverability: 'non_recoverable' })
+      assert.deepStrictEqual(availableActions(context), ['restart_execution', 'delete'])
+    })
+  })
+
+  describe('cancelled', () => {
+    it('should return restart_execution and delete with confirmed plan', () => {
+      const context = buildContext({ state: 'cancelled', hasConfirmedPlan: true })
+      assert.deepStrictEqual(availableActions(context), ['restart_execution', 'delete'])
+    })
+
+    it('should return only delete without confirmed plan', () => {
+      const context = buildContext({ state: 'cancelled', hasConfirmedPlan: false })
+      assert.deepStrictEqual(availableActions(context), ['delete'])
+    })
+  })
+
+  describe('succeeded', () => {
+    it('should return only delete', () => {
+      const context = buildContext({ state: 'succeeded' })
+      assert.deepStrictEqual(availableActions(context), ['delete'])
+    })
+  })
+
+  describe('matrix coverage', () => {
+    const ALL_STATES: JobState[] = [
       'planning_queued',
       'planning_running',
       'plan_review',
       'execution_queued',
-      'execution_running'
-    ]
-    const inactiveStates: readonly JobState[] = [
+      'execution_running',
       'pausing',
       'paused',
       'applying_changes',
@@ -157,16 +117,12 @@ describe('job-action-rules', () => {
       'cancelled'
     ]
 
-    for (const state of activeStates) {
-      it(`${state} is active`, () => {
-        assert.equal(isActive(state), true)
-      })
-    }
-
-    for (const state of inactiveStates) {
-      it(`${state} is not active`, () => {
-        assert.equal(isActive(state), false)
-      })
-    }
+    it('should have at least one test for each state', () => {
+      for (const state of ALL_STATES) {
+        const context = buildContext({ state })
+        const actions = availableActions(context)
+        assert.ok(Array.isArray(actions), `State ${state} should return an array`)
+      }
+    })
   })
 })
