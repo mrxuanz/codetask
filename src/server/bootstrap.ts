@@ -15,6 +15,9 @@ import { pruneOrphanRuntimeTrees } from './runtime/cleanup'
 import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } from './retention'
 import { getOrCreateAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
+import { StartupCoordinator } from './application/startup-coordinator'
+import { SafeLoggerImpl } from './application/safe-logger'
+import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
 
 export type { AppContext } from './context'
 
@@ -27,6 +30,8 @@ export interface BootstrapOptions {
 
 let appContext: AppContext | null = null
 const startupTasks = new Set<Promise<unknown>>()
+let startupCoordinator: StartupCoordinator | null = null
+const bootstrapLogger = new SafeLoggerImpl()
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -52,7 +57,7 @@ async function waitForPlanningToDrainForTests(ctx: AppContext): Promise<void> {
     await sleep(25)
   }
   if (ctx.runtimeRegistry.hasInflightPlanning()) {
-    console.warn('[tests] reset while planning runtime is still active')
+    bootstrapLogger.warn('[tests] reset while planning runtime is still active')
   }
 }
 
@@ -63,10 +68,16 @@ export function getAppContext(): AppContext {
   return appContext
 }
 
+export function getStartupCoordinator(): StartupCoordinator | null {
+  return startupCoordinator
+}
+
 export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   if (appContext) {
     return appContext
   }
+
+  void LEGACY_RESUME_RUNNING_DISABLED
 
   const db = createDatabase(options.dataDir)
   const mode = options.mode ?? 'desktop'
@@ -92,32 +103,49 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   process.env.CODETASK_DATA_DIR = options.dataDir
 
   const ctx = appContext
+
+  startupCoordinator = new StartupCoordinator({
+    logger: bootstrapLogger,
+    stages: [
+      {
+        name: 'reconcile-workload-slots',
+        execute: () => reconcileOrphanWorkloadSlotsOnStartupOnce()
+      },
+      {
+        name: 'reconcile-orphan-jobs',
+        execute: () => reconcileOrphanRunningJobsOnStartupOnce()
+      },
+      {
+        name: 'reconcile-planning-sessions',
+        execute: () => reconcileOrphanPlanningSessionsOnStartupOnce()
+      },
+      {
+        name: 'reconcile-conversation',
+        execute: () => reconcileOnStartupOnce()
+      },
+      {
+        name: 'prune-runtime-trees',
+        execute: async () => {
+          const result = await pruneOrphanRuntimeTrees(options.dataDir, db)
+          if (result.removedPaths.length > 0) {
+            bootstrapLogger.info('pruned orphan runtime trees', {
+              count: result.removedPaths.length
+            })
+          }
+        }
+      }
+    ]
+  })
+
   const startupReconcile = trackStartupTask(
-    reconcileOrphanWorkloadSlotsOnStartupOnce()
-      .then(() => reconcileOrphanRunningJobsOnStartupOnce())
-      .then(() => reconcileOrphanPlanningSessionsOnStartupOnce())
-      .catch((error) => {
-        console.warn('[jobs] startup reconcile failed', error)
+    startupCoordinator.ensureReady().catch((error: unknown) => {
+      bootstrapLogger.error('startup coordinator failed', {
+        error: error instanceof Error ? error.message : String(error)
       })
+    })
   )
 
   bindStartupWorkloadGate(startupReconcile)
-  trackStartupTask(
-    reconcileOnStartupOnce().catch((error) => {
-      console.warn('[conversation] startup reconcile failed', error)
-    })
-  )
-  trackStartupTask(
-    pruneOrphanRuntimeTrees(options.dataDir, db)
-      .then((result) => {
-        if (result.removedPaths.length > 0) {
-          console.info('[runtime] pruned orphan runtime trees', result.removedPaths.length)
-        }
-      })
-      .catch((error) => {
-        console.warn('[runtime] startup prune failed', error)
-      })
-  )
 
   trackStartupTask(
     runRetentionJanitorPass()
@@ -131,11 +159,16 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
           result.orphanRuntimeTrees > 0 ||
           result.sqliteMaintenance.ran
         ) {
-          console.info('[retention] startup janitor pass', result)
+          bootstrapLogger.info('retention startup janitor pass', {
+            expiredArtifacts: result.expiredArtifacts,
+            orphanAttachments: result.orphanAttachments
+          })
         }
       })
-      .catch((error) => {
-        console.warn('[retention] startup janitor failed', error)
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('retention startup janitor failed', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       })
   )
 
@@ -151,16 +184,20 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
         })
         module.startConversationCursorReaper()
       })
-      .catch((error) => {
-        console.warn('[cursor-acp] conversation session reaper startup failed', error)
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('conversation session reaper startup failed', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       })
   )
 
   trackStartupTask(
     import('./jobs/executor')
       .then((module) => module.initJobExecutor(ctx))
-      .catch((error) => {
-        console.warn('[jobs] executor startup failed', error)
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('executor startup failed', {
+          error: error instanceof Error ? error.message : String(error)
+        })
       })
   )
 
@@ -188,5 +225,6 @@ export async function resetAppContextForTests(): Promise<void> {
   }
 
   appContext = null
+  startupCoordinator = null
   closeDatabaseForTests()
 }

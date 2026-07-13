@@ -9,6 +9,7 @@ import { getDb } from '../db'
 import { loadJobPlan } from '../db/job-plan'
 import { threadJobs } from '../db/schema'
 import type { TaskProgressDto, ThreadJobDto } from './types'
+import type { ThreadJobStatus } from '@shared/contracts/jobs'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import { emitJobEvent, getUserJob, updateJobRow, updateJobRowForSnapshot } from './service'
@@ -18,6 +19,13 @@ import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { prepareContinueFailedExecution } from './continue-failed-job'
 import { releaseJobCursorResources, cancelJobSandboxTurns } from '../sandbox'
 import { purgeJobFilesystem } from '../retention/purge'
+import { tryGetControlJob } from '../application/control-plane-services'
+import {
+  pauseJobViaCommand,
+  cancelJobViaCommand,
+  continueJobViaCommand,
+  restartJobViaCommand
+} from '../application/controls-command-adapter'
 
 export type { JobControlState } from '../context/job-execution-runtime'
 import { JobExecutionRuntimeRegistry } from '../context/job-execution-runtime'
@@ -65,7 +73,215 @@ async function loadPlan(jobId: string): Promise<SavedJobPlan | null> {
   return loadJobPlan(getDb(), jobId)
 }
 
+function mapCommandError(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message === 'job.not_found') {
+    throw AppError.notFound('Job not found', 'job.not_found')
+  }
+  if (message === 'job.revision_conflict') {
+    throw AppError.conflict('Job revision conflict', undefined, 'job.revision_conflict')
+  }
+  if (message.startsWith('job.')) {
+    throw AppError.badRequest(message, message)
+  }
+  throw error instanceof Error ? error : new Error(message)
+}
+
+function mapV3StateToLegacyStatus(state: string): ThreadJobStatus | null {
+  switch (state) {
+    case 'pausing':
+      return 'pausing'
+    case 'paused':
+      return 'paused'
+    case 'cancelled':
+      return 'cancelled'
+    case 'failed':
+      return 'failed'
+    case 'succeeded':
+      return 'completed'
+    case 'execution_queued':
+    case 'planning_queued':
+      return 'pending'
+    case 'execution_running':
+      return 'running'
+    case 'planning_running':
+      return 'planning'
+    case 'plan_review':
+      return 'plan_ready'
+    default:
+      return null
+  }
+}
+
+/**
+ * Attach V3 availableActions + stateRevision when a control_jobs row exists.
+ * Used by legacy routes (C5) so the renderer does not invent actions from status.
+ */
+export function attachControlPlaneJobFields(username: string, job: ThreadJobDto): ThreadJobDto {
+  const v3 = tryGetControlJob(getAppContext(), job.id, username)
+  if (!v3) return job
+  return {
+    ...job,
+    stateRevision: v3.stateRevision,
+    availableActions: [...v3.availableActions]
+  }
+}
+
+async function mirrorControlStateToLegacy(
+  jobId: string,
+  v3State: string,
+  extra?: { lastError?: ThreadJobDto['lastError'] }
+): Promise<ThreadJobDto | null> {
+  const status = mapV3StateToLegacyStatus(v3State)
+  if (!status) {
+    return null
+  }
+  return updateJobRowForSnapshot(jobId, {
+    status,
+    ...(extra?.lastError !== undefined ? { lastError: extra.lastError } : {})
+  })
+}
+
+async function pauseJobViaControlPlane(
+  username: string,
+  jobId: string,
+  expectedRevision: number
+): Promise<ThreadJobDto> {
+  let result: { id: string; state: string; stateRevision: number }
+  try {
+    result = await pauseJobViaCommand(getAppContext(), username, jobId, expectedRevision)
+  } catch (error) {
+    mapCommandError(error)
+  }
+
+  const pausedError = JOB_PAUSED.toDto()
+  // Runtime side effects only — Command is the state authority.
+  executionRuntime().setControl(jobId, 'paused')
+  if (result.state === 'pausing') {
+    abortActiveTurn(jobId, JOB_PAUSED)
+    cancelJobSandboxTurns(jobId)
+  } else {
+    abortActiveTurn(jobId, JOB_PAUSED)
+    clearAbortController(jobId)
+    cancelJobSandboxTurns(jobId)
+    const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+    await stopAndReleaseActiveRun('thread_job', jobId, 'paused')
+  }
+
+  const mirrored = await mirrorControlStateToLegacy(
+    jobId,
+    result.state,
+    result.state === 'paused' ? { lastError: pausedError } : undefined
+  )
+  const latest = mirrored ?? (await getUserJob(username, jobId))
+  if (!latest) throw AppError.internal('Failed to pause job', 'job.invalid_status')
+  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: latest } })
+  return attachControlPlaneJobFields(username, latest)
+}
+
+async function cancelJobViaControlPlane(
+  username: string,
+  jobId: string,
+  expectedRevision: number
+): Promise<ThreadJobDto> {
+  let result: { id: string; state: string; stateRevision: number; runIdToStop: string | null }
+  try {
+    result = await cancelJobViaCommand(getAppContext(), username, jobId, expectedRevision)
+  } catch (error) {
+    mapCommandError(error)
+  }
+
+  executionRuntime().setControl(jobId, 'cancelling')
+  abortActiveTurn(jobId, JOB_CANCELLED)
+  clearAbortController(jobId)
+  cancelJobSandboxTurns(jobId)
+  getAppContext().runtimeRegistry.endJobPlanning(jobId)
+  executionRuntime().dropRuntime(jobId)
+  await clearExecutionLease(jobId)
+  void result.runIdToStop
+
+  const mirrored = await mirrorControlStateToLegacy(jobId, result.state)
+  const latest = mirrored ?? (await getUserJob(username, jobId))
+  if (!latest) throw AppError.internal('Failed to cancel job', 'job.invalid_status')
+  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: latest } })
+  emitJobEvent(jobId, { event: 'job_done', data: { job: latest } })
+  const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
+  await stopAndReleaseActiveRun('thread_job', jobId, 'cancelled')
+  return attachControlPlaneJobFields(username, latest)
+}
+
+async function continueJobViaControlPlane(
+  username: string,
+  jobId: string,
+  expectedRevision: number
+): Promise<ThreadJobDto> {
+  let result: { id: string; state: string; stateRevision: number }
+  try {
+    result = await continueJobViaCommand(getAppContext(), username, jobId, expectedRevision)
+  } catch (error) {
+    mapCommandError(error)
+  }
+
+  executionRuntime().setControl(jobId, 'running')
+  const mirrored = await mirrorControlStateToLegacy(jobId, result.state, { lastError: null })
+  const afterMirror = mirrored ?? (await getUserJob(username, jobId))
+  if (!afterMirror) throw AppError.internal('Failed to continue job', 'job.invalid_status')
+
+  if (result.state === 'execution_queued' || result.state === 'planning_queued') {
+    const claim = await claimJobSlotOrEnqueue(username, jobId)
+    if (claim === 'claimed') {
+      const leased = acquireExecutionLease(username, jobId)
+      if (leased) {
+        await updateJobRowForSnapshot(jobId, { status: 'running', lastError: null })
+        await requestJobExecutionResume(username, jobId)
+      }
+    }
+  }
+
+  const latest = (await getUserJob(username, jobId)) ?? afterMirror
+  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: latest } })
+  return attachControlPlaneJobFields(username, latest)
+}
+
+async function restartJobViaControlPlane(
+  username: string,
+  jobId: string,
+  expectedRevision: number
+): Promise<ThreadJobDto> {
+  let result: { id: string; state: string; stateRevision: number }
+  try {
+    result = await restartJobViaCommand(getAppContext(), username, jobId, expectedRevision)
+  } catch (error) {
+    mapCommandError(error)
+  }
+
+  executionRuntime().setControl(jobId, 'running')
+  const mirrored = await mirrorControlStateToLegacy(jobId, result.state, { lastError: null })
+  const afterMirror = mirrored ?? (await getUserJob(username, jobId))
+  if (!afterMirror) throw AppError.internal('Failed to restart job', 'job.invalid_status')
+
+  if (result.state === 'execution_queued') {
+    const claim = await claimJobSlotOrEnqueue(username, jobId)
+    if (claim === 'claimed') {
+      const leased = await acquireExecutionLease(username, jobId)
+      if (leased) {
+        await updateJobRowForSnapshot(jobId, { status: 'running', lastError: null })
+        await requestJobExecutionResume(username, jobId)
+      }
+    }
+  }
+
+  const latest = (await getUserJob(username, jobId)) ?? afterMirror
+  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: latest } })
+  return attachControlPlaneJobFields(username, latest)
+}
+
 export async function pauseJob(username: string, jobId: string): Promise<ThreadJobDto> {
+  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  if (controlJob) {
+    return pauseJobViaControlPlane(username, jobId, controlJob.stateRevision)
+  }
+
   const pausedError = JOB_PAUSED.toDto()
 
   const job = await getUserJob(username, jobId)
@@ -152,6 +368,11 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
 }
 
 export async function resumePausedJob(username: string, jobId: string): Promise<ThreadJobDto> {
+  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  if (controlJob) {
+    return continueJobViaControlPlane(username, jobId, controlJob.stateRevision)
+  }
+
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
   if (job.status !== 'paused' && job.status !== 'pausing') {
@@ -194,6 +415,11 @@ async function requestJobExecutionResume(username: string, jobId: string): Promi
 }
 
 export async function continueFailedJob(username: string, jobId: string): Promise<ThreadJobDto> {
+  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  if (controlJob) {
+    return continueJobViaControlPlane(username, jobId, controlJob.stateRevision)
+  }
+
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
   const state = deriveJobRecoveryState(job)
@@ -400,6 +626,11 @@ export async function continueJob(username: string, jobId: string): Promise<Thre
 }
 
 export async function cancelJob(username: string, jobId: string): Promise<ThreadJobDto> {
+  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  if (controlJob) {
+    return cancelJobViaControlPlane(username, jobId, controlJob.stateRevision)
+  }
+
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
   if (['completed', 'cancelled'].includes(job.status)) {
@@ -469,6 +700,11 @@ export async function cancelJob(username: string, jobId: string): Promise<Thread
 }
 
 export async function restartJob(username: string, jobId: string): Promise<ThreadJobDto> {
+  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  if (controlJob) {
+    return restartJobViaControlPlane(username, jobId, controlJob.stateRevision)
+  }
+
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
   if (!['failed', 'cancelled', 'paused'].includes(job.status)) {

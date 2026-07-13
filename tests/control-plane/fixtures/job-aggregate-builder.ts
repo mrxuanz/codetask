@@ -1,4 +1,4 @@
-import type { JobAggregate } from '../../../src/server/domain/jobs/job-state-machine'
+import type { JobAggregate } from '../../../src/shared/contracts/control-plane/schemas'
 import type {
   JobState,
   ControlIntent,

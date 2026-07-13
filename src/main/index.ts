@@ -4,6 +4,17 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { parseCliArgs } from './cli'
 import { startAppServer, stopAppServer, type ServerInfo } from './server'
+import { SafeLoggerImpl } from '../server/application/safe-logger'
+
+// Install stream EIO/EPIPE fail-closed logging before any other console use.
+let logDir: string | undefined
+try {
+  logDir = join(app.getPath('userData'), 'logs')
+} catch {
+  logDir = undefined
+}
+const earlyLogger = new SafeLoggerImpl(logDir ? { logDir } : undefined)
+earlyLogger.info('SafeLogger installed on main process')
 
 const cli = parseCliArgs()
 

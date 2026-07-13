@@ -1,15 +1,76 @@
 export {
   JOB_STATES,
   JOB_ACTIONS,
-  JOB_COMMAND_TYPES
+  type JobState,
+  type JobAction,
+  type ControlIntent,
+  type ResumeTarget,
+  type RunKind,
+  type Recoverability,
+  isTerminal,
+  isRunning,
+  isQueued
 } from './primitives'
 
-export type {
-  JobState,
-  JobAction,
-  ControlIntent,
-  ResumeTarget,
-  RunKind,
-  Recoverability,
-  JobCommandType
-} from './primitives'
+export {
+  JobStateSchema,
+  JobActionSchema,
+  ControlIntentSchema,
+  ResumeTargetSchema,
+  RunKindSchema,
+  RecoverabilitySchema,
+  JobAggregateSchema,
+  ActionRuleContextSchema,
+  type JobAggregate,
+  type ActionRuleContext
+} from './schemas'
+
+export {
+  ActorContextSchema,
+  UserCommandEnvelopeSchema,
+  PayloadCommandEnvelopeSchema,
+  WorkerCommandEnvelopeSchema,
+  CancelJobPayloadSchema,
+  RestartExecutionPayloadSchema,
+  PauseAcknowledgedPayloadSchema,
+  TaskCheckpointPayloadSchema,
+  StartVerificationPayloadSchema,
+  CompleteSliceVerificationPayloadSchema,
+  CompleteMilestoneVerificationPayloadSchema,
+  ReportNoProgressPayloadSchema,
+  RuntimeStartedPayloadSchema,
+  RuntimeExitedPayloadSchema,
+  RunInterruptedPayloadSchema,
+  type ActorContext,
+  type UserCommandEnvelope,
+  type PayloadCommandEnvelope,
+  type WorkerCommandEnvelope,
+  type CancelJobPayload,
+  type RestartExecutionPayload,
+  type PauseAcknowledgedPayload,
+  type TaskCheckpointPayload,
+  type StartVerificationPayload,
+  type CompleteSliceVerificationPayload,
+  type CompleteMilestoneVerificationPayload,
+  type ReportNoProgressPayload,
+  type RuntimeStartedPayload,
+  type RuntimeExitedPayload,
+  type RunInterruptedPayload,
+  type JobCommandResponse,
+  type CancelJobResponse,
+  type CheckpointResult,
+  type RuntimeStartedResult,
+  type RuntimeExitResult,
+  type StartVerificationResult,
+  type VerificationResult,
+  type NoProgressResult,
+  type JobCommandService,
+  type InternalExecutionCommandService
+} from './commands'
+
+export {
+  JobChangedEventSchema,
+  type JobChangedEvent,
+  type ChangedField,
+  jobChangedEvent
+} from './events'

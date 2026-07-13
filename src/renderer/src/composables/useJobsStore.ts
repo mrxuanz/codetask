@@ -1,3 +1,6 @@
+/**
+ * @deprecated Prefer `useControlPlaneJobsStore` for production Tasks UI (C13).
+ */
 import { computed, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -14,7 +17,6 @@ import {
 } from '@renderer/api/jobs'
 import type { JobSseEvent } from '@shared/contracts/sse'
 import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
-import { enrichJobWithRecoveryState } from '@shared/job-recovery-state'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
 
 export interface UseJobsStoreOptions {
@@ -78,7 +80,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       planProgress: has('planProgress') ? job.planProgress : existing?.planProgress,
       taskProgress: has('taskProgress') ? job.taskProgress : existing?.taskProgress
     } as ThreadJob
-    return job.availableActions?.length ? merged : enrichJobWithRecoveryState(merged)
+    return merged
   }
 
   function applyJobPatch(job: ThreadJob): void {

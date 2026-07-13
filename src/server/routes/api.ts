@@ -18,6 +18,7 @@ import { createSettingsRoutes } from './settings'
 import { createSystemRoutes } from './system'
 import { createEventsRoutes } from './events'
 import { createProjectThreadRoutes, createThreadRoutes } from './threads'
+import { mountV3Routes } from '../http/v3/mount'
 
 export function createApiRoutes(ctx: AppContext): Hono {
   const api = new Hono()
@@ -46,6 +47,7 @@ export function createApiRoutes(ctx: AppContext): Hono {
   api.route('/threads', createDesignSessionRoutes(ctx))
   api.route('/jobs', createUserJobRoutes(ctx))
   api.route('/drafts', createDraftListRoutes(ctx))
+  api.route('/v3', mountV3Routes(ctx))
 
   api.onError((error, c) => {
     console.error('[api] unhandled error:', error)
