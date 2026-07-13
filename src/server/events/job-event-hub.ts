@@ -127,7 +127,7 @@ async function pushJobSnapshots(
   topic: HubTopic,
   jobId: string
 ): Promise<'live' | 'terminal' | 'missing'> {
-  const { getUserJob } = await import('../jobs/service')
+  const { getUserJob } = await import('../legacy-control-plane/service')
   const job = await getUserJob(conn.username, jobId)
   if (!job) return 'missing'
 

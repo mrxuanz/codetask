@@ -38,6 +38,35 @@ export class SqliteTaskRepository implements TaskRepository {
     }
   }
 
+  listTasksForGeneration(jobId: string, generation: number): readonly TaskRow[] {
+    return this.db
+      .select()
+      .from(controlJobTasks)
+      .where(
+        and(
+          eq(controlJobTasks.jobId, jobId),
+          eq(controlJobTasks.executionGeneration, generation)
+        )
+      )
+      .orderBy(controlJobTasks.sortOrder)
+      .all()
+      .map((task) => ({
+        jobId: task.jobId,
+        executionGeneration: task.executionGeneration,
+        taskId: task.taskId,
+        sourcePlanRevision: task.sourcePlanRevision,
+        state: task.state as TaskState,
+        sortOrder: task.sortOrder,
+        originKind: task.originKind,
+        parentTaskId: task.parentTaskId,
+        title: task.title,
+        abilityCode: task.abilityCode,
+        coreCode: task.coreCode,
+        createdAtMs: task.createdAtMs,
+        updatedAtMs: task.updatedAtMs
+      }))
+  }
+
   updateTaskState(
     jobId: string,
     generation: number,
@@ -62,13 +91,53 @@ export class SqliteTaskRepository implements TaskRepository {
     return result.changes === 1
   }
 
-  getRunningAttempt(attemptId: string): TaskAttemptRow | null {
+  cloneTasksToGeneration(
+    jobId: string,
+    sourceGeneration: number,
+    targetGeneration: number,
+    createdAtMs: number
+  ): number {
+    const sourceTasks = this.db
+      .select()
+      .from(controlJobTasks)
+      .where(
+        and(
+          eq(controlJobTasks.jobId, jobId),
+          eq(controlJobTasks.executionGeneration, sourceGeneration)
+        )
+      )
+      .orderBy(controlJobTasks.sortOrder)
+      .all()
+    if (sourceTasks.length === 0) return 0
+
+    const result = this.db
+      .insert(controlJobTasks)
+      .values(
+        sourceTasks.map((task) => ({
+          jobId: task.jobId,
+          executionGeneration: targetGeneration,
+          taskId: task.taskId,
+          sourcePlanRevision: task.sourcePlanRevision,
+          state: 'queued',
+          sortOrder: task.sortOrder,
+          originKind: task.originKind,
+          parentTaskId: task.parentTaskId,
+          title: task.title,
+          abilityCode: task.abilityCode,
+          coreCode: task.coreCode,
+          createdAtMs,
+          updatedAtMs: createdAtMs
+        }))
+      )
+      .run()
+    return result.changes
+  }
+
+  getAttempt(attemptId: string): TaskAttemptRow | null {
     const result = this.db
       .select()
       .from(controlTaskAttempts)
-      .where(
-        and(eq(controlTaskAttempts.id, attemptId), eq(controlTaskAttempts.state, 'running'))
-      )
+      .where(eq(controlTaskAttempts.id, attemptId))
       .get()
 
     if (!result) return null
@@ -86,11 +155,22 @@ export class SqliteTaskRepository implements TaskRepository {
       failureId: result.failureId,
       startedAtMs: result.startedAtMs,
       endedAtMs: result.endedAtMs,
-      resultHash: result.resultHash
+      resultHash: result.resultHash,
+      resultRevision: result.resultRevision
     }
   }
 
-  finishAttempt(attemptId: string, resultHash: string, evidenceHash: string): void {
+  getRunningAttempt(attemptId: string): TaskAttemptRow | null {
+    const attempt = this.getAttempt(attemptId)
+    return attempt?.state === 'running' ? attempt : null
+  }
+
+  finishAttempt(
+    attemptId: string,
+    resultHash: string,
+    evidenceHash: string,
+    resultRevision: number
+  ): void {
     const now = Date.now()
     this.db
       .update(controlTaskAttempts)
@@ -98,6 +178,7 @@ export class SqliteTaskRepository implements TaskRepository {
         state: 'completed',
         resultHash,
         evidenceBlobHash: evidenceHash,
+        resultRevision,
         endedAtMs: now
       })
       .where(eq(controlTaskAttempts.id, attemptId))
@@ -133,7 +214,8 @@ export class SqliteTaskRepository implements TaskRepository {
         attemptNo: nextAttemptNo,
         runId,
         state: 'running',
-        startedAtMs: now
+        startedAtMs: now,
+        resultRevision: 0
       })
       .run()
 
@@ -182,7 +264,8 @@ export class SqliteTaskRepository implements TaskRepository {
       failureId: r.failureId,
       startedAtMs: r.startedAtMs,
       endedAtMs: r.endedAtMs,
-      resultHash: r.resultHash
+      resultHash: r.resultHash,
+      resultRevision: r.resultRevision
     }))
   }
 }

@@ -53,6 +53,11 @@ export class RuntimeSupervisor {
     return undefined
   }
 
+  async waitForExternalOperation(_operationId: string, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return
+    await Promise.resolve()
+  }
+
   async closeAll(): Promise<void> {
     if (this.closing) return
     this.closing = true

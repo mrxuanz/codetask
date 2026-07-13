@@ -18,12 +18,10 @@ export class Scheduler {
     private readonly config: SchedulerConfig,
     private readonly jobRepository: JobRepository,
     private readonly idGenerator: IdGenerator,
-    clock: Clock,
+    private readonly clock: Clock,
     private readonly logger: SafeLogger,
     private readonly runtimeStarter: RuntimeStarter
-  ) {
-    void clock
-  }
+  ) {}
 
   async start(): Promise<void> {
     if (this.running) return
@@ -56,22 +54,20 @@ export class Scheduler {
   }
 
   private claimJob(job: { id: string; state: string; stateRevision: number; executionGeneration: number }): void {
+    const now = this.clock.nowMs()
     const fenceToken = this.idGenerator.generate()
+    const runId = this.idGenerator.generate()
+    const pendingAttemptId = this.idGenerator.generate()
+    const lifecycleOperationId = this.idGenerator.generate()
     const kind = job.state.startsWith('planning') ? ('planning' as const) : ('execution' as const)
     const targetState = job.state.startsWith('planning')
       ? ('planning_running' as const)
       : ('execution_running' as const)
 
     const claimed = this.jobRepository.transaction(() => {
-      const runId = this.jobRepository.createRun({
-        jobId: job.id,
-        kind,
-        fenceToken,
-        executionGeneration: job.executionGeneration
-      })
-
       const cas = this.jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: job.stateRevision,
         expectedState: job.state as Parameters<typeof this.jobRepository.compareAndSetJob>[0]['expectedState'],
         expectedActiveRunId: null,
@@ -86,14 +82,26 @@ export class Scheduler {
       })
 
       if (!cas.ok) {
-        this.jobRepository.markRunState(runId, 'cancelled', 'claim_cas_failed')
         return null
       }
 
+      this.jobRepository.createRun({
+        id: runId,
+        jobId: job.id,
+        kind,
+        fenceToken,
+        executionGeneration: job.executionGeneration,
+        pendingAttemptId,
+        lifecycleOperationId,
+        startedAtMs: now
+      })
+
       this.jobRepository.createSlot({
+        id: this.idGenerator.generate(),
         jobId: job.id,
         runId,
-        pool: 'default'
+        pool: 'default',
+        createdAtMs: now
       })
 
       this.jobRepository.appendOutbox({
@@ -101,6 +109,7 @@ export class Scheduler {
         eventType: 'job.changed',
         entityId: job.id,
         aggregateRevision: cas.newRevision,
+        createdAtMs: now,
         payload: {
           type: 'job.changed',
           entityId: job.id,

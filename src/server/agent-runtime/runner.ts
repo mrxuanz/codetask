@@ -55,7 +55,7 @@ async function* withWorkloadLeaseRefresh<T>(
   signal?: AbortSignal
 ): AsyncGenerator<T> {
   const KEEPALIVE_INTERVAL_MS = 60_000
-  const { refreshWorkloadLease } = await import('../jobs/workload-slot-store')
+  const { refreshWorkloadLease } = await import('../legacy-control-plane/workload-slot-store')
   let timer: ReturnType<typeof setInterval> | null = setInterval(() => {
     refreshWorkloadLease(workloadRunId).catch((error) => {
       console.warn('[keepalive] lease refresh failed', workloadRunId, error)

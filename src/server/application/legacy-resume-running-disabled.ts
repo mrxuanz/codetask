@@ -10,7 +10,7 @@
  * - no intent + stale run → settle to failed/recoverable
  * - runtime lost → converge via RuntimeExited
  *
- * The old logic in src/server/jobs/reconcile.ts that did:
+ * The old logic in src/server/legacy-control-plane/reconcile.ts that did:
  *   if (job.state === 'running') { resumeRunning(job) }
  * should be REMOVED or DISABLED.
  *

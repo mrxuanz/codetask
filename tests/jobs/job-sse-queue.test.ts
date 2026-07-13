@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { enqueueJobSseEvent } from '../../src/server/context/event-bus'
-import type { JobSseEvent } from '../../src/server/jobs/types'
+import type { JobSseEvent } from '../../src/server/legacy-control-plane/types'
 
 test('enqueueJobSseEvent coalesces task_progress events', () => {
   const queue: JobSseEvent[] = []

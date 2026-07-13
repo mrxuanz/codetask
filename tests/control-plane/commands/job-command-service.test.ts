@@ -110,8 +110,8 @@ function seedTaskAndAttempt(
 
   db.prepare(
     `INSERT INTO control_task_attempts (
-      id, job_id, execution_generation, task_id, attempt_no, run_id, state, started_at_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      id, job_id, execution_generation, task_id, attempt_no, run_id, state, started_at_ms, result_revision
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     opts.attemptId ?? 'attempt-1',
     'job-1',
@@ -120,7 +120,8 @@ function seedTaskAndAttempt(
     1,
     opts.runId ?? 'run-1',
     opts.state ?? 'running',
-    now
+    now,
+    0
   )
 }
 
@@ -317,7 +318,8 @@ describe('JobCommandService', () => {
         expectedRevision: 2,
         runId: 'run-1',
         fenceToken: 'fence-1',
-        executionGeneration: 0
+        executionGeneration: 0,
+        updatedAtMs: Date.now()
       })
       assert.equal(fence.ok, false)
     })
@@ -409,6 +411,36 @@ describe('JobCommandService', () => {
       assert.equal(task.state, 'completed')
     })
 
+    it('should replay a matching checkpoint with its stored revision', async () => {
+      seedJob(rawDb, {
+        state: 'execution_running',
+        stateRevision: 1,
+        activeRunId: 'run-1'
+      })
+      seedRun(rawDb)
+      seedTaskAndAttempt(rawDb)
+      const input = {
+        jobId: 'job-1',
+        expectedRevision: 1,
+        runId: 'run-1',
+        fenceToken: 'fence-1',
+        executionGeneration: 0,
+        payload: { attemptId: 'attempt-1', result: completedResult }
+      }
+
+      const first = await service.checkpointTask(input)
+      const replay = await service.checkpointTask(input)
+
+      assert.equal(first.revision, 2)
+      assert.equal(replay.revision, 2)
+      const attempt = rawDb
+        .prepare(`SELECT result_hash, evidence_blob_hash, result_revision FROM control_task_attempts WHERE id = 'attempt-1'`)
+        .get() as { result_hash: string; evidence_blob_hash: string; result_revision: number }
+      assert.ok(attempt.result_hash)
+      assert.ok(attempt.evidence_blob_hash)
+      assert.equal(attempt.result_revision, 2)
+    })
+
     it('should return mustPause when job is pausing', async () => {
       seedJob(rawDb, {
         state: 'pausing',
@@ -475,6 +507,99 @@ describe('JobCommandService', () => {
         .prepare(`SELECT verdict_blob_hash FROM control_verifications WHERE id = 'v-1'`)
         .get() as { verdict_blob_hash: string }
       assert.equal(v.verdict_blob_hash, 'vh')
+    })
+  })
+
+  describe('continue versus restart projections', () => {
+    it('continues in the same generation without changing passed verifications', async () => {
+      seedJob(rawDb, {
+        state: 'paused',
+        stateRevision: 2,
+        resumeTarget: 'execution_queued',
+        executionGeneration: 3
+      })
+      rawDb
+        .prepare(
+          `INSERT INTO control_verifications (
+            id, job_id, execution_generation, plan_revision, scope_type, scope_id,
+            attempt_no, state, verdict_blob_hash, result_hash, started_at_ms, ended_at_ms
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          'passed-slice',
+          'job-1',
+          3,
+          1,
+          'slice',
+          'slice-1',
+          1,
+          'passed',
+          'verdict-hash',
+          'result-hash',
+          Date.now(),
+          Date.now()
+        )
+
+      const result = await service.continueJob({
+        actor: { username: 'u1', requestId: 'r1' },
+        jobId: 'job-1',
+        expectedRevision: 2,
+        idempotencyKey: randomUUID()
+      })
+
+      assert.equal(result.job.state, 'execution_queued')
+      const job = rawDb
+        .prepare(`SELECT execution_generation FROM control_jobs WHERE id = 'job-1'`)
+        .get() as { execution_generation: number }
+      assert.equal(job.execution_generation, 3)
+      const verificationCount = rawDb
+        .prepare(
+          `SELECT COUNT(*) AS count FROM control_verifications
+           WHERE job_id = 'job-1' AND execution_generation = 3 AND state = 'passed'`
+        )
+        .get() as { count: number }
+      assert.equal(verificationCount.count, 1)
+    })
+
+    it('restarts into a fresh task generation while retaining old history', async () => {
+      seedJob(rawDb, {
+        state: 'failed',
+        stateRevision: 4,
+        executionGeneration: 0
+      })
+      seedRun(rawDb)
+      seedTaskAndAttempt(rawDb)
+
+      const result = await service.restartExecution({
+        actor: { username: 'u1', requestId: 'r1' },
+        jobId: 'job-1',
+        expectedRevision: 4,
+        idempotencyKey: randomUUID(),
+        payload: {}
+      })
+
+      assert.equal(result.job.state, 'execution_queued')
+      const job = rawDb
+        .prepare(`SELECT execution_generation FROM control_jobs WHERE id = 'job-1'`)
+        .get() as { execution_generation: number }
+      assert.equal(job.execution_generation, 1)
+      const tasks = rawDb
+        .prepare(
+          `SELECT execution_generation, state FROM control_job_tasks
+           WHERE job_id = 'job-1' ORDER BY execution_generation`
+        )
+        .all() as Array<{ execution_generation: number; state: string }>
+      assert.deepEqual(tasks, [
+        { execution_generation: 0, state: 'running' },
+        { execution_generation: 1, state: 'queued' }
+      ])
+      const attempts = rawDb
+        .prepare(
+          `SELECT COUNT(*) AS count FROM control_task_attempts
+           WHERE job_id = 'job-1' AND execution_generation = 1`
+        )
+        .get() as { count: number }
+      assert.equal(attempts.count, 0)
     })
   })
 

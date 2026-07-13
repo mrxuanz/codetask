@@ -3,11 +3,11 @@ import { describe, it } from 'node:test'
 import {
   workloadLeaseTtlSec,
   resetWorkloadRunControllersForTests
-} from '../../src/server/jobs/workload-slot-store'
+} from '../../src/server/legacy-control-plane/workload-slot-store'
 import {
   startWorkloadReconciler,
   stopWorkloadReconcilerForTests
-} from '../../src/server/jobs/reconcile'
+} from '../../src/server/legacy-control-plane/reconcile'
 
 describe('workload reconciler', () => {
   it('defaults lease ttl to 90 minutes', () => {

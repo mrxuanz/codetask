@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import type { TaskProgressSliceDto } from '../jobs/types'
+import type { TaskProgressSliceDto } from '../legacy-control-plane/types'
 import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'

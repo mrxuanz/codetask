@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeTaskEvidencePacket } from '../../src/server/jobs/evidence/normalize'
+import { normalizeTaskEvidencePacket } from '../../src/server/legacy-control-plane/evidence/normalize'
 import {
   normalizeChangedFilePath,
   resolveReadablePathWithinWorkspace
-} from '../../src/server/jobs/evidence/paths'
-import { preflightSliceTaskEvidence } from '../../src/server/jobs/evidence/preflight'
-import { computeSliceEvidenceBundleHash } from '../../src/server/jobs/evidence/hash'
+} from '../../src/server/legacy-control-plane/evidence/paths'
+import { preflightSliceTaskEvidence } from '../../src/server/legacy-control-plane/evidence/preflight'
+import { computeSliceEvidenceBundleHash } from '../../src/server/legacy-control-plane/evidence/hash'
 import {
   guardVerificationAttempt,
   withVerificationAttempt
-} from '../../src/server/jobs/verification-attempts'
+} from '../../src/server/legacy-control-plane/verification-attempts'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
-import type { TaskProgressItemDto } from '../../src/server/jobs/types'
+import type { TaskProgressItemDto } from '../../src/server/legacy-control-plane/types'
 import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

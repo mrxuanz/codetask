@@ -33,7 +33,9 @@ export const ResyncRequiredReasonSchema = Type.Union([
 export const ResyncRequiredEventSchema = Type.Object(
   {
     reason: ResyncRequiredReasonSchema,
-    restartFromEventId: Type.Integer({ minimum: 0 })
+    restartFromEventId: Type.Integer({ minimum: 0 }),
+    lastDeliveredEventId: Type.Optional(Type.Integer({ minimum: 0 })),
+    latestEventId: Type.Optional(Type.Integer({ minimum: 0 }))
   },
   { additionalProperties: false }
 )

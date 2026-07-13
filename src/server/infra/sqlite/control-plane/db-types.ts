@@ -84,6 +84,7 @@ export interface ControlTaskAttemptRow {
   readonly startedAtMs: number
   readonly endedAtMs: number | null
   readonly resultHash: string | null
+  readonly resultRevision: number
 }
 
 export interface ControlVerificationRow {
@@ -140,5 +141,9 @@ export interface ControlJobFailureRow {
 export interface ControlSchemaMetaRow {
   readonly key: string
   readonly value: string
+  readonly sourceMigration: number
+  readonly copyReportHash: string | null
+  readonly backupId: string | null
+  readonly validationSummaryJson: string | null
   readonly updatedAtMs: number
 }

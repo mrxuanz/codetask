@@ -19,7 +19,8 @@ import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { prepareContinueFailedExecution } from './continue-failed-job'
 import { releaseJobCursorResources, cancelJobSandboxTurns } from '../sandbox'
 import { purgeJobFilesystem } from '../retention/purge'
-import { tryGetControlJob } from '../application/control-plane-services'
+import { getControlPlaneServices } from '../application/control-plane-services'
+import { isV3Authoritative } from '../application/cutover-state'
 import {
   pauseJobViaCommand,
   cancelJobViaCommand,
@@ -113,12 +114,18 @@ function mapV3StateToLegacyStatus(state: string): ThreadJobStatus | null {
   }
 }
 
+function getAuthoritativeControlJob(jobId: string, username: string) {
+  const ctx = getAppContext()
+  if (!isV3Authoritative(ctx.db)) return null
+  return getControlPlaneServices(ctx).queryService.getJob(jobId, { username })
+}
+
 /**
  * Attach V3 availableActions + stateRevision when a control_jobs row exists.
  * Used by legacy routes (C5) so the renderer does not invent actions from status.
  */
 export function attachControlPlaneJobFields(username: string, job: ThreadJobDto): ThreadJobDto {
-  const v3 = tryGetControlJob(getAppContext(), job.id, username)
+  const v3 = getAuthoritativeControlJob(job.id, username)
   if (!v3) return job
   return {
     ...job,
@@ -277,7 +284,7 @@ async function restartJobViaControlPlane(
 }
 
 export async function pauseJob(username: string, jobId: string): Promise<ThreadJobDto> {
-  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  const controlJob = getAuthoritativeControlJob(jobId, username)
   if (controlJob) {
     return pauseJobViaControlPlane(username, jobId, controlJob.stateRevision)
   }
@@ -368,7 +375,7 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
 }
 
 export async function resumePausedJob(username: string, jobId: string): Promise<ThreadJobDto> {
-  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  const controlJob = getAuthoritativeControlJob(jobId, username)
   if (controlJob) {
     return continueJobViaControlPlane(username, jobId, controlJob.stateRevision)
   }
@@ -415,7 +422,7 @@ async function requestJobExecutionResume(username: string, jobId: string): Promi
 }
 
 export async function continueFailedJob(username: string, jobId: string): Promise<ThreadJobDto> {
-  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  const controlJob = getAuthoritativeControlJob(jobId, username)
   if (controlJob) {
     return continueJobViaControlPlane(username, jobId, controlJob.stateRevision)
   }
@@ -626,7 +633,7 @@ export async function continueJob(username: string, jobId: string): Promise<Thre
 }
 
 export async function cancelJob(username: string, jobId: string): Promise<ThreadJobDto> {
-  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  const controlJob = getAuthoritativeControlJob(jobId, username)
   if (controlJob) {
     return cancelJobViaControlPlane(username, jobId, controlJob.stateRevision)
   }
@@ -700,7 +707,7 @@ export async function cancelJob(username: string, jobId: string): Promise<Thread
 }
 
 export async function restartJob(username: string, jobId: string): Promise<ThreadJobDto> {
-  const controlJob = tryGetControlJob(getAppContext(), jobId, username)
+  const controlJob = getAuthoritativeControlJob(jobId, username)
   if (controlJob) {
     return restartJobViaControlPlane(username, jobId, controlJob.stateRevision)
   }

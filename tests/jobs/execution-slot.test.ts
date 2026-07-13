@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JobExecutionRuntimeRegistry } from '../../src/server/context/job-execution-runtime'
-import { isRestartInterruptedPause } from '../../src/server/jobs/execution-recovery'
-import { isExecutionInfraNotReadyError } from '../../src/server/jobs/execution-infra-errors'
+import { isRestartInterruptedPause } from '../../src/server/legacy-control-plane/execution-recovery'
+import { isExecutionInfraNotReadyError } from '../../src/server/legacy-control-plane/execution-infra-errors'
 import { RuntimeRegistry } from '../../src/server/context/runtime-registry'
 
 test('JobExecutionRuntimeRegistry blocks a second active loop for the same user', () => {

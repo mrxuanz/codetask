@@ -15,9 +15,7 @@ export class StartupReconciler {
     private readonly clock: Clock,
     private readonly idGenerator: IdGenerator,
     private readonly logger: SafeLogger
-  ) {
-    void this.idGenerator
-  }
+  ) {}
 
   async reconcileAll(): Promise<readonly ReconcileDecision[]> {
     const jobs = this.jobRepository.getJobsForReconciliation()
@@ -79,9 +77,11 @@ export class StartupReconciler {
   }
 
   private settlePaused(job: JobAggregateView, failureReason: string | null): void {
+    const now = this.clock.nowMs()
     this.jobRepository.transaction(() => {
       const cas = this.jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: job.stateRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -101,16 +101,19 @@ export class StartupReconciler {
           eventType: 'job.changed',
           entityId: job.id,
           aggregateRevision: cas.newRevision,
-          payload: { type: 'job.changed', entityId: job.id, revision: cas.newRevision, changed: ['state'] }
+          payload: { type: 'job.changed', entityId: job.id, revision: cas.newRevision, changed: ['state'] },
+          createdAtMs: now
         })
 
         if (failureReason) {
           this.jobRepository.insertFailure({
+            id: this.idGenerator.generate(),
             jobId: job.id,
             code: 'run.interrupted',
             recoverability: 'recoverable',
             reason: failureReason,
-            runKind: null
+            runKind: null,
+            createdAtMs: now
           })
         }
       }
@@ -118,17 +121,22 @@ export class StartupReconciler {
   }
 
   private settleInterruptedFailure(job: JobAggregateView, reason: InterruptionReason): void {
+    const now = this.clock.nowMs()
     this.jobRepository.transaction(() => {
-      const failureId = this.jobRepository.insertFailure({
+      const failureId = this.idGenerator.generate()
+      this.jobRepository.insertFailure({
+        id: failureId,
         jobId: job.id,
         code: 'run.interrupted',
         recoverability: 'recoverable',
         reason,
-        runKind: null
+        runKind: null,
+        createdAtMs: now
       })
 
       const cas = this.jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: job.stateRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -138,7 +146,7 @@ export class StartupReconciler {
           resumeTarget: null,
           activeRunId: null,
           lastFailureId: failureId,
-          terminalAtMs: this.clock.nowMs()
+          terminalAtMs: now
         }
       })
 
@@ -148,24 +156,30 @@ export class StartupReconciler {
           eventType: 'job.changed',
           entityId: job.id,
           aggregateRevision: cas.newRevision,
-          payload: { type: 'job.changed', entityId: job.id, revision: cas.newRevision, changed: ['state', 'failure'] }
+          payload: { type: 'job.changed', entityId: job.id, revision: cas.newRevision, changed: ['state', 'failure'] },
+          createdAtMs: now
         })
       }
     })
   }
 
   private settleRuntimeLost(job: JobAggregateView, reason: 'child_closed' | 'owner_missing'): void {
+    const now = this.clock.nowMs()
     this.jobRepository.transaction(() => {
-      const failureId = this.jobRepository.insertFailure({
+      const failureId = this.idGenerator.generate()
+      this.jobRepository.insertFailure({
+        id: failureId,
         jobId: job.id,
         code: 'runtime.lost',
         recoverability: 'recoverable',
         reason,
-        runKind: null
+        runKind: null,
+        createdAtMs: now
       })
 
       const cas = this.jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: job.stateRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -175,7 +189,7 @@ export class StartupReconciler {
           resumeTarget: null,
           activeRunId: null,
           lastFailureId: failureId,
-          terminalAtMs: this.clock.nowMs()
+          terminalAtMs: now
         }
       })
 
@@ -185,7 +199,12 @@ export class StartupReconciler {
       }
 
       if (job.activeRunId !== null) {
-        this.jobRepository.markRunState(job.activeRunId, 'interrupted', reason)
+        this.jobRepository.markRunState({
+          runId: job.activeRunId,
+          state: 'interrupted',
+          stopReason: reason,
+          updatedAtMs: now
+        })
       }
 
       this.jobRepository.appendOutbox({
@@ -198,7 +217,8 @@ export class StartupReconciler {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state', 'failure']
-        }
+        },
+        createdAtMs: now
       })
     })
   }

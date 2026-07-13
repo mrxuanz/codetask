@@ -9,12 +9,15 @@ import type {
   PauseAcknowledgedPayload,
   TaskCheckpointPayload,
   RunInterruptedPayload,
+  ReportNoProgressPayload,
   JobCommandResponse,
   CancelJobResponse,
-  CheckpointResult
+  CheckpointResult,
+  NoProgressResult
 } from '@shared/contracts/control-plane'
 import type { JobState } from '@shared/contracts/control-plane'
 import type { JobRepository } from './ports/job-repository'
+import type { ControlPlaneUnitOfWork } from './ports/unit-of-work'
 import type { TaskRepository } from './ports/task-repository'
 import type { Clock } from './ports/clock'
 import type { IdGenerator } from './ports/id-generator'
@@ -27,12 +30,15 @@ import {
   cancelJob as cancelJobTransition,
   restartExecution as restartExecutionTransition
 } from '../domain/jobs/job-state-machine'
-import { fromTransitionError } from '../domain/jobs/job-errors'
+import { commandError, fromTransitionError } from '../domain/jobs/job-errors'
 import { validateTaskResult } from '../domain/tasks/validate-task-result'
 import { hashCanonicalCommand, canonicalJson, type JsonValue } from './utils/canonical-json'
 
+const DEDUP_TTL_MS = 24 * 60 * 60 * 1000
+
 export type JobCommandServiceDeps = {
   readonly jobRepository: JobRepository
+  readonly unitOfWork?: ControlPlaneUnitOfWork
   readonly taskRepository: TaskRepository
   readonly evidenceRepository: EvidenceStore
   readonly clock: Clock
@@ -42,7 +48,7 @@ export type JobCommandServiceDeps = {
 }
 
 export class JobCommandServiceImpl implements JobCommandService {
-  private readonly jobRepository: JobRepository
+  private readonly unitOfWork: ControlPlaneUnitOfWork
   private readonly taskRepository: TaskRepository
   private readonly evidenceRepository: EvidenceStore
   private readonly clock: Clock
@@ -51,21 +57,22 @@ export class JobCommandServiceImpl implements JobCommandService {
   private readonly runtimeController: RuntimeController
 
   constructor(deps: JobCommandServiceDeps) {
-    this.jobRepository = deps.jobRepository
+    this.unitOfWork = deps.unitOfWork ?? deps.jobRepository
     this.taskRepository = deps.taskRepository
     this.evidenceRepository = deps.evidenceRepository
     this.clock = deps.clock
     this.idGenerator = deps.idGenerator
     this.logger = deps.logger
     this.runtimeController = deps.runtimeController
-    void this.idGenerator
   }
 
   async requestPause(input: UserCommandEnvelope): Promise<JobCommandResponse> {
     const requestHash = hashCanonicalCommand('request_pause', null)
+    const now = this.clock.nowMs()
 
-    const result = this.jobRepository.transaction(() => {
-      const replay = this.jobRepository.getDedup({
+    const result = this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const replay = jobRepository.getDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey
       })
@@ -73,21 +80,22 @@ export class JobCommandServiceImpl implements JobCommandService {
         return this.assertMatchingReplay(replay, requestHash)
       }
 
-      const job = this.jobRepository.getOwnedAggregate({
+      const job = jobRepository.getOwnedAggregate({
         actor: input.actor,
         jobId: input.jobId
       })
-      if (job === null) throw new Error('job.not_found')
+      if (job === null) throw commandError('job.not_found')
       if (job.stateRevision !== input.expectedRevision) {
-        throw new Error('job.revision_conflict')
+        throw commandError('job.revision_conflict')
       }
 
       const transition = requestPause(job)
       if (!transition.ok) throw fromTransitionError(transition.error)
 
       const nextActiveRunId = transition.value.clearActiveRun ? null : job.activeRunId
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: input.expectedRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -100,10 +108,14 @@ export class JobCommandServiceImpl implements JobCommandService {
           terminalAtMs: null
         }
       })
-      if (!cas.ok) throw new Error('job.revision_conflict')
+      if (!cas.ok) throw commandError('job.revision_conflict')
 
       if (job.activeRunId !== null && transition.value.nextState === 'pausing') {
-        this.jobRepository.markRunState(job.activeRunId, 'pausing')
+        jobRepository.markRunState({
+          runId: job.activeRunId,
+          state: 'pausing',
+          updatedAtMs: now
+        })
       }
 
       const response: JobCommandResponse = {
@@ -114,7 +126,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       }
 
-      this.jobRepository.appendOutbox({
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -124,16 +136,19 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
-      this.jobRepository.storeDedup({
+      jobRepository.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'request_pause',
         requestHash,
         response,
-        responseRevision: cas.newRevision
+        responseRevision: cas.newRevision,
+        createdAtMs: now,
+        expiresAtMs: now + DEDUP_TTL_MS
       })
 
       return response
@@ -153,9 +168,11 @@ export class JobCommandServiceImpl implements JobCommandService {
 
   async continueJob(input: UserCommandEnvelope): Promise<JobCommandResponse> {
     const requestHash = hashCanonicalCommand('continue_job', null)
+    const now = this.clock.nowMs()
 
-    return this.jobRepository.transaction(() => {
-      const replay = this.jobRepository.getDedup({
+    return this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const replay = jobRepository.getDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey
       })
@@ -163,20 +180,21 @@ export class JobCommandServiceImpl implements JobCommandService {
         return this.assertMatchingReplay(replay, requestHash)
       }
 
-      const job = this.jobRepository.getOwnedAggregate({
+      const job = jobRepository.getOwnedAggregate({
         actor: input.actor,
         jobId: input.jobId
       })
-      if (job === null) throw new Error('job.not_found')
+      if (job === null) throw commandError('job.not_found')
       if (job.stateRevision !== input.expectedRevision) {
-        throw new Error('job.revision_conflict')
+        throw commandError('job.revision_conflict')
       }
 
       const transition = continueJobTransition(job)
       if (!transition.ok) throw fromTransitionError(transition.error)
 
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: input.expectedRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -189,7 +207,7 @@ export class JobCommandServiceImpl implements JobCommandService {
           terminalAtMs: null
         }
       })
-      if (!cas.ok) throw new Error('job.revision_conflict')
+      if (!cas.ok) throw commandError('job.revision_conflict')
 
       const response: JobCommandResponse = {
         job: {
@@ -199,7 +217,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       }
 
-      this.jobRepository.appendOutbox({
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -209,16 +227,19 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
-      this.jobRepository.storeDedup({
+      jobRepository.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'continue_job',
         requestHash,
         response,
-        responseRevision: cas.newRevision
+        responseRevision: cas.newRevision,
+        createdAtMs: now,
+        expiresAtMs: now + DEDUP_TTL_MS
       })
 
       return response
@@ -227,9 +248,11 @@ export class JobCommandServiceImpl implements JobCommandService {
 
   async cancelJob(input: PayloadCommandEnvelope<CancelJobPayload>): Promise<CancelJobResponse> {
     const requestHash = hashCanonicalCommand('cancel_job', input.payload)
+    const now = this.clock.nowMs()
 
-    const result = this.jobRepository.transaction(() => {
-      const replay = this.jobRepository.getDedup({
+    const result = this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const replay = jobRepository.getDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey
       })
@@ -239,21 +262,22 @@ export class JobCommandServiceImpl implements JobCommandService {
         return { job: stored.job, runIdToStop: parsed.runIdToStop ?? null }
       }
 
-      const job = this.jobRepository.getOwnedAggregate({
+      const job = jobRepository.getOwnedAggregate({
         actor: input.actor,
         jobId: input.jobId
       })
-      if (job === null) throw new Error('job.not_found')
+      if (job === null) throw commandError('job.not_found')
       if (job.stateRevision !== input.expectedRevision) {
-        throw new Error('job.revision_conflict')
+        throw commandError('job.revision_conflict')
       }
 
       const transition = cancelJobTransition(job)
       if (!transition.ok) throw fromTransitionError(transition.error)
 
       const runIdToStop = job.activeRunId
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: input.expectedRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -263,13 +287,18 @@ export class JobCommandServiceImpl implements JobCommandService {
           resumeTarget: null,
           activeRunId: null,
           lastFailureId: job.lastFailureId,
-          terminalAtMs: this.clock.nowMs()
+          terminalAtMs: now
         }
       })
-      if (!cas.ok) throw new Error('job.revision_conflict')
+      if (!cas.ok) throw commandError('job.revision_conflict')
 
       if (runIdToStop !== null) {
-        this.jobRepository.markRunState(runIdToStop, 'cancelling', input.payload.reasonCode)
+        jobRepository.markRunState({
+          runId: runIdToStop,
+          state: 'cancelling',
+          stopReason: input.payload.reasonCode,
+          updatedAtMs: now
+        })
       }
 
       const response: CancelJobResponse = {
@@ -281,7 +310,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         runIdToStop
       }
 
-      this.jobRepository.appendOutbox({
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -291,16 +320,19 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
-      this.jobRepository.storeDedup({
+      jobRepository.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'cancel_job',
         requestHash,
         response,
-        responseRevision: cas.newRevision
+        responseRevision: cas.newRevision,
+        createdAtMs: now,
+        expiresAtMs: now + DEDUP_TTL_MS
       })
 
       return response
@@ -324,9 +356,11 @@ export class JobCommandServiceImpl implements JobCommandService {
     input: PayloadCommandEnvelope<RestartExecutionPayload>
   ): Promise<JobCommandResponse> {
     const requestHash = hashCanonicalCommand('restart_execution', input.payload)
+    const now = this.clock.nowMs()
 
-    return this.jobRepository.transaction(() => {
-      const replay = this.jobRepository.getDedup({
+    return this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const replay = jobRepository.getDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey
       })
@@ -334,21 +368,22 @@ export class JobCommandServiceImpl implements JobCommandService {
         return this.assertMatchingReplay(replay, requestHash)
       }
 
-      const job = this.jobRepository.getOwnedAggregate({
+      const job = jobRepository.getOwnedAggregate({
         actor: input.actor,
         jobId: input.jobId
       })
-      if (job === null) throw new Error('job.not_found')
+      if (job === null) throw commandError('job.not_found')
       if (job.stateRevision !== input.expectedRevision) {
-        throw new Error('job.revision_conflict')
+        throw commandError('job.revision_conflict')
       }
 
       const transition = restartExecutionTransition(job)
       if (!transition.ok) throw fromTransitionError(transition.error)
 
       const nextGeneration = job.executionGeneration + 1
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: input.expectedRevision,
         expectedState: job.state,
         expectedActiveRunId: job.activeRunId,
@@ -362,7 +397,16 @@ export class JobCommandServiceImpl implements JobCommandService {
           executionGeneration: nextGeneration
         }
       })
-      if (!cas.ok) throw new Error('job.revision_conflict')
+      if (!cas.ok) throw commandError('job.revision_conflict')
+      // Restart deliberately creates a new immutable task projection. A
+      // Continue command never calls this path: it resumes the same
+      // generation and retains its passed verification records.
+      this.taskRepository.cloneTasksToGeneration(
+        job.id,
+        job.executionGeneration,
+        nextGeneration,
+        now
+      )
 
       const response: JobCommandResponse = {
         job: {
@@ -372,7 +416,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       }
 
-      this.jobRepository.appendOutbox({
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -382,16 +426,19 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
-      this.jobRepository.storeDedup({
+      jobRepository.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'restart_execution',
         requestHash,
         response,
-        responseRevision: cas.newRevision
+        responseRevision: cas.newRevision,
+        createdAtMs: now,
+        expiresAtMs: now + DEDUP_TTL_MS
       })
 
       return response
@@ -399,8 +446,10 @@ export class JobCommandServiceImpl implements JobCommandService {
   }
 
   async acknowledgePause(input: WorkerCommandEnvelope<PauseAcknowledgedPayload>): Promise<void> {
-    const runIdToClose = this.jobRepository.transaction(() => {
-      const run = this.jobRepository.getActiveRunSummary(input.runId)
+    const now = this.clock.nowMs()
+    const runIdToClose = this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const run = jobRepository.getActiveRunSummary(input.runId)
       if (
         run === null ||
         run.fenceToken !== input.fenceToken ||
@@ -410,13 +459,15 @@ export class JobCommandServiceImpl implements JobCommandService {
         throw new Error('job.stale_run')
       }
 
-      const job = this.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'ack-pause' },
-        jobId: input.jobId
+      const job = jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
-      if (job === null) throw new Error('job.not_found')
+      if (job === null) throw commandError('job.not_found')
       if (job.stateRevision !== input.expectedRevision) {
-        throw new Error('job.revision_conflict')
+        throw commandError('job.revision_conflict')
       }
       if (job.state !== 'pausing' || job.controlIntent !== 'pause') {
         throw new Error('job.pause_ack_not_allowed')
@@ -425,8 +476,9 @@ export class JobCommandServiceImpl implements JobCommandService {
         throw new Error('job.stale_run')
       }
 
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
+        updatedAtMs: now,
         expectedRevision: input.expectedRevision,
         expectedState: 'pausing',
         expectedActiveRunId: input.runId,
@@ -439,10 +491,14 @@ export class JobCommandServiceImpl implements JobCommandService {
           terminalAtMs: null
         }
       })
-      if (!cas.ok) throw new Error('job.stale_run')
+      if (!cas.ok) throw commandError('job.stale_run')
 
-      this.jobRepository.markRunState(input.runId, 'paused')
-      this.jobRepository.appendOutbox({
+      jobRepository.markRunState({
+        runId: input.runId,
+        state: 'paused',
+        updatedAtMs: now
+      })
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -452,7 +508,8 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
       return input.runId
@@ -461,9 +518,73 @@ export class JobCommandServiceImpl implements JobCommandService {
     await this.runtimeController.closeThenRelease(runIdToClose, 'paused')
   }
 
+  async completeExecution(input: WorkerCommandEnvelope<Record<string, never>>): Promise<void> {
+    const now = this.clock.nowMs()
+    this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const fence = jobRepository.assertWorkerFence({
+        jobId: input.jobId,
+        expectedRevision: input.expectedRevision,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
+      })
+      if (!fence.ok) throw commandError(fence.reason)
+
+      const job = jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
+      })
+      if (job === null) throw commandError('job.not_found')
+      if (job.state !== 'execution_running' || job.controlIntent !== 'none') {
+        throw new Error('job.complete_not_allowed')
+      }
+
+      const cas = jobRepository.compareAndSetJob({
+        jobId: job.id,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
+        expectedState: 'execution_running',
+        expectedActiveRunId: input.runId,
+        next: {
+          state: 'succeeded',
+          controlIntent: 'none',
+          resumeTarget: null,
+          activeRunId: null,
+          lastFailureId: job.lastFailureId,
+          terminalAtMs: now
+        }
+      })
+      if (!cas.ok) throw commandError('job.stale_run')
+
+      jobRepository.markRunState({
+        runId: input.runId,
+        state: 'succeeded',
+        updatedAtMs: now
+      })
+      jobRepository.appendOutbox({
+        topic: `job:${job.id}`,
+        eventType: 'job.changed',
+        entityId: job.id,
+        aggregateRevision: cas.newRevision,
+        payload: {
+          type: 'job.changed',
+          entityId: job.id,
+          revision: cas.newRevision,
+          changed: ['state']
+        },
+        createdAtMs: now
+      })
+    })
+  }
+
   async checkpointTask(input: WorkerCommandEnvelope<TaskCheckpointPayload>): Promise<CheckpointResult> {
-    return this.jobRepository.transaction(() => {
-      const attempt = this.taskRepository.getRunningAttempt(input.payload.attemptId)
+    const now = this.clock.nowMs()
+    return this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const attempt = this.taskRepository.getAttempt(input.payload.attemptId)
       if (attempt === null) throw new Error('task.attempt_not_running')
       if (attempt.runId !== input.runId || attempt.jobId !== input.jobId) {
         throw new Error('task.attempt_fence_mismatch')
@@ -479,30 +600,46 @@ export class JobCommandServiceImpl implements JobCommandService {
 
       if (attempt.resultHash !== null) {
         if (attempt.resultHash !== resultHash) {
-          throw new Error('task.attempt_result_conflict')
+          throw commandError('task.attempt_result_conflict')
         }
-        const job = this.jobRepository.getOwnedAggregate({
-          actor: { username: 'worker', requestId: 'checkpoint' },
-          jobId: input.jobId
+        const job = jobRepository.getWorkerAggregate({
+          jobId: input.jobId,
+          runId: input.runId,
+          fenceToken: input.fenceToken,
+          executionGeneration: input.executionGeneration
         })
-        if (job === null) throw new Error('job.not_found')
+        if (job === null) throw commandError('job.not_found')
+        if (attempt.resultRevision === null) {
+          throw new Error('task.attempt_result_revision_missing')
+        }
         return {
-          revision: job.stateRevision,
+          revision: attempt.resultRevision,
           mustPause: job.state === 'pausing' && job.controlIntent === 'pause'
         }
       }
 
-      const fence = this.jobRepository.workerFence({
+      if (attempt.state !== 'running') throw new Error('task.attempt_not_running')
+      const assertion = jobRepository.assertWorkerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
         fenceToken: input.fenceToken,
         executionGeneration: input.executionGeneration
       })
-      if (!fence.ok) throw new Error(fence.reason)
+      if (!assertion.ok) throw commandError(assertion.reason)
+
+      const fence = jobRepository.workerFence({
+        jobId: input.jobId,
+        expectedRevision: input.expectedRevision,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration,
+        updatedAtMs: now
+      })
+      if (!fence.ok) throw commandError(fence.reason)
 
       const evidenceHash = this.evidenceRepository.putImmutable(normalized.result.evidence)
-      this.taskRepository.finishAttempt(attempt.id, resultHash, evidenceHash)
+      this.taskRepository.finishAttempt(attempt.id, resultHash, evidenceHash, fence.newRevision)
 
       const current = this.taskRepository.getCurrentTask(
         attempt.jobId,
@@ -519,13 +656,15 @@ export class JobCommandServiceImpl implements JobCommandService {
       )
       if (!updated) throw new Error('task.state_conflict')
 
-      const job = this.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'checkpoint' },
-        jobId: input.jobId
+      const job = jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
-      if (job === null) throw new Error('job.not_found')
+      if (job === null) throw commandError('job.not_found')
 
-      this.jobRepository.appendOutbox({
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -535,7 +674,8 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: fence.newRevision,
           changed: ['tasks']
-        }
+        },
+        createdAtMs: now
       })
 
       return {
@@ -548,36 +688,44 @@ export class JobCommandServiceImpl implements JobCommandService {
   async failPauseCheckpoint(
     input: WorkerCommandEnvelope<{ reason: string }>
   ): Promise<void> {
-    this.jobRepository.transaction(() => {
-      const fence = this.jobRepository.workerFence({
+    const now = this.clock.nowMs()
+    this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const fence = jobRepository.assertWorkerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
         fenceToken: input.fenceToken,
         executionGeneration: input.executionGeneration
       })
-      if (!fence.ok) throw new Error(fence.reason)
+      if (!fence.ok) throw commandError(fence.reason)
 
-      const job = this.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'pause-checkpoint-failed' },
-        jobId: input.jobId
+      const job = jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
       if (job === null) throw new Error('job.not_found')
       if (job.state !== 'pausing' || job.controlIntent !== 'pause') {
         throw new Error('job.pause_checkpoint_fail_not_allowed')
       }
 
-      const failureId = this.jobRepository.insertFailure({
+      const failureId = this.idGenerator.generate()
+      jobRepository.insertFailure({
+        id: failureId,
         jobId: job.id,
         code: 'pause.checkpoint_failed',
         recoverability: 'recoverable',
         reason: input.payload.reason,
-        runKind: 'execution'
+        runKind: 'execution',
+        createdAtMs: now
       })
 
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
-        expectedRevision: fence.newRevision,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
         expectedState: 'pausing',
         expectedActiveRunId: input.runId,
         next: {
@@ -589,10 +737,15 @@ export class JobCommandServiceImpl implements JobCommandService {
           terminalAtMs: null
         }
       })
-      if (!cas.ok) throw new Error('job.revision_conflict')
+      if (!cas.ok) throw commandError('job.revision_conflict')
 
-      this.jobRepository.markRunState(input.runId, 'paused', input.payload.reason)
-      this.jobRepository.appendOutbox({
+      jobRepository.markRunState({
+        runId: input.runId,
+        state: 'paused',
+        stopReason: input.payload.reason,
+        updatedAtMs: now
+      })
+      jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -602,14 +755,90 @@ export class JobCommandServiceImpl implements JobCommandService {
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state', 'failure']
-        }
+        },
+        createdAtMs: now
       })
     })
   }
 
+  async reportNoProgress(
+    input: WorkerCommandEnvelope<ReportNoProgressPayload>
+  ): Promise<NoProgressResult> {
+    const now = this.clock.nowMs()
+    return this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const fence = jobRepository.assertWorkerFence({
+        jobId: input.jobId,
+        expectedRevision: input.expectedRevision,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
+      })
+      if (!fence.ok) return { revision: input.expectedRevision, eventCount: 1 }
+
+      const job = jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
+      })
+      if (job === null) return { revision: input.expectedRevision, eventCount: 1 }
+
+      const failureId = this.idGenerator.generate()
+      jobRepository.insertFailure({
+        id: failureId,
+        jobId: job.id,
+        code: 'workflow.no_progress',
+        recoverability: 'recoverable',
+        reason: input.payload.workIdentity,
+        runKind: 'execution',
+        createdAtMs: now
+      })
+      const cas = jobRepository.compareAndSetJob({
+        jobId: job.id,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
+        expectedState: job.state,
+        expectedActiveRunId: input.runId,
+        next: {
+          state: 'failed',
+          controlIntent: 'none',
+          resumeTarget: null,
+          activeRunId: null,
+          lastFailureId: failureId,
+          terminalAtMs: now
+        }
+      })
+      if (!cas.ok) return { revision: input.expectedRevision, eventCount: 1 }
+
+      jobRepository.markRunState({
+        runId: input.runId,
+        state: 'failed',
+        stopReason: 'workflow.no_progress',
+        updatedAtMs: now
+      })
+      jobRepository.appendOutbox({
+        topic: `job:${job.id}`,
+        eventType: 'job.changed',
+        entityId: job.id,
+        aggregateRevision: cas.newRevision,
+        payload: {
+          type: 'job.changed',
+          entityId: job.id,
+          revision: cas.newRevision,
+          changed: ['state', 'failure']
+        },
+        createdAtMs: now
+      })
+      return { revision: cas.newRevision, eventCount: 1 }
+    })
+  }
+
   async interruptRun(input: WorkerCommandEnvelope<RunInterruptedPayload>): Promise<void> {
-    this.jobRepository.transaction(() => {
-      const fence = this.jobRepository.workerFence({
+    const now = this.clock.nowMs()
+    this.unitOfWork.transaction((tx) => {
+      const jobRepository = tx.jobs
+      const fence = jobRepository.assertWorkerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
@@ -624,16 +853,19 @@ export class JobCommandServiceImpl implements JobCommandService {
         return
       }
 
-      const job = this.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'interrupt' },
-        jobId: input.jobId
+      const job = jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
       if (job === null) return
 
       if (job.state === 'pausing' && job.controlIntent === 'pause') {
-        const cas = this.jobRepository.compareAndSetJob({
+        const cas = jobRepository.compareAndSetJob({
           jobId: job.id,
-          expectedRevision: fence.newRevision,
+          updatedAtMs: now,
+          expectedRevision: input.expectedRevision,
           expectedState: 'pausing',
           expectedActiveRunId: input.runId,
           next: {
@@ -646,8 +878,13 @@ export class JobCommandServiceImpl implements JobCommandService {
           }
         })
         if (cas.ok) {
-          this.jobRepository.markRunState(input.runId, 'interrupted', input.payload.reason)
-          this.jobRepository.appendOutbox({
+          jobRepository.markRunState({
+            runId: input.runId,
+            state: 'interrupted',
+            stopReason: input.payload.reason,
+            updatedAtMs: now
+          })
+          jobRepository.appendOutbox({
             topic: `job:${job.id}`,
             eventType: 'job.changed',
             entityId: job.id,
@@ -657,23 +894,28 @@ export class JobCommandServiceImpl implements JobCommandService {
               entityId: job.id,
               revision: cas.newRevision,
               changed: ['state']
-            }
+            },
+            createdAtMs: now
           })
         }
         return
       }
 
-      const failureId = this.jobRepository.insertFailure({
+      const failureId = this.idGenerator.generate()
+      jobRepository.insertFailure({
+        id: failureId,
         jobId: job.id,
         code: 'run.interrupted',
         recoverability: 'recoverable',
         reason: input.payload.reason,
-        runKind: null
+        runKind: null,
+        createdAtMs: now
       })
 
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = jobRepository.compareAndSetJob({
         jobId: job.id,
-        expectedRevision: fence.newRevision,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
         expectedState: job.state as JobState,
         expectedActiveRunId: input.runId,
         next: {
@@ -682,12 +924,17 @@ export class JobCommandServiceImpl implements JobCommandService {
           resumeTarget: null,
           activeRunId: null,
           lastFailureId: failureId,
-          terminalAtMs: this.clock.nowMs()
+          terminalAtMs: now
         }
       })
       if (cas.ok) {
-        this.jobRepository.markRunState(input.runId, 'interrupted', input.payload.reason)
-        this.jobRepository.appendOutbox({
+        jobRepository.markRunState({
+          runId: input.runId,
+          state: 'interrupted',
+          stopReason: input.payload.reason,
+          updatedAtMs: now
+        })
+        jobRepository.appendOutbox({
           topic: `job:${job.id}`,
           eventType: 'job.changed',
           entityId: job.id,
@@ -697,7 +944,8 @@ export class JobCommandServiceImpl implements JobCommandService {
             entityId: job.id,
             revision: cas.newRevision,
             changed: ['state', 'failure']
-          }
+          },
+          createdAtMs: now
         })
       }
     })
@@ -708,7 +956,7 @@ export class JobCommandServiceImpl implements JobCommandService {
     requestHash: string
   ): JobCommandResponse {
     if (replay.requestHash !== requestHash) {
-      throw new Error('idempotency_key_reused')
+      throw commandError('idempotency_key_reused')
     }
     return JSON.parse(replay.responseJson) as JobCommandResponse
   }

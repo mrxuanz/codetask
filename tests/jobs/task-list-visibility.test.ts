@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { isTaskListVisibleJob } from '../../src/server/jobs/constants.ts'
+import { isTaskListVisibleJob } from '../../src/server/legacy-control-plane/constants.ts'
 
 describe('task list visibility', () => {
   it('hides planning-phase jobs before planConfirmedAt', () => {

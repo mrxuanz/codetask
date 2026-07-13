@@ -1,8 +1,8 @@
 import { TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
-import { getExecutionRunContext } from '../jobs/execution-run-context'
-import { refreshWorkloadLease } from '../jobs/workload-slot-store'
+import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
+import { refreshWorkloadLease } from '../legacy-control-plane/workload-slot-store'
 import { ProgressGuard } from './progress-guard'
 import { TurnScope } from './turn-scope'
 

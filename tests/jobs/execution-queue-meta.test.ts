@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { computeExecutionQueueMeta } from '../../src/server/jobs/execution-queue-meta'
+import { computeExecutionQueueMeta } from '../../src/server/legacy-control-plane/execution-queue-meta'
 
 test('computeExecutionQueueMeta returns FIFO position and ahead count', () => {
   const pending = ['job-a', 'job-b', 'job-c']

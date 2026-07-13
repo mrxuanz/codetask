@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
 import { requireUsername } from '../auth/session'
-import { listUserDrafts } from '../jobs/draft-plan'
+import { listUserDrafts } from '../legacy-control-plane/draft-plan'
 import { ok } from '../response'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

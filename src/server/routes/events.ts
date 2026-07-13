@@ -6,7 +6,7 @@ import { requireUsername } from '../auth/session'
 import { AppError } from '../error'
 import { ok } from '../response'
 import { registerJobHubConnection } from '../events/job-event-hub'
-import { getUserJob } from '../jobs/service'
+import { getUserJob } from '../legacy-control-plane/service'
 import { getThread } from '../threads/service'
 import {
   jobIdFromTopic,

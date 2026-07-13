@@ -18,6 +18,7 @@ export interface LegacyJobSnapshot {
   readonly status: string
   readonly planProgress?: { readonly status: string }
   readonly currentPlanRevision?: number | null
+  readonly planConfirmedAt?: number | null
 }
 
 export interface ControlJobSeed {
@@ -44,6 +45,7 @@ export interface MigrationCopyReport {
   readonly mapped: readonly ControlJobSeed[]
   readonly warnings: readonly string[]
   readonly countsByState: Readonly<Record<string, number>>
+  readonly perJobProjectionHashes: Readonly<Record<string, string>>
   readonly reportHash: string
 }
 
@@ -72,7 +74,11 @@ const KNOWN_LEGACY_STATUSES = new Set([
   'paused',
   'pausing',
   'running',
-  'planning'
+  'planning',
+  'plan_editing',
+  'plan_ready',
+  'plan_confirmed',
+  'pending'
 ])
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
@@ -155,6 +161,7 @@ export function mapLegacyJobs(jobs: readonly LegacyJobSnapshot[]): MigrationCopy
   const conflicts: MigrationConflict[] = []
   const warnings: string[] = []
   const countsByState: Record<string, number> = {}
+  const perJobProjectionHashes: Record<string, string> = {}
 
   for (const job of jobs) {
     const result = mapLegacyJob(job)
@@ -169,27 +176,33 @@ export function mapLegacyJobs(jobs: readonly LegacyJobSnapshot[]): MigrationCopy
 
     mapped.push(result.value)
     countsByState[result.value.state] = (countsByState[result.value.state] ?? 0) + 1
+    perJobProjectionHashes[result.value.id] = hashCanonicalJson(result.value)
     for (const warning of result.warnings) {
       warnings.push(`${job.id}: ${warning}`)
     }
   }
 
-  const draft: Omit<MigrationCopyReport, 'reportHash'> = {
-    generatedAtMs: Date.now(),
+  const stableReport = {
     sourceJobCount: jobs.length,
     mappedCount: mapped.length,
     conflictCount: conflicts.length,
     warningCount: warnings.length,
     hasConflicts: conflicts.length > 0,
     conflicts,
+    countsByState,
+    perJobProjectionHashes
+  }
+  const draft: Omit<MigrationCopyReport, 'reportHash'> = {
+    generatedAtMs: Date.now(),
+    ...stableReport,
     mapped,
     warnings,
-    countsByState
+    perJobProjectionHashes
   }
 
   return {
     ...draft,
-    reportHash: hashCanonicalJson(draft)
+    reportHash: hashCanonicalJson(stableReport)
   }
 }
 
@@ -241,16 +254,14 @@ export function validateCopyReport(report: MigrationCopyReport): {
   }
 
   const recomputed = hashCanonicalJson({
-    generatedAtMs: report.generatedAtMs,
     sourceJobCount: report.sourceJobCount,
     mappedCount: report.mappedCount,
     conflictCount: report.conflictCount,
     warningCount: report.warningCount,
     hasConflicts: report.hasConflicts,
     conflicts: report.conflicts,
-    mapped: report.mapped,
-    warnings: report.warnings,
-    countsByState: report.countsByState
+    countsByState: report.countsByState,
+    perJobProjectionHashes: report.perJobProjectionHashes
   })
   if (recomputed !== report.reportHash) {
     errors.push('migration.report_hash_mismatch')
@@ -333,11 +344,18 @@ export function parseLegacyJobSnapshots(value: unknown): LegacyJobSnapshot[] {
         : row.currentPlanRevision === null
           ? null
           : undefined
+    const planConfirmedAt =
+      typeof row.planConfirmedAt === 'number'
+        ? row.planConfirmedAt
+        : row.planConfirmedAt === null
+          ? null
+          : undefined
     return {
       id: row.id,
       status: row.status,
       ...(planProgress ? { planProgress } : {}),
-      ...(currentPlanRevision !== undefined ? { currentPlanRevision } : {})
+      ...(currentPlanRevision !== undefined ? { currentPlanRevision } : {}),
+      ...(planConfirmedAt !== undefined ? { planConfirmedAt } : {})
     }
   })
 }
@@ -366,7 +384,7 @@ export function summarizeReport(report: MigrationCopyReport): string {
 }
 
 function inferResumeTarget(input: LegacyJobSnapshot): string | null {
-  if (input.currentPlanRevision) {
+  if (input.planConfirmedAt != null && (input.currentPlanRevision ?? 0) > 0) {
     return 'execution_queued'
   }
   return null
@@ -374,6 +392,14 @@ function inferResumeTarget(input: LegacyJobSnapshot): string | null {
 
 function mapLegacyStatus(status: string): string {
   switch (status) {
+    case 'planning':
+      return 'planning_queued'
+    case 'plan_editing':
+    case 'plan_ready':
+      return 'plan_review'
+    case 'plan_confirmed':
+    case 'pending':
+      return 'execution_queued'
     case 'completed':
       return 'succeeded'
     case 'failed':
@@ -382,8 +408,6 @@ function mapLegacyStatus(status: string): string {
       return 'cancelled'
     case 'paused':
       return 'paused'
-    case 'planning':
-      return 'plan_review'
     default:
       return 'failed'
   }
@@ -422,6 +446,12 @@ function parseMigrationCopyReport(value: unknown): MigrationCopyReport {
     mapped: row.mapped as ControlJobSeed[],
     warnings: row.warnings as string[],
     countsByState: row.countsByState as Record<string, number>,
+    perJobProjectionHashes:
+      row.perJobProjectionHashes && typeof row.perJobProjectionHashes === 'object'
+        ? (row.perJobProjectionHashes as Record<string, string>)
+        : Object.fromEntries(
+            (row.mapped as ControlJobSeed[]).map((seed) => [seed.id, hashCanonicalJson(seed)])
+          ),
     reportHash: row.reportHash
   }
 }
