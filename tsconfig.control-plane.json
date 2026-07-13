@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "noImplicitOverride": true,
+    "allowUnreachableCode": false,
+    "composite": false,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["src/shared/*"],
+      "@server/*": ["src/server/*"]
+    }
+  },
+  "include": [
+    "src/shared/contracts/control-plane/**/*",
+    "src/server/domain/**/*",
+    "src/server/application/**/*",
+    "src/server/infra/sqlite/control-plane/**/*",
+    "src/server/http/legacy-cutover-guard.ts",
+    "scripts/control-plane/**/*",
+    "tests/control-plane/**/*"
+  ]
+}

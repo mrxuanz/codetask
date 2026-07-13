@@ -32,10 +32,12 @@ import {
   pauseJob,
   restartJob,
   resumePausedJob,
-  continueFailedJob
+  continueFailedJob,
+  attachControlPlaneJobFields
 } from '../jobs/controls'
 import { AppError } from '../error'
 import { ok } from '../response'
+import { createLegacyCutoverGuard } from '../http/legacy-cutover-guard'
 import { bodySizeLimit } from '../middleware/body-limiter'
 import {
   MAX_MULTIPART_BODY_BYTES,
@@ -326,6 +328,7 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createUserJobRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
+  const legacyWriteGuard = createLegacyCutoverGuard()
 
   routes.post('/queue/resume', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
@@ -351,33 +354,48 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
     return c.json(ok({ job }))
   })
 
-  routes.post('/:jobId/pause', async (c) => {
+  routes.post('/:jobId/pause', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await pauseJob(username, c.req.param('jobId'))
+    const job = attachControlPlaneJobFields(
+      username,
+      await pauseJob(username, c.req.param('jobId'))
+    )
     return c.json(ok({ job }))
   })
 
-  routes.post('/:jobId/resume', async (c) => {
+  routes.post('/:jobId/resume', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await resumePausedJob(username, c.req.param('jobId'))
+    const job = attachControlPlaneJobFields(
+      username,
+      await resumePausedJob(username, c.req.param('jobId'))
+    )
     return c.json(ok({ job }))
   })
 
-  routes.post('/:jobId/continue', async (c) => {
+  routes.post('/:jobId/continue', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await continueFailedJob(username, c.req.param('jobId'))
+    const job = attachControlPlaneJobFields(
+      username,
+      await continueFailedJob(username, c.req.param('jobId'))
+    )
     return c.json(ok({ job }))
   })
 
-  routes.post('/:jobId/cancel', async (c) => {
+  routes.post('/:jobId/cancel', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await cancelJob(username, c.req.param('jobId'))
+    const job = attachControlPlaneJobFields(
+      username,
+      await cancelJob(username, c.req.param('jobId'))
+    )
     return c.json(ok({ job }))
   })
 
-  routes.post('/:jobId/restart', async (c) => {
+  routes.post('/:jobId/restart', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await restartJob(username, c.req.param('jobId'))
+    const job = attachControlPlaneJobFields(
+      username,
+      await restartJob(username, c.req.param('jobId'))
+    )
     return c.json(ok({ job }))
   })
 
@@ -388,7 +406,7 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
     return c.json(ok({ job }))
   })
 
-  routes.delete('/:jobId', async (c) => {
+  routes.delete('/:jobId', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     await deleteJob(username, c.req.param('jobId'))
     return c.json(ok({ deleted: true }))

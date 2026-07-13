@@ -1,23 +1,4 @@
-import type {
-  JobState,
-  ControlIntent,
-  ResumeTarget
-} from '../../../shared/contracts/control-plane/primitives'
-import type { TransitionError, TransitionCommand, DomainResult } from './job-errors'
-
-export interface JobAggregate {
-  readonly id: string
-  readonly threadId: string
-  readonly projectId: string
-  readonly state: JobState
-  readonly stateRevision: number
-  readonly controlIntent: ControlIntent
-  readonly resumeTarget: ResumeTarget | null
-  readonly currentPlanRevision: number | null
-  readonly executionGeneration: number
-  readonly activeRunId: string | null
-  readonly lastFailureId: string | null
-}
+import type { JobAggregate, JobState, ControlIntent, ResumeTarget } from '@shared/contracts/control-plane'
 
 export type JobTransition = {
   readonly nextState: JobState
@@ -26,186 +7,179 @@ export type JobTransition = {
   readonly clearActiveRun: boolean
 }
 
-function error(
-  code: TransitionError['code'],
-  state: JobState,
-  command: TransitionCommand
-): DomainResult<JobTransition, TransitionError> {
-  return { ok: false, error: { code, state, command } }
+export type TransitionError = {
+  readonly code: 'job.action_not_allowed' | 'job.invalid_resume_target'
+  readonly state: JobState
+  readonly command: string
 }
 
-function success(
-  transition: JobTransition
-): DomainResult<JobTransition, TransitionError> {
-  return { ok: true, value: transition }
-}
+export type DomainResult<T, E> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: E }
 
-export function requestPause(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
+export function requestPause(job: JobAggregate): DomainResult<JobTransition, TransitionError> {
   if (job.state === 'planning_queued') {
-    return success({
-      nextState: 'paused',
-      controlIntent: 'none',
-      resumeTarget: 'planning_queued',
-      clearActiveRun: true
-    })
+    return {
+      ok: true,
+      value: {
+        nextState: 'paused',
+        controlIntent: 'none',
+        resumeTarget: 'planning_queued',
+        clearActiveRun: true
+      }
+    }
   }
   if (job.state === 'execution_queued') {
-    return success({
-      nextState: 'paused',
-      controlIntent: 'none',
-      resumeTarget: 'execution_queued',
-      clearActiveRun: true
-    })
+    return {
+      ok: true,
+      value: {
+        nextState: 'paused',
+        controlIntent: 'none',
+        resumeTarget: 'execution_queued',
+        clearActiveRun: true
+      }
+    }
   }
   if (job.state === 'planning_running' || job.state === 'execution_running') {
-    return success({
-      nextState: 'pausing',
-      controlIntent: 'pause',
-      resumeTarget: job.state === 'planning_running' ? 'planning_queued' : 'execution_queued',
-      clearActiveRun: false
-    })
+    return {
+      ok: true,
+      value: {
+        nextState: 'pausing',
+        controlIntent: 'pause',
+        resumeTarget:
+          job.state === 'planning_running' ? 'planning_queued' : 'execution_queued',
+        clearActiveRun: false
+      }
+    }
   }
-  return error('job.action_not_allowed', job.state, 'pause')
+  return {
+    ok: false,
+    error: { code: 'job.action_not_allowed', state: job.state, command: 'request_pause' }
+  }
 }
 
-export function continueJob(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
+export function continueJob(job: JobAggregate): DomainResult<JobTransition, TransitionError> {
   if (job.state === 'paused') {
     if (job.resumeTarget === null) {
-      return error('job.invalid_resume_target', job.state, 'continue')
+      return {
+        ok: false,
+        error: { code: 'job.invalid_resume_target', state: job.state, command: 'continue' }
+      }
     }
-    return success({
-      nextState: job.resumeTarget,
-      controlIntent: 'none',
-      resumeTarget: null,
-      clearActiveRun: true
-    })
+    return {
+      ok: true,
+      value: {
+        nextState: job.resumeTarget,
+        controlIntent: 'none',
+        resumeTarget: null,
+        clearActiveRun: true
+      }
+    }
   }
   if (job.state === 'failed') {
-    const resumeTarget: ResumeTarget = job.resumeTarget ?? 'execution_queued'
-    return success({
-      nextState: resumeTarget,
-      controlIntent: 'none',
-      resumeTarget: null,
-      clearActiveRun: true
-    })
+    return {
+      ok: true,
+      value: {
+        nextState: 'execution_queued',
+        controlIntent: 'none',
+        resumeTarget: null,
+        clearActiveRun: true
+      }
+    }
   }
-  return error('job.action_not_allowed', job.state, 'continue')
+  return {
+    ok: false,
+    error: { code: 'job.action_not_allowed', state: job.state, command: 'continue' }
+  }
 }
 
-export function cancelJob(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
-  switch (job.state) {
-    case 'planning_queued':
-    case 'planning_running':
-    case 'plan_review':
-    case 'execution_queued':
-    case 'execution_running':
-    case 'paused':
-      return success({
+export function cancelJob(job: JobAggregate): DomainResult<JobTransition, TransitionError> {
+  if (
+    job.state === 'planning_queued' ||
+    job.state === 'planning_running' ||
+    job.state === 'plan_review' ||
+    job.state === 'execution_queued' ||
+    job.state === 'execution_running' ||
+    job.state === 'paused' ||
+    job.state === 'failed'
+  ) {
+    return {
+      ok: true,
+      value: {
         nextState: 'cancelled',
         controlIntent: 'none',
         resumeTarget: null,
         clearActiveRun: true
-      })
-    case 'pausing':
-    case 'applying_changes':
-    case 'succeeded':
-    case 'failed':
-    case 'cancelled':
-      return error('job.action_not_allowed', job.state, 'cancel')
+      }
+    }
+  }
+  return {
+    ok: false,
+    error: { code: 'job.action_not_allowed', state: job.state, command: 'cancel' }
   }
 }
 
-export function restartExecution(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
+export function restartExecution(job: JobAggregate): DomainResult<JobTransition, TransitionError> {
   if (job.state === 'failed') {
-    return success({
-      nextState: 'execution_queued',
-      controlIntent: 'none',
-      resumeTarget: null,
-      clearActiveRun: true
-    })
-  }
-  if (job.state === 'cancelled' && job.currentPlanRevision !== null) {
-    return success({
-      nextState: 'execution_queued',
-      controlIntent: 'none',
-      resumeTarget: null,
-      clearActiveRun: true
-    })
-  }
-  return error('job.action_not_allowed', job.state, 'restart_execution')
-}
-
-export function acknowledgePause(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
-  if (job.state === 'pausing' && job.controlIntent === 'pause') {
-    return success({
-      nextState: 'paused',
-      controlIntent: 'none',
-      resumeTarget: job.resumeTarget,
-      clearActiveRun: true
-    })
-  }
-  return error('job.action_not_allowed', job.state, 'acknowledge_pause')
-}
-
-export function confirmPlan(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
-  if (job.state === 'plan_review') {
-    return success({
-      nextState: 'execution_queued',
-      controlIntent: 'none',
-      resumeTarget: null,
-      clearActiveRun: true
-    })
-  }
-  return error('job.action_not_allowed', job.state, 'confirm_plan')
-}
-
-export function editPlan(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
-  if (job.state === 'plan_review') {
-    return success({
-      nextState: 'plan_review',
-      controlIntent: 'none',
-      resumeTarget: null,
-      clearActiveRun: false
-    })
-  }
-  return error('job.action_not_allowed', job.state, 'edit_plan')
-}
-
-export function deleteJob(
-  job: JobAggregate
-): DomainResult<JobTransition, TransitionError> {
-  switch (job.state) {
-    case 'succeeded':
-    case 'failed':
-    case 'cancelled':
-      return success({
-        nextState: job.state,
+    return {
+      ok: true,
+      value: {
+        nextState: 'execution_queued',
         controlIntent: 'none',
         resumeTarget: null,
-        clearActiveRun: false
-      })
-    case 'planning_queued':
-    case 'planning_running':
-    case 'plan_review':
-    case 'execution_queued':
-    case 'execution_running':
-    case 'pausing':
-    case 'paused':
-    case 'applying_changes':
-      return error('job.action_not_allowed', job.state, 'delete')
+        clearActiveRun: true
+      }
+    }
+  }
+  if (job.state === 'cancelled') {
+    return {
+      ok: true,
+      value: {
+        nextState: 'execution_queued',
+        controlIntent: 'none',
+        resumeTarget: null,
+        clearActiveRun: true
+      }
+    }
+  }
+  return {
+    ok: false,
+    error: { code: 'job.action_not_allowed', state: job.state, command: 'restart_execution' }
+  }
+}
+
+export function confirmPlan(job: JobAggregate): DomainResult<JobTransition, TransitionError> {
+  if (job.state === 'plan_review') {
+    return {
+      ok: true,
+      value: {
+        nextState: 'execution_queued',
+        controlIntent: 'none',
+        resumeTarget: null,
+        clearActiveRun: true
+      }
+    }
+  }
+  return {
+    ok: false,
+    error: { code: 'job.action_not_allowed', state: job.state, command: 'confirm_plan' }
+  }
+}
+
+export function replan(job: JobAggregate): DomainResult<JobTransition, TransitionError> {
+  if (job.state === 'plan_review') {
+    return {
+      ok: true,
+      value: {
+        nextState: 'planning_queued',
+        controlIntent: 'none',
+        resumeTarget: null,
+        clearActiveRun: true
+      }
+    }
+  }
+  return {
+    ok: false,
+    error: { code: 'job.action_not_allowed', state: job.state, command: 'replan' }
   }
 }
