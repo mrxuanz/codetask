@@ -117,8 +117,8 @@ function seedTaskAndAttempt(
 
   db.prepare(
     `INSERT INTO control_task_attempts (
-      id, job_id, execution_generation, task_id, attempt_no, run_id, state, started_at_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      id, job_id, execution_generation, task_id, attempt_no, run_id, state, started_at_ms, result_revision
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     opts.attemptId ?? 'attempt-1',
     'job-1',
@@ -127,7 +127,8 @@ function seedTaskAndAttempt(
     1,
     opts.runId ?? 'run-1',
     opts.state ?? 'running',
-    now
+    now,
+    0
   )
 }
 
@@ -189,10 +190,7 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
       )
       await reconciler.reconcileAll()
 
-      const job = jobRepository.getOwnedAggregate({
-        actor: { username: 'system', requestId: '' },
-        jobId: 'job-1'
-      })
+      const job = jobRepository.getAggregate('job-1')
       assert.equal(job?.state, 'paused')
       assert.equal(job?.controlIntent, 'none')
     })
@@ -217,10 +215,7 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
       )
       await reconciler.reconcileAll()
 
-      const job = jobRepository.getOwnedAggregate({
-        actor: { username: 'system', requestId: '' },
-        jobId: 'job-1'
-      })
+      const job = jobRepository.getAggregate('job-1')
       assert.equal(job?.state, 'failed')
       assert.ok(job?.lastFailureId)
     })
@@ -250,7 +245,8 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
         expectedRevision: 2,
         runId: 'run-1',
         fenceToken: 'fence-1',
-        executionGeneration: 0
+        executionGeneration: 0,
+        updatedAtMs: Date.now()
       })
       assert.equal(fence.ok, false)
 

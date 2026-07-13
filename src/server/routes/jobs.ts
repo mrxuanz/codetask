@@ -13,7 +13,7 @@ import {
   updateDraftAbilityCores,
   updateDraftReferenceDescription,
   uploadDraftReferences
-} from '../jobs/service'
+} from '../legacy-control-plane/service'
 import {
   confirmDraftAndStartPlanning,
   confirmDraftSection,
@@ -25,7 +25,7 @@ import {
   unlockRequirementsContractForEdit,
   updateDraftContent,
   updateJobPlan
-} from '../jobs/draft-plan'
+} from '../legacy-control-plane/draft-plan'
 import {
   cancelJob,
   deleteJob,
@@ -34,7 +34,7 @@ import {
   resumePausedJob,
   continueFailedJob,
   attachControlPlaneJobFields
-} from '../jobs/controls'
+} from '../legacy-control-plane/controls'
 import { AppError } from '../error'
 import { ok } from '../response'
 import { createLegacyCutoverGuard } from '../http/legacy-cutover-guard'
@@ -75,7 +75,7 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 
   routes.get('/:threadId/jobs/:jobId/tasks/:taskId/evidence', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const { getTaskEvidenceDetailForUser } = await import('../jobs/service')
+    const { getTaskEvidenceDetailForUser } = await import('../legacy-control-plane/service')
     const detail = await getTaskEvidenceDetailForUser({
       username,
       threadId: c.req.param('threadId'),
@@ -330,9 +330,9 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
   const legacyWriteGuard = createLegacyCutoverGuard()
 
-  routes.post('/queue/resume', async (c) => {
+  routes.post('/queue/resume', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const { resumeJobQueueForUser } = await import('../jobs/job-queue')
+    const { resumeJobQueueForUser } = await import('../legacy-control-plane/job-queue')
     await resumeJobQueueForUser(username)
     return c.json(ok({ resumed: true }))
   })
@@ -399,9 +399,9 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
     return c.json(ok({ job }))
   })
 
-  routes.post('/:jobId/retry-planning', async (c) => {
+  routes.post('/:jobId/retry-planning', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const { retryJobPlanning } = await import('../jobs/service')
+    const { retryJobPlanning } = await import('../legacy-control-plane/service')
     const job = await retryJobPlanning(username, c.req.param('jobId'))
     return c.json(ok({ job }))
   })

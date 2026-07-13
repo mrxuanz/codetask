@@ -8,15 +8,15 @@ import { getDb } from '../db'
 import { loadJobAbilities, loadJobPlan, saveJobPlanInTx } from '../db/job-plan'
 import { saveTaskProgressInTx } from '../db/job-progress'
 import { designRuns, threadJobs, threads, type ThreadJob } from '../db/schema'
-import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../jobs/types'
+import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultTaskProgress } from '../planner/save-plan'
-import { mapJob } from '../jobs/repository'
+import { mapJob } from '../legacy-control-plane/repository'
 import { AppError } from '../error'
-import { ReferenceFileMissingError } from '../jobs/reference-paths'
+import { ReferenceFileMissingError } from '../legacy-control-plane/reference-paths'
 import { buildJobSnapshot, parseSessionManifest, validateLaunchPreconditions } from './launch'
-import { advanceWorkloadQueue } from '../jobs/workload-slot-store'
-import { emitJobEvent } from '../jobs/service'
+import { advanceWorkloadQueue } from '../legacy-control-plane/workload-slot-store'
+import { emitJobEvent } from '../legacy-control-plane/service'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -285,7 +285,7 @@ export async function launchJobFromDesignSession(
   designSessionId: string,
   options?: { skipQueueAdvance?: boolean }
 ): Promise<ThreadJobDto> {
-  const { ensureStartupWorkloadReady } = await import('../jobs/workload-slot')
+  const { ensureStartupWorkloadReady } = await import('../legacy-control-plane/workload-slot')
   await ensureStartupWorkloadReady()
 
   const db = getDb()

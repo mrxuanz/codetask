@@ -1,4 +1,4 @@
-import type { TaskProgressDto, ThreadJobDto } from '../jobs/types'
+import type { TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
 import { slimTaskEvidence } from './evidence/store'
 import { slimSliceVerdict } from '../retention/lifecycle-helpers'
 

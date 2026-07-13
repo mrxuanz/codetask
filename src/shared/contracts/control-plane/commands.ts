@@ -191,6 +191,7 @@ export interface CheckpointResult {
 export interface RuntimeStartedResult {
   readonly runtimeInstanceId: string
   readonly runState: string
+  readonly revision: number
 }
 
 export interface RuntimeExitResult {
@@ -221,9 +222,11 @@ export interface JobCommandService {
   cancelJob(input: PayloadCommandEnvelope<CancelJobPayload>): Promise<CancelJobResponse>
   restartExecution(input: PayloadCommandEnvelope<RestartExecutionPayload>): Promise<JobCommandResponse>
   acknowledgePause(input: WorkerCommandEnvelope<PauseAcknowledgedPayload>): Promise<void>
+  completeExecution(input: WorkerCommandEnvelope<Record<string, never>>): Promise<void>
   checkpointTask(input: WorkerCommandEnvelope<TaskCheckpointPayload>): Promise<CheckpointResult>
   failPauseCheckpoint(input: WorkerCommandEnvelope<{ reason: string }>): Promise<void>
   interruptRun(input: WorkerCommandEnvelope<RunInterruptedPayload>): Promise<void>
+  reportNoProgress(input: WorkerCommandEnvelope<ReportNoProgressPayload>): Promise<NoProgressResult>
 
   /**
    * PR7 Reserved: BeginWorkspaceApply

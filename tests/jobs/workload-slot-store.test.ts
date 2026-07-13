@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
-import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/jobs/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/jobs/workload-slot'
+import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/legacy-control-plane/reconcile'
+import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import {
   jobArtifacts,
   jobTasks,
@@ -26,10 +26,10 @@ import {
   markRunCancelling,
   workloadPoolCapacity,
   resetWorkloadRunControllersForTests
-} from '../../src/server/jobs/workload-slot-store'
-import { updateJobRowFenced } from '../../src/server/jobs/repository'
-import { hydrateTaskEvidenceSync } from '../../src/server/jobs/evidence/store'
-import type { TaskProgressDto } from '../../src/server/jobs/types'
+} from '../../src/server/legacy-control-plane/workload-slot-store'
+import { updateJobRowFenced } from '../../src/server/legacy-control-plane/repository'
+import { hydrateTaskEvidenceSync } from '../../src/server/legacy-control-plane/evidence/store'
+import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
 import {
   registerPlannerMcpSession,
   unregisterPlannerMcpSession,

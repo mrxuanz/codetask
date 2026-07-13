@@ -12,7 +12,7 @@ import {
   clearStaleExecutionLeaseIfNeeded,
   executionLeaseOwner,
   isStaleExecutionLeaseOwner
-} from '../../src/server/jobs/repository'
+} from '../../src/server/legacy-control-plane/repository'
 import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'lease-user'

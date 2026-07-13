@@ -3,7 +3,7 @@
  * Design-session plan storage was unified into thread_jobs / job_plan_* tables.
  */
 import type { getDb } from './index'
-import type { PlanProgressDto, ThreadJobAbilityDto } from '../jobs/types'
+import type { PlanProgressDto, ThreadJobAbilityDto } from '../legacy-control-plane/types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import {
   loadJobAbilities,

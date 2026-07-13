@@ -25,12 +25,12 @@ import {
 import { eq } from 'drizzle-orm'
 import { getDb } from '../../src/server/db'
 import { threadJobs } from '../../src/server/db/schema'
-import { clearExecutionLease } from '../../src/server/jobs/repository'
-import { abortActiveTurn } from '../../src/server/jobs/controls'
+import { clearExecutionLease } from '../../src/server/legacy-control-plane/repository'
+import { abortActiveTurn } from '../../src/server/legacy-control-plane/controls'
 import {
   reconcileOrphanRunningJobsOnStartup,
   resetJobReconcileForTests
-} from '../../src/server/jobs/reconcile'
+} from '../../src/server/legacy-control-plane/reconcile'
 import { saveControlPlanePolicies } from '../../src/server/settings/control-plane'
 import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'

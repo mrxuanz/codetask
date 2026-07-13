@@ -6,19 +6,19 @@ import { tmpdir } from 'node:os'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import { threadJobs, threadMessages, threads, projects } from '../../src/server/db/schema'
-import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/jobs/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/jobs/workload-slot'
+import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/legacy-control-plane/reconcile'
+import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import {
   claimWorkloadSlotTx,
   getActiveRun,
   resetWorkloadRunControllersForTests
-} from '../../src/server/jobs/workload-slot-store'
+} from '../../src/server/legacy-control-plane/workload-slot-store'
 import {
   finishExecutionRunLifecycle,
   finishPlanningRunLifecycle,
   stopRunLifecycle
-} from '../../src/server/jobs/run-lifecycle'
-import { registerRunRuntime, resetRuntimeSupervisorForTests } from '../../src/server/jobs/runtime-supervisor'
+} from '../../src/server/legacy-control-plane/run-lifecycle'
+import { registerRunRuntime, resetRuntimeSupervisorForTests } from '../../src/server/legacy-control-plane/runtime-supervisor'
 
 let dataDir: string
 

@@ -4,7 +4,7 @@ import {
   TASK_EVIDENCE_GRACE_MS,
   TASK_EVIDENCE_WAIT_FULL_MS,
   VERIFIER_VERDICT_GRACE_MS
-} from '../../src/server/jobs/recovery-limits.ts'
+} from '../../src/server/legacy-control-plane/recovery-limits.ts'
 import { TASK_TURN_STALLED_MS } from '../../src/server/agent-runtime/turn-timeouts.ts'
 
 describe('evidence wait vs stall policy', () => {

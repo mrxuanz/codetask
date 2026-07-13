@@ -9,7 +9,7 @@ import {
   externalizeTaskEvidence,
   hydrateTaskEvidenceSync,
   slimTaskEvidence
-} from '../../src/server/jobs/evidence/store'
+} from '../../src/server/legacy-control-plane/evidence/store'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
 import { shouldExternalizeEvidence } from '../../src/server/retention/lifecycle-helpers'
 

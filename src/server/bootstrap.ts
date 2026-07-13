@@ -8,8 +8,8 @@ import {
   reconcileOrphanWorkloadSlotsOnStartupOnce,
   startWorkloadReconciler,
   stopWorkloadReconcilerForTests
-} from './jobs/reconcile'
-import { bindStartupWorkloadGate } from './jobs/workload-slot'
+} from './legacy-control-plane/reconcile'
+import { bindStartupWorkloadGate } from './legacy-control-plane/workload-slot'
 import { reconcileOnStartupOnce } from './conversation/service'
 import { pruneOrphanRuntimeTrees } from './runtime/cleanup'
 import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } from './retention'
@@ -18,6 +18,7 @@ import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/ja
 import { StartupCoordinator } from './application/startup-coordinator'
 import { SafeLoggerImpl } from './application/safe-logger'
 import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
+import { getCutoverMarker } from './application/cutover-state'
 
 export type { AppContext } from './context'
 
@@ -81,6 +82,8 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
   const db = createDatabase(options.dataDir)
   const mode = options.mode ?? 'desktop'
+  const schemaGeneration = getCutoverMarker(db)
+  const v3Authoritative = schemaGeneration === 'v3_authoritative'
 
   const settings = new SettingsStore(options.dataDir)
   const authSecret = getOrCreateAuthSecret(options.dataDir)
@@ -107,18 +110,22 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   startupCoordinator = new StartupCoordinator({
     logger: bootstrapLogger,
     stages: [
-      {
-        name: 'reconcile-workload-slots',
-        execute: () => reconcileOrphanWorkloadSlotsOnStartupOnce()
-      },
-      {
-        name: 'reconcile-orphan-jobs',
-        execute: () => reconcileOrphanRunningJobsOnStartupOnce()
-      },
-      {
-        name: 'reconcile-planning-sessions',
-        execute: () => reconcileOrphanPlanningSessionsOnStartupOnce()
-      },
+      ...(v3Authoritative
+        ? []
+        : [
+            {
+              name: 'reconcile-workload-slots',
+              execute: () => reconcileOrphanWorkloadSlotsOnStartupOnce()
+            },
+            {
+              name: 'reconcile-orphan-jobs',
+              execute: () => reconcileOrphanRunningJobsOnStartupOnce()
+            },
+            {
+              name: 'reconcile-planning-sessions',
+              execute: () => reconcileOrphanPlanningSessionsOnStartupOnce()
+            }
+          ]),
       {
         name: 'reconcile-conversation',
         execute: () => reconcileOnStartupOnce()
@@ -143,7 +150,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       error: error instanceof Error ? error.message : String(error)
     })
   })
-  trackStartupTask(startupReconcile.catch(() => undefined))
+  trackStartupTask(startupReconcile)
 
   bindStartupWorkloadGate(startupReconcile)
 
@@ -174,17 +181,9 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
   startRetentionJanitor()
   startAuthJanitor()
-  trackStartupTask(
-    startupReconcile
-      .then(() => {
-        startWorkloadReconciler()
-      })
-      .catch((error: unknown) => {
-        bootstrapLogger.warn('workload reconciler startup skipped', {
-          error: error instanceof Error ? error.message : String(error)
-        })
-      })
-  )
+  if (!v3Authoritative) {
+    trackStartupTask(startupReconcile.then(() => startWorkloadReconciler()))
+  }
 
   trackStartupTask(
     import('./agent-runtime/cursor-acp/conversation-cursor-reaper')
@@ -201,28 +200,23 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       })
   )
 
-  trackStartupTask(
-    startupReconcile
-      .then(() => import('./jobs/executor'))
-      .then((module) => module.initJobExecutor(ctx))
-      .catch((error: unknown) => {
-        bootstrapLogger.warn('executor startup failed', {
-          error: error instanceof Error ? error.message : String(error)
-        })
-      })
-  )
-
-  trackStartupTask(
-    import('./application/control-plane-runtime')
-      .then((module) => module.bootstrapControlPlaneRuntime(ctx, startupReconcile))
-      .catch((error: unknown) => {
-        bootstrapLogger.warn('control-plane runtime startup failed', {
-          error: error instanceof Error ? error.message : String(error)
-        })
-      })
-  )
+  if (!v3Authoritative) {
+    trackStartupTask(
+      startupReconcile
+        .then(() => import('./legacy-control-plane/executor'))
+        .then((module) => module.initJobExecutor(ctx))
+    )
+  }
 
   return appContext
+}
+
+/** Fail-closed readiness barrier used by HTTP entrypoints. */
+export async function ensureRuntimeReady(ctx: AppContext = getAppContext()): Promise<void> {
+  if (startupCoordinator === null) throw new Error('Runtime not bootstrapped')
+  await startupCoordinator.ensureReady()
+  const { bootstrapControlPlaneRuntime } = await import('./application/control-plane-runtime')
+  await bootstrapControlPlaneRuntime(ctx)
 }
 
 export async function resetAppContextForTests(): Promise<void> {

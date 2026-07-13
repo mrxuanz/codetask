@@ -4,7 +4,7 @@ import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { saveDesignPlan, saveDesignPlanProgress, saveDesignAbilities } from '../db/design-plan'
 import { threadJobs } from '../db/schema'
-import { mapJob } from '../jobs/repository'
+import { mapJob } from '../legacy-control-plane/repository'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import { ensureRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
@@ -34,8 +34,8 @@ import { plannerSandboxDebug } from '../debug/planner-sandbox'
 import { planFailureFromSandboxError } from '../sandbox/sandbox-failure'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
 import { ensureDraftPlanningAbilities } from '../conversation/draft/normalize'
-import type { PlanProgressDto } from '../jobs/types'
-import { emitJobEvent } from '../jobs/service'
+import type { PlanProgressDto } from '../legacy-control-plane/types'
+import { emitJobEvent } from '../legacy-control-plane/service'
 import { AppError } from '../error'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import {
@@ -47,9 +47,9 @@ import {
 } from './service'
 import { advanceWizardPhase, buildDraftToPlanHandoff } from '../wizard/phase'
 import { WIZARD_PHASE_PLAN_EDIT } from '../wizard/types'
-import type { PlanningRunOutcome } from '../jobs/run-lifecycle'
-import { getRunController } from '../jobs/workload-slot-store'
-import { runWithExecutionRunContext } from '../jobs/execution-run-context'
+import type { PlanningRunOutcome } from '../legacy-control-plane/run-lifecycle'
+import { getRunController } from '../legacy-control-plane/workload-slot-store'
+import { runWithExecutionRunContext } from '../legacy-control-plane/execution-run-context'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -303,7 +303,7 @@ async function runDesignPlanner(
     planRevisionBefore?: number
   }
 ): Promise<void> {
-  const { claimWorkloadSlotTx } = await import('../jobs/workload-slot-store')
+  const { claimWorkloadSlotTx } = await import('../legacy-control-plane/workload-slot-store')
   const run = await claimWorkloadSlotTx({
     username,
     ownerKind: 'thread_job',
@@ -328,7 +328,7 @@ async function runDesignPlanner(
       emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
       emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: updated } })
     }
-    const { advanceWorkloadQueue } = await import('../jobs/workload-slot-store')
+    const { advanceWorkloadQueue } = await import('../legacy-control-plane/workload-slot-store')
     await advanceWorkloadQueue(username).catch((error) => {
       console.warn(
         '[runDesignPlanner] advance queue after planning wait failed',
@@ -385,9 +385,9 @@ async function runDesignPlanner(
   let plannerSession: PlannerMcpSession | null = null
   const plannerScopeId = `${designSessionId}:${run.runId}`
 
-  const { registerRunRuntime } = await import('../jobs/runtime-supervisor')
-  const { buildCursorPlannerRuntimeHandle } = await import('../jobs/runtime-handle-cursor')
-  const { updateRunRuntimeRef } = await import('../jobs/workload-slot-store')
+  const { registerRunRuntime } = await import('../legacy-control-plane/runtime-supervisor')
+  const { buildCursorPlannerRuntimeHandle } = await import('../legacy-control-plane/runtime-handle-cursor')
+  const { updateRunRuntimeRef } = await import('../legacy-control-plane/workload-slot-store')
   registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
   await updateRunRuntimeRef(run.runId, { kind: 'cursor-acp', scopeId: plannerScopeId })
 
@@ -665,7 +665,7 @@ async function runDesignPlanner(
       runId: run.runId,
       outcome: runOutcome
     })
-    const { finishPlanningRunLifecycle } = await import('../jobs/run-lifecycle')
+    const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
     await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
   }
 }
@@ -806,7 +806,7 @@ export function scheduleDesignSessionPlanRegeneration(
 export async function retryDesignSessionPlanning(
   username: string,
   designSessionId: string
-): Promise<import('../jobs/types').ThreadJobDto> {
+): Promise<import('../legacy-control-plane/types').ThreadJobDto> {
   const { getUserDesignSessionAsJob } = await import('./service')
   const session = await getUserDesignSessionAsJob(username, designSessionId)
   if (!session) throw AppError.notFound('Design session not found', 'design_session.not_found')

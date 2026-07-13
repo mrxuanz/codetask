@@ -30,6 +30,7 @@ export interface TaskAttemptRow {
   readonly startedAtMs: number
   readonly endedAtMs: number | null
   readonly resultHash: string | null
+  readonly resultRevision: number | null
 }
 
 export interface EvidenceBlob {
@@ -39,9 +40,26 @@ export interface EvidenceBlob {
 
 export interface TaskRepository {
   getCurrentTask(jobId: string, generation: number, taskId: string): TaskRow | null
+  listTasksForGeneration(jobId: string, generation: number): readonly TaskRow[]
   updateTaskState(jobId: string, generation: number, taskId: string, expectedState: TaskState, nextState: TaskState): boolean
+  /**
+   * Creates the next execution-generation projection from the confirmed
+   * projection currently in use. Historical generations remain immutable.
+   */
+  cloneTasksToGeneration(
+    jobId: string,
+    sourceGeneration: number,
+    targetGeneration: number,
+    createdAtMs: number
+  ): number
+  getAttempt(attemptId: string): TaskAttemptRow | null
   getRunningAttempt(attemptId: string): TaskAttemptRow | null
-  finishAttempt(attemptId: string, resultHash: string, evidenceHash: string): void
+  finishAttempt(
+    attemptId: string,
+    resultHash: string,
+    evidenceHash: string,
+    resultRevision: number
+  ): void
   createAttempt(jobId: string, generation: number, taskId: string, runId: string): string
   startAttempt(attemptId: string): boolean
   getTaskAttempts(jobId: string, generation: number, taskId: string): readonly TaskAttemptRow[]

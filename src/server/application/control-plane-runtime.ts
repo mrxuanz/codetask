@@ -1,44 +1,56 @@
 import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
-import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { AppContext } from '../context'
-import { threadJobs } from '../db/schema'
 import { SqliteJobRepository, type ControlPlaneDatabase } from '../infra/sqlite/control-plane/job-repository'
 import { controlPlaneSchema } from '../infra/sqlite/control-plane/schema'
-import { pauseJobExecution } from '../jobs/controls'
-import { controlJobsTableExists, registerControlPlaneRuntimeController } from './control-plane-services'
-import { isV3Authoritative } from './cutover-state'
+import { getCutoverMarker, type SchemaGeneration } from './cutover-state'
 import { EventHub } from './event-hub'
+import { EvidenceRepository } from '../infra/sqlite/control-plane/evidence-repository'
+import { VerificationRepository } from '../infra/sqlite/control-plane/verification-repository'
+import { SqliteTaskRepository } from '../infra/sqlite/control-plane/task-repository'
+import { createExecutorDependencies } from './executor-adapter'
+import { executeRun } from './executor-loop'
+import { JobCommandServiceImpl } from './job-command-service'
+import { InternalExecutionCommandServiceImpl } from './internal-execution-command-service'
+import { JobQueryServiceImpl, type JobQueryService } from './job-query-service'
 import { OutboxDispatcher } from './outbox-dispatcher'
 import type { ActorContext, OutboxEvent } from './ports/job-repository'
+import type { JobCommandService, InternalExecutionCommandService } from '@shared/contracts/control-plane'
 import { RuntimeSupervisor, type RuntimeExit, type RuntimeHandle } from './runtime-supervisor'
 import { SafeLoggerImpl } from './safe-logger'
 import { Scheduler } from './scheduler'
 import { ShutdownCoordinator, type ShutdownReason } from './shutdown-coordinator'
+import { StartupCoordinator } from './startup-coordinator'
+import { StartupReconciler } from './startup-reconciler-impl'
 import type { SseEnvelope } from '../http/v3/sse-envelope'
 
 interface RuntimeBinding {
   readonly jobId: string
   readonly runId: string
-  readonly username: string
   readonly kind: 'planning' | 'execution'
   readonly runtimeInstanceId: string
   readonly closed: Promise<RuntimeExit>
   resolveClosed(exit: RuntimeExit): void
-  startObservedAtMs: number | null
   stopPromise: Promise<void> | null
+  abortController?: AbortController
 }
 
-interface ControlPlaneRuntime {
+export interface ControlPlaneRuntime {
   readonly ctx: AppContext
   readonly logger: SafeLoggerImpl
   readonly jobRepository: SqliteJobRepository
+  readonly taskRepository: SqliteTaskRepository
+  readonly commandService: JobCommandService
+  readonly internalCommandService: InternalExecutionCommandService
+  readonly queryService: JobQueryService
+  readonly startup: StartupCoordinator
+  readonly shutdown: ShutdownCoordinator
+  readonly schemaGeneration: SchemaGeneration
   readonly scheduler: Scheduler
   readonly outboxDispatcher: OutboxDispatcher
   readonly eventHub: EventHub
   readonly runtimeSupervisor: RuntimeSupervisor
-  readonly shutdownCoordinator: ShutdownCoordinator
   readonly bindingsByRunId: Map<string, RuntimeBinding>
   readonly activeRunByJobId: Map<string, string>
   started: boolean
@@ -53,6 +65,16 @@ function createControlPlaneDb(appDb: AppContext['db']): ControlPlaneDatabase {
     throw new Error('Database client not available')
   }
   return drizzle(client, { schema: controlPlaneSchema })
+}
+
+function controlJobsTableExists(ctx: Pick<AppContext, 'db'>): boolean {
+  const client = (ctx.db as AppContext['db'] & { $client?: Database.Database }).$client
+  if (!client) return false
+  return Boolean(
+    client
+      .prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'control_jobs'`)
+      .get()
+  )
 }
 
 function toEnvelope(event: OutboxEvent): SseEnvelope {
@@ -97,216 +119,35 @@ function settleBinding(runtime: ControlPlaneRuntime, binding: RuntimeBinding, ex
   binding.resolveClosed(exit)
 }
 
-async function isLegacyRuntimeActive(
-  runtime: ControlPlaneRuntime,
-  binding: RuntimeBinding
-): Promise<boolean> {
-  const { findActiveWorkloadRunId } = await import('../jobs/workload-slot-store')
-  const physicalRunId = await findActiveWorkloadRunId('thread_job', binding.jobId)
-  if (physicalRunId !== null) {
-    return true
-  }
-  if (binding.kind === 'planning') {
-    return runtime.ctx.runtimeRegistry.isJobPlanning(binding.jobId)
-  }
-  return runtime.ctx.executionRuntime.isLoopActive(binding.jobId)
-}
-
-function parseLegacyFailureCode(lastError: string | null): string {
-  if (!lastError) {
-    return 'runtime.exited'
-  }
-  try {
-    const parsed = JSON.parse(lastError) as { code?: string }
-    return typeof parsed.code === 'string' && parsed.code.trim() ? parsed.code : 'runtime.exited'
-  } catch {
-    return 'runtime.exited'
-  }
-}
-
-async function readLegacyProjection(
-  ctx: AppContext,
-  jobId: string
-): Promise<{
-  nextState: 'plan_review' | 'paused' | 'cancelled' | 'failed' | 'succeeded'
-  terminalAtMs: number | null
-  failureCode: string | null
-  changed: Array<'state' | 'failure'>
-} | null> {
-  const row = await ctx.db
-    .select({
-      status: threadJobs.status,
-      lastError: threadJobs.lastError
-    })
-    .from(threadJobs)
-    .where(eq(threadJobs.id, jobId))
-    .limit(1)
-    .then((rows) => rows[0] ?? null)
-
-  if (!row) return null
-
-  switch (row.status) {
-    case 'plan_ready':
-    case 'plan_editing':
-      return { nextState: 'plan_review', terminalAtMs: null, failureCode: null, changed: ['state'] }
-    case 'paused':
-    case 'pausing':
-      return { nextState: 'paused', terminalAtMs: null, failureCode: null, changed: ['state'] }
-    case 'cancelled':
-      return { nextState: 'cancelled', terminalAtMs: Date.now(), failureCode: null, changed: ['state'] }
-    case 'completed':
-      return { nextState: 'succeeded', terminalAtMs: Date.now(), failureCode: null, changed: ['state'] }
-    case 'failed':
-      return {
-        nextState: 'failed',
-        terminalAtMs: Date.now(),
-        failureCode: parseLegacyFailureCode(row.lastError),
-        changed: ['state', 'failure']
-      }
-    default:
-      return null
-  }
-}
-
 async function settleRuntimeExited(
   runtime: ControlPlaneRuntime,
   binding: RuntimeBinding,
   reason: string
 ): Promise<void> {
-  const job = runtime.jobRepository.getOwnedAggregate({
-    actor: { username: 'worker', requestId: 'runtime-bridge-exit' },
-    jobId: binding.jobId
-  })
+  const now = Date.now()
+  const job = runtime.jobRepository.getAggregate(binding.jobId)
   const run = runtime.jobRepository.getActiveRunSummary(binding.runId)
 
   if (job === null || run === null) {
-    runtime.jobRepository.releaseSlot(binding.runId)
+    runtime.jobRepository.releaseSlot({ runId: binding.runId, releasedAtMs: now })
     settleBinding(runtime, binding, { kind: 'normal' })
     return
   }
 
-  if (job.state === 'cancelled') {
-    runtime.jobRepository.markRunState(binding.runId, 'cancelled', reason)
-    runtime.jobRepository.releaseSlot(binding.runId)
-    settleBinding(runtime, binding, { kind: 'normal' })
-    return
-  }
-
-  let nextState: 'plan_review' | 'paused' | 'cancelled' | 'failed' | 'succeeded'
-  let terminalAtMs: number | null = null
-  let failureId = job.lastFailureId
-  let changed: Array<'state' | 'failure'> = ['state']
-
-  if (job.state === 'pausing' && job.controlIntent === 'pause') {
-    nextState = 'paused'
-  } else {
-    const projection = await readLegacyProjection(runtime.ctx, binding.jobId)
-    if (projection !== null) {
-      nextState = projection.nextState
-      terminalAtMs = projection.terminalAtMs
-      changed = projection.changed
-      if (projection.failureCode) {
-        failureId = runtime.jobRepository.insertFailure({
-          jobId: binding.jobId,
-          code: projection.failureCode,
-          recoverability: 'recoverable',
-          reason,
-          runKind: binding.kind
-        })
-      }
-    } else {
-      nextState = 'failed'
-      terminalAtMs = Date.now()
-      changed = ['state', 'failure']
-      failureId = runtime.jobRepository.insertFailure({
-        jobId: binding.jobId,
-        code: 'run.interrupted',
-        recoverability: 'recoverable',
-        reason,
-        runKind: binding.kind
-      })
-    }
-  }
-
-  const cas = runtime.jobRepository.compareAndSetJob({
+  runtime.internalCommandService.runtimeExited({
     jobId: binding.jobId,
     expectedRevision: job.stateRevision,
-    expectedState: job.state,
-    expectedActiveRunId: binding.runId,
-    next: {
-      state: nextState,
-      controlIntent: 'none',
-      resumeTarget: nextState === 'paused' ? job.resumeTarget : null,
-      activeRunId: null,
-      lastFailureId: failureId,
-      terminalAtMs
+    runId: binding.runId,
+    fenceToken: run.fenceToken,
+    executionGeneration: run.executionGeneration,
+    payload: {
+      runtimeInstanceId: binding.runtimeInstanceId,
+      exitKind: reason === 'normal' ? 'normal' : 'signal',
+      ...(reason === 'normal' ? {} : { signal: reason })
     }
   })
-
-  if (cas.ok) {
-    const runState =
-      nextState === 'paused'
-        ? 'paused'
-        : nextState === 'cancelled'
-          ? 'cancelled'
-          : nextState === 'failed'
-            ? 'failed'
-            : 'succeeded'
-    runtime.jobRepository.markRunState(binding.runId, runState, reason)
-    runtime.jobRepository.appendOutbox({
-      topic: `job:${binding.jobId}`,
-      eventType: 'job.changed',
-      entityId: binding.jobId,
-      aggregateRevision: cas.newRevision,
-      payload: {
-        type: 'job.changed',
-        entityId: binding.jobId,
-        revision: cas.newRevision,
-        changed
-      }
-    })
-  } else {
-    runtime.logger.warn('control-plane runtime exit CAS lost', {
-      jobId: binding.jobId,
-      runId: binding.runId,
-      reason
-    })
-  }
-
-  runtime.jobRepository.releaseSlot(binding.runId)
+  runtime.jobRepository.releaseSlot({ runId: binding.runId, releasedAtMs: now })
   settleBinding(runtime, binding, { kind: 'normal' })
-}
-
-async function watchLegacyRuntime(runtime: ControlPlaneRuntime, binding: RuntimeBinding): Promise<void> {
-  const startDeadlineMs = Date.now() + 10_000
-
-  for (;;) {
-    if (runtime.bindingsByRunId.get(binding.runId) !== binding) {
-      return
-    }
-
-    const active = await isLegacyRuntimeActive(runtime, binding)
-    if (active) {
-      binding.startObservedAtMs = Date.now()
-    }
-
-    if (binding.startObservedAtMs !== null && !active) {
-      await settleRuntimeExited(runtime, binding, 'normal')
-      return
-    }
-
-    if (binding.startObservedAtMs === null && Date.now() >= startDeadlineMs) {
-      runtime.logger.error('legacy runtime never became active for control-plane run', {
-        jobId: binding.jobId,
-        runId: binding.runId,
-        kind: binding.kind
-      })
-      await settleRuntimeExited(runtime, binding, 'start_timeout')
-      return
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-  }
 }
 
 async function stopBinding(
@@ -321,27 +162,13 @@ async function stopBinding(
 
   binding.stopPromise = (async () => {
     try {
-      if (binding.kind === 'planning') {
-        runtime.ctx.runtimeRegistry.setPlanningControl(binding.jobId, 'paused')
-      } else if (reason === 'paused' || reason === 'pause_requested') {
-        pauseJobExecution(binding.jobId)
+      if (binding.abortController) {
+        binding.abortController.abort(reason)
+        await settleRuntimeExited(runtime, binding, reason)
+        return
       }
 
-      const { stopAndReleaseActiveRun } = await import('../jobs/workload-slot-store')
-      await stopAndReleaseActiveRun('thread_job', binding.jobId, reason).catch((error: unknown) => {
-        runtime.logger.warn('legacy runtime stop failed', {
-          jobId: binding.jobId,
-          runId: binding.runId,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      })
-
-      const run = runtime.jobRepository.getActiveRunSummary(binding.runId)
-      if (run?.state === 'cancelling') {
-        runtime.jobRepository.markRunState(binding.runId, 'cancelled', reason)
-      }
-      runtime.jobRepository.releaseSlot(binding.runId)
-      settleBinding(runtime, binding, { kind: 'signal', signal: reason })
+      await settleRuntimeExited(runtime, binding, reason)
     } finally {
       binding.stopPromise = null
     }
@@ -364,28 +191,26 @@ function createRuntimeHandle(runtime: ControlPlaneRuntime, binding: RuntimeBindi
   }
 }
 
-async function lookupJobOwnerUsername(ctx: AppContext, jobId: string): Promise<string | null> {
-  const row = await ctx.db
-    .select({ username: threadJobs.username })
-    .from(threadJobs)
-    .where(eq(threadJobs.id, jobId))
-    .limit(1)
-    .then((rows) => rows[0] ?? null)
-
-  return row?.username ?? null
-}
-
-async function startLegacyRuntime(
+async function startV3ExecutorRuntime(
   runtime: ControlPlaneRuntime,
   jobId: string,
   runId: string,
   kind: 'planning' | 'execution'
 ): Promise<void> {
-  const username = await lookupJobOwnerUsername(runtime.ctx, jobId)
-  if (!username) {
-    runtime.logger.warn('control-plane scheduler could not resolve job owner', { jobId, runId, kind })
-    runtime.jobRepository.markRunState(runId, 'failed', 'owner_not_found')
-    runtime.jobRepository.releaseSlot(runId)
+  if (kind !== 'execution') {
+    const now = Date.now()
+    runtime.logger.error('V3 scheduler rejected unsupported non-execution run', {
+      jobId,
+      runId,
+      kind
+    })
+    runtime.jobRepository.markRunState({
+      runId,
+      state: 'failed',
+      stopReason: 'unsupported_v3_run_kind',
+      updatedAtMs: now
+    })
+    runtime.jobRepository.releaseSlot({ runId, releasedAtMs: now })
     return
   }
 
@@ -393,17 +218,16 @@ async function startLegacyRuntime(
   const closed = new Promise<RuntimeExit>((resolve) => {
     resolveClosed = resolve
   })
-
+  const abortController = new AbortController()
   const binding: RuntimeBinding = {
     jobId,
     runId,
-    username,
     kind,
     runtimeInstanceId: randomUUID(),
     closed,
     resolveClosed,
-    startObservedAtMs: null,
-    stopPromise: null
+    stopPromise: null,
+    abortController
   }
 
   runtime.bindingsByRunId.set(runId, binding)
@@ -411,24 +235,48 @@ async function startLegacyRuntime(
   runtime.runtimeSupervisor.register(createRuntimeHandle(runtime, binding))
 
   try {
-    if (kind === 'planning') {
-      const { tryStartDesignSessionPlanning } = await import('../design-session/planner')
-      await tryStartDesignSessionPlanning(username, jobId)
-    } else {
-      const { startPendingExecutionJob } = await import('../jobs/queue-coordinator')
-      await startPendingExecutionJob(username, jobId)
+    const job = runtime.jobRepository.getAggregate(jobId)
+    const run = runtime.jobRepository.getActiveRunSummary(runId)
+    if (job === null || run === null) {
+      throw new Error('claimed run disappeared before runtimeStarted')
     }
-
-    runtime.jobRepository.markRunState(runId, 'active')
-    void watchLegacyRuntime(runtime, binding)
-  } catch (error: unknown) {
-    runtime.logger.error('failed to start legacy runtime for control-plane job', {
+    const started = runtime.internalCommandService.runtimeStarted({
+      jobId,
+      expectedRevision: job.stateRevision,
+      runId,
+      fenceToken: run.fenceToken,
+      executionGeneration: run.executionGeneration,
+      payload: {
+        runtimeInstanceId: binding.runtimeInstanceId,
+        provider: 'v3-executor-loop',
+        pidOrHandleRef: `executor:${jobId}`
+      }
+    })
+    const context = {
       jobId,
       runId,
-      kind,
+      fenceToken: run.fenceToken,
+      executionGeneration: run.executionGeneration,
+      expectedRevision: started.revision,
+      workIdentity: ''
+    }
+    const deps = createExecutorDependencies(runtime, context)
+    void executeRun(context, deps, abortController.signal)
+      .catch((error: unknown) => {
+        runtime.logger.error('V3 executor loop failed', {
+          jobId,
+          runId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      })
+      .finally(() => settleRuntimeExited(runtime, binding, 'normal'))
+  } catch (error: unknown) {
+    runtime.logger.error('failed to start V3 executor runtime', {
+      jobId,
+      runId,
       error: error instanceof Error ? error.message : String(error)
     })
-    await settleRuntimeExited(runtime, binding, 'start_failed')
+    await createRuntimeHandle(runtime, binding).hardKill('runtime_start_stale')
   }
 }
 
@@ -438,15 +286,7 @@ function publishOutboxEvent(runtime: ControlPlaneRuntime, event: OutboxEvent): v
 
 function buildRuntimeController(runtime: ControlPlaneRuntime) {
   return {
-    notifyPauseRequested(jobId: string): void {
-      const runId = runtime.activeRunByJobId.get(jobId)
-      const binding = runId ? runtime.bindingsByRunId.get(runId) : undefined
-      if (binding?.kind === 'planning') {
-        runtime.ctx.runtimeRegistry.setPlanningControl(jobId, 'paused')
-        return
-      }
-      pauseJobExecution(jobId)
-    },
+    notifyPauseRequested(): void {},
     async closeThenRelease(runId: string, reason: string): Promise<void> {
       const binding = runtime.bindingsByRunId.get(runId)
       if (binding) {
@@ -454,11 +294,10 @@ function buildRuntimeController(runtime: ControlPlaneRuntime) {
         return
       }
 
-      const run = runtime.jobRepository.getActiveRunSummary(runId)
-      if (run?.state === 'cancelling') {
-        runtime.jobRepository.markRunState(runId, 'cancelled', reason)
-      }
-      runtime.jobRepository.releaseSlot(runId)
+      runtime.logger.warn('runtime stop requested without an observed handle; retaining slot', {
+        runId,
+        reason
+      })
     }
   }
 }
@@ -481,6 +320,7 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
     jobRepository,
     (event) => publishOutboxEvent(runtime, event),
     logger,
+    () => Date.now(),
     { batchSize: 100, pollIntervalMs: 250 }
   )
   const scheduler = new Scheduler(
@@ -490,7 +330,9 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
     { nowMs: () => Date.now() },
     logger,
     (jobId, runId, kind) => {
-      void startLegacyRuntime(runtime, jobId, runId, kind)
+      if (runtime.schemaGeneration === 'v3_authoritative') {
+        void startV3ExecutorRuntime(runtime, jobId, runId, kind)
+      }
     }
   )
   const shutdownCoordinator = new ShutdownCoordinator(
@@ -502,23 +344,95 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
     },
     { outboxFlushDeadlineMs: 5000 }
   )
+  const runtimeController = buildRuntimeController(runtime)
+  const taskRepository = new SqliteTaskRepository(cpDb)
+  const evidenceRepository = new EvidenceRepository(cpDb)
+  const commandService = new JobCommandServiceImpl({
+    jobRepository,
+    unitOfWork: jobRepository,
+    taskRepository,
+    evidenceRepository,
+    clock: { nowMs: () => Date.now() },
+    idGenerator: { generate: () => randomUUID() },
+    logger,
+    runtimeController
+  })
+  const internalCommandService = new InternalExecutionCommandServiceImpl({
+    jobRepository,
+    verificationRepository: new VerificationRepository(cpDb),
+    evidenceRepository,
+    clock: { nowMs: () => Date.now() },
+    idGenerator: { generate: () => randomUUID() },
+    logger
+  })
+  const queryService = new JobQueryServiceImpl({
+    getJobAggregate: (actor, jobId) =>
+      jobRepository.getOwnedAggregate({ actor: { username: actor.username, requestId: '' }, jobId }),
+    listJobAggregates: (actor, projectId) =>
+      jobRepository.listOwnedAggregates({
+        actor: { username: actor.username, requestId: '' },
+        ...(projectId === undefined ? {} : { projectId })
+      }),
+    getLegacyJobSnapshot: async () => null,
+    listLegacyJobSnapshots: async () => ({ jobs: [], total: 0 }),
+    getJobTimestamps: (jobId) => jobRepository.getJobTimestamps(jobId),
+    getJobFailure: (failureId) => jobRepository.getJobFailure(failureId)
+  })
+  const startup = new StartupCoordinator({
+    logger,
+    stages: [
+      {
+        name: 'control-schema-invariants',
+        async execute() {
+          const client = (ctx.db as AppContext['db'] & { $client?: Database.Database }).$client
+          if (!client) throw new Error('Database client not available')
+          if (!client.pragma('foreign_keys', { simple: true })) {
+            throw new Error('SQLite foreign keys must be enabled')
+          }
+          if (!controlJobsTableExists(ctx)) throw new Error('Control-plane schema is unavailable')
+        }
+      },
+      {
+        name: 'control-plane-reconcile',
+        execute: async () => {
+          if (runtime.schemaGeneration === 'v3_authoritative') {
+            await new StartupReconciler(
+              jobRepository,
+              { nowMs: () => Date.now() },
+              { generate: () => randomUUID() },
+              logger
+            ).reconcileAll()
+          }
+        }
+      },
+      {
+        name: 'control-outbox',
+        execute: () => outboxDispatcher.start()
+      }
+    ]
+  })
 
   runtime = {
     ctx,
     logger,
     jobRepository,
+    taskRepository,
+    commandService,
+    internalCommandService,
+    queryService,
+    startup,
+    shutdown: shutdownCoordinator,
+    schemaGeneration: getCutoverMarker(ctx.db),
     scheduler,
     outboxDispatcher,
     eventHub,
     runtimeSupervisor,
-    shutdownCoordinator,
     bindingsByRunId: new Map(),
     activeRunByJobId: new Map(),
     started: false,
     startPromise: null
   }
 
-  registerControlPlaneRuntimeController(buildRuntimeController(runtime))
   return runtime
 }
 
@@ -532,7 +446,7 @@ export function ensureControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime 
 
 export async function bootstrapControlPlaneRuntime(
   ctx: AppContext,
-  startupReady: Promise<unknown>
+  startupReady?: Promise<unknown>
 ): Promise<void> {
   const runtime = ensureControlPlaneRuntime(ctx)
   if (runtime === null) {
@@ -544,26 +458,34 @@ export async function bootstrapControlPlaneRuntime(
   }
 
   runtime.startPromise = (async () => {
-    try {
+    if (startupReady) {
       await startupReady
-    } catch (error: unknown) {
-      runtime.logger.warn('control-plane runtime start skipped: startup not ready', {
-        error: error instanceof Error ? error.message : String(error)
-      })
-      return
     }
-
-    if (!isV3Authoritative(ctx.db)) {
-      runtime.logger.info('control-plane runtime scheduler remains idle before authoritative cutover')
-      return
-    }
-
-    await runtime.outboxDispatcher.start()
-    await runtime.scheduler.start()
-    runtime.started = true
+    await runtime.startup.ensureReady()
   })()
 
   await runtime.startPromise
+}
+
+/** Starts scheduling only after DB facts, reconciliation, and outbox are ready. */
+export async function startControlPlaneScheduler(ctx: AppContext): Promise<void> {
+  const runtime = ensureControlPlaneRuntime(ctx)
+  if (runtime === null) return
+  await bootstrapControlPlaneRuntime(ctx)
+  if (runtime.schemaGeneration !== 'v3_authoritative') {
+    runtime.logger.info('control-plane scheduler remains idle before authoritative cutover', {
+      schemaGeneration: runtime.schemaGeneration
+    })
+    return
+  }
+  await runtime.scheduler.start()
+  runtime.started = true
+}
+
+export function getControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime {
+  const runtime = ensureControlPlaneRuntime(ctx)
+  if (runtime === null) throw new Error('Control-plane schema is unavailable')
+  return runtime
 }
 
 export function getControlPlaneReplayEvents(
@@ -595,23 +517,28 @@ export function subscribeControlPlaneEvents(
   ctx: AppContext,
   actor: ActorContext,
   connectionId: string,
-  callback: (event: SseEnvelope) => void
+  callback: (event: SseEnvelope) => void,
+  onOverflow?: (info: { readonly lastDeliveredEventId: number; readonly latestEventId: number }) => void
 ): () => void {
   const runtime = ensureControlPlaneRuntime(ctx)
   if (runtime === null) {
     return () => {}
   }
 
-  return runtime.eventHub.subscribe(connectionId, (event) => {
-    const visible = runtime.jobRepository.getOwnedAggregate({
-      actor,
-      jobId: event.entityId
-    })
-    if (visible === null) {
-      return
-    }
-    callback(event)
-  })
+  return runtime.eventHub.subscribe(
+    connectionId,
+    (event) => {
+      const visible = runtime.jobRepository.getOwnedAggregate({
+        actor,
+        jobId: event.entityId
+      })
+      if (visible === null) {
+        return
+      }
+      callback(event)
+    },
+    onOverflow
+  )
 }
 
 export async function shutdownControlPlaneRuntime(reason: ShutdownReason): Promise<void> {
@@ -619,7 +546,7 @@ export async function shutdownControlPlaneRuntime(reason: ShutdownReason): Promi
     return
   }
 
-  await runtimeSingleton.shutdownCoordinator.shutdown(reason)
+  await runtimeSingleton.shutdown.shutdown(reason)
   await runtimeSingleton.outboxDispatcher.stop().catch((error: unknown) => {
     runtimeSingleton?.logger.warn('control-plane outbox dispatcher stop failed', {
       error: error instanceof Error ? error.message : String(error)

@@ -7,11 +7,11 @@ import { eq } from 'drizzle-orm'
 import { bootstrapRuntime, resetAppContextForTests, getAppContext } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import { jobTasks, threadJobs } from '../../src/server/db/schema'
-import { updateJobRow, isStaleExecutionLeaseOwner, executionLeaseOwner } from '../../src/server/jobs/repository'
+import { updateJobRow, isStaleExecutionLeaseOwner, executionLeaseOwner } from '../../src/server/legacy-control-plane/repository'
 import { cleanupJobRuntimeTree, jobRuntimeDir } from '../../src/server/runtime/cleanup'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { readRetentionSettings } from '../../src/server/retention/settings'
-import { getExecutionRunContext } from '../../src/server/jobs/execution-run-context'
+import { getExecutionRunContext } from '../../src/server/legacy-control-plane/execution-run-context'
 import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'txn-test-user'
@@ -200,7 +200,7 @@ describe('evidence hydrate with large objects', () => {
   })
 
   it('evidence exceeding 5MB is truncated', async () => {
-    const { MAX_TASK_EVIDENCE_BYTES } = await import('../../src/server/jobs/evidence/store')
+    const { MAX_TASK_EVIDENCE_BYTES } = await import('../../src/server/legacy-control-plane/evidence/store')
     const largeEvidence = {
       status: 'completed' as const,
       summary: 'test',
@@ -212,7 +212,7 @@ describe('evidence hydrate with large objects', () => {
     const byteSize = Buffer.byteLength(json, 'utf8')
     assert.ok(byteSize > MAX_TASK_EVIDENCE_BYTES, 'evidence should exceed limit')
 
-    const { truncateEvidence } = await import('../../src/server/jobs/evidence/store')
+    const { truncateEvidence } = await import('../../src/server/legacy-control-plane/evidence/store')
     const truncated = truncateEvidence(largeEvidence)
     assert.ok(truncated.evidence.length <= 1000, 'evidence lines should be truncated')
   })
@@ -221,7 +221,7 @@ describe('evidence hydrate with large objects', () => {
 describe('keepalive cross-process awareness', () => {
   it('confirms getExecutionRunContext is undefined outside runWithExecutionRunContext', async () => {
     const { getExecutionRunContext, runWithExecutionRunContext } = await import(
-      '../../src/server/jobs/execution-run-context'
+      '../../src/server/legacy-control-plane/execution-run-context'
     )
     assert.equal(getExecutionRunContext(), undefined, 'should be undefined when not in context')
 

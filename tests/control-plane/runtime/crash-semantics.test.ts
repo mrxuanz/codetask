@@ -11,6 +11,7 @@ import { decideStartupReconcile } from '../../../src/server/application/startup-
 import { StartupReconciler } from '../../../src/server/application/startup-reconciler-impl'
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
+import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 function createTestDb(): Database.Database {
   const db = new Database(':memory:')
@@ -29,11 +30,16 @@ function seedJob(db: Database.Database, opts: {
   resumeTarget?: string | null
 }): void {
   const now = Date.now()
+  const jobId = opts.id
+  seedOwnedThreadJob(db, {
+    jobId,
+    status: opts.state === 'execution_running' ? 'running' : 'pending'
+  })
   db.prepare(
     `INSERT INTO control_jobs (id, thread_id, project_id, draft_message_id, state, state_revision,
       control_intent, execution_generation, active_run_id, title, requirements_summary, created_at_ms, updated_at_ms)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(opts.id, 'thread-1', 'project-1', 'draft-1', opts.state, opts.stateRevision ?? 1,
+  ).run(jobId, `thread-${jobId}`, `project-${jobId}`, `draft-${jobId}`, opts.state, opts.stateRevision ?? 1,
     opts.controlIntent ?? 'none', 0, opts.activeRunId ?? null, 'Test', '', now, now)
 }
 
@@ -173,7 +179,7 @@ describe('Incident A: Zombie running (Task 64)', () => {
     const decisions = await reconciler.reconcileAll()
     assert.ok(decisions.length > 0)
 
-    const job = repo.getOwnedAggregate({ actor: { username: 'system', requestId: '' }, jobId: 'job-1' })
+    const job = repo.getAggregate('job-1')
     assert.equal(job?.state, 'paused')
   })
 })

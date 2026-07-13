@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classifyTaskOutcome } from '../../src/server/jobs/task-blocker/classify'
+import { classifyTaskOutcome } from '../../src/server/legacy-control-plane/task-blocker/classify'
 import { isInfraTurnError } from '../../src/shared/turn-errors/policy.ts'
 import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'
 import {
@@ -8,10 +8,10 @@ import {
   applyTaskInfraRetryItem,
   resolveTaskInfraRecovery,
   resolveTaskRecoveryAction
-} from '../../src/server/jobs/task-blocker/recovery'
-import { injectTaskDependencyPrepTask } from '../../src/server/jobs/repair-tasks'
+} from '../../src/server/legacy-control-plane/task-blocker/recovery'
+import { injectTaskDependencyPrepTask } from '../../src/server/legacy-control-plane/repair-tasks'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
-import type { TaskProgressDto } from '../../src/server/jobs/types'
+import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
 
 const infraPacket = {
   status: 'blocked' as const,

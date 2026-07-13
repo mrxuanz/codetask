@@ -5,7 +5,7 @@ import type {
   TaskProgressItemDto,
   TaskProgressMilestoneDto,
   TaskProgressSliceDto
-} from '../jobs/types'
+} from '../legacy-control-plane/types'
 import type { TaskEvidenceDto } from '@shared/contracts/evidence'
 import {
   parseStoredTurnError,
@@ -19,7 +19,7 @@ import { getAppContext } from '../bootstrap'
 import {
   externalizeTaskProgressEvidence,
   hydrateTaskProgressEvidence
-} from '../jobs/evidence/store'
+} from '../legacy-control-plane/evidence/store'
 import {
   loadJobCountersIntoProgress,
   syncJobCountersFromProgressInTx,

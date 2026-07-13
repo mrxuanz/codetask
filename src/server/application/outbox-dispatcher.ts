@@ -17,6 +17,7 @@ export class OutboxDispatcher {
     private readonly jobRepository: JobRepository,
     private readonly publisher: EventPublisher,
     private readonly logger: SafeLogger,
+    private readonly nowMs: () => number,
     private readonly config: OutboxDispatcherConfig = { batchSize: 50, pollIntervalMs: 1000 }
   ) {}
 
@@ -39,12 +40,7 @@ export class OutboxDispatcher {
 
   async flushWithin(deadlineMs: number): Promise<void> {
     const deadline = Date.now() + deadlineMs
-    this.flushing = this.flushUntilDeadline(deadline)
-    try {
-      await this.flushing
-    } finally {
-      this.flushing = null
-    }
+    await this.runSingleFlight(() => this.flushUntilDeadline(deadline))
   }
 
   private async flushUntilDeadline(deadline: number): Promise<void> {
@@ -56,7 +52,26 @@ export class OutboxDispatcher {
 
   private async dispatch(): Promise<void> {
     if (!this.running) return
-    this.dispatchBatch()
+    await this.runSingleFlight(async () => {
+      this.dispatchBatch()
+    })
+  }
+
+  private async runSingleFlight(work: () => Promise<void>): Promise<void> {
+    if (this.flushing !== null) {
+      await this.flushing
+      return
+    }
+
+    const flushing = work()
+    this.flushing = flushing
+    try {
+      await flushing
+    } finally {
+      if (this.flushing === flushing) {
+        this.flushing = null
+      }
+    }
   }
 
   private dispatchBatch(): number {
@@ -78,7 +93,7 @@ export class OutboxDispatcher {
     }
 
     if (ids.length > 0) {
-      this.jobRepository.markDispatched(ids)
+      this.jobRepository.markDispatched({ eventIds: ids, dispatchedAtMs: this.nowMs() })
     }
 
     return events.length

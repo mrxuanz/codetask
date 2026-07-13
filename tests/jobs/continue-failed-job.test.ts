@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { prepareContinueFailedExecution } from '../../src/server/jobs/continue-failed-job.ts'
+import { prepareContinueFailedExecution } from '../../src/server/legacy-control-plane/continue-failed-job.ts'
 import type { ThreadJobDto } from '../../src/shared/contracts/jobs.ts'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types.ts'
 import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'

@@ -31,8 +31,8 @@ import {
 } from '../db/schema'
 import { updateDesignSessionRow } from '../design-session/service'
 import { AppError } from '../error'
-import { serializeJobReferenceManifest } from '../jobs/reference-manifest'
-import { emitJobEvent } from '../jobs/service'
+import { serializeJobReferenceManifest } from '../legacy-control-plane/reference-manifest'
+import { emitJobEvent } from '../legacy-control-plane/service'
 import {
   assertLocalCorpusFileAllowed,
   inferReferenceKind,

@@ -6,9 +6,13 @@
 
 updateJobRow
 updateJobRowForSnapshot
+updateJobRowFenced
 transitionJobStatus
 exportVerificationProgress
 preflightMilestoneSliceVerdicts
 enrichJobWithRecoveryState
 startupWorkloadSlotsReconciled
 startupQueueResumed
+LoopStepAction
+tryGetControlJob
+noopRuntimeController

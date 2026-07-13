@@ -13,10 +13,15 @@ import type {
   StoreDedupInput,
   WorkerFence,
   WorkerFenceResult,
+  WorkerFenceAssertion,
   OutboxEvent,
   CreateRunInput,
   CreateSlotInput
 } from '../../../application/ports/job-repository'
+import type {
+  ControlPlaneTransaction,
+  ControlPlaneUnitOfWork
+} from '../../../application/ports/unit-of-work'
 import type { ActiveRunSummary } from '../../../domain/jobs/job-invariants'
 import {
   controlJobs,
@@ -25,30 +30,24 @@ import {
   controlOutboxEvents,
   controlCommandDedup,
   controlResourceSlots,
+  controlRuntimeInstances,
   controlPlaneSchema
 } from './schema'
 import { parseJobState, parseControlIntent, parseResumeTarget } from './parsers'
+import { projects, threads } from '../../../db/schema'
 
 export type ControlPlaneDatabase = BetterSQLite3Database<typeof controlPlaneSchema>
 export type AppTransaction = Parameters<Parameters<ControlPlaneDatabase['transaction']>[0]>[0]
 export type DbExecutor = ControlPlaneDatabase | AppTransaction
 
-const INTERNAL_ACTORS = new Set(['system', 'worker'])
-
-function isInternalActor(username: string): boolean {
-  return INTERNAL_ACTORS.has(username)
-}
-
 function ownerVisibilityPredicate(actor: ActorContext) {
-  if (isInternalActor(actor.username)) {
-    return null
-  }
-
   return sql`EXISTS (
     SELECT 1
-    FROM thread_jobs tj
-    WHERE tj.id = ${controlJobs.id}
-      AND tj.username = ${actor.username}
+    FROM ${threads}
+    INNER JOIN ${projects} ON ${projects.id} = ${threads.projectId}
+    WHERE ${threads.id} = ${controlJobs.threadId}
+      AND ${projects.id} = ${controlJobs.projectId}
+      AND ${projects.username} = ${actor.username}
   )`
 }
 
@@ -80,7 +79,7 @@ function toAggregate(row: {
   }
 }
 
-export class SqliteJobRepository implements JobRepository {
+export class SqliteJobRepository implements JobRepository, ControlPlaneUnitOfWork {
   constructor(private readonly db: DbExecutor) {}
 
   getOwnedAggregate(input: { readonly actor: ActorContext; readonly jobId: string }): JobAggregateView | null {
@@ -111,6 +110,65 @@ export class SqliteJobRepository implements JobRepository {
     if (!result) return null
 
     return toAggregate(result)
+  }
+
+  getAggregate(jobId: string): JobAggregateView | null {
+    const result = this.db
+      .select({
+        id: controlJobs.id,
+        threadId: controlJobs.threadId,
+        projectId: controlJobs.projectId,
+        state: controlJobs.state,
+        stateRevision: controlJobs.stateRevision,
+        controlIntent: controlJobs.controlIntent,
+        resumeTarget: controlJobs.resumeTarget,
+        currentPlanRevision: controlJobs.currentPlanRevision,
+        executionGeneration: controlJobs.executionGeneration,
+        activeRunId: controlJobs.activeRunId,
+        lastFailureId: controlJobs.lastFailureId
+      })
+      .from(controlJobs)
+      .where(eq(controlJobs.id, jobId))
+      .get()
+
+    return result ? toAggregate(result) : null
+  }
+
+  getWorkerAggregate(input: {
+    readonly jobId: string
+    readonly runId: string
+    readonly fenceToken: string
+    readonly executionGeneration: number
+  }): JobAggregateView | null {
+    const result = this.db
+      .select({
+        id: controlJobs.id,
+        threadId: controlJobs.threadId,
+        projectId: controlJobs.projectId,
+        state: controlJobs.state,
+        stateRevision: controlJobs.stateRevision,
+        controlIntent: controlJobs.controlIntent,
+        resumeTarget: controlJobs.resumeTarget,
+        currentPlanRevision: controlJobs.currentPlanRevision,
+        executionGeneration: controlJobs.executionGeneration,
+        activeRunId: controlJobs.activeRunId,
+        lastFailureId: controlJobs.lastFailureId
+      })
+      .from(controlJobs)
+      .innerJoin(controlJobRuns, eq(controlJobRuns.id, controlJobs.activeRunId))
+      .where(
+        and(
+          eq(controlJobs.id, input.jobId),
+          eq(controlJobs.activeRunId, input.runId),
+          eq(controlJobs.executionGeneration, input.executionGeneration),
+          eq(controlJobRuns.jobId, input.jobId),
+          eq(controlJobRuns.fenceToken, input.fenceToken),
+          eq(controlJobRuns.executionGeneration, input.executionGeneration)
+        )
+      )
+      .get()
+
+    return result ? toAggregate(result) : null
   }
 
   listOwnedAggregates(input: {
@@ -171,7 +229,7 @@ export class SqliteJobRepository implements JobRepository {
       lastFailureId: input.next.lastFailureId,
       terminalAtMs: input.next.terminalAtMs,
       stateRevision: sql`${controlJobs.stateRevision} + 1`,
-      updatedAtMs: Date.now()
+      updatedAtMs: input.updatedAtMs
     }
     if (input.next.executionGeneration !== undefined) {
       patch.executionGeneration = input.next.executionGeneration
@@ -195,21 +253,19 @@ export class SqliteJobRepository implements JobRepository {
       : { ok: false, reason: 'revision_conflict' }
   }
 
-  insertFailure(input: InsertFailureInput): string {
-    const id = crypto.randomUUID()
+  insertFailure(input: InsertFailureInput): void {
     this.db
       .insert(controlJobFailures)
       .values({
-        id,
+        id: input.id,
         jobId: input.jobId,
         code: input.code,
         recoverability: input.recoverability,
         reason: input.reason,
         runKind: input.runKind,
-        createdAtMs: Date.now()
+        createdAtMs: input.createdAtMs
       })
       .run()
-    return id
   }
 
   appendOutbox(input: AppendOutboxInput): number {
@@ -223,7 +279,7 @@ export class SqliteJobRepository implements JobRepository {
         aggregateRevision: input.aggregateRevision,
         payloadJson,
         payloadBytes: payloadJson.length,
-        createdAtMs: Date.now()
+        createdAtMs: input.createdAtMs
       })
       .run()
 
@@ -253,17 +309,14 @@ export class SqliteJobRepository implements JobRepository {
     readonly limit: number
   }): readonly OutboxEvent[] {
     const predicates: SQL[] = [sql`${controlOutboxEvents.eventId} > ${input.afterEventId}`]
-    const ownership = isInternalActor(input.actor.username)
-      ? null
-      : sql`EXISTS (
-          SELECT 1
-          FROM thread_jobs tj
-          WHERE tj.id = ${controlOutboxEvents.entityId}
-            AND tj.username = ${input.actor.username}
-        )`
-    if (ownership !== null) {
-      predicates.push(ownership)
-    }
+    predicates.push(sql`EXISTS (
+      SELECT 1 FROM ${controlJobs}
+      INNER JOIN ${threads} ON ${threads.id} = ${controlJobs.threadId}
+      INNER JOIN ${projects} ON ${projects.id} = ${threads.projectId}
+      WHERE ${controlJobs.id} = ${controlOutboxEvents.entityId}
+        AND ${projects.id} = ${controlJobs.projectId}
+        AND ${projects.username} = ${input.actor.username}
+    )`)
 
     return this.db
       .select({
@@ -283,17 +336,14 @@ export class SqliteJobRepository implements JobRepository {
 
   getOwnedOutboxLatestEventId(input: { readonly actor: ActorContext }): number {
     const predicates: SQL[] = []
-    const ownership = isInternalActor(input.actor.username)
-      ? null
-      : sql`EXISTS (
-          SELECT 1
-          FROM thread_jobs tj
-          WHERE tj.id = ${controlOutboxEvents.entityId}
-            AND tj.username = ${input.actor.username}
-        )`
-    if (ownership !== null) {
-      predicates.push(ownership)
-    }
+    predicates.push(sql`EXISTS (
+      SELECT 1 FROM ${controlJobs}
+      INNER JOIN ${threads} ON ${threads.id} = ${controlJobs.threadId}
+      INNER JOIN ${projects} ON ${projects.id} = ${threads.projectId}
+      WHERE ${controlJobs.id} = ${controlOutboxEvents.entityId}
+        AND ${projects.id} = ${controlJobs.projectId}
+        AND ${projects.username} = ${input.actor.username}
+    )`)
 
     const query = this.db
       .select({
@@ -307,14 +357,13 @@ export class SqliteJobRepository implements JobRepository {
     return result?.eventId ?? 0
   }
 
-  markDispatched(eventIds: readonly number[]): void {
-    if (eventIds.length === 0) return
-    const now = Date.now()
+  markDispatched(input: { readonly eventIds: readonly number[]; readonly dispatchedAtMs: number }): void {
+    if (input.eventIds.length === 0) return
     this.db
       .update(controlOutboxEvents)
-      .set({ dispatchedAtMs: now })
+      .set({ dispatchedAtMs: input.dispatchedAtMs })
       .where(
-        sql`${controlOutboxEvents.eventId} IN (${sql.join(eventIds.map((id) => sql`${id}`), sql`, `)})`
+        sql`${controlOutboxEvents.eventId} IN (${sql.join(input.eventIds.map((id) => sql`${id}`), sql`, `)})`
       )
       .run()
   }
@@ -349,8 +398,8 @@ export class SqliteJobRepository implements JobRepository {
         requestHash: input.requestHash,
         responseJson,
         responseRevision: input.responseRevision,
-        createdAtMs: Date.now(),
-        expiresAtMs: Date.now() + 24 * 60 * 60 * 1000
+        createdAtMs: input.createdAtMs,
+        expiresAtMs: input.expiresAtMs
       })
       .run()
   }
@@ -479,79 +528,166 @@ export class SqliteJobRepository implements JobRepository {
     }
   }
 
-  createRun(input: CreateRunInput): string {
-    const runId = crypto.randomUUID()
-    const now = Date.now()
+  getJobFailure(failureId: string): {
+    code: string
+    recoverability: string
+    reason: string | null
+  } | null {
+    const result = this.db
+      .select({
+        code: controlJobFailures.code,
+        recoverability: controlJobFailures.recoverability,
+        reason: controlJobFailures.reason
+      })
+      .from(controlJobFailures)
+      .where(eq(controlJobFailures.id, failureId))
+      .get()
+
+    return result ?? null
+  }
+
+  createRun(input: CreateRunInput): void {
     this.db
       .insert(controlJobRuns)
       .values({
-        id: runId,
+        id: input.id,
         jobId: input.jobId,
         kind: input.kind,
         state: 'starting',
         attemptNo: 1,
         fenceToken: input.fenceToken,
         executionGeneration: input.executionGeneration,
-        startedAtMs: now
+        pendingAttemptId: input.pendingAttemptId,
+        lifecycleOperationId: input.lifecycleOperationId,
+        startedAtMs: input.startedAtMs
       })
       .run()
-    return runId
   }
 
   createSlot(input: CreateSlotInput): void {
-    const now = Date.now()
     this.db
       .insert(controlResourceSlots)
       .values({
-        id: crypto.randomUUID(),
+        id: input.id,
         jobId: input.jobId,
         runId: input.runId,
         pool: input.pool,
         state: 'active',
-        createdAtMs: now
+        createdAtMs: input.createdAtMs
       })
       .run()
   }
 
-  releaseSlot(runId: string): void {
-    const now = Date.now()
+  releaseSlot(input: { readonly runId: string; readonly releasedAtMs: number }): void {
     this.db
       .update(controlResourceSlots)
       .set({
         state: 'released',
-        releasedAtMs: now
+        releasedAtMs: input.releasedAtMs
       })
       .where(
-        and(eq(controlResourceSlots.runId, runId), sql`${controlResourceSlots.state} != 'released'`)
+        and(eq(controlResourceSlots.runId, input.runId), sql`${controlResourceSlots.state} != 'released'`)
       )
       .run()
   }
 
-  markRunState(runId: string, state: string, stopReason: string | null = null): void {
-    const now = Date.now()
+  markRunState(input: { readonly runId: string; readonly state: string; readonly stopReason?: string | null; readonly updatedAtMs: number }): void {
     const ended =
-      state === 'paused' ||
-      state === 'cancelled' ||
-      state === 'failed' ||
-      state === 'succeeded' ||
-      state === 'interrupted'
+      input.state === 'paused' ||
+      input.state === 'cancelled' ||
+      input.state === 'failed' ||
+      input.state === 'succeeded' ||
+      input.state === 'interrupted'
     this.db
       .update(controlJobRuns)
       .set({
-        state,
-        stopReason: stopReason ?? null,
-        endedAtMs: ended ? now : null
+        state: input.state,
+        stopReason: input.stopReason ?? null,
+        endedAtMs: ended ? input.updatedAtMs : null
       })
-      .where(eq(controlJobRuns.id, runId))
+      .where(eq(controlJobRuns.id, input.runId))
+      .run()
+  }
+
+  markRunActive(input: {
+    readonly runId: string
+    readonly runtimeInstanceId: string
+    readonly updatedAtMs: number
+  }): void {
+    this.db
+      .update(controlJobRuns)
+      .set({
+        state: 'active',
+        currentRuntimeInstanceId: input.runtimeInstanceId,
+        pendingAttemptId: null,
+        lifecycleOperationId: null,
+        heartbeatAtMs: input.updatedAtMs
+      })
+      .where(eq(controlJobRuns.id, input.runId))
+      .run()
+  }
+
+  createRuntimeInstance(input: {
+    readonly id: string
+    readonly runId: string
+    readonly ownerBootId: string
+    readonly provider: string
+    readonly pidOrHandleRef?: string
+    readonly startedAtMs: number
+  }): void {
+    this.db
+      .insert(controlRuntimeInstances)
+      .values({
+        id: input.id,
+        runId: input.runId,
+        state: 'active',
+        ownerBootId: input.ownerBootId,
+        provider: input.provider,
+        pidOrHandleRef: input.pidOrHandleRef ?? null,
+        startedAtMs: input.startedAtMs
+      })
+      .run()
+  }
+
+  closeRuntimeInstance(input: {
+    readonly id: string
+    readonly runId: string
+    readonly closedAtMs: number
+    readonly exitKind: string
+    readonly exitCode?: number
+    readonly signal?: string
+  }): void {
+    this.db
+      .insert(controlRuntimeInstances)
+      .values({
+        id: input.id,
+        runId: input.runId,
+        state: 'closed',
+        ownerBootId: 'control-plane',
+        startedAtMs: input.closedAtMs,
+        closedAtMs: input.closedAtMs,
+        exitKind: input.exitKind,
+        exitCode: input.exitCode ?? null,
+        signal: input.signal ?? null
+      })
+      .onConflictDoUpdate({
+        target: controlRuntimeInstances.id,
+        set: {
+          state: 'closed',
+          closedAtMs: input.closedAtMs,
+          exitKind: input.exitKind,
+          exitCode: input.exitCode ?? null,
+          signal: input.signal ?? null
+        }
+      })
       .run()
   }
 
   workerFence(input: WorkerFence): WorkerFenceResult {
-    const now = Date.now()
     const result = (this.db as ControlPlaneDatabase).all(
       sql`UPDATE control_jobs
           SET state_revision = state_revision + 1,
-              updated_at_ms = ${now}
+              updated_at_ms = ${input.updatedAtMs}
           WHERE id = ${input.jobId}
             AND state_revision = ${input.expectedRevision}
             AND active_run_id = ${input.runId}
@@ -598,7 +734,25 @@ export class SqliteJobRepository implements JobRepository {
     return { ok: true, newRevision: firstResult.state_revision }
   }
 
-  transaction<T>(fn: () => T): T {
-    return (this.db as ControlPlaneDatabase).transaction(fn)
+  assertWorkerFence(input: Omit<WorkerFence, 'updatedAtMs'>): WorkerFenceAssertion {
+    const job = this.getWorkerAggregate(input)
+    if (job === null) return { ok: false, reason: 'fence_mismatch' }
+    if (job.stateRevision !== input.expectedRevision) {
+      return { ok: false, reason: 'revision_conflict' }
+    }
+    const run = this.getActiveRunSummary(input.runId)
+    if (
+      run === null ||
+      !['starting', 'retrying', 'active', 'pausing'].includes(run.state)
+    ) {
+      return { ok: false, reason: 'stale_run' }
+    }
+    return { ok: true }
+  }
+
+  transaction<T>(fn: (tx: ControlPlaneTransaction) => T): T {
+    return (this.db as ControlPlaneDatabase).transaction((tx) =>
+      fn({ jobs: new SqliteJobRepository(tx) })
+    )
   }
 }

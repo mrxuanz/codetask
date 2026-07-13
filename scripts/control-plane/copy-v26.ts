@@ -8,46 +8,16 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import Database from 'better-sqlite3'
 import {
   mapLegacyJobs,
   parseArgs,
   parseLegacyJobSnapshots,
   requireArg,
-  writeReport,
-  type LegacyJobSnapshot
+  writeReport
 } from './migration-lib'
+import { copyLegacyDatabase } from './migration-db'
 
-interface ThreadJobRow {
-  readonly id: string
-  readonly status: string
-  readonly plan_status: string
-  readonly plan_revision: number
-  readonly plan_confirmed_at: number | null
-}
-
-function loadJobsFromDb(dbPath: string): LegacyJobSnapshot[] {
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
-  try {
-    const rows = db
-      .prepare(
-        `SELECT id, status, plan_status, plan_revision, plan_confirmed_at
-         FROM thread_jobs`
-      )
-      .all() as ThreadJobRow[]
-
-    return rows.map((row) => ({
-      id: row.id,
-      status: row.status,
-      planProgress: { status: row.plan_status },
-      currentPlanRevision: row.plan_confirmed_at != null ? row.plan_revision : null
-    }))
-  } finally {
-    db.close()
-  }
-}
-
-function loadJobsFromJson(jobsPath: string): LegacyJobSnapshot[] {
+function loadJobsFromJson(jobsPath: string) {
   if (!existsSync(jobsPath)) {
     throw new Error(`migration.jobs_missing: ${jobsPath}`)
   }
@@ -65,8 +35,7 @@ function main(): void {
     throw new Error('provide --jobs <json> or --db <sqlite>')
   }
 
-  const jobs = jobsPath ? loadJobsFromJson(jobsPath) : loadJobsFromDb(dbPath!)
-  const report = mapLegacyJobs(jobs)
+  const report = dbPath && !jobsPath ? copyLegacyDatabase(dbPath) : mapLegacyJobs(loadJobsFromJson(jobsPath!))
   const fileHash = writeReport(reportPath, report)
   console.log(
     JSON.stringify(

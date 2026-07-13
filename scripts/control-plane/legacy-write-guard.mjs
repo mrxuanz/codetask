@@ -2,12 +2,14 @@
 
 /**
  * CI gate: forbidden legacy write/recovery symbols must not appear outside
- * allowed paths (migration scripts, adapters, docs).
+ * allowed paths (migration scripts, adapters, docs, and the isolated legacy
+ * control plane).
  *
  * Scoped enforcement:
  * - renderer production paths
  * - control-plane application layer
  * - V3 HTTP layer
+ * - server jobs layer
  *
  * Usage:
  *   node scripts/control-plane/legacy-write-guard.mjs
@@ -22,7 +24,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '../..')
 const symbolsFile = join(__dirname, 'legacy-write-symbols.rg.txt')
 
-const SEARCH_ROOTS = ['src/renderer', 'src/server/application', 'src/server/http/v3']
+const SEARCH_ROOTS = [
+  'src/renderer',
+  'src/server/application',
+  'src/server/http/v3',
+  'src/server/legacy-control-plane'
+]
 
 const ALLOWED_PATH_PREFIXES = [
   'scripts/control-plane/',
@@ -30,7 +37,8 @@ const ALLOWED_PATH_PREFIXES = [
   'tests/control-plane/migration/',
   'src/server/application/controls-command-adapter.ts',
   'src/server/application/planner-adapter.ts',
-  'src/server/http/legacy-cutover-guard.ts'
+  'src/server/http/legacy-cutover-guard.ts',
+  'src/server/legacy-control-plane/'
 ]
 
 function loadSymbols() {
@@ -107,7 +115,8 @@ let hasErrors = false
 
 for (const symbol of symbols) {
   for (const searchRoot of SEARCH_ROOTS) {
-    const matches = findMatches(symbol, searchRoot).filter((entry) => !isAllowedPath(entry.file))
+    const allMatches = findMatches(symbol, searchRoot)
+    const matches = allMatches.filter((entry) => !isAllowedPath(entry.file))
     if (matches.length === 0) continue
     hasErrors = true
     console.error(`\nForbidden legacy symbol "${symbol}" found outside allowed paths:`)
@@ -122,4 +131,4 @@ if (hasErrors) {
   exit(1)
 }
 
-console.log('✅ legacy write guard passed (renderer/app/v3 production paths clean)')
+console.log('✅ legacy write guard passed (renderer/app/v3/jobs clean; legacy writers isolated)')

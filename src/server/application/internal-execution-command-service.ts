@@ -35,8 +35,9 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
   constructor(private readonly deps: InternalExecutionCommandServiceDeps) {}
 
   runtimeStarted(input: WorkerCommandEnvelope<RuntimeStartedPayload>): RuntimeStartedResult {
+    const now = this.deps.clock.nowMs()
     return this.deps.jobRepository.transaction(() => {
-      const fence = this.deps.jobRepository.workerFence({
+      const fence = this.deps.jobRepository.assertWorkerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
@@ -46,38 +47,96 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
       if (!fence.ok) throw new Error(fence.reason)
 
       const instanceId = input.payload.runtimeInstanceId || this.deps.idGenerator.generate()
-      this.deps.jobRepository.markRunState(input.runId, 'active')
+      this.deps.jobRepository.createRuntimeInstance({
+        id: instanceId,
+        runId: input.runId,
+        ownerBootId: 'control-plane',
+        provider: input.payload.provider,
+        pidOrHandleRef: input.payload.pidOrHandleRef,
+        startedAtMs: now
+      })
+      this.deps.jobRepository.markRunActive({
+        runId: input.runId,
+        runtimeInstanceId: instanceId,
+        updatedAtMs: now
+      })
+      const job = this.deps.jobRepository.getAggregate(input.jobId)
+      if (job === null) throw new Error('job.not_found')
+      const cas = this.deps.jobRepository.compareAndSetJob({
+        jobId: input.jobId,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
+        expectedState: job.state,
+        expectedActiveRunId: input.runId,
+        next: {
+          state: job.state,
+          controlIntent: job.controlIntent,
+          resumeTarget: job.resumeTarget,
+          activeRunId: input.runId,
+          lastFailureId: job.lastFailureId,
+          terminalAtMs: null
+        }
+      })
+      if (!cas.ok) throw new Error(cas.reason)
 
       this.deps.jobRepository.appendOutbox({
         topic: `job:${input.jobId}`,
         eventType: 'job.changed',
         entityId: input.jobId,
-        aggregateRevision: fence.newRevision,
+        aggregateRevision: cas.newRevision,
         payload: {
           type: 'job.changed',
           entityId: input.jobId,
-          revision: fence.newRevision,
+          revision: cas.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
-      return { runtimeInstanceId: instanceId, runState: 'active' }
+      return { runtimeInstanceId: instanceId, runState: 'active', revision: cas.newRevision }
     })
   }
 
   runtimeExited(input: WorkerCommandEnvelope<RuntimeExitedPayload>): RuntimeExitResult {
+    const now = this.deps.clock.nowMs()
     return this.deps.jobRepository.transaction(() => {
-      const job = this.deps.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'runtime-exited' },
-        jobId: input.jobId
+      const job = this.deps.jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
-      if (job === null) return { decision: 'stale_ignored' }
+      if (job === null) {
+        // Cancel may have cleared active_run_id; fall back to internal read.
+        const fallback = this.deps.jobRepository.getAggregate(input.jobId)
+        if (fallback === null) return { decision: 'stale_ignored' }
+        if (fallback.state === 'cancelled' || fallback.state === 'succeeded') {
+          this.deps.jobRepository.closeRuntimeInstance({
+            id: input.payload.runtimeInstanceId,
+            runId: input.runId,
+            closedAtMs: now,
+            exitKind: input.payload.exitKind,
+            exitCode: input.payload.exitCode,
+            signal: input.payload.signal
+          })
+          this.deps.jobRepository.markRunState({
+            runId: input.runId,
+            state: fallback.state,
+            stopReason: input.payload.exitKind,
+            updatedAtMs: now
+          })
+          return fallback.state === 'cancelled'
+            ? { decision: 'cancelled_cleanup_only' }
+            : { decision: 'stale_ignored' }
+        }
+        return { decision: 'stale_ignored' }
+      }
 
       if (job.activeRunId !== input.runId) {
         return { decision: 'stale_ignored' }
       }
 
-      const fence = this.deps.jobRepository.workerFence({
+      const fence = this.deps.jobRepository.assertWorkerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
@@ -87,14 +146,28 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
       if (!fence.ok) return { decision: 'stale_ignored' }
 
       if (job.state === 'cancelled') {
-        this.deps.jobRepository.markRunState(input.runId, 'cancelled', input.payload.exitKind)
+        this.deps.jobRepository.closeRuntimeInstance({
+          id: input.payload.runtimeInstanceId,
+          runId: input.runId,
+          closedAtMs: now,
+          exitKind: input.payload.exitKind,
+          exitCode: input.payload.exitCode,
+          signal: input.payload.signal
+        })
+        this.deps.jobRepository.markRunState({
+          runId: input.runId,
+          state: 'cancelled',
+          stopReason: input.payload.exitKind,
+          updatedAtMs: now
+        })
         return { decision: 'cancelled_cleanup_only' }
       }
 
       if (job.state === 'pausing' && job.controlIntent === 'pause') {
         const cas = this.deps.jobRepository.compareAndSetJob({
           jobId: job.id,
-          expectedRevision: fence.newRevision,
+          updatedAtMs: now,
+          expectedRevision: input.expectedRevision,
           expectedState: 'pausing',
           expectedActiveRunId: input.runId,
           next: {
@@ -107,7 +180,20 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           }
         })
         if (!cas.ok) return { decision: 'stale_ignored' }
-        this.deps.jobRepository.markRunState(input.runId, 'paused', input.payload.exitKind)
+        this.deps.jobRepository.markRunState({
+          runId: input.runId,
+          state: 'paused',
+          stopReason: input.payload.exitKind,
+          updatedAtMs: now
+        })
+        this.deps.jobRepository.closeRuntimeInstance({
+          id: input.payload.runtimeInstanceId,
+          runId: input.runId,
+          closedAtMs: now,
+          exitKind: input.payload.exitKind,
+          exitCode: input.payload.exitCode,
+          signal: input.payload.signal
+        })
         this.deps.jobRepository.appendOutbox({
           topic: `job:${job.id}`,
           eventType: 'job.changed',
@@ -118,22 +204,27 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
             entityId: job.id,
             revision: cas.newRevision,
             changed: ['state']
-          }
+          },
+          createdAtMs: now
         })
         return { decision: 'pause_settled' }
       }
 
-      const failureId = this.deps.jobRepository.insertFailure({
+      const failureId = this.deps.idGenerator.generate()
+      this.deps.jobRepository.insertFailure({
+        id: failureId,
         jobId: job.id,
         code: 'runtime.exited',
         recoverability: 'recoverable',
         reason: input.payload.exitKind,
-        runKind: null
+        runKind: null,
+        createdAtMs: now
       })
 
       const cas = this.deps.jobRepository.compareAndSetJob({
         jobId: job.id,
-        expectedRevision: fence.newRevision,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
         expectedState: job.state,
         expectedActiveRunId: input.runId,
         next: {
@@ -142,12 +233,25 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           resumeTarget: null,
           activeRunId: null,
           lastFailureId: failureId,
-          terminalAtMs: this.deps.clock.nowMs()
+          terminalAtMs: now
         }
       })
       if (!cas.ok) return { decision: 'stale_ignored' }
 
-      this.deps.jobRepository.markRunState(input.runId, 'failed', input.payload.exitKind)
+      this.deps.jobRepository.markRunState({
+        runId: input.runId,
+        state: 'failed',
+        stopReason: input.payload.exitKind,
+        updatedAtMs: now
+      })
+      this.deps.jobRepository.closeRuntimeInstance({
+        id: input.payload.runtimeInstanceId,
+        runId: input.runId,
+        closedAtMs: now,
+        exitKind: input.payload.exitKind,
+        exitCode: input.payload.exitCode,
+        signal: input.payload.signal
+      })
       this.deps.jobRepository.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
@@ -158,7 +262,8 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state', 'failure']
-        }
+        },
+        createdAtMs: now
       })
 
       return { decision: 'job_failed', failureId }
@@ -166,19 +271,23 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
   }
 
   startVerification(input: WorkerCommandEnvelope<StartVerificationPayload>): StartVerificationResult {
+    const now = this.deps.clock.nowMs()
     return this.deps.jobRepository.transaction(() => {
       const fence = this.deps.jobRepository.workerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
         fenceToken: input.fenceToken,
-        executionGeneration: input.executionGeneration
+        executionGeneration: input.executionGeneration,
+        updatedAtMs: now
       })
       if (!fence.ok) throw new Error(fence.reason)
 
-      const job = this.deps.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'start-verification' },
-        jobId: input.jobId
+      const job = this.deps.jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
       if (job === null) throw new Error('job.not_found')
 
@@ -203,7 +312,8 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           entityId: input.jobId,
           revision: fence.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
       return { verificationId, state: 'running' }
@@ -223,10 +333,11 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
   }
 
   reportNoProgress(input: WorkerCommandEnvelope<ReportNoProgressPayload>): NoProgressResult {
+    const now = this.deps.clock.nowMs()
     return this.deps.jobRepository.transaction(() => {
       const count = 1
 
-      const fence = this.deps.jobRepository.workerFence({
+      const fence = this.deps.jobRepository.assertWorkerFence({
         jobId: input.jobId,
         expectedRevision: input.expectedRevision,
         runId: input.runId,
@@ -237,25 +348,31 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
         return { revision: input.expectedRevision, eventCount: count }
       }
 
-      const job = this.deps.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'no-progress' },
-        jobId: input.jobId
+      const job = this.deps.jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
       if (job === null) {
         return { revision: input.expectedRevision, eventCount: count }
       }
 
-      const failureId = this.deps.jobRepository.insertFailure({
+      const failureId = this.deps.idGenerator.generate()
+      this.deps.jobRepository.insertFailure({
+        id: failureId,
         jobId: job.id,
         code: 'workflow.no_progress',
         recoverability: 'recoverable',
         reason: input.payload.workIdentity,
-        runKind: null
+        runKind: null,
+        createdAtMs: now
       })
 
       const cas = this.deps.jobRepository.compareAndSetJob({
         jobId: job.id,
-        expectedRevision: fence.newRevision,
+        updatedAtMs: now,
+        expectedRevision: input.expectedRevision,
         expectedState: job.state,
         expectedActiveRunId: input.runId,
         next: {
@@ -264,12 +381,19 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           resumeTarget: null,
           activeRunId: null,
           lastFailureId: failureId,
-          terminalAtMs: this.deps.clock.nowMs()
+          terminalAtMs: now
         }
       })
       if (!cas.ok) {
-        return { revision: fence.newRevision, eventCount: count }
+        return { revision: input.expectedRevision, eventCount: count }
       }
+
+      this.deps.jobRepository.markRunState({
+        runId: input.runId,
+        state: 'failed',
+        stopReason: 'workflow.no_progress',
+        updatedAtMs: now
+      })
 
       this.deps.jobRepository.appendOutbox({
         topic: `job:${job.id}`,
@@ -281,7 +405,8 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           entityId: job.id,
           revision: cas.newRevision,
           changed: ['state', 'failure']
-        }
+        },
+        createdAtMs: now
       })
 
       return { revision: cas.newRevision, eventCount: count }
@@ -292,10 +417,13 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
     input: WorkerCommandEnvelope<CompleteSliceVerificationPayload | CompleteMilestoneVerificationPayload>,
     scopeType: 'slice' | 'milestone'
   ): VerificationResult {
+    const now = this.deps.clock.nowMs()
     return this.deps.jobRepository.transaction(() => {
-      const job = this.deps.jobRepository.getOwnedAggregate({
-        actor: { username: 'worker', requestId: 'complete-verification' },
-        jobId: input.jobId
+      const job = this.deps.jobRepository.getWorkerAggregate({
+        jobId: input.jobId,
+        runId: input.runId,
+        fenceToken: input.fenceToken,
+        executionGeneration: input.executionGeneration
       })
       if (job === null) throw new Error('job.not_found')
 
@@ -325,7 +453,8 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
         expectedRevision: input.expectedRevision,
         runId: input.runId,
         fenceToken: input.fenceToken,
-        executionGeneration: input.executionGeneration
+        executionGeneration: input.executionGeneration,
+        updatedAtMs: now
       })
       if (!fence.ok) throw new Error(fence.reason)
 
@@ -358,7 +487,8 @@ export class InternalExecutionCommandServiceImpl implements InternalExecutionCom
           entityId: input.jobId,
           revision: fence.newRevision,
           changed: ['state']
-        }
+        },
+        createdAtMs: now
       })
 
       return {
