@@ -10,8 +10,6 @@ import type {
   TaskCheckpointPayload,
   PauseAcknowledgedPayload
 } from '@shared/contracts/control-plane'
-import type { IdGenerator } from './ports/id-generator'
-
 export interface PlannerAdapterConfig {
   readonly jobId: string
   readonly runId: string
@@ -27,7 +25,6 @@ export interface PlanningCheckpointProvider {
 export class PlannerAdapter {
   constructor(
     private readonly commandService: JobCommandService,
-    private readonly idGenerator: IdGenerator,
     private readonly config: PlannerAdapterConfig
   ) {}
 

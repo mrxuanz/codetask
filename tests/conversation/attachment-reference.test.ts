@@ -28,7 +28,7 @@ test('attachment reference paths', async (t) => {
     rmSync(dataDir, { recursive: true, force: true })
   })
 
-  const threadId = 'thread-abc'
+  const threadId = '11111111-1111-4111-8111-111111111111'
   const attachment = saveThreadAttachment({
     threadId,
     name: 'hero.png',

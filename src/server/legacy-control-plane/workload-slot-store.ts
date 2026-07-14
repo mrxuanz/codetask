@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import { getDb } from '../db'
 import { getAppContext } from '../bootstrap'
 import { threadJobs, workloadRuns, workloadSlots } from '../db/schema'
+import { isEntityDeletionBlocked } from './deletion-coordinator'
 
 /** @deprecated `design_session` kept for reading legacy workload_runs rows only; never write it. */
 export type WorkloadOwnerKind = 'thread_job' | 'design_session'
@@ -65,13 +66,26 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
-export function workloadPoolCapacity(pool = 'default'): number {
+/**
+ * F2 (§2.2/§7.3): the execution pool is a process-global pool with capacity
+ * fixed at 1 for this release. Any `CODETASK_WORKLOAD_POOL_CAPACITY` other than
+ * 1 is rejected at read/startup with a clear config error; concurrency will be
+ * reintroduced later together with DB capacity constraints and fair scheduling.
+ */
+export function workloadPoolCapacity(_pool = 'default'): number {
   const env = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  if (env) {
+  if (env !== undefined && env.trim() !== '') {
     const parsed = Number(env)
-    if (!Number.isNaN(parsed) && parsed > 0) return parsed
+    // Only an explicit numeric capacity is validated. Non-numeric junk (including
+    // the literal "undefined"/"null" left by lax env cleanup) is treated as unset.
+    if (Number.isFinite(parsed) && parsed !== 1) {
+      throw new Error(
+        `Invalid CODETASK_WORKLOAD_POOL_CAPACITY=${env}: execution pool capacity is fixed at 1 for this release. ` +
+          `Remove the variable or set it to 1.`
+      )
+    }
   }
-  return pool === 'execution' ? 1 : 1
+  return 1
 }
 
 export function workloadLeaseTtlSec(): number {
@@ -121,16 +135,11 @@ export async function claimWorkloadSlotTx(
   const leaseExpiresAt = now + workloadLeaseTtlSec()
 
   const result = db.transaction((tx) => {
+    // F2 (§7.2/§7.3): slot capacity is process-global, NOT per-username.
     const activeSlotCountRows = tx
       .select({ count: sql<number>`count(*)` })
       .from(workloadSlots)
-      .where(
-        and(
-          eq(workloadSlots.username, username),
-          eq(workloadSlots.pool, pool),
-          eq(workloadSlots.status, 'active')
-        )
-      )
+      .where(and(eq(workloadSlots.pool, pool), eq(workloadSlots.status, 'active')))
       .all()
 
     if (((activeSlotCountRows[0]?.count as number | undefined) ?? 0) >= capacity) {
@@ -562,6 +571,110 @@ export async function claimExecutionWorkloadSlot(
   if (!run) return null
   setExecutionRunId(jobId, run.runId)
   return { runId: run.runId, signal: run.signal }
+}
+
+/**
+ * F2 (§7.2): single atomic execution claim. In ONE database transaction:
+ *   - assert global active execution slots < capacity (fixed at 1)
+ *   - CAS the job pending → running (writes the thread-job execution lease)
+ *   - create the workload_run + workload_slot
+ *   - write the owner activeRunId
+ * On CAS failure or capacity full the transaction rolls back fully, leaving no
+ * orphan run/slot and the job retryable in `pending`. This merges the previously
+ * split `tryPromoteJobToRunning` + `claimExecutionWorkloadSlot` paths.
+ */
+export async function claimExecutionSlotForJobTx(
+  username: string,
+  jobId: string
+): Promise<{ runId: string; signal: AbortSignal } | null> {
+  const db = getDb()
+  const pool = 'execution'
+  const capacity = workloadPoolCapacity(pool)
+  const now = nowSec()
+  const owner = leaseOwner()
+  const slotLeaseExpiresAt = now + workloadLeaseTtlSec()
+  const runId = `wrun-${randomUUID()}`
+
+  const { EXECUTION_LEASE_TTL_SEC, executionLeaseOwner } = await import('./repository')
+  const jobLeaseOwner = executionLeaseOwner()
+  const jobLeaseExpiresAt = now + EXECUTION_LEASE_TTL_SEC
+
+  const claimed = db.transaction((tx) => {
+    if (isEntityDeletionBlocked('thread_job', jobId)) {
+      return false
+    }
+
+    const activeSlotCountRows = tx
+      .select({ count: sql<number>`count(*)` })
+      .from(workloadSlots)
+      .where(and(eq(workloadSlots.pool, pool), eq(workloadSlots.status, 'active')))
+      .all()
+    if (((activeSlotCountRows[0]?.count as number | undefined) ?? 0) >= capacity) {
+      return false
+    }
+
+    const updated = tx
+      .update(threadJobs)
+      .set({
+        status: 'running',
+        executionLeaseOwner: jobLeaseOwner,
+        executionLeaseExpiresAt: jobLeaseExpiresAt,
+        activeRunId: runId,
+        lastError: null,
+        updatedAt: now
+      })
+      .where(
+        and(
+          eq(threadJobs.id, jobId),
+          eq(threadJobs.username, username),
+          eq(threadJobs.status, 'pending')
+        )
+      )
+      .run()
+    if (!updated.changes) {
+      return false
+    }
+
+    tx.insert(workloadRuns)
+      .values({
+        id: runId,
+        username,
+        ownerKind: 'thread_job',
+        ownerId: jobId,
+        kind: 'execution',
+        pool,
+        status: 'active',
+        leaseOwner: owner,
+        leaseExpiresAt: slotLeaseExpiresAt,
+        startedAt: now,
+        updatedAt: now
+      })
+      .run()
+
+    tx.insert(workloadSlots)
+      .values({
+        runId,
+        username,
+        pool,
+        ownerKind: 'thread_job',
+        ownerId: jobId,
+        kind: 'execution',
+        status: 'active',
+        leaseOwner: owner,
+        leaseExpiresAt: slotLeaseExpiresAt,
+        createdAt: now
+      })
+      .run()
+
+    return true
+  })
+
+  if (!claimed) return null
+
+  const controller = new AbortController()
+  runControllers.set(runId, controller)
+  setExecutionRunId(jobId, runId)
+  return { runId, signal: controller.signal }
 }
 
 export async function releaseExecutionWorkloadSlot(

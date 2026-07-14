@@ -36,16 +36,16 @@ export interface RunSandboxedTurnInput {
   workspaceRoot: string
   runtimeRoot: string
   prompt: string
-  runtimeSessionId?: string | null
-  model?: string
-  systemPrompt?: string
-  mcpUrl?: string
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
-  mcpToken?: string
-  signal?: AbortSignal
-  readRoots?: string[]
-  jobId?: string
+  runtimeSessionId?: string | null | undefined
+  model?: string | undefined
+  systemPrompt?: string | undefined
+  mcpUrl?: string | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
+  mcpToken?: string | undefined
+  signal?: AbortSignal | undefined
+  readRoots?: string[] | undefined
+  jobId?: string | undefined
 }
 
 function resolveRoleWorkerPath(): string {
@@ -263,5 +263,13 @@ export async function* streamSandboxedConversationTurnLocal(
 }
 
 export function isOuterSandboxEnabled(): boolean {
+  if (process.env.CODETASK_MODE === 'server' && process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
+    console.warn(
+      '[sandbox] CODETASK_DISABLE_OUTER_SANDBOX is ignored in server mode; outer sandbox stays enabled'
+    )
+  }
+  if (process.env.CODETASK_MODE === 'server') {
+    return true
+  }
   return process.env.CODETASK_DISABLE_OUTER_SANDBOX !== '1'
 }

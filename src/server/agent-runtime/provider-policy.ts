@@ -29,9 +29,14 @@ export function resolveProviderOuterSandbox(
   role: ConversationRole,
   optionsOuterSandbox?: boolean
 ): boolean {
+  if (roleRequiresOuterSandbox(role)) {
+    if (optionsOuterSandbox === false) {
+      throw new Error(`${role} cannot disable outer sandbox`)
+    }
+    return true
+  }
   if (optionsOuterSandbox === true) return true
-  if (optionsOuterSandbox === false) return false
-  return roleRequiresOuterSandbox(role)
+  return false
 }
 
 export function buildCursorAcpCliArgs(input: { outerSandbox: boolean; cwd?: string }): string[] {

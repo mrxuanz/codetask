@@ -239,6 +239,24 @@ const confirmDeleteMessage = computed(() => {
       </div>
     </div>
 
+    <div
+      v-if="workspace.loadError.value"
+      class="mx-3 mb-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+      role="alert"
+    >
+      <p>{{ t('workspace.loadFailed') }}</p>
+      <p class="mt-1 text-[11px] opacity-90">{{ workspace.loadError.value }}</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        class="mt-2 h-7"
+        @click="workspace.retryLoadWorkspace()"
+      >
+        {{ t('workspace.retryLoad') }}
+      </Button>
+    </div>
+
     <div class="flex items-center justify-between px-3 py-3">
       <span class="px-2 text-[11px] font-semibold tracking-wide text-muted-foreground">
         {{ t('workspace.section.projects') }}

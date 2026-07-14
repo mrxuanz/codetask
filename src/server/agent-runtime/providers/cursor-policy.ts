@@ -23,7 +23,10 @@ function buildCursorHostEnv(runtimeRoot: string): Record<string, string> {
 
 export function buildCursorTurnPlan(
   input: AgentTurnInput,
-  options: { outerSandbox?: boolean; userMcpServers?: Record<string, unknown> } = {}
+  options: {
+    outerSandbox?: boolean | undefined
+    userMcpServers?: Record<string, unknown> | undefined
+  } = {}
 ): CursorTurnPlan {
   const outerSandbox = resolveProviderOuterSandbox(input.role, options.outerSandbox)
   const env = outerSandbox

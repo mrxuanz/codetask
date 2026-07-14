@@ -185,7 +185,7 @@ async function persistDraftPayload(
   threadId: string,
   messageId: string,
   payload: TaskLaunchDraftPayload,
-  options?: { expectedRevision?: number }
+  options?: { expectedRevision?: number | undefined }
 ): Promise<{
   messageId: string
   payload: Record<string, unknown>
@@ -236,7 +236,7 @@ export async function resolveDraftMessageId(
     const match = drafts.find((m) => m.id === input.activeDraftId)
     if (match) return match.id
   }
-  if (drafts.length === 1) return drafts[0].id
+  if (drafts.length === 1) return drafts[0]!.id
   throw AppError.badRequest(
     'Specify draftId, messageId, or select a draft in the UI',
     'draft.not_found'
@@ -328,7 +328,7 @@ export async function resolveJobId(
   if (input.activePlanId) return input.activePlanId
 
   const plans = await listThreadPlans(username, threadId)
-  if (plans.length === 1) return plans[0].id
+  if (plans.length === 1) return plans[0]!.id
   throw AppError.badRequest(
     'Specify jobId, designSessionId, or select a plan in the UI',
     'job.not_found'
@@ -1322,15 +1322,15 @@ export async function updateJobPlan(
   planOrSessionId: string,
   patch: {
     nodeRef: string
-    expectedPlanRevision?: number
-    title?: string
-    description?: string
-    successCriteria?: string
-    contextMarkdown?: string
-    abilityCode?: string
-    coreCode?: string
-    referenceIds?: string[]
-    referenceReason?: string
+    expectedPlanRevision?: number | undefined
+    title?: string | undefined
+    description?: string | undefined
+    successCriteria?: string | undefined
+    contextMarkdown?: string | undefined
+    abilityCode?: string | undefined
+    coreCode?: string | undefined
+    referenceIds?: string[] | undefined
+    referenceReason?: string | undefined
   }
 ): Promise<ThreadJobDto> {
   await assertThreadWizardPhase(username, threadId, WIZARD_PHASE_PLAN_EDIT)
@@ -1388,6 +1388,7 @@ export async function updateJobPlan(
   } else if (node.kind === 'slice') {
     const [mi, si] = node.indices
     const m = milestones[mi]
+    if (!m) throw AppError.notFound('Milestone not found', 'draft.node_not_found')
     const slices = [...m.slices]
     const s = slices[si]
     if (!s) throw AppError.notFound('Slice not found', 'draft.node_not_found')
@@ -1407,8 +1408,10 @@ export async function updateJobPlan(
   } else {
     const [mi, si, ti] = node.indices
     const m = milestones[mi]
+    if (!m) throw AppError.notFound('Milestone not found', 'draft.node_not_found')
     const slices = [...m.slices]
     const s = slices[si]
+    if (!s) throw AppError.notFound('Slice not found', 'draft.node_not_found')
     const tasks = [...s.tasks]
     const t = tasks[ti]
     if (!t) throw AppError.notFound('Task not found', 'draft.node_not_found')
@@ -1430,6 +1433,7 @@ export async function updateJobPlan(
     const flatIdx = plan.tasks.findIndex((ft) => ft.id === patch.nodeRef)
     if (flatIdx >= 0) {
       const flat = plan.tasks[flatIdx]
+      if (!flat) throw AppError.notFound('Task not found', 'draft.node_not_found')
       plan.tasks[flatIdx] = {
         ...flat,
         title: patch.title ?? flat.title,
@@ -1507,22 +1511,35 @@ export async function confirmPlanNode(
   const milestones = [...plan.milestones]
   if (node.kind === 'milestone') {
     const mi = node.indices[0]
-    milestones[mi] = { ...milestones[mi], confirmed: true }
+    const m = milestones[mi]
+    if (!m) throw AppError.notFound('Milestone not found', 'draft.node_not_found')
+    milestones[mi] = { ...m, confirmed: true }
   } else if (node.kind === 'slice') {
     const [mi, si] = node.indices
-    const slices = [...milestones[mi].slices]
-    slices[si] = { ...slices[si], confirmed: true }
-    milestones[mi] = { ...milestones[mi], slices }
+    const m = milestones[mi]
+    if (!m) throw AppError.notFound('Milestone not found', 'draft.node_not_found')
+    const slices = [...m.slices]
+    const s = slices[si]
+    if (!s) throw AppError.notFound('Slice not found', 'draft.node_not_found')
+    slices[si] = { ...s, confirmed: true }
+    milestones[mi] = { ...m, slices }
   } else {
     const [mi, si, ti] = node.indices
-    const slices = [...milestones[mi].slices]
-    const tasks = [...slices[si].tasks]
-    tasks[ti] = { ...tasks[ti], confirmed: true }
-    slices[si] = { ...slices[si], tasks }
-    milestones[mi] = { ...milestones[mi], slices }
+    const m = milestones[mi]
+    if (!m) throw AppError.notFound('Milestone not found', 'draft.node_not_found')
+    const slices = [...m.slices]
+    const s = slices[si]
+    if (!s) throw AppError.notFound('Slice not found', 'draft.node_not_found')
+    const tasks = [...s.tasks]
+    const t = tasks[ti]
+    if (!t) throw AppError.notFound('Task not found', 'draft.node_not_found')
+    tasks[ti] = { ...t, confirmed: true }
+    slices[si] = { ...s, tasks }
+    milestones[mi] = { ...m, slices }
     const flatIdx = plan.tasks.findIndex((ft) => ft.id === nodeRef)
     if (flatIdx >= 0) {
-      plan.tasks[flatIdx] = { ...plan.tasks[flatIdx], confirmed: true }
+      const flatTask = plan.tasks[flatIdx]
+      if (flatTask) plan.tasks[flatIdx] = { ...flatTask, confirmed: true }
     }
   }
 

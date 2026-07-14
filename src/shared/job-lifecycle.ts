@@ -18,9 +18,9 @@ export function isLaunchedJobStatus(status: string | null | undefined): boolean 
 }
 
 export function isDraftListEntryLaunched(input: {
-  launched?: boolean
-  planStatus?: string | null
-  hasLaunchedJobId?: boolean
+  launched?: boolean | undefined
+  planStatus?: string | null | undefined
+  hasLaunchedJobId?: boolean | undefined
 }): boolean {
   if (input.hasLaunchedJobId === true) return true
   if (input.planStatus === 'launched') return true

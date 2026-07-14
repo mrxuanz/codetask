@@ -1,4 +1,7 @@
-export type PlanNodeRef = { kind: 'milestone' | 'slice' | 'task'; indices: number[] }
+export type PlanNodeRef =
+  | { kind: 'milestone'; indices: [number] }
+  | { kind: 'slice'; indices: [number, number] }
+  | { kind: 'task'; indices: [number, number, number] }
 
 export interface PlanNodeLookupPlan {
   tasks: Array<{

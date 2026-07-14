@@ -24,17 +24,17 @@ export interface UnifiedTaskNode {
   planStatus: PlanUnitStatus
 
   status: string
-  executionStatus?: string | null
-  evidenceStatus?: string | null
-  errorMessage?: string | null
-  error?: import('./contracts/turn-errors').TurnErrorDto | null
-  evidence?: TaskEvidenceDto | null
-  evidenceArtifactId?: string | null
-  evidenceSummary?: string | null
-  coreCode?: string | null
-  referenceIds?: string[]
-  referenceReason?: string
-  assignedReferences?: TaskAssignedReference[]
+  executionStatus?: string | null | undefined
+  evidenceStatus?: string | null | undefined
+  errorMessage?: string | null | undefined
+  error?: import('./contracts/turn-errors').TurnErrorDto | null | undefined
+  evidence?: TaskEvidenceDto | null | undefined
+  evidenceArtifactId?: string | null | undefined
+  evidenceSummary?: string | null | undefined
+  coreCode?: string | null | undefined
+  referenceIds?: string[] | undefined
+  referenceReason?: string | undefined
+  assignedReferences?: TaskAssignedReference[] | undefined
 }
 
 export interface UnifiedSliceNode {
@@ -44,8 +44,8 @@ export interface UnifiedSliceNode {
   successCriteria: string
   order: number
   status: string
-  runtimeStatus?: string | null
-  verificationStatus?: string | null
+  runtimeStatus?: string | null | undefined
+  verificationStatus?: string | null | undefined
   tasks: UnifiedTaskNode[]
 }
 
@@ -56,7 +56,7 @@ export interface UnifiedMilestoneNode {
   successCriteria: string
   order: number
   status: string
-  verificationStatus?: string | null
+  verificationStatus?: string | null | undefined
   slices: UnifiedSliceNode[]
 }
 
@@ -77,33 +77,33 @@ export interface FlatPlanTask {
   taskKind: string
   abilityCode: string
   contextMarkdown: string
-  successCriteria?: string
-  coreCode?: string
-  referenceIds?: string[]
-  referenceReason?: string
-  dependsOnTaskRefs?: string[]
-  canRunInParallel?: boolean
+  successCriteria?: string | undefined
+  coreCode?: string | undefined
+  referenceIds?: string[] | undefined
+  referenceReason?: string | undefined
+  dependsOnTaskRefs?: string[] | undefined
+  canRunInParallel?: boolean | undefined
 }
 
 export interface SavedPlanShape {
   milestones: Array<{
-    title?: string
-    description?: string
-    successCriteria?: string
+    title?: string | undefined
+    description?: string | undefined
+    successCriteria?: string | undefined
     slices: Array<{
-      title?: string
-      description?: string
-      successCriteria?: string
-      acceptanceSignals?: string[]
-      expectedArtifacts?: string[]
-      dependsOnSliceRefs?: string[]
+      title?: string | undefined
+      description?: string | undefined
+      successCriteria?: string | undefined
+      acceptanceSignals?: string[] | undefined
+      expectedArtifacts?: string[] | undefined
+      dependsOnSliceRefs?: string[] | undefined
       tasks: Array<{
-        title?: string
-        description?: string
-        taskKind?: string
-        abilityCode?: string
-        dependsOnTaskRefs?: string[]
-        canRunInParallel?: boolean
+        title?: string | undefined
+        description?: string | undefined
+        taskKind?: string | undefined
+        abilityCode?: string | undefined
+        dependsOnTaskRefs?: string[] | undefined
+        canRunInParallel?: boolean | undefined
       }>
     }>
   }>
@@ -111,9 +111,9 @@ export interface SavedPlanShape {
 }
 
 function resolveSliceSuccessCriteria(slice: {
-  successCriteria?: string
-  acceptanceSignals?: string[]
-  expectedArtifacts?: string[]
+  successCriteria?: string | undefined
+  acceptanceSignals?: string[] | undefined
+  expectedArtifacts?: string[] | undefined
 }): string {
   if (slice.successCriteria?.trim()) return slice.successCriteria.trim()
   const parts = [
@@ -127,15 +127,15 @@ export interface TaskProgressItemShape {
   id: string
   title: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped'
-  abilityCode?: string
-  executionStatus?: string | null
-  evidenceStatus?: string | null
-  errorMessage?: string | null
-  error?: import('./contracts/turn-errors').TurnErrorDto | null
-  evidence?: TaskEvidenceDto | null
-  evidenceArtifactId?: string | null
-  evidenceSummary?: string | null
-  coreCode?: string | null
+  abilityCode?: string | undefined
+  executionStatus?: string | null | undefined
+  evidenceStatus?: string | null | undefined
+  errorMessage?: string | null | undefined
+  error?: import('./contracts/turn-errors').TurnErrorDto | null | undefined
+  evidence?: TaskEvidenceDto | null | undefined
+  evidenceArtifactId?: string | null | undefined
+  evidenceSummary?: string | null | undefined
+  coreCode?: string | null | undefined
 }
 
 export interface PlanProgressShape {
@@ -149,20 +149,27 @@ export interface BuildTreeInput {
   title: string
   jobStatus: string
   plan: SavedPlanShape | null | undefined
-  planProgress?: PlanProgressShape | null
-  taskProgressItems?: TaskProgressItemShape[] | null
+  planProgress?: PlanProgressShape | null | undefined
+  taskProgressItems?: TaskProgressItemShape[] | null | undefined
 
-  currentTaskId?: string | null
-  verification?: {
-    slices?: Array<{
-      id: string
-      runtimeStatus?: string | null
-      verificationStatus?: string | null
-    }>
-    milestones?: Array<{ id: string; verificationStatus?: string | null }>
-  } | null
-  abilities?: Array<{ abilityCode: string; recommendedCoreCode?: string }>
-  referenceManifest?: JobReferenceManifestDto | null
+  currentTaskId?: string | null | undefined
+  verification?:
+    | {
+        slices?:
+          | Array<{
+              id: string
+              runtimeStatus?: string | null | undefined
+              verificationStatus?: string | null | undefined
+            }>
+          | undefined
+        milestones?:
+          | Array<{ id: string; verificationStatus?: string | null | undefined }>
+          | undefined
+      }
+    | null
+    | undefined
+  abilities?: Array<{ abilityCode: string; recommendedCoreCode?: string | undefined }> | undefined
+  referenceManifest?: JobReferenceManifestDto | null | undefined
 }
 
 function taskKey(mIdx: number, sIdx: number, tIdx: number): string {

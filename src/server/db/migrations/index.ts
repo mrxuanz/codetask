@@ -26,6 +26,8 @@ import { migration025RuntimeBytes } from './025_runtime_bytes'
 import { migration026UnifyThreadJobs } from './026_unify_thread_jobs'
 import { migration027ControlPlaneSchema } from './027_control_plane_schema'
 import { migration028ControlPlaneCorrectiveSchema } from './028_control_plane_corrective_schema'
+import { migration029JobTaskAttempts } from './029_job_task_attempts'
+import { migration030WorkspaceLeasesAndDeletion } from './030_workspace_leases_and_deletion'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -57,7 +59,9 @@ export const allMigrations = [
   migration025RuntimeBytes,
   migration026UnifyThreadJobs,
   migration027ControlPlaneSchema,
-  migration028ControlPlaneCorrectiveSchema
+  migration028ControlPlaneCorrectiveSchema,
+  migration029JobTaskAttempts,
+  migration030WorkspaceLeasesAndDeletion
 ]
 
 export function applyMigrations(db: Database.Database): void {

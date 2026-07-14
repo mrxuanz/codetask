@@ -42,10 +42,7 @@ const defaultIds: IdGenerator = { generate: () => crypto.randomUUID() }
  * Binds the generic V3 loop to the authoritative control-plane repositories.
  * Task results come only from the injected TaskExecutionProvider — never synthesized here.
  */
-export function createExecutorDependencies(
-  config: ExecutorAdapterConfig,
-  context: ExecutionRunContext
-): ExecutorDependencies {
+export function createExecutorDependencies(config: ExecutorAdapterConfig): ExecutorDependencies {
   const { runtime, taskExecutionProvider } = config
   const clock = config.clock ?? defaultClock
   const idGenerator = config.idGenerator ?? defaultIds

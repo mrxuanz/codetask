@@ -51,9 +51,9 @@ export type WizardPhaseWriteIntent =
   | { type: 'set'; phase: WizardPhase }
   | {
       type: 'infer_from_context'
-      activeDraftId?: string | null
-      activePlanId?: string | null
-      draftIsPlaceholder?: boolean
+      activeDraftId?: string | null | undefined
+      activePlanId?: string | null | undefined
+      draftIsPlaceholder?: boolean | undefined
     }
   | { type: 'collecting_draft' }
 
@@ -205,8 +205,8 @@ export function buildRollbackHandoff(input: {
   from: WizardPhase
   to: WizardPhase
   reason: string
-  draftMessageId?: string | null
-  draftRevision?: number | null
+  draftMessageId?: string | null | undefined
+  draftRevision?: number | null | undefined
 }): WizardHandoffPayload {
   return {
     from: input.from,
@@ -273,12 +273,13 @@ export async function advanceWizardPhase(
   const handoffContent = formatHandoffMarkdown(input.handoff)
 
   const db = getDb()
+  const nextWizardPhase = resolveThreadWizardPhaseWrite(row, { type: 'set', phase: input.to })
   const patch: Partial<Thread> = {
-    wizardPhase: resolveThreadWizardPhaseWrite(row, { type: 'set', phase: input.to }),
     runtimeSessionId: null,
     runtimeStatus: RUNTIME_STATUS_IDLE,
     coreRuntimeJson: JSON.stringify(clearedMap),
-    updatedAt: now
+    updatedAt: now,
+    ...(nextWizardPhase !== undefined ? { wizardPhase: nextWizardPhase } : {})
   }
   if (input.activeDraftId !== undefined) patch.activeDraftId = input.activeDraftId
   if (input.activePlanId !== undefined) patch.activePlanId = input.activePlanId

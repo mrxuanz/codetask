@@ -15,7 +15,6 @@ export interface LegacyApplicationRuntime {
   readonly ctx: AppContext
   readonly schemaRead: SchemaGenerationRead
   readonly startup: StartupCoordinator
-  readonly controlPlane: ControlPlaneRuntime | null
   started: boolean
   startPromise: Promise<void> | null
   shutdownPromise: Promise<void> | null
@@ -47,6 +46,14 @@ export function createV3ApplicationRuntime(ctx: AppContext): V3ApplicationRuntim
     startPromise: null,
     shutdownPromise: null
   }
+}
+
+/**
+ * Test-only V3 root. Production bootstrap refuses v3_authoritative until F6 cutover.
+ * Do not call from production Composition Root paths.
+ */
+export function createV3ApplicationRuntimeForTests(ctx: AppContext): V3ApplicationRuntime {
+  return createV3ApplicationRuntime(ctx)
 }
 
 export function getApplicationRuntime(ctx: AppContext): ApplicationRuntime {

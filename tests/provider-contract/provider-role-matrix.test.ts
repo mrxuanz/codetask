@@ -33,11 +33,13 @@ test('resolveProviderRunPolicy uses runtime-copy inside outer sandbox', () => {
 test('resolveProviderOuterSandbox matrix', () => {
   for (const role of ROLES) {
     const outer = resolveProviderOuterSandbox(role, undefined)
-    if (role === 'conversation' || role === 'planner') {
-      assert.equal(outer, false, role)
-    } else {
-      assert.equal(outer, true, role)
-    }
+    assert.equal(outer, true, role)
+  }
+})
+
+test('resolveProviderOuterSandbox rejects disable for file roles', () => {
+  for (const role of ROLES) {
+    assert.throws(() => resolveProviderOuterSandbox(role, false), /cannot disable outer sandbox/)
   }
 })
 

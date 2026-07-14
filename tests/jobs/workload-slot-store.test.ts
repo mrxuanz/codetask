@@ -171,15 +171,41 @@ test('claim capacity=1 rejects second run', async () => {
   }
 })
 
-test('capacity=N allows N runs', async () => {
+test('CODETASK_WORKLOAD_POOL_CAPACITY > 1 is rejected (capacity fixed at 1)', async () => {
   await setupDb()
   const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
   process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '2'
   try {
+    // Reading the capacity must throw a clear config error, and any claim that
+    // reads it must therefore also fail rather than silently allowing >1.
+    assert.throws(() => workloadPoolCapacity('execution'), /capacity is fixed at 1/)
+    assert.throws(() => workloadPoolCapacity('default'), /capacity is fixed at 1/)
+
+    const db = getDb()
+    await seedJob(db, 'job-1', 'planning')
+    await assert.rejects(
+      claimWorkloadSlotTx({
+        username: 'user',
+        ownerKind: 'thread_job',
+        ownerId: 'job-1',
+        kind: 'planning'
+      }),
+      /capacity is fixed at 1/
+    )
+  } finally {
+    process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
+  await teardownDb()
+  }
+})
+
+test('capacity 1 semantics: only one active run per pool', async () => {
+  await setupDb()
+  const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
+  process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '1'
+  try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
     await seedJob(db, 'job-2', 'planning')
-    await seedJob(db, 'job-3', 'planning')
 
     const first = await claimWorkloadSlotTx({
       username: 'user',
@@ -193,17 +219,11 @@ test('capacity=N allows N runs', async () => {
       ownerId: 'job-2',
       kind: 'planning'
     })
-    const third = await claimWorkloadSlotTx({
-      username: 'user',
-      ownerKind: 'thread_job',
-      ownerId: 'job-3',
-      kind: 'planning'
-    })
 
     assert.ok(first)
-    assert.ok(second)
-    assert.equal(third, null)
-    assert.equal(workloadPoolCapacity('default'), 2)
+    assert.equal(second, null)
+    assert.equal(workloadPoolCapacity('default'), 1)
+    assert.equal(workloadPoolCapacity('execution'), 1)
   } finally {
     process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
   await teardownDb()

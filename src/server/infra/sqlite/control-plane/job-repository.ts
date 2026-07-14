@@ -54,26 +54,28 @@ function legacyStatusToStates(status: string): readonly JobState[] | null {
   }
 }
 
-function selectJobFields() {
-  return {
-    id: controlJobs.id,
-    threadId: controlJobs.threadId,
-    projectId: controlJobs.projectId,
-    state: controlJobs.state,
-    stateRevision: controlJobs.stateRevision,
-    controlIntent: controlJobs.controlIntent,
-    resumeTarget: controlJobs.resumeTarget,
-    currentPlanRevision: controlJobs.currentPlanRevision,
-    executionGeneration: controlJobs.executionGeneration,
-    activeRunId: controlJobs.activeRunId,
-    lastFailureId: controlJobs.lastFailureId,
-    draftMessageId: controlJobs.draftMessageId,
-    title: controlJobs.title,
-    requirementsSummary: controlJobs.requirementsSummary,
-    createdAtMs: controlJobs.createdAtMs,
-    updatedAtMs: controlJobs.updatedAtMs,
-    terminalAtMs: controlJobs.terminalAtMs
-  }
+const jobFieldsSelection = {
+  id: controlJobs.id,
+  threadId: controlJobs.threadId,
+  projectId: controlJobs.projectId,
+  state: controlJobs.state,
+  stateRevision: controlJobs.stateRevision,
+  controlIntent: controlJobs.controlIntent,
+  resumeTarget: controlJobs.resumeTarget,
+  currentPlanRevision: controlJobs.currentPlanRevision,
+  executionGeneration: controlJobs.executionGeneration,
+  activeRunId: controlJobs.activeRunId,
+  lastFailureId: controlJobs.lastFailureId,
+  draftMessageId: controlJobs.draftMessageId,
+  title: controlJobs.title,
+  requirementsSummary: controlJobs.requirementsSummary,
+  createdAtMs: controlJobs.createdAtMs,
+  updatedAtMs: controlJobs.updatedAtMs,
+  terminalAtMs: controlJobs.terminalAtMs
+}
+
+function selectJobFields(): typeof jobFieldsSelection {
+  return jobFieldsSelection
 }
 
 type JobSelectRow = {
@@ -98,7 +100,7 @@ type JobSelectRow = {
 
 export type { ControlPlaneDatabase } from './db-executor'
 
-function ownerVisibilityPredicate(actor: ActorContext) {
+function ownerVisibilityPredicate(actor: ActorContext): SQL {
   return sql`EXISTS (
     SELECT 1
     FROM ${threads}

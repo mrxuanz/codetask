@@ -30,7 +30,7 @@ export class SandboxSupervisorManager extends EventEmitter {
   private startPromise: Promise<void> | null = null
   private lastError: string | undefined
 
-  statusSnapshot(): { ready: boolean; starting: boolean; lastError?: string } {
+  statusSnapshot(): { ready: boolean; starting: boolean; lastError?: string | undefined } {
     return {
       ready: this.ready && Boolean(this.child && !this.child.killed),
       starting: this.starting,

@@ -8,12 +8,12 @@ export interface SliceVerificationVerdict {
   evidenceTrace: Array<{
     requirement: string
     status: string
-    evidence?: string[]
+    evidence?: string[] | undefined
   }>
   repairSuggestions: Array<{
     reason: string
     instruction: string
-    targetTaskId?: string
+    targetTaskId?: string | undefined
   }>
 }
 
@@ -24,7 +24,7 @@ export interface MilestoneVerificationVerdict {
   requirementTrace: Array<{
     requirement: string
     status: string
-    evidence?: string[]
+    evidence?: string[] | undefined
   }>
   sliceAssessments: Array<{
     sliceId: string
@@ -34,8 +34,8 @@ export interface MilestoneVerificationVerdict {
   repairTasks: Array<{
     instruction: string
     evidenceGap: string
-    targetSliceId?: string
-    targetTaskId?: string
+    targetSliceId?: string | undefined
+    targetTaskId?: string | undefined
   }>
 }
 
@@ -49,8 +49,8 @@ function parseMilestoneRepairTarget(
 ): {
   instruction: string
   evidenceGap: string
-  targetSliceId?: string
-  targetTaskId?: string
+  targetSliceId?: string | undefined
+  targetTaskId?: string | undefined
 } {
   const instruction = nonEmpty(row.instruction)
   const evidenceGap = nonEmpty(row.evidenceGap)

@@ -120,15 +120,6 @@ export async function touchProject(username: string, projectId: string): Promise
 }
 
 export async function deleteProject(username: string, projectId: string): Promise<void> {
-  const existing = await getProject(username, projectId)
-  if (!existing) {
-    throw AppError.notFound('Project not found', 'project.not_found')
-  }
-
-  const db = getDb()
-  db.transaction((tx) => {
-    tx.delete(projects)
-      .where(and(eq(projects.username, username), eq(projects.id, projectId)))
-      .run()
-  })
+  const { drainAndDeleteProject } = await import('../legacy-control-plane/deletion-coordinator')
+  await drainAndDeleteProject(username, projectId)
 }

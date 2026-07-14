@@ -94,6 +94,8 @@ export default {
     addProject: 'Add local folder',
     addProjectHint: 'Add local folder…',
     loading: 'Loading…',
+    loadFailed: 'Failed to load workspace',
+    retryLoad: 'Retry',
     noThreads: 'No threads yet',
     expand: 'Expand',
     collapse: 'Collapse',

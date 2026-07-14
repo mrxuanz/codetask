@@ -2,7 +2,16 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, statSync, statfsSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
-import { validateJobInvariant } from '../../src/server/domain/jobs/job-invariants'
+import {
+  validateJobInvariant,
+  type ActiveRunSummary
+} from '../../src/server/domain/jobs/job-invariants'
+import type { JobAggregate } from '@shared/contracts/control-plane'
+import {
+  parseControlIntent,
+  parseJobState,
+  parseResumeTarget
+} from '../../src/server/infra/sqlite/control-plane/parsers'
 import { resolveAppCommit } from './app-commit'
 import {
   buildMigrationCopyReport,
@@ -37,7 +46,7 @@ export interface DatabasePreflightResult {
   readonly dbPath: string
   readonly databaseIdentity?: { readonly absolutePath: string; readonly sha256: string }
   readonly userVersion?: number
-  readonly schemaGeneration?: string
+  readonly schemaGeneration?: string | undefined
   readonly integrityCheck?: string
   readonly foreignKeyViolations?: number
   readonly activeChildren?: number
@@ -494,52 +503,65 @@ export function runMigrationInvariantSummary(db: Sqlite): MigrationInvariantSumm
   if (tableExists(db, 'control_jobs')) {
     const jobs = db
       .prepare(
-        `SELECT id, state, control_intent, resume_target, execution_generation, active_run_id
+        `SELECT id, thread_id, project_id, state, state_revision, control_intent, resume_target,
+                current_plan_revision, execution_generation, active_run_id, last_failure_id
          FROM control_jobs ORDER BY id`
       )
       .all() as Array<{
       id: string
+      thread_id: string
+      project_id: string
       state: string
+      state_revision: number
       control_intent: string
       resume_target: string | null
+      current_plan_revision: number | null
       execution_generation: number
       active_run_id: string | null
+      last_failure_id: string | null
     }>
     for (const job of jobs) {
-      let activeRun = null
+      let activeRun: ActiveRunSummary | null = null
       if (job.active_run_id && tableExists(db, 'control_job_runs')) {
-        activeRun = db
+        const runRow = db
           .prepare(
             `SELECT id, state, fence_token, execution_generation, current_runtime_instance_id
              FROM control_job_runs WHERE id = ?`
           )
-          .get(job.active_run_id) as {
-          id: string
-          state: string
-          fence_token: string
-          execution_generation: number
-          current_runtime_instance_id: string | null
-        } | null
-      }
-      const violations = validateJobInvariant(
-        {
-          id: job.id,
-          state: job.state as never,
-          controlIntent: job.control_intent as never,
-          resumeTarget: job.resume_target as never,
-          executionGeneration: job.execution_generation,
-          activeRunId: job.active_run_id
-        },
-        activeRun
-          ? {
-              id: activeRun.id,
-              state: activeRun.state,
-              fenceToken: activeRun.fence_token,
-              executionGeneration: activeRun.execution_generation,
-              currentRuntimeInstanceId: activeRun.current_runtime_instance_id
+          .get(job.active_run_id) as
+          | {
+              id: string
+              state: string
+              fence_token: string
+              execution_generation: number
+              current_runtime_instance_id: string | null
             }
-          : null
-      )
+          | undefined
+        if (runRow) {
+          activeRun = {
+            id: runRow.id,
+            state: runRow.state,
+            fenceToken: runRow.fence_token,
+            executionGeneration: runRow.execution_generation,
+            currentRuntimeInstanceId: runRow.current_runtime_instance_id
+          }
+        }
+      }
+      const aggregate: JobAggregate = {
+        id: job.id,
+        threadId: job.thread_id,
+        projectId: job.project_id,
+        state: parseJobState(job.state),
+        stateRevision: job.state_revision,
+        controlIntent: parseControlIntent(job.control_intent),
+        resumeTarget:
+          job.resume_target === null ? null : parseResumeTarget(job.resume_target),
+        currentPlanRevision: job.current_plan_revision,
+        executionGeneration: job.execution_generation,
+        activeRunId: job.active_run_id,
+        lastFailureId: job.last_failure_id
+      }
+      const violations = validateJobInvariant(aggregate, activeRun)
       for (const violation of violations) {
         invariantViolations.push({ jobId: job.id, code: violation.code })
       }

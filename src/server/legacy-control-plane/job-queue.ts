@@ -54,18 +54,11 @@ export async function resumeJobQueueForUser(username: string): Promise<void> {
 export async function resumeJobQueuesAfterServerReady(supervisor?: {
   ensureReady(): Promise<void>
 }): Promise<void> {
-  try {
-    await ensureStartupWorkloadReady()
-  } catch (error) {
-    console.warn('[jobs] startup workload gate failed; queue resume skipped', error)
-    return
-  }
+  // FIX-PLAN F3-C (§8.5): fail closed — do not swallow readiness errors. The caller runs this
+  // BEFORE HTTP listen, so a rejection prevents claiming the runtime is ready.
+  await ensureStartupWorkloadReady()
   if (supervisor) {
-    try {
-      await supervisor.ensureReady()
-    } catch (error) {
-      console.warn('[jobs] sandbox not ready for queue resume', error)
-    }
+    await supervisor.ensureReady()
   }
   await resumeJobQueuesOnStartupOnce()
 }
@@ -93,12 +86,23 @@ export async function resumeJobQueuesOnStartup(): Promise<void> {
     ...runningRows.map((row) => row.username)
   ])
 
+  // FIX-PLAN F3-C (§8.5): aggregate per-user failures into a startup failure instead of printing
+  // and permanently skipping the user.
+  const failures: Array<{ username: string; error: unknown }> = []
   for (const username of usernames) {
     try {
       await resumeJobQueueForUser(username)
     } catch (error) {
       console.warn('[jobs] startup queue resume failed', username, error)
+      failures.push({ username, error })
     }
+  }
+
+  if (failures.length > 0) {
+    const detail = failures
+      .map(({ username, error }) => `${username}: ${error instanceof Error ? error.message : String(error)}`)
+      .join('; ')
+    throw new Error(`Startup queue resume failed for ${failures.length} user(s): ${detail}`)
   }
 
   if (usernames.size > 0) {
@@ -108,10 +112,23 @@ export async function resumeJobQueuesOnStartup(): Promise<void> {
 
 let startupQueueResumed = false
 
+/**
+ * FIX-PLAN F3-C (§8.5): `startupQueueResumed` flips to true only after a fully successful resume.
+ * On failure it stays false so startup can be retried (fail closed, no permanent skip).
+ */
 export async function resumeJobQueuesOnStartupOnce(): Promise<void> {
   if (startupQueueResumed) return
-  startupQueueResumed = true
-  await resumeJobQueuesOnStartup()
+  try {
+    await resumeJobQueuesOnStartup()
+    startupQueueResumed = true
+  } catch (error) {
+    startupQueueResumed = false
+    throw error
+  }
+}
+
+export function isStartupQueueResumed(): boolean {
+  return startupQueueResumed
 }
 
 export function resetJobQueueStartupForTests(): void {

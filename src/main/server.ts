@@ -30,6 +30,36 @@ function formatUrl(host: string, port: number): string {
   return `http://${displayHost}:${port}`
 }
 
+/**
+ * FIX-PLAN F3-C (§8.5): confirm the sandbox/provider is executable with bounded backoff retry.
+ * Throws (fail closed) if it never becomes ready, so we never claim the runtime is ready.
+ */
+async function confirmSandboxReadyOrThrow(supervisor: {
+  ensureReady(): Promise<void>
+}): Promise<void> {
+  const maxAttempts = Math.max(1, Number(process.env.CODETASK_SANDBOX_READY_MAX_ATTEMPTS ?? 5))
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await supervisor.ensureReady()
+      console.log('[sandbox] supervisor ready')
+      return
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      const delayMs = 500 * attempt
+      console.warn(
+        `[sandbox] not ready (attempt ${attempt}/${maxAttempts}): ${message}; retrying in ${delayMs}ms`
+      )
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      }
+    }
+  }
+  const message = lastError instanceof Error ? lastError.message : String(lastError)
+  throw new Error(`Sandbox/provider unavailable after ${maxAttempts} attempts: ${message}`)
+}
+
 function isAddressInUse(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -84,17 +114,25 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`[sandbox] supervisor restart failed permanently: ${message}`)
   })
-  void supervisor.ensureReady().then(
-    () => console.log('[sandbox] supervisor ready'),
-    (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`[sandbox] supervisor lazy start deferred: ${message}`)
-    }
-  )
 
   const ctx = bootstrapRuntime({ dataDir, mode: cli.mode })
-  // Scheduler, outbox, and reconciliation must finish before HTTP bind/listen.
+  process.env.CODETASK_MODE = cli.mode
+  // FIX-PLAN F3-C (§8.5): full recovery must complete BEFORE HTTP bind/listen:
+  //   open DB/migrate → select Legacy root → init sandbox/provider (confirm executable) →
+  //   reclaim stale run/slot/lease → running attempt → interrupted → resume last running Job →
+  //   advance pending FIFO → start reconciler → (only then) listen.
+  // ensureRuntimeReady runs reclaim + interrupt-attempts + reconcile and starts the reconciler.
   await ensureRuntimeReady(ctx)
+
+  if (ctx.applicationRuntime?.kind !== 'v3') {
+    // Confirm sandbox/provider is executable (bounded retry) before claiming readiness — fail
+    // closed if it never becomes ready, preserving DB state for a later retry.
+    await confirmSandboxReadyOrThrow(supervisor)
+    // Reclaim + resume running + advance pending FIFO. Fails closed on any user/job error.
+    await import('../server/legacy-control-plane/job-queue').then((module) =>
+      module.resumeJobQueuesAfterServerReady(supervisor)
+    )
+  }
 
   if (cli.mode === 'server') {
     const { getBootstrap } = await import('../server/auth/service')
@@ -133,14 +171,6 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
       boundPort = port
       bindChanged = cli.port !== port
       initConversationMcpBackend(port)
-      if (ctx.applicationRuntime?.kind !== 'v3') {
-        void import('../server/legacy-control-plane/job-queue')
-          .then((module) => module.resumeJobQueuesAfterServerReady(supervisor))
-          .catch((error: unknown) => {
-            const message = error instanceof Error ? error.message : String(error)
-            console.warn(`[jobs] queue resume deferred: ${message}`)
-          })
-      }
       break
     } catch (error) {
       if (!isAddressInUse(error)) throw error

@@ -7,14 +7,15 @@ import { getOrCreateAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
 import { SafeLoggerImpl } from './application/safe-logger'
 import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
+import { StartupError } from './application/startup-error'
 import { readSchemaGeneration } from './application/cutover-state'
 import {
-  createV3ApplicationRuntime,
   startApplicationRuntime,
   shutdownApplicationRuntime,
   resetApplicationRuntimeForTests
 } from './application/application-runtime'
 import { getApplicationStartup } from './application/application-runtime'
+import type { StartupCoordinator } from './application/startup-coordinator'
 
 export type { AppContext } from './context'
 
@@ -49,7 +50,7 @@ export function getAppContext(): AppContext {
   return appContext
 }
 
-export function getStartupCoordinator() {
+export function getStartupCoordinator(): StartupCoordinator | null {
   if (!appContext?.applicationRuntime) {
     return null
   }
@@ -87,36 +88,37 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   }
   process.env.CODETASK_DATA_DIR = options.dataDir
 
-  appContext.applicationRuntime =
-    schemaRead === 'v3_authoritative' ? createV3ApplicationRuntime(appContext) : null
+  // FIX-PLAN F1: production refuses V3 until cutover gate is complete. preparing/copied/legacy
+  // use Legacy Composition Root only (created lazily in startApplicationRuntime).
+  if (schemaRead === 'v3_authoritative') {
+    throw new StartupError('control_plane.v3_not_release_ready')
+  }
 
   startRetentionJanitor()
   startAuthJanitor()
 
-  if (schemaRead !== 'v3_authoritative') {
-    void runRetentionJanitorPass()
-      .then((result) => {
-        if (
-          result.expiredArtifacts > 0 ||
-          result.orphanAttachments > 0 ||
-          result.staleRuntimes > 0 ||
-          result.orphanDesignArtifacts > 0 ||
-          result.staleAttachmentDirs > 0 ||
-          result.orphanRuntimeTrees > 0 ||
-          result.sqliteMaintenance.ran
-        ) {
-          bootstrapLogger.info('retention startup janitor pass', {
-            expiredArtifacts: result.expiredArtifacts,
-            orphanAttachments: result.orphanAttachments
-          })
-        }
-      })
-      .catch((error: unknown) => {
-        bootstrapLogger.warn('retention startup janitor failed', {
-          error: error instanceof Error ? error.message : String(error)
+  void runRetentionJanitorPass()
+    .then((result) => {
+      if (
+        result.expiredArtifacts > 0 ||
+        result.orphanAttachments > 0 ||
+        result.staleRuntimes > 0 ||
+        result.orphanDesignArtifacts > 0 ||
+        result.staleAttachmentDirs > 0 ||
+        result.orphanRuntimeTrees > 0 ||
+        result.sqliteMaintenance.ran
+      ) {
+        bootstrapLogger.info('retention startup janitor pass', {
+          expiredArtifacts: result.expiredArtifacts,
+          orphanAttachments: result.orphanAttachments
         })
+      }
+    })
+    .catch((error: unknown) => {
+      bootstrapLogger.warn('retention startup janitor failed', {
+        error: error instanceof Error ? error.message : String(error)
       })
-  }
+    })
 
   return appContext
 }

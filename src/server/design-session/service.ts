@@ -7,7 +7,7 @@ import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
 import { loadJobAbilities, loadJobPlan, saveJobPlanInTx } from '../db/job-plan'
 import { saveTaskProgressInTx } from '../db/job-progress'
-import { designRuns, threadJobs, threads, type ThreadJob } from '../db/schema'
+import { designRuns, threadJobs, threadMessages, threads, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultTaskProgress } from '../planner/save-plan'
@@ -255,8 +255,8 @@ export async function finishPlannerRun(
   runId: string,
   input: {
     status: 'completed' | 'failed' | 'cancelled'
-    planRevisionAfter?: number
-    error?: string
+    planRevisionAfter?: number | undefined
+    error?: string | undefined
   }
 ): Promise<void> {
   const db = getDb()
@@ -287,6 +287,16 @@ export async function launchJobFromDesignSession(
 ): Promise<ThreadJobDto> {
   const { ensureStartupWorkloadReady } = await import('../legacy-control-plane/workload-slot')
   await ensureStartupWorkloadReady()
+
+  // FIX-PLAN F3-C (§8.4): reject new execution-tree confirms while draining for shutdown.
+  const { isDraining } = await import('../legacy-control-plane/shutdown-state')
+  if (isDraining()) {
+    throw AppError.conflict(
+      'Runtime is shutting down; cannot confirm execution tree',
+      undefined,
+      'runtime.draining'
+    )
+  }
 
   const db = getDb()
   const sessionRows = await db
@@ -344,6 +354,29 @@ export async function launchJobFromDesignSession(
   }
   const taskProgress = defaultTaskProgress(snapshot.executionPlan.tasks)
 
+  // F2 (§7.1): the draft message's linkedPlanId MUST be frozen in the SAME
+  // transaction that makes the job executable. Prepare the payload columns
+  // (async: strips asset tokens / externalizes) BEFORE opening the synchronous
+  // transaction, then apply them atomically inside it.
+  const { prepareMessagePayloadColumns, getMessage } = await import('../conversation/messages')
+  const draftMessage = await getMessage(username, threadId, session.draftMessageId, {
+    signAssets: false
+  })
+  let draftPayloadColumns:
+    | { payloadJson: string | null; payloadArtifactId: string | null }
+    | null = null
+  if (draftMessage?.payload) {
+    const payload = draftMessage.payload as Record<string, unknown>
+    draftPayloadColumns = await prepareMessagePayloadColumns(session.draftMessageId, {
+      ...payload,
+      linkedPlanId: designSessionId,
+      designSessionId
+    })
+  }
+
+  // Single atomic confirm boundary: freeze snapshot revisions, flip the job to
+  // pending, write planConfirmedAt, clear old errors AND old lease, persist task
+  // progress, link the draft message payload, and mark the thread's active plan.
   db.transaction(() => {
     const planCounts = {
       milestones: planProgress.milestones,
@@ -369,6 +402,10 @@ export async function launchJobFromDesignSession(
         snapshotPlanRevision: snapshot.planRevision,
         snapshotManifestRevision: snapshot.manifestRevision,
         lastError: null,
+        // Clear any stale lease from a previous run so recovery/claim starts clean.
+        executionLeaseOwner: null,
+        executionLeaseExpiresAt: null,
+        activeRunId: null,
         updatedAt: confirmedAt
       })
       .where(eq(threadJobs.id, designSessionId))
@@ -376,24 +413,27 @@ export async function launchJobFromDesignSession(
 
     saveTaskProgressInTx(db, designSessionId, taskProgress, eq(threadJobs.id, designSessionId))
 
+    if (draftPayloadColumns) {
+      db.update(threadMessages)
+        .set({
+          payloadJson: draftPayloadColumns.payloadJson,
+          payloadArtifactId: draftPayloadColumns.payloadArtifactId
+        })
+        .where(
+          and(
+            eq(threadMessages.id, session.draftMessageId),
+            eq(threadMessages.threadId, threadId),
+            eq(threadMessages.username, username)
+          )
+        )
+        .run()
+    }
+
     db.update(threads)
       .set({ activePlanId: designSessionId, updatedAt: confirmedAt })
       .where(and(eq(threads.id, threadId), eq(threads.username, username)))
       .run()
   })
-
-  const { updateMessagePayload, getMessage } = await import('../conversation/messages')
-  const draftMessage = await getMessage(username, threadId, session.draftMessageId, {
-    signAssets: false
-  })
-  if (draftMessage?.payload) {
-    const payload = draftMessage.payload as Record<string, unknown>
-    await updateMessagePayload(username, threadId, session.draftMessageId, {
-      ...payload,
-      linkedPlanId: designSessionId,
-      designSessionId
-    })
-  }
 
   const jobRows = db
     .select()
@@ -407,8 +447,28 @@ export async function launchJobFromDesignSession(
   emitJobEvent(designSessionId, { event: 'task_progress', data: { taskProgress } })
   emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job } })
 
+  // F2 (§7.1): queue advance happens strictly AFTER commit. If it fails the job
+  // stays pending for the reconciler / next startup to pick up — never roll back
+  // a committed confirmation.
   if (!options?.skipQueueAdvance) {
-    await advanceWorkloadQueue(username)
+    try {
+      await advanceWorkloadQueue(username)
+    } catch (error) {
+      console.warn(
+        '[design-session] advance queue after confirm failed; job stays pending',
+        designSessionId,
+        error
+      )
+    }
+    const latestRows = db
+      .select()
+      .from(threadJobs)
+      .where(eq(threadJobs.id, designSessionId))
+      .limit(1)
+      .all()
+    if (latestRows[0]) {
+      return mapJob(latestRows[0], { includePlan: true })
+    }
   }
   return job
 }

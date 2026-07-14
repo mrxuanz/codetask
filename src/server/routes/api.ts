@@ -5,6 +5,8 @@ import { code, toErrorHttpResult } from '../error'
 import { fail, ok } from '../response'
 import { requireAuth } from '../middleware/require-auth'
 import { requestGuard } from '../middleware/request-guard'
+import { bodySizeLimit } from '../middleware/body-limiter'
+import { requestTimeout } from '../middleware/http-limits'
 import { createAuthRoutes } from './auth'
 import { createAgentRoutes, createThreadAgentRoutes } from './conversation'
 import { createAttachmentRoutes } from './attachments'
@@ -18,6 +20,7 @@ import { createSettingsRoutes } from './settings'
 import { createSystemRoutes } from './system'
 import { createEventsRoutes } from './events'
 import { createProjectThreadRoutes, createThreadRoutes } from './threads'
+import { isV3Authoritative } from '../application/cutover-state'
 import { mountV3Routes } from '../http/v3/mount'
 
 export function createApiRoutes(ctx: AppContext): Hono {
@@ -25,6 +28,8 @@ export function createApiRoutes(ctx: AppContext): Hono {
 
   api.use('*', requireAuth())
   api.use('*', requestGuard(ctx.security))
+  api.use('*', requestTimeout())
+  api.use('*', bodySizeLimit())
 
   api.get('/health', (c) => {
     return c.json(ok({ status: 'ok' }))
@@ -47,7 +52,12 @@ export function createApiRoutes(ctx: AppContext): Hono {
   api.route('/threads', createDesignSessionRoutes(ctx))
   api.route('/jobs', createUserJobRoutes(ctx))
   api.route('/drafts', createDraftListRoutes(ctx))
-  api.route('/v3', mountV3Routes(ctx))
+
+  // V3 Job API only when process generation is authoritative. Legacy roots must not
+  // initialize control-plane services (FIX-PLAN F0/F1).
+  if (isV3Authoritative(ctx.db)) {
+    api.route('/v3', mountV3Routes(ctx))
+  }
 
   api.onError((error, c) => {
     console.error('[api] unhandled error:', error)

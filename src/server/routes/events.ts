@@ -8,6 +8,7 @@ import { ok } from '../response'
 import { registerJobHubConnection } from '../events/job-event-hub'
 import { getUserJob } from '../legacy-control-plane/service'
 import { getThread } from '../threads/service'
+import { assertSseClientCapacity } from '../middleware/http-limits'
 import {
   jobIdFromTopic,
   parseHubTopic,
@@ -105,6 +106,8 @@ async function handleStream(c: Context): Promise<Response> {
   const lastRaw = c.req.header('Last-Event-ID') ?? c.req.query('lastEventId')
   const parsedLast = lastRaw ? Number.parseInt(lastRaw, 10) : NaN
   const lastEventId = Number.isFinite(parsedLast) ? parsedLast : null
+
+  assertSseClientCapacity(activeHubs.keys(), username)
 
   const hub = registerJobHubConnection(username, connectionId, { lastEventId })
   const key = hubKey(username, hub.connectionId)

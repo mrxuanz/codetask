@@ -13,10 +13,10 @@ export async function storeTaskEvidenceArtifact(input: {
   taskId: string
   evidence: TaskEvidenceDto
   dataDir: string
-  settings?: RetentionSettings
-  db?: ReturnType<typeof getDb>
-  expiresAt?: number | null
-  replaceExisting?: boolean
+  settings?: RetentionSettings | undefined
+  db?: ReturnType<typeof getDb> | undefined
+  expiresAt?: number | null | undefined
+  replaceExisting?: boolean | undefined
 }): Promise<{ artifactId: string; slim: TaskEvidenceDto }> {
   const settings = input.settings ?? DEFAULT_RETENTION_SETTINGS
   const db = input.db ?? getDb()
@@ -41,10 +41,10 @@ export async function storeSliceVerdictArtifact(input: {
   sliceId: string
   verdict: SliceVerificationRecordDto
   dataDir: string
-  settings?: RetentionSettings
-  db?: ReturnType<typeof getDb>
-  expiresAt?: number | null
-  replaceExisting?: boolean
+  settings?: RetentionSettings | undefined
+  db?: ReturnType<typeof getDb> | undefined
+  expiresAt?: number | null | undefined
+  replaceExisting?: boolean | undefined
 }): Promise<{ artifactId: string; slim: SliceVerificationRecordDto }> {
   const artifactId = await putJobArtifact({
     db: input.db ?? getDb(),

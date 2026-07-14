@@ -76,8 +76,8 @@ export interface SandboxEvidence {
   backend: SandboxBackend
   policySha256: string
   sandboxPid: number
-  effectiveReadRootsHash?: string
-  effectiveWriteRootsHash?: string
+  effectiveReadRootsHash?: string | undefined
+  effectiveWriteRootsHash?: string | undefined
   warnings: string[]
 }
 
@@ -85,8 +85,8 @@ export interface SandboxBootstrapInfo {
   required: boolean
   ready: boolean
   platform: NodeJS.Platform
-  backend?: SandboxBackend
-  error?: string
+  backend?: SandboxBackend | undefined
+  error?: string | undefined
 }
 
 export class SandboxError extends Error {
@@ -120,11 +120,11 @@ export interface CodeteamSandboxNative {
     command: string
     args: string[]
     cwd: string
-    env?: Array<{ key: string; value: string }>
+    env?: Array<{ key: string; value: string }> | undefined
 
-    readRoots?: string[]
+    readRoots?: string[] | undefined
 
-    writeRoots?: string[]
+    writeRoots?: string[] | undefined
   }): {
     get pid(): number
     get evidence(): {

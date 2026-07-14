@@ -97,17 +97,17 @@ export async function connectControlPlaneEventsStream(
     import('./sse')
   ])
 
-  const headers: Record<string, string> = {
+  const headers: HeadersInit = {
     Accept: 'text/event-stream',
-    ...authHeaders()
-  }
-  if (options?.lastEventId != null && options.lastEventId > 0) {
-    headers['Last-Event-ID'] = String(options.lastEventId)
+    ...authHeaders(),
+    ...(options?.lastEventId != null && options.lastEventId > 0
+      ? { 'Last-Event-ID': String(options.lastEventId) }
+      : {})
   }
 
   const res = await fetch('/api/v3/events', {
     headers,
-    signal: options?.signal
+    ...(options?.signal !== undefined ? { signal: options.signal } : {})
   })
 
   await throwIfNotSseResponse(res)

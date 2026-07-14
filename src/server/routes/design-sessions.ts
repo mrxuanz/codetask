@@ -3,6 +3,7 @@ import type { AppContext } from '../context'
 import { requireUsername } from '../auth/session'
 import { AppError } from '../error'
 import { ok } from '../response'
+import { createLegacyCutoverGuard } from '../http/legacy-cutover-guard'
 import { bodySizeLimit } from '../middleware/body-limiter'
 import {
   MAX_MULTIPART_BODY_BYTES,
@@ -23,6 +24,7 @@ import {
 
 export function createDesignSessionRoutes(ctx: AppContext): Hono {
   const routes = new Hono()
+  const legacyWriteGuard = createLegacyCutoverGuard()
 
   routes.get('/:threadId/design-sessions/:sessionId/references', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
@@ -41,6 +43,7 @@ export function createDesignSessionRoutes(ctx: AppContext): Hono {
 
   routes.post(
     '/:threadId/design-sessions/:sessionId/references/attachment',
+    legacyWriteGuard,
     bodySizeLimit(MAX_MULTIPART_BODY_BYTES),
     async (c) => {
       const username = await requireUsername(c.req.header('Authorization'))
@@ -78,65 +81,81 @@ export function createDesignSessionRoutes(ctx: AppContext): Hono {
     }
   )
 
-  routes.post('/:threadId/design-sessions/:sessionId/references/local-corpus', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{
-      localPath?: string
-      name?: string
-      description?: string
-      kind?: 'file' | 'directory'
-    }>()
-    if (!body.localPath?.trim())
-      throw AppError.badRequest('localPath is required', 'draft.local_path_required')
-    if (!body.description?.trim())
-      throw AppError.badRequest('Description is required', 'draft.reference_description_missing')
+  routes.post(
+    '/:threadId/design-sessions/:sessionId/references/local-corpus',
+    legacyWriteGuard,
+    async (c) => {
+      const username = await requireUsername(c.req.header('Authorization'))
+      const body = await c.req.json<{
+        localPath?: string
+        name?: string
+        description?: string
+        kind?: 'file' | 'directory'
+      }>()
+      if (!body.localPath?.trim())
+        throw AppError.badRequest('localPath is required', 'draft.local_path_required')
+      if (!body.description?.trim())
+        throw AppError.badRequest('Description is required', 'draft.reference_description_missing')
 
-    const reference = await addLocalCorpusToCorpus({
-      username,
-      threadId: c.req.param('threadId'),
-      designSessionId: c.req.param('sessionId'),
-      localPath: body.localPath.trim(),
-      name: body.name?.trim() ?? '',
-      description: body.description.trim(),
-      kind: body.kind
-    })
-    return c.json(ok({ reference }))
-  })
+      const reference = await addLocalCorpusToCorpus({
+        username,
+        threadId: c.req.param('threadId'),
+        designSessionId: c.req.param('sessionId'),
+        localPath: body.localPath.trim(),
+        name: body.name?.trim() ?? '',
+        description: body.description.trim(),
+        ...(body.kind !== undefined ? { kind: body.kind } : {})
+      })
+      return c.json(ok({ reference }))
+    }
+  )
 
-  routes.patch('/:threadId/design-sessions/:sessionId/references/:refId', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{ description?: string; name?: string }>()
-    const reference = await updateCorpusItem({
-      username,
-      threadId: c.req.param('threadId'),
-      designSessionId: c.req.param('sessionId'),
-      refId: c.req.param('refId'),
-      description: body.description,
-      name: body.name
-    })
-    return c.json(ok({ reference }))
-  })
+  routes.patch(
+    '/:threadId/design-sessions/:sessionId/references/:refId',
+    legacyWriteGuard,
+    async (c) => {
+      const username = await requireUsername(c.req.header('Authorization'))
+      const body = await c.req.json<{ description?: string; name?: string }>()
+      const reference = await updateCorpusItem({
+        username,
+        threadId: c.req.param('threadId'),
+        designSessionId: c.req.param('sessionId'),
+        refId: c.req.param('refId'),
+        ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.name !== undefined ? { name: body.name } : {})
+      })
+      return c.json(ok({ reference }))
+    }
+  )
 
-  routes.delete('/:threadId/design-sessions/:sessionId/references/:refId', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    await removeCorpusItem({
-      username,
-      threadId: c.req.param('threadId'),
-      designSessionId: c.req.param('sessionId'),
-      refId: c.req.param('refId')
-    })
-    return c.json(ok({ removed: true }))
-  })
+  routes.delete(
+    '/:threadId/design-sessions/:sessionId/references/:refId',
+    legacyWriteGuard,
+    async (c) => {
+      const username = await requireUsername(c.req.header('Authorization'))
+      await removeCorpusItem({
+        username,
+        threadId: c.req.param('threadId'),
+        designSessionId: c.req.param('sessionId'),
+        refId: c.req.param('refId')
+      })
+      return c.json(ok({ removed: true }))
+    }
+  )
 
-  routes.post('/:threadId/design-sessions/:sessionId/references/freeze', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const manifest = await freezeReferenceCorpus({
-      username,
-      threadId: c.req.param('threadId'),
-      designSessionId: c.req.param('sessionId')
-    })
-    return c.json(ok({ manifest: toPublicReferenceManifest(manifest) }))
-  })
+  routes.post(
+    '/:threadId/design-sessions/:sessionId/references/freeze',
+    legacyWriteGuard,
+    async (c) => {
+      const username = await requireUsername(c.req.header('Authorization'))
+      const manifest = await freezeReferenceCorpus({
+        username,
+        threadId: c.req.param('threadId'),
+        designSessionId: c.req.param('sessionId')
+      })
+      return c.json(ok({ manifest: toPublicReferenceManifest(manifest) }))
+    }
+  )
 
   routes.get('/:threadId/design-sessions/:sessionId/reference-manifest', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
@@ -151,7 +170,7 @@ export function createDesignSessionRoutes(ctx: AppContext): Hono {
     return c.json(ok({ manifest: manifest ? toPublicReferenceManifest(manifest) : null }))
   })
 
-  routes.post('/:threadId/design-sessions/:sessionId/launch', async (c) => {
+  routes.post('/:threadId/design-sessions/:sessionId/launch', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const { launchJobFromDesignSession } = await import('../design-session/service')
     const job = await launchJobFromDesignSession(

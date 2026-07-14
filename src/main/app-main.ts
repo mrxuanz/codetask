@@ -6,6 +6,8 @@ import { parseCliArgs } from './cli'
 import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
 import { SafeLoggerImpl } from '../server/application/safe-logger'
 
+const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
+
 let logDir: string | undefined
 try {
   logDir = join(app.getPath('userData'), 'logs')
@@ -24,20 +26,53 @@ if (cli.mode === 'server') {
 
 let serverInfo: ServerInfo | null = null
 
+function isAllowedExternalUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl)
+    return ALLOWED_EXTERNAL_SCHEMES.has(parsed.protocol)
+  } catch {
+    return false
+  }
+}
+
+function isSameAppOrigin(navigationUrl: string, appOrigin: string): boolean {
+  try {
+    return new URL(navigationUrl).origin === appOrigin
+  } catch {
+    return false
+  }
+}
+
 function createWindow(serverUrl: string): void {
+  const appOrigin = new URL(serverUrl).origin
+
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
-    webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false }
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      sandbox: true
+    }
   })
-  mainWindow.on('ready-to-show', () => mainWindow.show())
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (isAllowedExternalUrl(details.url)) {
+      void shell.openExternal(details.url)
+    }
     return { action: 'deny' }
   })
+
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    if (!isSameAppOrigin(navigationUrl, appOrigin)) {
+      event.preventDefault()
+    }
+  })
+
+  mainWindow.on('ready-to-show', () => mainWindow.show())
   mainWindow.loadURL(serverUrl)
 }
 

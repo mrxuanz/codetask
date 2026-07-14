@@ -1,10 +1,10 @@
 export interface DraftReferenceLike {
   id: string
   name: string
-  mimeType?: string
-  kind?: 'image' | 'file' | 'directory'
-  description?: string
-  assetUrl?: string
+  mimeType?: string | undefined
+  kind?: 'image' | 'file' | 'directory' | undefined
+  description?: string | undefined
+  assetUrl?: string | undefined
 }
 
 const TEXT_LIKE_REFERENCE_EXTENSIONS = new Set([

@@ -14,6 +14,7 @@ import {
   type TurnError
 } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
+import { roleRequiresOuterSandbox } from '../roles'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
 import {
@@ -24,8 +25,10 @@ import {
 import { abortReason, createProviderTurnScope } from '../provider-turn'
 import {
   buildOpencodeAutoQuestionAnswers,
+  parseOpencodeQuestions,
   resolveOpencodePermissionConfig,
-  resolveOpencodeToolsConfig
+  resolveOpencodeToolsConfig,
+  type OpencodeQuestionDto
 } from './opencode-config'
 import {
   createOpencodeLongTurnFetch,
@@ -52,9 +55,9 @@ function buildOpencodeConfig(input: AgentTurnInput): Config {
   const mcp = Object.keys(mcpEntries).length > 0 ? (mcpEntries as Config['mcp']) : undefined
 
   return {
-    model: input.model,
     permission: resolveOpencodePermissionConfig(),
     tools: resolveOpencodeToolsConfig(),
+    ...(input.model !== undefined ? { model: input.model } : {}),
     ...(mcp ? { mcp } : {})
   }
 }
@@ -67,11 +70,7 @@ async function autoReplyOpencodeQuestion(
   client: OpencodeClient,
   cwd: string,
   requestID: string,
-  questions: ReadonlyArray<{
-    options?: Array<{ label?: string }>
-    multiple?: boolean
-    custom?: boolean
-  }>
+  questions: ReadonlyArray<OpencodeQuestionDto>
 ): Promise<void> {
   try {
     await client.question.reply({
@@ -202,8 +201,8 @@ async function startOpencodeServer(options: {
   cwd: string
   config: Config
   env: Record<string, string>
-  signal?: AbortSignal
-  timeoutMs?: number
+  signal?: AbortSignal | undefined
+  timeoutMs?: number | undefined
 }): Promise<OpencodeServerHandle> {
   const args = ['serve', `--hostname=${options.hostname}`, `--port=${options.port}`]
   if (options.config.logLevel) args.push(`--log-level=${options.config.logLevel}`)
@@ -259,7 +258,8 @@ async function startOpencodeServer(options: {
         const clean = stripAnsi(line).trim()
         if (!clean.startsWith('opencode server listening')) continue
         const match = clean.match(/on\s+(https?:\/\/[^\s]+)/)
-        if (!match) {
+        const matchedUrl = match?.[1]
+        if (!matchedUrl) {
           fail(
             formatServerStartFailure(
               `Unable to parse OpenCode server address: ${clean}`,
@@ -273,7 +273,7 @@ async function startOpencodeServer(options: {
         settled = true
         clearTimeout(timeout)
         clearAbort()
-        resolve(match[1])
+        resolve(matchedUrl)
         return
       }
     })
@@ -371,6 +371,11 @@ export async function* streamOpencodeTurn(
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
   const outerSandbox = options?.outerSandbox ?? false
+  if (!outerSandbox && roleRequiresOuterSandbox(input.role)) {
+    throw createTurnError('sandbox.required', {
+      detail: 'OpenCode requires OS outer sandbox'
+    })
+  }
   const { createOpencodeClient } = await import('@opencode-ai/sdk/v2/client')
   const config = buildOpencodeConfig(input)
   const env = outerSandbox
@@ -433,11 +438,11 @@ export async function* streamOpencodeTurn(
       {
         sessionID: sessionId,
         directory: input.cwd,
-        system: input.systemPrompt,
         // Per-prompt tools disable (session permission path). Still may be
         // ignored on older OpenCode builds — auto-reply remains the safety net.
         tools: resolveOpencodeToolsConfig(),
-        parts: [{ type: 'text', text: input.prompt }]
+        parts: [{ type: 'text', text: input.prompt }],
+        ...(input.systemPrompt !== undefined ? { system: input.systemPrompt } : {})
       },
       {
         signal: promptAbort.signal
@@ -495,7 +500,12 @@ export async function* streamOpencodeTurn(
           }
           const requestID = props.id ?? props.requestID
           if (requestID) {
-            void autoReplyOpencodeQuestion(client, input.cwd, requestID, props.questions ?? [])
+            void autoReplyOpencodeQuestion(
+              client,
+              input.cwd,
+              requestID,
+              parseOpencodeQuestions(props.questions)
+            )
           }
           turnScope.recordProgress('tool_updated')
           continue

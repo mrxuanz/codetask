@@ -20,6 +20,7 @@ import {
   THREAD_KIND_CHAT,
   THREAD_KIND_CREATE_TASK
 } from '../threads/types'
+import type { ThreadKind } from '../threads/types'
 import { ensureCoreAvailable, getAgentCore, listChatCores, type SupportedCoreCode } from './cores'
 import { buildConversationMcpUrl } from './mcp/url'
 import {
@@ -58,11 +59,38 @@ import type {
 } from './types'
 import { buildAttachmentReferenceMarkdown, resolveTurnAttachmentReadRoots } from './attachments'
 import { getAppContext } from '../bootstrap'
+import { assertConcurrentTurnCapacity } from '../middleware/http-limits'
 import { maybeSeedThreadTitleFromFirstMessage } from './thread-title'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initConversationService(_options: { dataDir: string }): void {
   getAppContext()
+}
+
+/**
+ * Server-side mode truth (FIX-PLAN §1.2). `threadKind` from the database is
+ * the only authority; client-supplied booleans (generateDraft, createTaskMode)
+ * are requests that must be validated against it, never trusted directly.
+ */
+export type ConversationMode =
+  | { kind: typeof THREAD_KIND_CHAT; generateDraft: false }
+  | { kind: typeof THREAD_KIND_CREATE_TASK; generateDraft: boolean }
+
+export function resolveConversationMode(input: {
+  threadKind: ThreadKind
+  requestedDraft: boolean
+}): ConversationMode {
+  if (input.threadKind === THREAD_KIND_CHAT && input.requestedDraft) {
+    throw AppError.conflict(
+      'Chat threads cannot start draft turns',
+      { threadKind: input.threadKind },
+      'conversation.mode_mismatch',
+      { threadKind: input.threadKind }
+    )
+  }
+  return input.threadKind === THREAD_KIND_CHAT
+    ? { kind: THREAD_KIND_CHAT, generateDraft: false }
+    : { kind: THREAD_KIND_CREATE_TASK, generateDraft: input.requestedDraft }
 }
 
 function isThreadInflight(threadId: string): boolean {
@@ -120,15 +148,16 @@ async function loadThreadProject(
   return { thread: toThreadDto(row), workspacePath: project.workspaceRoot }
 }
 
-function reserveThread(thread: ThreadDto): void {
+function reserveThread(thread: ThreadDto, username: string): void {
   const registry = getAppContext().runtimeRegistry
+  assertConcurrentTurnCapacity(registry.countInflightForUser(username))
   if (registry.isThreadInflight(thread.id)) {
     throw AppError.badRequest('Thread is busy; wait for the reply to finish', 'thread.busy')
   }
   if (thread.runtimeStatus === RUNTIME_STATUS_RUNNING) {
     throw AppError.badRequest('Thread is busy; wait for the reply to finish', 'thread.busy')
   }
-  registry.addInflightThread(thread.id)
+  registry.addInflightThread(thread.id, username)
 }
 
 function releaseThread(threadId: string): void {
@@ -196,6 +225,16 @@ export async function* streamSendMessage(
   const resolved = await loadThreadProject(username, threadId)
   let thread = resolved.thread
   const workspacePath = resolved.workspacePath
+  const { isThreadProjectDeletionBlocked } = await import(
+    '../legacy-control-plane/deletion-coordinator'
+  )
+  if (await isThreadProjectDeletionBlocked(threadId)) {
+    throw AppError.conflict(
+      'Project or thread is being deleted',
+      undefined,
+      'thread.deleting'
+    )
+  }
   const threadRow = await getThreadRow(username, threadId)
   if (!threadRow) throw AppError.notFound('Thread not found', 'thread.not_found')
   const threadKind = resolveThreadKind(threadRow)
@@ -214,9 +253,16 @@ export async function* streamSendMessage(
       { expected: 'chat', actual: threadKind }
     )
   }
+  // Server-side mode truth: threadKind alone decides whether a draft turn may
+  // start. Must run before turnRole is computed so a chat thread can never be
+  // coerced into a draft turn, regardless of what the client requests.
+  const conversationMode = resolveConversationMode({
+    threadKind,
+    requestedDraft: options?.generateDraft === true
+  })
   const wizardPhase = resolveWizardPhase(threadRow)
   thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
-  reserveThread(thread)
+  reserveThread(thread, username)
 
   try {
     const core = await ensureCoreAvailable(thread.coreCode).catch((error: Error) => {
@@ -240,6 +286,47 @@ export async function* streamSendMessage(
 
     yield { event: 'user_message', data: { message: userMessage } }
 
+    const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
+      '../legacy-control-plane/workspace-lease-store'
+    )
+    const workspaceLease = acquireWorkspaceLease({
+      workspacePath,
+      ownerKind: 'conversation',
+      ownerId: thread.id
+    })
+    if (!workspaceLease) {
+      const { findWorkspaceLeaseConflict } = await import(
+        '../legacy-control-plane/workspace-lease-store'
+      )
+      const occupant = findWorkspaceLeaseConflict(workspacePath, {
+        ownerKind: 'conversation',
+        ownerId: thread.id
+      })
+      throw AppError.conflict(
+        'Workspace is busy',
+        occupant
+          ? {
+              occupant: {
+                ownerKind: occupant.ownerKind,
+                ownerId: occupant.ownerId,
+                runId: occupant.runId
+              }
+            }
+          : undefined,
+        'workspace.busy'
+      )
+    }
+
+    const { enterWorkspaceLeaseContext } = await import(
+      '../legacy-control-plane/workspace-lease-context'
+    )
+    enterWorkspaceLeaseContext({
+      leaseId: workspaceLease.leaseId,
+      ownerKind: 'conversation',
+      ownerId: thread.id
+    })
+
+    try {
     if (!createTaskMode && threadKind === THREAD_KIND_CHAT) {
       try {
         const firstImage = turnAttachments.find((attachment) =>
@@ -292,7 +379,7 @@ export async function* streamSendMessage(
       core.code as SupportedCoreCode
     )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
-    const turnRole: ConversationTurnRole = options?.generateDraft ? 'draft' : 'chat'
+    const turnRole: ConversationTurnRole = conversationMode.generateDraft ? 'draft' : 'chat'
     const wizardStage: WizardPhase | null = createTaskMode ? wizardPhase : null
     const mcpWizardStage = wizardStage ?? 'general'
     const phaseRuntimeId = createTaskMode
@@ -561,6 +648,9 @@ export async function* streamSendMessage(
         thread,
         state: buildThreadState(thread, workspacePath, updatedCore, 0)
       }
+    }
+    } finally {
+      releaseWorkspaceLeaseForOwner('conversation', thread.id)
     }
   } catch (error) {
     const errMessage = formatSdkTurnError(error)
