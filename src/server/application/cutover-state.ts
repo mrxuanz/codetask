@@ -7,8 +7,11 @@
 import type Database from 'better-sqlite3'
 import type { AppDatabase } from '../db'
 import { getDb } from '../db'
+import { StartupError } from './startup-error'
 
 export type SchemaGeneration = 'preparing' | 'copied' | 'v3_authoritative'
+
+export type SchemaGenerationRead = SchemaGeneration | 'legacy_v26'
 
 export const CUTOVER_MARKER_KEY = 'control_schema_generation' as const
 
@@ -18,64 +21,90 @@ function getSqliteClient(db: AppDatabase): Database.Database | null {
   return (db as AppDatabase & { $client?: Database.Database }).$client ?? null
 }
 
-function controlSchemaMetaExists(client: Database.Database): boolean {
-  try {
-    const row = client
-      .prepare(
-        `SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'control_schema_meta'`
-      )
-      .get() as { ok: number } | undefined
-    return Boolean(row)
-  } catch {
-    return false
-  }
+function tableExists(client: Database.Database, table: string): boolean {
+  const row = client
+    .prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(table) as { ok: number } | undefined
+  return Boolean(row)
 }
 
-function parseGeneration(value: string | null | undefined): SchemaGeneration {
-  if (value === 'copied' || value === 'v3_authoritative' || value === 'preparing') {
+function readMigrationVersion(client: Database.Database): number {
+  if (!tableExists(client, 'schema_migrations')) {
+    return 0
+  }
+  const row = client.prepare(`SELECT MAX(version) AS version FROM schema_migrations`).get() as
+    | { version: number | null }
+    | undefined
+  return row?.version ?? 0
+}
+
+function parseSchemaGeneration(value: string): SchemaGeneration {
+  if (value === 'preparing' || value === 'copied' || value === 'v3_authoritative') {
     return value
   }
-  return 'preparing'
+  throw new StartupError('schema.marker_invalid')
 }
 
-/** Test-only override. Pass null to clear (falls back to DB / preparing). */
+/** Test-only override. Pass null to clear (falls back to strict DB read). */
 export function setCutoverMarkerForTests(value: SchemaGeneration | null): void {
   inMemoryOverride = value
 }
 
 /**
- * Resolve cutover generation: in-memory override → DB meta → preparing.
- * Safe on legacy-only DBs (missing table → preparing).
- * When `db` is omitted, tries getDb() if initialized.
+ * Strict marker read — fail closed. Never returns `preparing` as a soft default.
+ * `legacy_v26` only when control schema meta is absent and migration version <= 26.
+ */
+export function readSchemaGeneration(db: AppDatabase): SchemaGenerationRead {
+  if (inMemoryOverride !== null) {
+    return inMemoryOverride
+  }
+
+  const client = getSqliteClient(db)
+  if (!client) {
+    throw new StartupError('schema.db_unavailable')
+  }
+
+  const hasMeta = tableExists(client, 'control_schema_meta')
+  if (!hasMeta) {
+    const migrationVersion = readMigrationVersion(client)
+    if (migrationVersion <= 26) {
+      return 'legacy_v26'
+    }
+    throw new StartupError('schema.marker_table_missing')
+  }
+
+  const rows = client
+    .prepare(`SELECT value FROM control_schema_meta WHERE key = ?`)
+    .all(CUTOVER_MARKER_KEY) as Array<{ value: string }>
+
+  if (rows.length !== 1) {
+    throw new StartupError('schema.marker_invalid')
+  }
+
+  return parseSchemaGeneration(rows[0].value)
+}
+
+/**
+ * Resolve cutover generation for runtime gating. Maps `legacy_v26` → `preparing`.
+ * Prefer `readSchemaGeneration` at bootstrap for fail-closed routing.
  */
 export function getCutoverMarker(db?: AppDatabase | null): SchemaGeneration {
   if (inMemoryOverride !== null) {
     return inMemoryOverride
   }
 
-  let database = db ?? null
-  if (!database) {
-    try {
-      database = getDb()
-    } catch {
-      return 'preparing'
-    }
-  }
-
-  const client = getSqliteClient(database)
-  if (!client || !controlSchemaMetaExists(client)) {
+  const database = db ?? getDb()
+  const generation = readSchemaGeneration(database)
+  if (generation === 'legacy_v26') {
     return 'preparing'
   }
-  try {
-    const row = client
-      .prepare(`SELECT value FROM control_schema_meta WHERE key = ?`)
-      .get(CUTOVER_MARKER_KEY) as { value: string } | undefined
-    return parseGeneration(row?.value)
-  } catch {
-    return 'preparing'
-  }
+  return generation
 }
 
 export function isV3Authoritative(db?: AppDatabase | null): boolean {
-  return getCutoverMarker(db) === 'v3_authoritative'
+  if (inMemoryOverride !== null) {
+    return inMemoryOverride === 'v3_authoritative'
+  }
+  const database = db ?? getDb()
+  return readSchemaGeneration(database) === 'v3_authoritative'
 }

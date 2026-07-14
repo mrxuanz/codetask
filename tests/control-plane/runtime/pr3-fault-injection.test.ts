@@ -7,11 +7,10 @@ import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
-import { SqliteTaskRepository } from '../../../src/server/infra/sqlite/control-plane/task-repository'
-import { EvidenceRepository } from '../../../src/server/infra/sqlite/control-plane/evidence-repository'
+import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { JobCommandServiceImpl } from '../../../src/server/application/job-command-service'
 import { InternalExecutionCommandServiceImpl } from '../../../src/server/application/internal-execution-command-service'
-import { VerificationRepository } from '../../../src/server/infra/sqlite/control-plane/verification-repository'
+import { SqliteVerificationRepository } from '../../../src/server/infra/sqlite/control-plane/verification-repository'
 import { StartupReconciler } from '../../../src/server/application/startup-reconciler-impl'
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
@@ -85,10 +84,12 @@ function createServices(rawDb: Database.Database): {
   command: JobCommandServiceImpl
   internal: InternalExecutionCommandServiceImpl
   jobRepository: SqliteJobRepository
+  controlPlane: ReturnType<typeof createControlPlaneTransaction>
   runtimeStops: string[]
 } {
   const drizzleDb = drizzle(rawDb, { schema: controlPlaneSchema })
-  const jobRepository = new SqliteJobRepository(drizzleDb)
+  const controlPlane = createControlPlaneTransaction(drizzleDb)
+  const jobRepository = controlPlane.jobs
   const runtimeStops: string[] = []
   const runtimeController: RuntimeController = {
     notifyPauseRequested() {},
@@ -97,23 +98,19 @@ function createServices(rawDb: Database.Database): {
     }
   }
   const command = new JobCommandServiceImpl({
-    jobRepository,
-    taskRepository: new SqliteTaskRepository(drizzleDb),
-    evidenceRepository: new EvidenceRepository(drizzleDb),
+    unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     runtimeController
   })
   const internal = new InternalExecutionCommandServiceImpl({
-    jobRepository,
-    verificationRepository: new VerificationRepository(drizzleDb),
-    evidenceRepository: new EvidenceRepository(drizzleDb),
+    unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
     logger: { debug() {}, info() {}, warn() {}, error() {} }
   })
-  return { command, internal, jobRepository, runtimeStops }
+  return { command, internal, jobRepository, controlPlane, runtimeStops }
 }
 
 describe('C7 kill windows', () => {
@@ -126,9 +123,10 @@ describe('C7 kill windows', () => {
   it('pause before intent commit → crash settles recoverable failed (not paused)', async () => {
     seedJob(rawDb, { state: 'execution_running', activeRunId: 'run-1' })
     seedRun(rawDb, { state: 'interrupted' })
-    const { jobRepository } = createServices(rawDb)
+    const { jobRepository, controlPlane } = createServices(rawDb)
     const reconciler = new StartupReconciler(
       jobRepository,
+      controlPlane,
       { nowMs: () => Date.now() },
       { generate: () => 'f1' },
       new SafeLoggerImpl()
@@ -145,7 +143,7 @@ describe('C7 kill windows', () => {
       activeRunId: 'run-1'
     })
     seedRun(rawDb)
-    const { command, jobRepository } = createServices(rawDb)
+    const { command, jobRepository, controlPlane } = createServices(rawDb)
     await command.requestPause({
       actor: { username: 'u1', requestId: 'r1' },
       jobId: 'job-1',
@@ -161,6 +159,7 @@ describe('C7 kill windows', () => {
 
     const reconciler = new StartupReconciler(
       jobRepository,
+      controlPlane,
       { nowMs: () => Date.now() },
       { generate: () => 'f1' },
       new SafeLoggerImpl()
@@ -198,9 +197,10 @@ describe('C7 kill windows', () => {
       controlIntent: 'none'
     })
     seedRun(rawDb, { state: 'interrupted' })
-    const { jobRepository } = createServices(rawDb)
+    const { jobRepository, controlPlane } = createServices(rawDb)
     const reconciler = new StartupReconciler(
       jobRepository,
+      controlPlane,
       { nowMs: () => Date.now() },
       { generate: () => 'f1' },
       new SafeLoggerImpl()

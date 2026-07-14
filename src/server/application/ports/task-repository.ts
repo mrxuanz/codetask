@@ -31,21 +31,20 @@ export interface TaskAttemptRow {
   readonly endedAtMs: number | null
   readonly resultHash: string | null
   readonly resultRevision: number | null
-}
-
-export interface EvidenceBlob {
-  readonly hash: string
-  readonly content: string
+  readonly mustPauseAtCommit: boolean | null
 }
 
 export interface TaskRepository {
   getCurrentTask(jobId: string, generation: number, taskId: string): TaskRow | null
   listTasksForGeneration(jobId: string, generation: number): readonly TaskRow[]
-  updateTaskState(jobId: string, generation: number, taskId: string, expectedState: TaskState, nextState: TaskState): boolean
-  /**
-   * Creates the next execution-generation projection from the confirmed
-   * projection currently in use. Historical generations remain immutable.
-   */
+  updateTaskState(
+    jobId: string,
+    generation: number,
+    taskId: string,
+    expectedState: TaskState,
+    nextState: TaskState,
+    updatedAtMs: number
+  ): boolean
   cloneTasksToGeneration(
     jobId: string,
     sourceGeneration: number,
@@ -54,13 +53,25 @@ export interface TaskRepository {
   ): number
   getAttempt(attemptId: string): TaskAttemptRow | null
   getRunningAttempt(attemptId: string): TaskAttemptRow | null
+  getPendingAttemptForRun(runId: string): TaskAttemptRow | null
   finishAttempt(
     attemptId: string,
     resultHash: string,
     evidenceHash: string,
-    resultRevision: number
+    resultRevision: number,
+    endedAtMs: number,
+    mustPauseAtCommit?: boolean
   ): void
-  createAttempt(jobId: string, generation: number, taskId: string, runId: string): string
+  createAttempt(input: {
+    readonly id: string
+    readonly jobId: string
+    readonly generation: number
+    readonly taskId: string
+    readonly runId: string
+    readonly state: 'pending' | 'running' | 'starting'
+    readonly startedAtMs: number
+    readonly attemptNo?: number
+  }): void
   startAttempt(attemptId: string): boolean
   getTaskAttempts(jobId: string, generation: number, taskId: string): readonly TaskAttemptRow[]
 }

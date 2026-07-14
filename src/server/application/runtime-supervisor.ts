@@ -1,10 +1,11 @@
 import type { SafeLogger } from './ports/safe-logger'
+import type { TaskExecutionRegistry } from './task-execution-registry'
 
 export interface RuntimeHandle {
   readonly runtimeInstanceId: string
   readonly runId: string
   readonly closed: Promise<RuntimeExit>
-  requestStop(reason: string): void
+  requestStop(reason: string): Promise<void>
   hardKill(reason: string): Promise<void>
 }
 
@@ -18,7 +19,10 @@ export class RuntimeSupervisor {
   private handles = new Map<string, RuntimeHandle>()
   private closing = false
 
-  constructor(private readonly logger: SafeLogger) {}
+  constructor(
+    private readonly logger: SafeLogger,
+    private readonly taskExecutionRegistry?: TaskExecutionRegistry
+  ) {}
 
   register(handle: RuntimeHandle): void {
     this.handles.set(handle.runtimeInstanceId, handle)
@@ -42,6 +46,16 @@ export class RuntimeSupervisor {
       })
   }
 
+  observeClosed(
+    handle: RuntimeHandle,
+    onClosed: (exit: RuntimeExit) => Promise<void>
+  ): Promise<RuntimeExit> {
+    return handle.closed.then(async (exit) => {
+      await onClosed(exit)
+      return exit
+    })
+  }
+
   get(runtimeInstanceId: string): RuntimeHandle | undefined {
     return this.handles.get(runtimeInstanceId)
   }
@@ -53,8 +67,12 @@ export class RuntimeSupervisor {
     return undefined
   }
 
-  async waitForExternalOperation(_operationId: string, signal: AbortSignal): Promise<void> {
+  async waitForExternalOperation(operationId: string, signal: AbortSignal): Promise<void> {
     if (signal.aborted) return
+    if (this.taskExecutionRegistry !== undefined) {
+      await this.taskExecutionRegistry.waitFor(operationId, signal)
+      return
+    }
     await Promise.resolve()
   }
 

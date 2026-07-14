@@ -30,8 +30,6 @@ export interface ControlJobRunRow {
   readonly executionGeneration: number
   readonly leaseOwnerBootId: string | null
   readonly currentRuntimeInstanceId: string | null
-  readonly pendingAttemptId: string | null
-  readonly lifecycleOperationId: string | null
   readonly heartbeatAtMs: number | null
   readonly stopReason: string | null
   readonly startedAtMs: number
@@ -85,6 +83,7 @@ export interface ControlTaskAttemptRow {
   readonly endedAtMs: number | null
   readonly resultHash: string | null
   readonly resultRevision: number
+  readonly mustPauseAtCommit: number | null
 }
 
 export interface ControlVerificationRow {

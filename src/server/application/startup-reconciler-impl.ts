@@ -1,7 +1,9 @@
 import type { JobRepository, JobAggregateView } from './ports/job-repository'
+import type { ControlPlaneUnitOfWork } from './ports/unit-of-work'
 import type { SafeLogger } from './ports/safe-logger'
 import type { Clock } from './ports/clock'
 import type { IdGenerator } from './ports/id-generator'
+import type { RuntimeSupervisor } from './runtime-supervisor'
 import {
   decideStartupReconcile,
   type ReconcileDecision,
@@ -9,12 +11,16 @@ import {
   type InterruptionReason
 } from './startup-reconciler'
 
+const CURRENT_BOOT_ID = 'control-plane'
+
 export class StartupReconciler {
   constructor(
     private readonly jobRepository: JobRepository,
+    private readonly unitOfWork: ControlPlaneUnitOfWork,
     private readonly clock: Clock,
     private readonly idGenerator: IdGenerator,
-    private readonly logger: SafeLogger
+    private readonly logger: SafeLogger,
+    private readonly runtimeSupervisor?: RuntimeSupervisor
   ) {}
 
   async reconcileAll(): Promise<readonly ReconcileDecision[]> {
@@ -35,17 +41,43 @@ export class StartupReconciler {
       ? this.jobRepository.getActiveRunSummary(job.activeRunId)
       : null
 
+    const facts = this.unitOfWork.transaction((tx) => {
+      const runId = job.activeRunId
+      const hasActiveSlot =
+        runId !== null ? tx.slots.hasActiveSlotForRun(runId) : false
+      const activeRuntime =
+        runId !== null ? tx.runtimes.getActiveInstanceForRun(runId) : null
+      const hasRunningAttempt =
+        runId !== null ? tx.verifications.hasRunningVerificationForRun(runId) : false
+      const runtimeWasClosed =
+        runId !== null
+          ? activeRuntime === null && tx.runtimes.hasClosedInstanceForRun(runId)
+          : false
+
+      return {
+        hasActiveSlot,
+        hasRunningAttempt,
+        hasRegisteredRuntimeInstance:
+          (runId !== null && this.runtimeSupervisor?.getByRunId(runId) !== undefined) ||
+          activeRuntime !== null,
+        runBelongsToCurrentBoot:
+          activeRuntime !== null && activeRuntime.ownerBootId === CURRENT_BOOT_ID,
+        hasSupervisedLifecycleOperation: false,
+        runtimeWasClosed
+      }
+    })
+
     const input: ReconcileInput = {
       job,
       runIsStale: activeRun !== null && activeRun.state !== 'active',
       interruptionReason: 'process_crash' as InterruptionReason,
-      hasRunningAttempt: false,
-      hasLegacyActiveRuntime: false,
-      runBelongsToCurrentBoot: false,
-      hasActiveSlot: activeRun !== null,
-      hasRegisteredRuntimeInstance: false,
-      hasSupervisedLifecycleOperation: false,
-      runtimeWasClosed: false
+      hasRunningAttempt: facts.hasRunningAttempt,
+      hasLegacyActiveRuntime: facts.hasRegisteredRuntimeInstance,
+      runBelongsToCurrentBoot: facts.runBelongsToCurrentBoot,
+      hasActiveSlot: facts.hasActiveSlot,
+      hasRegisteredRuntimeInstance: facts.hasRegisteredRuntimeInstance,
+      hasSupervisedLifecycleOperation: facts.hasSupervisedLifecycleOperation,
+      runtimeWasClosed: facts.runtimeWasClosed
     }
 
     const decision = decideStartupReconcile(input)
@@ -78,8 +110,8 @@ export class StartupReconciler {
 
   private settlePaused(job: JobAggregateView, failureReason: string | null): void {
     const now = this.clock.nowMs()
-    this.jobRepository.transaction(() => {
-      const cas = this.jobRepository.compareAndSetJob({
+    this.unitOfWork.transaction((tx) => {
+      const cas = tx.jobs.compareAndSetJob({
         jobId: job.id,
         updatedAtMs: now,
         expectedRevision: job.stateRevision,
@@ -96,7 +128,7 @@ export class StartupReconciler {
       })
 
       if (cas.ok) {
-        this.jobRepository.appendOutbox({
+        tx.outbox.appendOutbox({
           topic: `job:${job.id}`,
           eventType: 'job.changed',
           entityId: job.id,
@@ -106,7 +138,7 @@ export class StartupReconciler {
         })
 
         if (failureReason) {
-          this.jobRepository.insertFailure({
+          tx.jobs.insertFailure({
             id: this.idGenerator.generate(),
             jobId: job.id,
             code: 'run.interrupted',
@@ -122,9 +154,9 @@ export class StartupReconciler {
 
   private settleInterruptedFailure(job: JobAggregateView, reason: InterruptionReason): void {
     const now = this.clock.nowMs()
-    this.jobRepository.transaction(() => {
+    this.unitOfWork.transaction((tx) => {
       const failureId = this.idGenerator.generate()
-      this.jobRepository.insertFailure({
+      tx.jobs.insertFailure({
         id: failureId,
         jobId: job.id,
         code: 'run.interrupted',
@@ -134,7 +166,7 @@ export class StartupReconciler {
         createdAtMs: now
       })
 
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = tx.jobs.compareAndSetJob({
         jobId: job.id,
         updatedAtMs: now,
         expectedRevision: job.stateRevision,
@@ -151,7 +183,7 @@ export class StartupReconciler {
       })
 
       if (cas.ok) {
-        this.jobRepository.appendOutbox({
+        tx.outbox.appendOutbox({
           topic: `job:${job.id}`,
           eventType: 'job.changed',
           entityId: job.id,
@@ -165,9 +197,9 @@ export class StartupReconciler {
 
   private settleRuntimeLost(job: JobAggregateView, reason: 'child_closed' | 'owner_missing'): void {
     const now = this.clock.nowMs()
-    this.jobRepository.transaction(() => {
+    this.unitOfWork.transaction((tx) => {
       const failureId = this.idGenerator.generate()
-      this.jobRepository.insertFailure({
+      tx.jobs.insertFailure({
         id: failureId,
         jobId: job.id,
         code: 'runtime.lost',
@@ -177,7 +209,7 @@ export class StartupReconciler {
         createdAtMs: now
       })
 
-      const cas = this.jobRepository.compareAndSetJob({
+      const cas = tx.jobs.compareAndSetJob({
         jobId: job.id,
         updatedAtMs: now,
         expectedRevision: job.stateRevision,
@@ -199,15 +231,16 @@ export class StartupReconciler {
       }
 
       if (job.activeRunId !== null) {
-        this.jobRepository.markRunState({
+        tx.runs.markRunState({
           runId: job.activeRunId,
           state: 'interrupted',
           stopReason: reason,
           updatedAtMs: now
         })
+        tx.slots.releaseSlot({ runId: job.activeRunId, releasedAtMs: now })
       }
 
-      this.jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,

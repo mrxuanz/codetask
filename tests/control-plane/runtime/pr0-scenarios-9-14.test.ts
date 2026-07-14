@@ -8,8 +8,7 @@ import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
-import { VerificationRepository } from '../../../src/server/infra/sqlite/control-plane/verification-repository'
-import { EvidenceRepository } from '../../../src/server/infra/sqlite/control-plane/evidence-repository'
+import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { InternalExecutionCommandServiceImpl } from '../../../src/server/application/internal-execution-command-service'
 import { JobEventHub } from '../../../src/server/application/job-event-hub'
 import { EventHub } from '../../../src/server/application/event-hub'
@@ -91,13 +90,10 @@ function createInternalService(rawDb: Database.Database): {
   jobRepository: SqliteJobRepository
 } {
   const drizzleDb = drizzle(rawDb, { schema: controlPlaneSchema })
-  const jobRepository = new SqliteJobRepository(drizzleDb)
-  const verificationRepository = new VerificationRepository(drizzleDb)
-  const evidenceRepository = new EvidenceRepository(drizzleDb)
+  const controlPlane = createControlPlaneTransaction(drizzleDb)
+  const jobRepository = controlPlane.jobs
   const service = new InternalExecutionCommandServiceImpl({
-    jobRepository,
-    verificationRepository,
-    evidenceRepository,
+    unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
     logger: { debug() {}, info() {}, warn() {}, error() {} }
@@ -215,12 +211,24 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
       const now = Date.now()
       rawDb
         .prepare(
+          `INSERT INTO control_plan_revisions (id, job_id, plan_revision, status, content_hash, created_at_ms)
+           VALUES ('plan-1', 'job-1', 1, 'confirmed', 'hash-1', ?)`
+        )
+        .run(now)
+      rawDb
+        .prepare(
+          `INSERT INTO control_evidence_blobs (hash, content_json, bytes, created_at_ms)
+           VALUES (?, ?, ?, ?)`
+        )
+        .run(hash, JSON.stringify(verdict), JSON.stringify(verdict).length, now)
+      rawDb
+        .prepare(
           `INSERT INTO control_verifications (
             id, job_id, execution_generation, plan_revision, scope_type, scope_id,
-            attempt_no, state, verdict_blob_hash, result_hash, started_at_ms, ended_at_ms
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            attempt_no, state, verdict_blob_hash, result_hash, result_revision, started_at_ms, ended_at_ms
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run('v-s1', 'job-1', 0, 1, 'slice', 's1', 1, 'passed', hash, hash, now, now)
+        .run('v-s1', 'job-1', 0, 1, 'slice', 's1', 1, 'passed', hash, hash, 1, now, now)
 
       rawDb
         .prepare(
@@ -449,12 +457,12 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
   })
 })
 
-describe('PR0 EventReducer gap helper', () => {
-  it('detects live event gap', () => {
+describe('PR0 EventReducer owner-safe cursor', () => {
+  it('accepts non-contiguous global event ids', () => {
     const reducer = new EventReducer()
-    let resync = false
-    reducer.setResyncCallback(() => {
-      resync = true
+    let handled = 0
+    reducer.registerHandler('job.changed', () => {
+      handled += 1
     })
     reducer.reduce({
       eventId: 1,
@@ -472,6 +480,7 @@ describe('PR0 EventReducer gap helper', () => {
       revision: 3,
       payload: {}
     })
-    assert.equal(resync, true)
+    assert.equal(handled, 2)
+    assert.equal(reducer.getLastEventId(), 3)
   })
 })

@@ -18,6 +18,7 @@ export interface ExecutionRunContext {
   readonly runId: string
   readonly fenceToken: string
   readonly executionGeneration: number
+  readonly abortSignal: AbortSignal
   expectedRevision: number
   workIdentity: string
 }

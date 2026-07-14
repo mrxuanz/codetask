@@ -7,6 +7,7 @@ import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
+import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
 function createTestDb(): Database.Database {
@@ -90,11 +91,13 @@ function seedRun(
 describe('JobRepository', () => {
   let rawDb: Database.Database
   let repo: SqliteJobRepository
+  let controlPlane: ReturnType<typeof createControlPlaneTransaction>
 
   beforeEach(() => {
     rawDb = createTestDb()
     const drizzleDb = drizzle(rawDb, { schema: controlPlaneSchema })
-    repo = new SqliteJobRepository(drizzleDb)
+    controlPlane = createControlPlaneTransaction(drizzleDb)
+    repo = controlPlane.jobs
   })
 
   describe('compareAndSetJob', () => {
@@ -374,7 +377,7 @@ describe('JobRepository', () => {
   describe('dedup', () => {
     it('should return stored result for same key and hash', () => {
       const now = Date.now()
-      repo.storeDedup({
+      controlPlane.dedup.storeDedup({
         actorUsername: 'alice',
         idempotencyKey: 'key-1',
         commandType: 'request_pause',
@@ -385,8 +388,9 @@ describe('JobRepository', () => {
         expiresAtMs: now + 60_000
       })
 
-      const result = repo.getDedup({
+      const result = controlPlane.dedup.getDedup({
         actorUsername: 'alice',
+        commandType: 'request_pause',
         idempotencyKey: 'key-1'
       })
 
@@ -398,8 +402,9 @@ describe('JobRepository', () => {
     })
 
     it('should return null for unknown key', () => {
-      const result = repo.getDedup({
+      const result = controlPlane.dedup.getDedup({
         actorUsername: 'alice',
+        commandType: 'request_pause',
         idempotencyKey: 'unknown-key'
       })
 
@@ -408,7 +413,7 @@ describe('JobRepository', () => {
 
     it('should detect key reuse with different hash', () => {
       const now = Date.now()
-      repo.storeDedup({
+      controlPlane.dedup.storeDedup({
         actorUsername: 'alice',
         idempotencyKey: 'key-1',
         commandType: 'request_pause',
@@ -419,8 +424,9 @@ describe('JobRepository', () => {
         expiresAtMs: now + 60_000
       })
 
-      const stored = repo.getDedup({
+      const stored = controlPlane.dedup.getDedup({
         actorUsername: 'alice',
+        commandType: 'request_pause',
         idempotencyKey: 'key-1'
       })
 
@@ -436,7 +442,7 @@ describe('JobRepository', () => {
       seedJob(rawDb, { id: 'job-1', username: 'owner-1' })
       seedJob(rawDb, { id: 'job-2', username: 'owner-2' })
 
-      repo.appendOutbox({
+      controlPlane.outbox.appendOutbox({
         topic: 'job:job-1',
         eventType: 'job.changed',
         entityId: 'job-1',
@@ -444,7 +450,7 @@ describe('JobRepository', () => {
         createdAtMs: Date.now(),
         payload: { type: 'job.changed', entityId: 'job-1', revision: 2, changed: ['state'] }
       })
-      repo.appendOutbox({
+      controlPlane.outbox.appendOutbox({
         topic: 'job:job-2',
         eventType: 'job.changed',
         entityId: 'job-2',
@@ -453,7 +459,7 @@ describe('JobRepository', () => {
         payload: { type: 'job.changed', entityId: 'job-2', revision: 2, changed: ['state'] }
       })
 
-      const visible = repo.listOwnedOutboxEvents({
+      const visible = controlPlane.outbox.listOwnedOutboxEvents({
         actor: { username: 'owner-1', requestId: 'r1' },
         afterEventId: 0,
         limit: 10
@@ -466,7 +472,7 @@ describe('JobRepository', () => {
       seedJob(rawDb, { id: 'job-1', username: 'owner-1' })
       seedJob(rawDb, { id: 'job-2', username: 'owner-2' })
 
-      repo.appendOutbox({
+      controlPlane.outbox.appendOutbox({
         topic: 'job:job-2',
         eventType: 'job.changed',
         entityId: 'job-2',
@@ -474,7 +480,7 @@ describe('JobRepository', () => {
         createdAtMs: Date.now(),
         payload: { type: 'job.changed', entityId: 'job-2', revision: 2, changed: ['state'] }
       })
-      repo.appendOutbox({
+      controlPlane.outbox.appendOutbox({
         topic: 'job:job-1',
         eventType: 'job.changed',
         entityId: 'job-1',
@@ -483,10 +489,10 @@ describe('JobRepository', () => {
         payload: { type: 'job.changed', entityId: 'job-1', revision: 2, changed: ['state'] }
       })
 
-      const latestOwner1 = repo.getOwnedOutboxLatestEventId({
+      const latestOwner1 = controlPlane.outbox.getOwnedOutboxLatestEventId({
         actor: { username: 'owner-1', requestId: 'r1' }
       })
-      const latestOwner2 = repo.getOwnedOutboxLatestEventId({
+      const latestOwner2 = controlPlane.outbox.getOwnedOutboxLatestEventId({
         actor: { username: 'owner-2', requestId: 'r2' }
       })
 
@@ -500,7 +506,7 @@ describe('JobRepository', () => {
       seedJob(rawDb, { id: 'job-1', state: 'execution_running', activeRunId: 'run-1' })
       seedRun(rawDb, { id: 'run-1', jobId: 'job-1' })
       const now = Date.now()
-      repo.createSlot({
+      controlPlane.slots.createSlot({
         id: randomUUID(),
         jobId: 'job-1',
         runId: 'run-1',
@@ -508,7 +514,7 @@ describe('JobRepository', () => {
         createdAtMs: now
       })
 
-      repo.releaseSlot({ runId: 'run-1', releasedAtMs: now })
+      controlPlane.slots.releaseSlot({ runId: 'run-1', releasedAtMs: now })
 
       const row = rawDb
         .prepare(`SELECT state, released_at_ms FROM control_resource_slots WHERE run_id = ?`)

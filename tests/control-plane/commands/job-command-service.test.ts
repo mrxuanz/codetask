@@ -6,9 +6,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
+import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
-import { SqliteTaskRepository } from '../../../src/server/infra/sqlite/control-plane/task-repository'
-import { EvidenceRepository } from '../../../src/server/infra/sqlite/control-plane/evidence-repository'
 import { JobCommandServiceImpl } from '../../../src/server/application/job-command-service'
 import {
   canonicalJson,
@@ -96,6 +95,22 @@ function seedRun(
   )
 }
 
+function seedEvidenceBlob(db: Database.Database, hash: string): void {
+  const content = JSON.stringify([hash])
+  db.prepare(
+    `INSERT INTO control_evidence_blobs (hash, content_json, bytes, created_at_ms)
+     VALUES (?, ?, ?, ?)`
+  ).run(hash, content, content.length, Date.now())
+}
+
+function seedPlanRevision(db: Database.Database, jobId = 'job-1', planRevision = 1): void {
+  const now = Date.now()
+  db.prepare(
+    `INSERT INTO control_plan_revisions (id, job_id, plan_revision, status, content_hash, created_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(`plan-${jobId}-${planRevision}`, jobId, planRevision, 'confirmed', 'hash-1', now)
+}
+
 function seedTaskAndAttempt(
   db: Database.Database,
   opts: { attemptId?: string; taskId?: string; runId?: string; state?: string } = {}
@@ -147,9 +162,7 @@ describe('JobCommandService', () => {
   beforeEach(() => {
     rawDb = createTestDb()
     const drizzleDb = drizzle(rawDb, { schema: controlPlaneSchema })
-    const jobRepository = new SqliteJobRepository(drizzleDb)
-    const taskRepository = new SqliteTaskRepository(drizzleDb)
-    const evidenceRepository = new EvidenceRepository(drizzleDb)
+    const controlPlane = createControlPlaneTransaction(drizzleDb)
     runtimeStops = []
     pauseNotifications = []
     const runtimeController: RuntimeController = {
@@ -161,9 +174,7 @@ describe('JobCommandService', () => {
       }
     }
     service = new JobCommandServiceImpl({
-      jobRepository,
-      taskRepository,
-      evidenceRepository,
+      unitOfWork: controlPlane,
       clock: { nowMs: () => 1_700_000_000_000 },
       idGenerator: { generate: () => randomUUID() },
       logger: {
@@ -217,9 +228,16 @@ describe('JobCommandService', () => {
         expectedRevision: 1,
         idempotencyKey: key
       })
+      rawDb
+        .prepare(
+          `UPDATE control_command_dedup
+           SET request_hash = ?
+           WHERE actor_username = ? AND command_type = ? AND idempotency_key = ?`
+        )
+        .run('tampered-hash', 'u1', 'request_pause', key)
       await assert.rejects(
         () =>
-          service.continueJob({
+          service.requestPause({
             actor: { username: 'u1', requestId: 'r2' },
             jobId: 'job-1',
             expectedRevision: 2,
@@ -474,6 +492,9 @@ describe('JobCommandService', () => {
       })
       seedRun(rawDb)
       seedTaskAndAttempt(rawDb)
+      seedPlanRevision(rawDb)
+      seedEvidenceBlob(rawDb, 'vh')
+      seedEvidenceBlob(rawDb, 'rh')
       rawDb
         .prepare(
           `INSERT INTO control_verifications (
@@ -518,6 +539,9 @@ describe('JobCommandService', () => {
         resumeTarget: 'execution_queued',
         executionGeneration: 3
       })
+      seedPlanRevision(rawDb)
+      seedEvidenceBlob(rawDb, 'verdict-hash')
+      seedEvidenceBlob(rawDb, 'result-hash')
       rawDb
         .prepare(
           `INSERT INTO control_verifications (
@@ -637,33 +661,17 @@ describe('JobCommandService', () => {
       })
       rawDb
         .prepare(
-          `INSERT INTO control_jobs (
-            id, thread_id, project_id, draft_message_id, state, state_revision,
-            control_intent, execution_generation, active_run_id, title, requirements_summary,
-            created_at_ms, updated_at_ms
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `UPDATE control_command_dedup
+           SET request_hash = ?
+           WHERE actor_username = ? AND command_type = ? AND idempotency_key = ?`
         )
-        .run(
-          'job-2',
-          'thread-2',
-          'project-1',
-          'draft-2',
-          'execution_queued',
-          1,
-          'none',
-          0,
-          null,
-          'Job 2',
-          '',
-          Date.now(),
-          Date.now()
-        )
+        .run('tampered-hash', 'u1', 'continue_job', key)
       await assert.rejects(
         () =>
-          service.requestPause({
+          service.continueJob({
             actor: { username: 'u1', requestId: 'r2' },
-            jobId: 'job-2',
-            expectedRevision: 1,
+            jobId: 'job-1',
+            expectedRevision: 3,
             idempotencyKey: key
           }),
         /idempotency_key_reused/

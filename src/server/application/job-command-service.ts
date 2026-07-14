@@ -16,13 +16,10 @@ import type {
   NoProgressResult
 } from '@shared/contracts/control-plane'
 import type { JobState } from '@shared/contracts/control-plane'
-import type { JobRepository } from './ports/job-repository'
 import type { ControlPlaneUnitOfWork } from './ports/unit-of-work'
-import type { TaskRepository } from './ports/task-repository'
 import type { Clock } from './ports/clock'
 import type { IdGenerator } from './ports/id-generator'
 import type { SafeLogger } from './ports/safe-logger'
-import type { EvidenceStore } from './ports/evidence-store'
 import type { RuntimeController } from './ports/runtime-controller'
 import {
   requestPause,
@@ -30,17 +27,19 @@ import {
   cancelJob as cancelJobTransition,
   restartExecution as restartExecutionTransition
 } from '../domain/jobs/job-state-machine'
-import { commandError, fromTransitionError } from '../domain/jobs/job-errors'
+import { commandError, fromTransitionError, CommandError } from '../domain/jobs/job-errors'
 import { validateTaskResult } from '../domain/tasks/validate-task-result'
 import { hashCanonicalCommand, canonicalJson, type JsonValue } from './utils/canonical-json'
+import {
+  parseStoredCommandReceipt,
+  wrapCommandReceipt,
+  type JobCommandName
+} from './stored-command-receipt'
 
 const DEDUP_TTL_MS = 24 * 60 * 60 * 1000
 
 export type JobCommandServiceDeps = {
-  readonly jobRepository: JobRepository
-  readonly unitOfWork?: ControlPlaneUnitOfWork
-  readonly taskRepository: TaskRepository
-  readonly evidenceRepository: EvidenceStore
+  readonly unitOfWork: ControlPlaneUnitOfWork
   readonly clock: Clock
   readonly idGenerator: IdGenerator
   readonly logger: SafeLogger
@@ -49,17 +48,13 @@ export type JobCommandServiceDeps = {
 
 export class JobCommandServiceImpl implements JobCommandService {
   private readonly unitOfWork: ControlPlaneUnitOfWork
-  private readonly taskRepository: TaskRepository
-  private readonly evidenceRepository: EvidenceStore
   private readonly clock: Clock
   private readonly idGenerator: IdGenerator
   private readonly logger: SafeLogger
   private readonly runtimeController: RuntimeController
 
   constructor(deps: JobCommandServiceDeps) {
-    this.unitOfWork = deps.unitOfWork ?? deps.jobRepository
-    this.taskRepository = deps.taskRepository
-    this.evidenceRepository = deps.evidenceRepository
+    this.unitOfWork = deps.unitOfWork
     this.clock = deps.clock
     this.idGenerator = deps.idGenerator
     this.logger = deps.logger
@@ -72,12 +67,13 @@ export class JobCommandServiceImpl implements JobCommandService {
 
     const result = this.unitOfWork.transaction((tx) => {
       const jobRepository = tx.jobs
-      const replay = jobRepository.getDedup({
+      const replay = tx.dedup.getDedup({
         actorUsername: input.actor.username,
+        commandType: 'request_pause',
         idempotencyKey: input.idempotencyKey
       })
       if (replay !== null) {
-        return this.assertMatchingReplay(replay, requestHash)
+        return this.assertMatchingReplay(replay, requestHash, 'request_pause')
       }
 
       const job = jobRepository.getOwnedAggregate({
@@ -111,7 +107,7 @@ export class JobCommandServiceImpl implements JobCommandService {
       if (!cas.ok) throw commandError('job.revision_conflict')
 
       if (job.activeRunId !== null && transition.value.nextState === 'pausing') {
-        jobRepository.markRunState({
+        tx.runs.markRunState({
           runId: job.activeRunId,
           state: 'pausing',
           updatedAtMs: now
@@ -126,7 +122,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       }
 
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -140,12 +136,17 @@ export class JobCommandServiceImpl implements JobCommandService {
         createdAtMs: now
       })
 
-      jobRepository.storeDedup({
+      tx.dedup.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'request_pause',
         requestHash,
-        response,
+        response: wrapCommandReceipt({
+          command: 'request_pause',
+          jobId: job.id,
+          revision: cas.newRevision,
+          response
+        }),
         responseRevision: cas.newRevision,
         createdAtMs: now,
         expiresAtMs: now + DEDUP_TTL_MS
@@ -172,12 +173,13 @@ export class JobCommandServiceImpl implements JobCommandService {
 
     return this.unitOfWork.transaction((tx) => {
       const jobRepository = tx.jobs
-      const replay = jobRepository.getDedup({
+      const replay = tx.dedup.getDedup({
         actorUsername: input.actor.username,
+        commandType: 'continue_job',
         idempotencyKey: input.idempotencyKey
       })
       if (replay !== null) {
-        return this.assertMatchingReplay(replay, requestHash)
+        return this.assertMatchingReplay(replay, requestHash, 'continue_job')
       }
 
       const job = jobRepository.getOwnedAggregate({
@@ -217,7 +219,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       }
 
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -231,12 +233,17 @@ export class JobCommandServiceImpl implements JobCommandService {
         createdAtMs: now
       })
 
-      jobRepository.storeDedup({
+      tx.dedup.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'continue_job',
         requestHash,
-        response,
+        response: wrapCommandReceipt({
+          command: 'continue_job',
+          jobId: job.id,
+          revision: cas.newRevision,
+          response
+        }),
         responseRevision: cas.newRevision,
         createdAtMs: now,
         expiresAtMs: now + DEDUP_TTL_MS
@@ -252,14 +259,13 @@ export class JobCommandServiceImpl implements JobCommandService {
 
     const result = this.unitOfWork.transaction((tx) => {
       const jobRepository = tx.jobs
-      const replay = jobRepository.getDedup({
+      const replay = tx.dedup.getDedup({
         actorUsername: input.actor.username,
+        commandType: 'cancel_job',
         idempotencyKey: input.idempotencyKey
       })
       if (replay !== null) {
-        const stored = this.assertMatchingReplay(replay, requestHash)
-        const parsed = JSON.parse(replay.responseJson) as CancelJobResponse
-        return { job: stored.job, runIdToStop: parsed.runIdToStop ?? null }
+        return this.assertMatchingReplay(replay, requestHash, 'cancel_job') as CancelJobResponse
       }
 
       const job = jobRepository.getOwnedAggregate({
@@ -293,7 +299,7 @@ export class JobCommandServiceImpl implements JobCommandService {
       if (!cas.ok) throw commandError('job.revision_conflict')
 
       if (runIdToStop !== null) {
-        jobRepository.markRunState({
+        tx.runs.markRunState({
           runId: runIdToStop,
           state: 'cancelling',
           stopReason: input.payload.reasonCode,
@@ -310,7 +316,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         runIdToStop
       }
 
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -324,12 +330,17 @@ export class JobCommandServiceImpl implements JobCommandService {
         createdAtMs: now
       })
 
-      jobRepository.storeDedup({
+      tx.dedup.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'cancel_job',
         requestHash,
-        response,
+        response: wrapCommandReceipt({
+          command: 'cancel_job',
+          jobId: job.id,
+          revision: cas.newRevision,
+          response
+        }),
         responseRevision: cas.newRevision,
         createdAtMs: now,
         expiresAtMs: now + DEDUP_TTL_MS
@@ -360,12 +371,13 @@ export class JobCommandServiceImpl implements JobCommandService {
 
     return this.unitOfWork.transaction((tx) => {
       const jobRepository = tx.jobs
-      const replay = jobRepository.getDedup({
+      const replay = tx.dedup.getDedup({
         actorUsername: input.actor.username,
+        commandType: 'restart_execution',
         idempotencyKey: input.idempotencyKey
       })
       if (replay !== null) {
-        return this.assertMatchingReplay(replay, requestHash)
+        return this.assertMatchingReplay(replay, requestHash, 'restart_execution')
       }
 
       const job = jobRepository.getOwnedAggregate({
@@ -401,7 +413,7 @@ export class JobCommandServiceImpl implements JobCommandService {
       // Restart deliberately creates a new immutable task projection. A
       // Continue command never calls this path: it resumes the same
       // generation and retains its passed verification records.
-      this.taskRepository.cloneTasksToGeneration(
+      tx.tasks.cloneTasksToGeneration(
         job.id,
         job.executionGeneration,
         nextGeneration,
@@ -416,7 +428,7 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       }
 
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -430,12 +442,17 @@ export class JobCommandServiceImpl implements JobCommandService {
         createdAtMs: now
       })
 
-      jobRepository.storeDedup({
+      tx.dedup.storeDedup({
         actorUsername: input.actor.username,
         idempotencyKey: input.idempotencyKey,
         commandType: 'restart_execution',
         requestHash,
-        response,
+        response: wrapCommandReceipt({
+          command: 'restart_execution',
+          jobId: job.id,
+          revision: cas.newRevision,
+          response
+        }),
         responseRevision: cas.newRevision,
         createdAtMs: now,
         expiresAtMs: now + DEDUP_TTL_MS
@@ -493,12 +510,12 @@ export class JobCommandServiceImpl implements JobCommandService {
       })
       if (!cas.ok) throw commandError('job.stale_run')
 
-      jobRepository.markRunState({
+      tx.runs.markRunState({
         runId: input.runId,
         state: 'paused',
         updatedAtMs: now
       })
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -559,12 +576,12 @@ export class JobCommandServiceImpl implements JobCommandService {
       })
       if (!cas.ok) throw commandError('job.stale_run')
 
-      jobRepository.markRunState({
+      tx.runs.markRunState({
         runId: input.runId,
         state: 'succeeded',
         updatedAtMs: now
       })
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -584,7 +601,7 @@ export class JobCommandServiceImpl implements JobCommandService {
     const now = this.clock.nowMs()
     return this.unitOfWork.transaction((tx) => {
       const jobRepository = tx.jobs
-      const attempt = this.taskRepository.getAttempt(input.payload.attemptId)
+      const attempt = tx.tasks.getAttempt(input.payload.attemptId)
       if (attempt === null) throw new Error('task.attempt_not_running')
       if (attempt.runId !== input.runId || attempt.jobId !== input.jobId) {
         throw new Error('task.attempt_fence_mismatch')
@@ -602,19 +619,12 @@ export class JobCommandServiceImpl implements JobCommandService {
         if (attempt.resultHash !== resultHash) {
           throw commandError('task.attempt_result_conflict')
         }
-        const job = jobRepository.getWorkerAggregate({
-          jobId: input.jobId,
-          runId: input.runId,
-          fenceToken: input.fenceToken,
-          executionGeneration: input.executionGeneration
-        })
-        if (job === null) throw commandError('job.not_found')
         if (attempt.resultRevision === null) {
           throw new Error('task.attempt_result_revision_missing')
         }
         return {
           revision: attempt.resultRevision,
-          mustPause: job.state === 'pausing' && job.controlIntent === 'pause'
+          mustPause: attempt.mustPauseAtCommit ?? false
         }
       }
 
@@ -638,24 +648,7 @@ export class JobCommandServiceImpl implements JobCommandService {
       })
       if (!fence.ok) throw commandError(fence.reason)
 
-      const evidenceHash = this.evidenceRepository.putImmutable(normalized.result.evidence)
-      this.taskRepository.finishAttempt(attempt.id, resultHash, evidenceHash, fence.newRevision)
-
-      const current = this.taskRepository.getCurrentTask(
-        attempt.jobId,
-        attempt.executionGeneration,
-        attempt.taskId
-      )
-      if (current === null) throw new Error('task.not_found')
-      const updated = this.taskRepository.updateTaskState(
-        attempt.jobId,
-        attempt.executionGeneration,
-        attempt.taskId,
-        current.state,
-        normalized.taskState
-      )
-      if (!updated) throw new Error('task.state_conflict')
-
+      const evidenceHash = tx.evidence.putImmutable(normalized.result.evidence, now)
       const job = jobRepository.getWorkerAggregate({
         jobId: input.jobId,
         runId: input.runId,
@@ -663,8 +656,33 @@ export class JobCommandServiceImpl implements JobCommandService {
         executionGeneration: input.executionGeneration
       })
       if (job === null) throw commandError('job.not_found')
+      const mustPauseAtCommit = job.state === 'pausing' && job.controlIntent === 'pause'
+      tx.tasks.finishAttempt(
+        attempt.id,
+        resultHash,
+        evidenceHash,
+        fence.newRevision,
+        now,
+        mustPauseAtCommit
+      )
 
-      jobRepository.appendOutbox({
+      const current = tx.tasks.getCurrentTask(
+        attempt.jobId,
+        attempt.executionGeneration,
+        attempt.taskId
+      )
+      if (current === null) throw new Error('task.not_found')
+      const updated = tx.tasks.updateTaskState(
+        attempt.jobId,
+        attempt.executionGeneration,
+        attempt.taskId,
+        current.state,
+        normalized.taskState,
+        now
+      )
+      if (!updated) throw new Error('task.state_conflict')
+
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -680,7 +698,7 @@ export class JobCommandServiceImpl implements JobCommandService {
 
       return {
         revision: fence.newRevision,
-        mustPause: job.state === 'pausing' && job.controlIntent === 'pause'
+        mustPause: mustPauseAtCommit
       }
     })
   }
@@ -739,13 +757,13 @@ export class JobCommandServiceImpl implements JobCommandService {
       })
       if (!cas.ok) throw commandError('job.revision_conflict')
 
-      jobRepository.markRunState({
+      tx.runs.markRunState({
         runId: input.runId,
         state: 'paused',
         stopReason: input.payload.reason,
         updatedAtMs: now
       })
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -811,13 +829,13 @@ export class JobCommandServiceImpl implements JobCommandService {
       })
       if (!cas.ok) return { revision: input.expectedRevision, eventCount: 1 }
 
-      jobRepository.markRunState({
+      tx.runs.markRunState({
         runId: input.runId,
         state: 'failed',
         stopReason: 'workflow.no_progress',
         updatedAtMs: now
       })
-      jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,
@@ -878,13 +896,13 @@ export class JobCommandServiceImpl implements JobCommandService {
           }
         })
         if (cas.ok) {
-          jobRepository.markRunState({
+          tx.runs.markRunState({
             runId: input.runId,
             state: 'interrupted',
             stopReason: input.payload.reason,
             updatedAtMs: now
           })
-          jobRepository.appendOutbox({
+          tx.outbox.appendOutbox({
             topic: `job:${job.id}`,
             eventType: 'job.changed',
             entityId: job.id,
@@ -928,13 +946,13 @@ export class JobCommandServiceImpl implements JobCommandService {
         }
       })
       if (cas.ok) {
-        jobRepository.markRunState({
+        tx.runs.markRunState({
           runId: input.runId,
           state: 'interrupted',
           stopReason: input.payload.reason,
           updatedAtMs: now
         })
-        jobRepository.appendOutbox({
+        tx.outbox.appendOutbox({
           topic: `job:${job.id}`,
           eventType: 'job.changed',
           entityId: job.id,
@@ -953,11 +971,26 @@ export class JobCommandServiceImpl implements JobCommandService {
 
   private assertMatchingReplay(
     replay: { requestHash: string; responseJson: string },
-    requestHash: string
+    requestHash: string,
+    command: JobCommandName
   ): JobCommandResponse {
     if (replay.requestHash !== requestHash) {
       throw commandError('idempotency_key_reused')
     }
-    return JSON.parse(replay.responseJson) as JobCommandResponse
+    try {
+      const receipt = parseStoredCommandReceipt(replay.responseJson)
+      if (receipt.command !== command) {
+        throw commandError('idempotency_key_reused')
+      }
+      return receipt.response as JobCommandResponse
+    } catch (error: unknown) {
+      if (error instanceof CommandError) {
+        throw error
+      }
+      if (error instanceof Error && error.message === 'command.receipt_invalid') {
+        return JSON.parse(replay.responseJson) as JobCommandResponse
+      }
+      throw error
+    }
   }
 }

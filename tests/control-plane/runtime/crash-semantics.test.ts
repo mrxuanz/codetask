@@ -6,7 +6,8 @@ import type { JobAggregate, ControlIntent, ResumeTarget } from '@shared/contract
 import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
-import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
+import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
+import type { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
 import { decideStartupReconcile } from '../../../src/server/application/startup-reconciler'
 import { StartupReconciler } from '../../../src/server/application/startup-reconciler-impl'
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
@@ -84,12 +85,14 @@ interface CountRow {
 describe('Incident A: Zombie running (Task 64)', () => {
   let rawDb: Database.Database
   let repo: SqliteJobRepository
+  let controlPlane: ReturnType<typeof createControlPlaneTransaction>
   let logger: SafeLoggerImpl
 
   beforeEach(() => {
     rawDb = createTestDb()
     const drizzleDb = drizzle(rawDb, { schema: controlPlaneSchema })
-    repo = new SqliteJobRepository(drizzleDb)
+    controlPlane = createControlPlaneTransaction(drizzleDb)
+    repo = controlPlane.jobs
     logger = new SafeLoggerImpl()
   })
 
@@ -171,6 +174,7 @@ describe('Incident A: Zombie running (Task 64)', () => {
 
     const reconciler = new StartupReconciler(
       repo,
+      controlPlane,
       { nowMs: () => Date.now() },
       { generate: () => 'failure-1' },
       logger
@@ -184,6 +188,22 @@ describe('Incident A: Zombie running (Task 64)', () => {
   })
 })
 
+function seedEvidenceBlob(db: Database.Database, hash: string): void {
+  const content = JSON.stringify([hash])
+  db.prepare(
+    `INSERT INTO control_evidence_blobs (hash, content_json, bytes, created_at_ms)
+     VALUES (?, ?, ?, ?)`
+  ).run(hash, content, content.length, Date.now())
+}
+
+function seedPlanRevision(db: Database.Database, jobId = 'job-1', planRevision = 1): void {
+  const now = Date.now()
+  db.prepare(
+    `INSERT INTO control_plan_revisions (id, job_id, plan_revision, status, content_hash, created_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(`plan-${jobId}-${planRevision}`, jobId, planRevision, 'confirmed', 'hash-1', now)
+}
+
 describe('Incident B: Verdict erasure (Task 65)', () => {
   let rawDb: Database.Database
 
@@ -193,6 +213,9 @@ describe('Incident B: Verdict erasure (Task 65)', () => {
 
   it('should preserve verdict hash after subsequent task progress', () => {
     seedJob(rawDb, { id: 'job-1', state: 'execution_running' })
+    seedPlanRevision(rawDb)
+    seedEvidenceBlob(rawDb, 'verdict-hash-1')
+    seedEvidenceBlob(rawDb, 'result-hash-1')
 
     rawDb.prepare(
       `INSERT INTO control_verifications (id, job_id, execution_generation, plan_revision, scope_type, scope_id,
@@ -209,6 +232,7 @@ describe('Incident B: Verdict erasure (Task 65)', () => {
 
   it('should reject passed verification without verdict', () => {
     seedJob(rawDb, { id: 'job-1', state: 'execution_running' })
+    seedPlanRevision(rawDb)
 
     assert.throws(
       () => rawDb.prepare(
@@ -222,6 +246,7 @@ describe('Incident B: Verdict erasure (Task 65)', () => {
 
   it('should not create outbox event for same revision', () => {
     seedJob(rawDb, { id: 'job-1', state: 'execution_running' })
+    seedPlanRevision(rawDb)
 
     rawDb.prepare(
       `INSERT INTO control_outbox_events (topic, event_type, entity_id, aggregate_revision, payload_json, payload_bytes, created_at_ms)

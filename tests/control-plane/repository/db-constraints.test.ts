@@ -12,6 +12,14 @@ function createTestDb(): Database.Database {
   return db
 }
 
+function seedPlanRevision(db: Database.Database, jobId = 'job-1', planRevision = 1): void {
+  const now = Date.now()
+  db.prepare(
+    `INSERT INTO control_plan_revisions (id, job_id, plan_revision, status, content_hash, created_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(`plan-${jobId}-${planRevision}`, jobId, planRevision, 'confirmed', 'hash-1', now)
+}
+
 function insertJob(
   db: Database.Database,
   opts: {
@@ -241,6 +249,7 @@ describe('DB Constraints', () => {
   describe('control_verifications', () => {
     it('should reject duplicate composite key', () => {
       insertJob(db)
+      seedPlanRevision(db)
       const now = Date.now()
       db.prepare(
         `INSERT INTO control_verifications (
@@ -263,6 +272,7 @@ describe('DB Constraints', () => {
 
     it('should reject passed without verdict_blob_hash', () => {
       insertJob(db)
+      seedPlanRevision(db)
       assert.throws(
         () =>
           db.prepare(
@@ -277,6 +287,7 @@ describe('DB Constraints', () => {
 
     it('should reject passed without result_hash', () => {
       insertJob(db)
+      seedPlanRevision(db)
       assert.throws(
         () =>
           db.prepare(
@@ -291,6 +302,7 @@ describe('DB Constraints', () => {
 
     it('should reject passed without ended_at_ms', () => {
       insertJob(db)
+      seedPlanRevision(db)
       assert.throws(
         () =>
           db.prepare(

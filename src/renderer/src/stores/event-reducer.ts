@@ -9,37 +9,13 @@ export interface EventEnvelope {
 
 export type EventHandler = (event: EventEnvelope) => void
 
-export type ResyncReason = 'event_gap' | 'resync_required'
-
-export type ResyncCallback = (info: {
-  readonly reason: ResyncReason
-  readonly lastEventId: number
-  readonly newEventId: number
-}) => void
-
+/**
+ * Tracks the opaque global SSE cursor. Owner-filtered streams may skip event IDs;
+ * entity revision gaps are handled by entity stores and REST resync — not here.
+ */
 export class EventReducer {
   private lastEventId = 0
-  private needsResync = false
-  private onResync: ResyncCallback | null = null
   private readonly handlers = new Map<string, EventHandler[]>()
-
-  setResyncCallback(callback: ResyncCallback): void {
-    this.onResync = callback
-  }
-
-  getNeedsResync(): boolean {
-    return this.needsResync
-  }
-
-  clearNeedsResync(): void {
-    this.needsResync = false
-  }
-
-  resetCursor(nextLastEventId = 0): void {
-    this.lastEventId =
-      Number.isInteger(nextLastEventId) && nextLastEventId > 0 ? nextLastEventId : 0
-    this.needsResync = false
-  }
 
   registerHandler(eventType: string, handler: EventHandler): void {
     const handlers = this.handlers.get(eventType) ?? []
@@ -52,11 +28,6 @@ export class EventReducer {
       return
     }
 
-    if (event.eventId > this.lastEventId + 1) {
-      this.handleGap(event.eventId)
-      return
-    }
-
     this.lastEventId = event.eventId
 
     const handlers = this.handlers.get(event.type) ?? []
@@ -65,13 +36,9 @@ export class EventReducer {
     }
   }
 
-  private handleGap(newEventId: number): void {
-    this.needsResync = true
-    this.onResync?.({
-      reason: 'event_gap',
-      lastEventId: this.lastEventId,
-      newEventId
-    })
+  resetCursor(nextLastEventId = 0): void {
+    this.lastEventId =
+      Number.isInteger(nextLastEventId) && nextLastEventId > 0 ? nextLastEventId : 0
   }
 
   getLastEventId(): number {

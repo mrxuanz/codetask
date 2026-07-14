@@ -1,15 +1,37 @@
 import { eq, and, sql } from 'drizzle-orm'
 import { createHash } from 'crypto'
-import type { ControlPlaneDatabase } from './job-repository'
-import type { VerificationStore, VerificationRow } from '../../../application/ports/verification-store'
-import { controlVerifications } from './schema'
+import type { DbExecutor } from './db-executor'
+import type { VerificationRepository as VerificationRepositoryPort, VerificationRow } from '../../../application/ports/verification-repository'
+import { controlVerifications, controlPlanSlices } from './schema'
 
 export type { VerificationRow }
 
-export class VerificationRepository implements VerificationStore {
-  constructor(private readonly db: ControlPlaneDatabase) {}
+function mapRow(result: typeof controlVerifications.$inferSelect): VerificationRow {
+  return {
+    id: result.id,
+    jobId: result.jobId,
+    executionGeneration: result.executionGeneration,
+    planRevision: result.planRevision,
+    scopeType: result.scopeType,
+    scopeId: result.scopeId,
+    attemptNo: result.attemptNo,
+    state: result.state,
+    runId: result.runId,
+    fenceToken: result.fenceToken,
+    verdictBlobHash: result.verdictBlobHash,
+    resultHash: result.resultHash,
+    resultRevision: result.resultRevision ?? null,
+    failureId: result.failureId,
+    startedAtMs: result.startedAtMs,
+    endedAtMs: result.endedAtMs
+  }
+}
+
+export class SqliteVerificationRepository implements VerificationRepositoryPort {
+  constructor(private readonly db: DbExecutor) {}
 
   create(input: {
+    id: string
     jobId: string
     executionGeneration: number
     planRevision: number
@@ -18,14 +40,12 @@ export class VerificationRepository implements VerificationStore {
     attemptNo: number
     runId: string
     fenceToken: string
-  }): string {
-    const id = crypto.randomUUID()
-    const now = Date.now()
-
+    startedAtMs: number
+  }): void {
     this.db
       .insert(controlVerifications)
       .values({
-        id,
+        id: input.id,
         jobId: input.jobId,
         executionGeneration: input.executionGeneration,
         planRevision: input.planRevision,
@@ -35,22 +55,26 @@ export class VerificationRepository implements VerificationStore {
         state: 'running',
         runId: input.runId,
         fenceToken: input.fenceToken,
-        startedAtMs: now
+        startedAtMs: input.startedAtMs
       })
       .run()
-
-    return id
   }
 
-  markPassed(verificationId: string, verdictBlobHash: string, resultHash: string): boolean {
-    const now = Date.now()
+  markPassed(
+    verificationId: string,
+    verdictBlobHash: string,
+    resultHash: string,
+    resultRevision: number,
+    endedAtMs: number
+  ): boolean {
     const result = this.db
       .update(controlVerifications)
       .set({
         state: 'passed',
         verdictBlobHash,
         resultHash,
-        endedAtMs: now
+        resultRevision,
+        endedAtMs
       })
       .where(
         and(
@@ -63,14 +87,13 @@ export class VerificationRepository implements VerificationStore {
     return result.changes === 1
   }
 
-  markRejected(verificationId: string, failureId: string): boolean {
-    const now = Date.now()
+  markRejected(verificationId: string, failureId: string, endedAtMs: number): boolean {
     const result = this.db
       .update(controlVerifications)
       .set({
         state: 'rejected',
         failureId,
-        endedAtMs: now
+        endedAtMs
       })
       .where(
         and(
@@ -91,24 +114,32 @@ export class VerificationRepository implements VerificationStore {
       .get()
 
     if (!result) return null
+    return mapRow(result)
+  }
 
-    return {
-      id: result.id,
-      jobId: result.jobId,
-      executionGeneration: result.executionGeneration,
-      planRevision: result.planRevision,
-      scopeType: result.scopeType,
-      scopeId: result.scopeId,
-      attemptNo: result.attemptNo,
-      state: result.state,
-      runId: result.runId,
-      fenceToken: result.fenceToken,
-      verdictBlobHash: result.verdictBlobHash,
-      resultHash: result.resultHash,
-      failureId: result.failureId,
-      startedAtMs: result.startedAtMs,
-      endedAtMs: result.endedAtMs
-    }
+  getRunningForScope(input: {
+    jobId: string
+    executionGeneration: number
+    planRevision: number
+    scopeType: string
+    scopeId: string
+  }): VerificationRow | null {
+    const result = this.db
+      .select()
+      .from(controlVerifications)
+      .where(
+        and(
+          eq(controlVerifications.jobId, input.jobId),
+          eq(controlVerifications.executionGeneration, input.executionGeneration),
+          eq(controlVerifications.planRevision, input.planRevision),
+          eq(controlVerifications.scopeType, input.scopeType),
+          eq(controlVerifications.scopeId, input.scopeId),
+          eq(controlVerifications.state, 'running')
+        )
+      )
+      .get()
+
+    return result ? mapRow(result) : null
   }
 
   getCurrentPassedVerifications(
@@ -132,23 +163,7 @@ export class VerificationRepository implements VerificationStore {
       )
       .all()
 
-    return results.map((r) => ({
-      id: r.id,
-      jobId: r.jobId,
-      executionGeneration: r.executionGeneration,
-      planRevision: r.planRevision,
-      scopeType: r.scopeType,
-      scopeId: r.scopeId,
-      attemptNo: r.attemptNo,
-      state: r.state,
-      runId: r.runId,
-      fenceToken: r.fenceToken,
-      verdictBlobHash: r.verdictBlobHash,
-      resultHash: r.resultHash,
-      failureId: r.failureId,
-      startedAtMs: r.startedAtMs,
-      endedAtMs: r.endedAtMs
-    }))
+    return results.map(mapRow)
   }
 
   isMilestoneReady(
@@ -157,29 +172,45 @@ export class VerificationRepository implements VerificationStore {
     planRevision: number,
     milestoneId: string
   ): boolean {
-    // Check if all slices for this milestone have passed verifications with verdicts
-    const result = this.db.all(
-      `SELECT COUNT(*) as missing
-       FROM control_plan_slices s
-       LEFT JOIN control_verifications v
-         ON v.job_id = ${jobId}
-         AND v.execution_generation = ${generation}
-         AND v.plan_revision = ${planRevision}
-         AND v.scope_type = 'slice'
-         AND v.scope_id = s.slice_id
-         AND v.state = 'passed'
-         AND v.verdict_blob_hash IS NOT NULL
-       WHERE s.milestone_id = ${milestoneId}
-         AND s.job_id = ${jobId}
-         AND s.plan_revision = ${planRevision}
-         AND v.id IS NULL`
-    ) as Array<{ missing: number }>
+    const missing = this.db
+      .select({ sliceId: controlPlanSlices.sliceId })
+      .from(controlPlanSlices)
+      .leftJoin(
+        controlVerifications,
+        and(
+          eq(controlVerifications.jobId, controlPlanSlices.jobId),
+          eq(controlVerifications.executionGeneration, generation),
+          eq(controlVerifications.planRevision, planRevision),
+          eq(controlVerifications.scopeType, 'slice'),
+          eq(controlVerifications.scopeId, controlPlanSlices.sliceId),
+          eq(controlVerifications.state, 'passed'),
+          sql`${controlVerifications.verdictBlobHash} IS NOT NULL`
+        )
+      )
+      .where(
+        and(
+          eq(controlPlanSlices.jobId, jobId),
+          eq(controlPlanSlices.planRevision, planRevision),
+          eq(controlPlanSlices.milestoneId, milestoneId),
+          sql`${controlVerifications.id} IS NULL`
+        )
+      )
+      .all()
 
-    return result[0]?.missing === 0
+    return missing.length === 0
   }
 
   storeVerdictBlob(verdict: unknown): string {
     const content = JSON.stringify(verdict)
     return createHash('sha256').update(content).digest('hex')
+  }
+
+  hasRunningVerificationForRun(runId: string): boolean {
+    const row = this.db
+      .select({ id: controlVerifications.id })
+      .from(controlVerifications)
+      .where(and(eq(controlVerifications.runId, runId), eq(controlVerifications.state, 'running')))
+      .get()
+    return row !== undefined
   }
 }

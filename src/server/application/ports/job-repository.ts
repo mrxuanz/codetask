@@ -1,6 +1,5 @@
 import type { JobState, ControlIntent, ResumeTarget } from '@shared/contracts/control-plane'
 import type { ActiveRunSummary } from '../../domain/jobs/job-invariants'
-import type { ControlPlaneTransaction } from './unit-of-work'
 
 export interface ActorContext {
   readonly username: string
@@ -19,6 +18,24 @@ export interface JobAggregateView {
   readonly executionGeneration: number
   readonly activeRunId: string | null
   readonly lastFailureId: string | null
+}
+
+export interface JobDetailView extends JobAggregateView {
+  readonly draftMessageId: string
+  readonly title: string
+  readonly requirementsSummary: string
+  readonly createdAtMs: number
+  readonly updatedAtMs: number
+  readonly terminalAtMs: number | null
+}
+
+export interface ListOwnedJobsInput {
+  readonly actor: ActorContext
+  readonly projectId?: string
+  readonly status?: string
+  readonly page?: number
+  readonly limit?: number
+  readonly q?: string
 }
 
 export interface JobCasInput {
@@ -52,37 +69,6 @@ export interface InsertFailureInput {
   readonly createdAtMs: number
 }
 
-export interface AppendOutboxInput {
-  readonly topic: string
-  readonly eventType: string
-  readonly entityId: string
-  readonly aggregateRevision: number
-  readonly payload: unknown
-  readonly createdAtMs: number
-}
-
-export interface DedupLookup {
-  readonly actorUsername: string
-  readonly idempotencyKey: string
-}
-
-export interface StoredCommandResult {
-  readonly responseJson: string
-  readonly responseRevision: number
-  readonly requestHash: string
-}
-
-export interface StoreDedupInput {
-  readonly actorUsername: string
-  readonly idempotencyKey: string
-  readonly commandType: string
-  readonly requestHash: string
-  readonly response: unknown
-  readonly responseRevision: number
-  readonly createdAtMs: number
-  readonly expiresAtMs: number
-}
-
 export interface WorkerFence {
   readonly jobId: string
   readonly expectedRevision: number
@@ -99,34 +85,6 @@ export type WorkerFenceResult =
 export type WorkerFenceAssertion =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: 'stale_run' | 'revision_conflict' | 'fence_mismatch' }
-
-export interface OutboxEvent {
-  readonly eventId: number
-  readonly topic: string
-  readonly eventType: string
-  readonly entityId: string
-  readonly aggregateRevision: number
-  readonly payloadJson: string
-}
-
-export interface CreateRunInput {
-  readonly id: string
-  readonly jobId: string
-  readonly kind: 'planning' | 'execution'
-  readonly fenceToken: string
-  readonly executionGeneration: number
-  readonly startedAtMs: number
-  readonly pendingAttemptId: string
-  readonly lifecycleOperationId: string
-}
-
-export interface CreateSlotInput {
-  readonly id: string
-  readonly jobId: string
-  readonly runId: string
-  readonly pool: string
-  readonly createdAtMs: number
-}
 
 export interface JobRepository {
   getOwnedAggregate(input: {
@@ -149,29 +107,19 @@ export interface JobRepository {
     readonly projectId?: string
   }): readonly JobAggregateView[]
 
+  getOwnedJobDetail(input: {
+    readonly actor: ActorContext
+    readonly jobId: string
+  }): JobDetailView | null
+
+  listOwnedJobDetails(input: ListOwnedJobsInput): {
+    readonly jobs: readonly JobDetailView[]
+    readonly total: number
+  }
+
   compareAndSetJob(input: JobCasInput): JobCasResult
 
   insertFailure(input: InsertFailureInput): void
-
-  appendOutbox(input: AppendOutboxInput): number
-
-  getUndispatchedEvents(batchSize: number): readonly OutboxEvent[]
-
-  listOwnedOutboxEvents(input: {
-    readonly actor: ActorContext
-    readonly afterEventId: number
-    readonly limit: number
-  }): readonly OutboxEvent[]
-
-  getOwnedOutboxLatestEventId(input: { readonly actor: ActorContext }): number
-
-  markDispatched(input: { readonly eventIds: readonly number[]; readonly dispatchedAtMs: number }): void
-
-  getDedup(input: DedupLookup): StoredCommandResult | null
-
-  storeDedup(input: StoreDedupInput): void
-
-  getActiveRunSummary(runId: string): ActiveRunSummary | null
 
   getJobsForReconciliation(): readonly JobAggregateView[]
 
@@ -179,42 +127,13 @@ export interface JobRepository {
 
   getJobTimestamps(jobId: string): { createdAtMs: number; updatedAtMs: number; terminalAtMs: number | null } | null
 
-  createRun(input: CreateRunInput): void
+  getJobFailure(failureId: string): {
+    code: string
+    recoverability: string
+    reason: string | null
+  } | null
 
-  createSlot(input: CreateSlotInput): void
-
-  releaseSlot(input: { readonly runId: string; readonly releasedAtMs: number }): void
-
-  markRunState(input: {
-    readonly runId: string
-    readonly state: string
-    readonly stopReason?: string | null
-    readonly updatedAtMs: number
-  }): void
-
-  markRunActive(input: {
-    readonly runId: string
-    readonly runtimeInstanceId: string
-    readonly updatedAtMs: number
-  }): void
-
-  createRuntimeInstance(input: {
-    readonly id: string
-    readonly runId: string
-    readonly ownerBootId: string
-    readonly provider: string
-    readonly pidOrHandleRef?: string | undefined
-    readonly startedAtMs: number
-  }): void
-
-  closeRuntimeInstance(input: {
-    readonly id: string
-    readonly runId: string
-    readonly closedAtMs: number
-    readonly exitKind: string
-    readonly exitCode?: number | undefined
-    readonly signal?: string | undefined
-  }): void
+  getActiveRunSummary(runId: string): ActiveRunSummary | null
 
   /**
    * Atomically verify worker fence (run_id + fence_token + generation + revision)
@@ -225,10 +144,8 @@ export interface JobRepository {
   workerFence(input: WorkerFence): WorkerFenceResult
 
   assertWorkerFence(input: Omit<WorkerFence, 'updatedAtMs'>): WorkerFenceAssertion
-
-  /**
-   * Execute a synchronous transaction. The callback must not contain await.
-   * All repository methods called within the callback will participate in the same transaction.
-   */
-  transaction<T>(fn: (tx: ControlPlaneTransaction) => T): T
 }
+
+// Re-export outbox/dedup types used by other application layers.
+export type { OutboxEvent, AppendOutboxInput } from './outbox-repository'
+export type { DedupLookup, StoredCommandResult, StoreDedupInput } from './dedup-repository'

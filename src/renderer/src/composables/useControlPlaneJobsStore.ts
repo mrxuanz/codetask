@@ -10,14 +10,12 @@ import { useRouter } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
 import type { ThreadJob } from '@renderer/api/jobs'
 import {
-  fetchV3Jobs,
-  fetchV3Job,
-  pauseV3Job,
-  continueV3Job,
-  cancelV3Job,
-  restartExecutionV3Job,
-  newIdempotencyKey
-} from '@renderer/api/v3-jobs'
+  createV3JobsApi,
+  newIdempotencyKey,
+  resolveJobsApi,
+  type JobsApi
+} from '@renderer/api/jobs-api'
+import { fetchControlPlaneGeneration } from '@renderer/api/control-plane-generation'
 import {
   connectControlPlaneEventsStream,
   ControlPlaneEventsResyncRequiredError
@@ -71,16 +69,19 @@ function jobState(job: ThreadJob): string {
   return (job as ThreadJob & { state?: string }).state ?? mapLegacyStatusToState(job.status)
 }
 
-function requireV3Revision(job: ThreadJob): number {
-  if (typeof job.stateRevision !== 'number') {
-    throw new Error('Control-plane job is missing its state revision')
+  function requireCommandRevision(job: ThreadJob): number {
+    if (!isAuthoritative) {
+      return typeof job.stateRevision === 'number' ? job.stateRevision : 0
+    }
+    if (typeof job.stateRevision !== 'number') {
+      throw new Error('Control-plane job is missing its state revision')
+    }
+    return job.stateRevision
   }
-  return job.stateRevision
-}
 
-function isRevisionConflict(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 409 && error.message === 'job.revision_conflict'
-}
+  function isRevisionConflict(error: unknown): boolean {
+    return error instanceof ApiError && error.httpStatus === 409 && error.code === 'job.revision_conflict'
+  }
 
 export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOptions): {
   statusFilter: Ref<string>
@@ -115,6 +116,14 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   const { selectedJobId } = options
   const router = useRouter()
   const v3Store = new JobsStore()
+  let jobsApi: JobsApi = createV3JobsApi()
+  let isAuthoritative = false
+  const apiReady = (async () => {
+    const generation = await fetchControlPlaneGeneration()
+    isAuthoritative = generation === 'v3_authoritative'
+    jobsApi = await resolveJobsApi()
+    return jobsApi
+  })()
 
   const statusFilter = ref('all')
   const searchQuery = ref('')
@@ -181,7 +190,6 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }, 100)
 
   function scheduleResync(jobId?: string): void {
-    eventReducer.clearNeedsResync()
     debouncedRefreshJobs()
     if (jobId) {
       debouncedRefreshSelectedDetail(jobId)
@@ -239,7 +247,8 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     if (!silent) loadingList.value = true
     error.value = null
     try {
-      const res = await fetchV3Jobs(statusFilter.value, 1, 50, searchQuery.value)
+      await apiReady
+      const res = await jobsApi.fetchJobs(statusFilter.value, 1, 50, searchQuery.value)
       if (token !== loadJobsToken) return
       const currentById = new Map(jobs.value.map((job) => [job.id, job] as const))
       jobs.value = res.data.jobs
@@ -265,7 +274,8 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     const silent = options?.silent ?? false
     if (!silent) loadingDetail.value = true
     try {
-      const res = await fetchV3Job(jobId)
+      await apiReady
+      const res = await jobsApi.fetchJob(jobId)
       if (token !== loadDetailToken) return
       applyJobPatch(res.data.job)
     } catch (err) {
@@ -279,14 +289,6 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
-  eventReducer.setResyncCallback((info) => {
-    eventReducer.resetCursor(info.newEventId)
-    streamAbort?.abort()
-    void Promise.all([
-      loadJobs({ silent: true }),
-      selectedJobId.value ? loadDetail(selectedJobId.value, { silent: true }) : Promise.resolve()
-    ]).finally(() => eventReducer.clearNeedsResync())
-  })
   eventReducer.registerHandler('job.changed', (event) => {
     const current = v3Store.getJob(event.entityId)
     if (current && event.revision <= current.stateRevision) return
@@ -345,14 +347,18 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }
 
   function startHubPolling(): void {
-    startV3EventsStream()
-    pollTimer = setInterval(() => {
-      if (!streamAbort) {
-        void loadJobs({ silent: true })
-        const jobId = selectedJobId.value
-        if (jobId) void loadDetail(jobId, { silent: true })
+    void apiReady.then(() => {
+      if (isAuthoritative) {
+        startV3EventsStream()
       }
-    }, 30_000)
+      pollTimer = setInterval(() => {
+        if (!streamAbort) {
+          void loadJobs({ silent: true })
+          const jobId = selectedJobId.value
+          if (jobId) void loadDetail(jobId, { silent: true })
+        }
+      }, 30_000)
+    })
   }
 
   function stopHubPolling(): void {
@@ -410,30 +416,37 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   async function handlePause(): Promise<void> {
     await runAction('pause', (job, idempotencyKey) =>
-      pauseV3Job(job.id, requireV3Revision(job), idempotencyKey)
+      jobsApi.pause(job.id, requireCommandRevision(job), idempotencyKey)
     )
   }
 
   async function handleContinue(): Promise<void> {
     await runAction('continue', (job, idempotencyKey) =>
-      continueV3Job(job.id, requireV3Revision(job), idempotencyKey)
+      jobsApi.continue(job.id, requireCommandRevision(job), idempotencyKey)
     )
   }
 
   async function handleRestart(): Promise<void> {
     await runAction('restart_execution', (job, idempotencyKey) =>
-      restartExecutionV3Job(job.id, requireV3Revision(job), idempotencyKey)
+      jobsApi.restartExecution(job.id, requireCommandRevision(job), idempotencyKey)
     )
   }
 
   async function handleCancel(): Promise<void> {
     await runAction('cancel', (job, idempotencyKey) =>
-      cancelV3Job(job.id, requireV3Revision(job), 'user_cancelled', idempotencyKey)
+      jobsApi.cancel(job.id, requireCommandRevision(job), 'user_cancelled', idempotencyKey)
     )
   }
 
   async function handleDelete(): Promise<void> {
-    actionError.value = 'Deleting V3 jobs is not supported by the control-plane API'
+    if (!jobsApi.delete) {
+      actionError.value = 'Deleting V3 jobs is not supported by the control-plane API'
+      return
+    }
+    await runAction('delete', async (job) => {
+      await jobsApi.delete!(job.id)
+      await router.replace({ name: 'tasks' })
+    })
   }
 
   return {

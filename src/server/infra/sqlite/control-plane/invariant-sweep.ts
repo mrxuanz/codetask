@@ -42,8 +42,6 @@ type RunRow = {
   readonly fenceToken: string
   readonly executionGeneration: number
   readonly currentRuntimeInstanceId: string | null
-  readonly pendingAttemptId: string | null
-  readonly lifecycleOperationId: string | null
 }
 
 function parseJobRow(input: unknown): JobRow {
@@ -94,9 +92,7 @@ function parseRunRow(input: unknown): RunRow | null {
     state: r.state,
     fenceToken: r.fenceToken,
     executionGeneration: r.executionGeneration,
-    currentRuntimeInstanceId: (r.currentRuntimeInstanceId === null || typeof r.currentRuntimeInstanceId === 'string') ? r.currentRuntimeInstanceId : null,
-    pendingAttemptId: (r.pendingAttemptId === null || typeof r.pendingAttemptId === 'string') ? r.pendingAttemptId : null,
-    lifecycleOperationId: (r.lifecycleOperationId === null || typeof r.lifecycleOperationId === 'string') ? r.lifecycleOperationId : null
+    currentRuntimeInstanceId: (r.currentRuntimeInstanceId === null || typeof r.currentRuntimeInstanceId === 'string') ? r.currentRuntimeInstanceId : null
   }
 }
 
@@ -154,9 +150,7 @@ export function createInvariantSweep(
               state: controlJobRuns.state,
               fenceToken: controlJobRuns.fenceToken,
               executionGeneration: controlJobRuns.executionGeneration,
-              currentRuntimeInstanceId: controlJobRuns.currentRuntimeInstanceId,
-              pendingAttemptId: controlJobRuns.pendingAttemptId,
-              lifecycleOperationId: controlJobRuns.lifecycleOperationId
+              currentRuntimeInstanceId: controlJobRuns.currentRuntimeInstanceId
             })
             .from(controlJobRuns)
             .where(eq(controlJobRuns.id, job.activeRunId))

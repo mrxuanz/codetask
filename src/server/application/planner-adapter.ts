@@ -2,9 +2,7 @@
  * Planner → Command adapter.
  *
  * C6: Checkpoint and pause-ack paths call JobCommandService only.
- * There is no `updateJobRow` / legacy status write in this adapter.
- * Failure reporting stays on the executor/reconciler Command path
- * (`reportNoProgress` / crash recovery) — do not add legacy patches here.
+ * Plan checkpoint payloads must come from an injected provider — never synthesized here.
  */
 import type {
   JobCommandService,
@@ -21,6 +19,11 @@ export interface PlannerAdapterConfig {
   readonly executionGeneration: number
 }
 
+export interface PlanningCheckpointProvider {
+  readonly attemptId: string
+  produceCheckpointResult(): Promise<unknown>
+}
+
 export class PlannerAdapter {
   constructor(
     private readonly commandService: JobCommandService,
@@ -28,7 +31,10 @@ export class PlannerAdapter {
     private readonly config: PlannerAdapterConfig
   ) {}
 
-  async reportPlanCheckpoint(expectedRevision: number): Promise<void> {
+  async reportPlanCheckpoint(
+    expectedRevision: number,
+    provider: PlanningCheckpointProvider
+  ): Promise<void> {
     const envelope: WorkerCommandEnvelope<TaskCheckpointPayload> = {
       jobId: this.config.jobId,
       expectedRevision,
@@ -36,16 +42,8 @@ export class PlannerAdapter {
       fenceToken: this.config.fenceToken,
       executionGeneration: this.config.executionGeneration,
       payload: {
-        attemptId: this.idGenerator.generate(),
-        result: {
-          status: 'completed',
-          summary: 'Plan checkpoint',
-          changedFiles: [],
-          evidence: ['plan checkpoint recorded'],
-          validation: { ran: false, outcome: 'not-applicable' },
-          blockers: [],
-          blockerKind: null
-        }
+        attemptId: provider.attemptId,
+        result: await provider.produceCheckpointResult()
       }
     }
 
