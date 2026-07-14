@@ -14,6 +14,8 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'sandbox.child_closed': 'サンドボックス worker が異常終了しました',
   'sandbox.worker.busy': 'サンドボックス worker がビジーです',
   'workspace.busy': 'ワークスペースは他のタスクが使用中です。しばらくしてから再試行してください',
+  'workspace.lease_lost':
+    'ワークスペースリースが無効です。単一ライター許可なしでは実行できません',
   'runtime.draining': 'ランタイムはシャットダウン中です。再起動後に再試行してください',
   'sandbox.worker.missing': 'サンドボックス worker を利用できません',
   'sandbox.required': 'この操作にはサンドボックスが必要です',
@@ -158,6 +160,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'draft.local_corpus.invalid_path': 'ローカルコーパスパスが無効です',
   'draft.local_corpus.file_not_allowed': '単一ファイルのローカルコーパスは許可されていません',
   'plan.cancelled': '計画生成がキャンセルされました',
+  'plan.confirm_conflict': '確認中に計画が変更されました',
   'plan.sandbox_timeout':
     'サンドボックスタスクがタイムアウトしました。後で再試行するか、より高速な Planner CLI に変更してください',
   'plan.sandbox_cleanup_failed':

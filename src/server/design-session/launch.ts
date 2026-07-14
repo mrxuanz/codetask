@@ -91,3 +91,35 @@ export function validateLaunchPreconditions(input: {
 export function parseSessionManifest(session: ThreadJob): JobReferenceManifest | null {
   return parseJobReferenceManifest(session.referenceManifestJson)
 }
+
+export type ConfirmRevisionExpectations = {
+  draftRevision: number
+  planRevision: number
+  manifestRevision: number
+}
+
+export function captureConfirmRevisionExpectations(session: ThreadJob): ConfirmRevisionExpectations {
+  return {
+    draftRevision: session.draftRevision ?? 0,
+    planRevision: session.planRevision ?? 0,
+    manifestRevision: session.manifestRevision ?? 0
+  }
+}
+
+export function assertConfirmRevisionMatches(
+  session: ThreadJob,
+  expected: ConfirmRevisionExpectations
+): void {
+  const current = captureConfirmRevisionExpectations(session)
+  if (
+    current.draftRevision !== expected.draftRevision ||
+    current.planRevision !== expected.planRevision ||
+    current.manifestRevision !== expected.manifestRevision
+  ) {
+    throw AppError.conflict(
+      'Plan changed while it was being confirmed',
+      undefined,
+      'plan.confirm_conflict'
+    )
+  }
+}

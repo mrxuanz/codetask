@@ -29,6 +29,11 @@ export interface AcquireWorkspaceLeaseResult {
   canonicalPath: string
 }
 
+export interface ReleaseWorkspaceLeaseInput {
+  leaseId: string
+  runId?: string | null
+}
+
 const activeLeaseByOwner = new Map<string, string>()
 
 function ownerKey(ownerKind: WorkspaceLeaseOwnerKind, ownerId: string): string {
@@ -231,27 +236,43 @@ export function refreshWorkspaceLeaseForOwner(
   refreshWorkspaceLease(leaseId)
 }
 
-export function releaseWorkspaceLease(leaseId: string): void {
+export function releaseWorkspaceLease(input: string | ReleaseWorkspaceLeaseInput): boolean {
+  const leaseId = typeof input === 'string' ? input : input.leaseId
+  const expectedRunId = typeof input === 'string' ? undefined : input.runId
   const now = nowSec()
   const rows = getDb()
     .select({
       ownerKind: workspaceLeases.ownerKind,
-      ownerId: workspaceLeases.ownerId
+      ownerId: workspaceLeases.ownerId,
+      runId: workspaceLeases.runId,
+      status: workspaceLeases.status
     })
     .from(workspaceLeases)
     .where(eq(workspaceLeases.id, leaseId))
     .limit(1)
     .all()
   const row = rows[0]
-  if (row) {
-    activeLeaseByOwner.delete(ownerKey(row.ownerKind as WorkspaceLeaseOwnerKind, row.ownerId))
+  if (!row || row.status !== 'active') {
+    return false
+  }
+  if (expectedRunId !== undefined && row.runId !== expectedRunId) {
+    return false
   }
 
-  getDb()
+  activeLeaseByOwner.delete(ownerKey(row.ownerKind as WorkspaceLeaseOwnerKind, row.ownerId))
+
+  const result = getDb()
     .update(workspaceLeases)
     .set({ status: 'released', releasedAt: now })
-    .where(and(eq(workspaceLeases.id, leaseId), eq(workspaceLeases.status, 'active')))
+    .where(
+      and(
+        eq(workspaceLeases.id, leaseId),
+        eq(workspaceLeases.status, 'active'),
+        ...(expectedRunId !== undefined ? [eq(workspaceLeases.runId, expectedRunId)] : [])
+      )
+    )
     .run()
+  return result.changes > 0
 }
 
 export function releaseWorkspaceLeaseForOwner(

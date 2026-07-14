@@ -50,6 +50,15 @@ export async function purgeJobFilesystem(
   await cleanupJobRuntimeTree(dataDir, threadId, jobId).catch(() => {})
 }
 
+/** Strict variant for deletion coordinator — surfaces filesystem errors instead of swallowing. */
+export async function purgeJobFilesystemStrict(
+  dataDir: string,
+  threadId: string,
+  jobId: string
+): Promise<void> {
+  await cleanupJobRuntimeTree(dataDir, threadId, jobId)
+}
+
 export async function purgeThreadFilesystem(
   dataDir: string,
   threadId: string,
@@ -58,6 +67,22 @@ export async function purgeThreadFilesystem(
   await cleanupThreadRuntimeTree(dataDir, threadId).catch(() => {})
   await removeThreadAttachmentsDir(dataDir, threadId).catch(() => {})
 
+  await Promise.all([
+    ...targets.designSessionIds.map((designSessionId) =>
+      deleteDesignArtifactFiles(dataDir, designSessionId)
+    ),
+    ...targets.messageIds.map((messageId) => deleteMessageArtifactFiles(dataDir, messageId))
+  ])
+}
+
+/** Strict variant for deletion coordinator — surfaces filesystem errors instead of swallowing. */
+export async function purgeThreadFilesystemStrict(
+  dataDir: string,
+  threadId: string,
+  targets: ThreadPurgeTargets
+): Promise<void> {
+  await cleanupThreadRuntimeTree(dataDir, threadId)
+  await removeThreadAttachmentsDir(dataDir, threadId)
   await Promise.all([
     ...targets.designSessionIds.map((designSessionId) =>
       deleteDesignArtifactFiles(dataDir, designSessionId)

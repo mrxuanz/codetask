@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, isNotNull, sql } from 'drizzle-orm'
 import { getDb } from '../db'
 import { getAppContext } from '../bootstrap'
 import { threadJobs, workloadRuns, workloadSlots } from '../db/schema'
@@ -401,6 +401,44 @@ export async function clearActiveRunIfMatches(
     .run()
 }
 
+export async function markRunQuarantined(
+  runId: string,
+  input: { reason: string; detail?: string }
+): Promise<WorkloadRunSummary | null> {
+  const db = getDb()
+  const now = nowSec()
+  const cancelReason = input.detail ? `${input.reason}: ${input.detail}` : input.reason
+
+  const runRow = await db
+    .select()
+    .from(workloadRuns)
+    .where(eq(workloadRuns.id, runId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
+
+  if (!runRow || runRow.status === 'released' || runRow.status === 'failed') return null
+
+  await db
+    .update(workloadRuns)
+    .set({ status: 'stopping', cancelReason, updatedAt: now })
+    .where(eq(workloadRuns.id, runId))
+    .run()
+
+  return {
+    runId: runRow.id,
+    username: runRow.username,
+    ownerKind: runRow.ownerKind as WorkloadOwnerKind,
+    ownerId: runRow.ownerId,
+    kind: runRow.kind as WorkloadRunKind,
+    pool: runRow.pool,
+    status: 'stopping',
+    leaseOwner: runRow.leaseOwner,
+    leaseExpiresAt: runRow.leaseExpiresAt,
+    startedAt: runRow.startedAt,
+    updatedAt: now
+  }
+}
+
 export async function markRunCancelling(
   runId: string,
   reason: string
@@ -627,7 +665,8 @@ export async function claimExecutionSlotForJobTx(
         and(
           eq(threadJobs.id, jobId),
           eq(threadJobs.username, username),
-          eq(threadJobs.status, 'pending')
+          eq(threadJobs.status, 'pending'),
+          isNotNull(threadJobs.planConfirmedAt)
         )
       )
       .run()

@@ -4,13 +4,15 @@ import { streamSSE } from 'hono/streaming'
 import { requireUsername } from '../auth/session'
 import { resolveThreadAttachments } from '../conversation/attachments'
 import {
+  executePreparedTurn,
   listCores,
   listThreadMessages,
   loadThreadState,
-  streamSendMessage,
+  prepareConversationTurn,
   switchThreadCore
 } from '../conversation/service'
 import { AppError } from '../error'
+import { releaseWorkspaceLease } from '../legacy-control-plane/workspace-lease-store'
 import { toTurnErrorDto } from '../agent-runtime/errors'
 import { ok } from '../response'
 
@@ -70,6 +72,13 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
       )
     }
 
+    const prepared = await prepareConversationTurn({
+      username,
+      threadId,
+      requestedCreateTaskMode: body.createTaskMode === true,
+      requestedDraft: body.generateDraft === true
+    })
+
     return streamSSE(c, async (stream) => {
       // Keep the renderer SSE idle watchdog alive during long tool/LLM gaps
       // (e.g. OpenCode read/explore). Must be < SSE_IDLE_TIMEOUT_MS (45s).
@@ -91,9 +100,7 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
         }, HEARTBEAT_MS)
         heartbeatTimer.unref?.()
 
-        for await (const chunk of streamSendMessage(username, threadId, body.message!, {
-          generateDraft: body.generateDraft === true,
-          createTaskMode: body.createTaskMode === true,
+        for await (const chunk of executePreparedTurn(prepared, body.message!, {
           attachments,
           selectedDraftSection: body.selectedDraftSection,
           selectedPlanNodeRef: body.selectedPlanNodeRef
@@ -111,6 +118,7 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
         })
       } finally {
         stopHeartbeat()
+        releaseWorkspaceLease(prepared.workspaceLeaseId)
       }
     })
   })

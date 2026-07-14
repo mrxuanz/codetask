@@ -71,26 +71,33 @@ export async function waitClosed(runId: string, timeoutMs = 30_000): Promise<voi
   if (!entry) return
   if (!entry.handle.waitClosed) return
 
-  await Promise.race([
-    entry.handle.waitClosed().catch((error) => {
-      console.warn('[runtime-supervisor] waitClosed failed', runId, error)
-    }),
-    new Promise<void>((_, reject) => {
-      const timer = setTimeout(() => {
-        clearTimeout(timer)
-        reject(new Error(`waitClosed timeout for ${runId}`))
-      }, timeoutMs)
-    })
-  ])
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      entry.handle.waitClosed(),
+      new Promise<void>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`waitClosed timeout for ${runId}`))
+        }, timeoutMs)
+      })
+    ])
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle)
+    }
+  }
 }
 
 export async function closeRunRuntime(runId: string): Promise<void> {
   const entry = handles.get(runId)
   if (!entry) return
   if (entry.handle.close) {
-    await entry.handle.close().catch((error) => {
+    try {
+      await entry.handle.close()
+    } catch (error) {
       console.warn('[runtime-supervisor] close failed', runId, error)
-    })
+      throw error
+    }
   }
   handles.delete(runId)
 }

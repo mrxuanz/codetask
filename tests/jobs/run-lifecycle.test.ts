@@ -18,12 +18,20 @@ import {
   finishPlanningRunLifecycle,
   stopRunLifecycle
 } from '../../src/server/legacy-control-plane/run-lifecycle'
-import { registerRunRuntime, resetRuntimeSupervisorForTests } from '../../src/server/legacy-control-plane/runtime-supervisor'
+import {
+  hasRunRuntime,
+  registerRunRuntime,
+  resetRuntimeSupervisorForTests
+} from '../../src/server/legacy-control-plane/runtime-supervisor'
+import { workloadRuns } from '../../src/server/db/schema'
+import { eq } from 'drizzle-orm'
 
 let dataDir: string
 
 async function setupDb(): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'codetask-run-lifecycle-'))
+  process.env.CODETASK_RUN_CANCEL_GRACE_MS = '0'
+  process.env.CODETASK_RUN_KILL_GRACE_MS = '0'
   await resetAppContextForTests()
   resetJobReconcileForTests()
   bootstrapRuntime({ dataDir })
@@ -331,5 +339,163 @@ test('finishPlanningRunLifecycle skips release when run already released', async
     assert.equal(closeCalls, 1)
   } finally {
   await teardownDb()
+  }
+})
+
+test('stopRunLifecycle keeps slot when waitClosed rejects', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-wait-fail')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-wait-fail',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {}
+    })
+
+    await assert.rejects(
+      () =>
+        stopRunLifecycle(run.runId, 'timeout', {
+          sleep: async () => {},
+          waitClosed: async () => {
+            throw new Error('waitClosed rejected')
+          }
+        }),
+      /waitClosed rejected/
+    )
+
+    const active = await getActiveRun('thread_job', 'job-wait-fail')
+    assert.ok(active)
+    assert.equal(active.status, 'stopping')
+    assert.equal(hasRunRuntime(run.runId), true)
+
+    const [runRow] = await getDb()
+      .select()
+      .from(workloadRuns)
+      .where(eq(workloadRuns.id, run.runId))
+    assert.ok(runRow)
+    assert.equal(runRow.status, 'stopping')
+    assert.match(runRow.cancelReason ?? '', /child_close_unconfirmed/)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('stopRunLifecycle keeps slot when waitClosed never resolves', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-wait-hang')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-wait-hang',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {},
+      waitClosed: async () => new Promise(() => {})
+    })
+
+    await assert.rejects(
+      () =>
+        stopRunLifecycle(run.runId, 'timeout', {
+          sleep: async () => {},
+          waitClosed: async () =>
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error(`waitClosed timeout for ${run.runId}`)), 10)
+            })
+        }),
+      /waitClosed timeout/
+    )
+
+    assert.notEqual(await getActiveRun('thread_job', 'job-wait-hang'), null)
+    assert.equal(hasRunRuntime(run.runId), true)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('stopRunLifecycle keeps slot when hardKill throws and waitClosed fails', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-kill-wait-fail')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-kill-wait-fail',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {}
+    })
+
+    await assert.rejects(
+      () =>
+        stopRunLifecycle(run.runId, 'timeout', {
+          sleep: async () => {},
+          hardKill: async () => {
+            throw new Error('hardKill failed')
+          },
+          waitClosed: async () => {
+            throw new Error('waitClosed failed')
+          }
+        }),
+      /waitClosed failed/
+    )
+
+    const active = await getActiveRun('thread_job', 'job-kill-wait-fail')
+    assert.ok(active)
+    assert.equal(active.status, 'stopping')
+    assert.equal(hasRunRuntime(run.runId), true)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('stopRunLifecycle releases slot after waitClosed confirms closed', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-stop-success')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-stop-success',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    let waitClosedCalled = false
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {},
+      waitClosed: async () => {
+        waitClosedCalled = true
+      }
+    })
+
+    await stopRunLifecycle(run.runId, 'timeout', {
+      sleep: async () => {},
+      waitClosed: async () => {
+        waitClosedCalled = true
+      }
+    })
+
+    assert.equal(waitClosedCalled, true)
+    assert.equal(await getActiveRun('thread_job', 'job-stop-success'), null)
+    assert.equal(hasRunRuntime(run.runId), false)
+  } finally {
+    await teardownDb()
   }
 })

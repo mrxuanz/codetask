@@ -68,6 +68,7 @@ jobs:
     needs: [quality, test]
     uses: ./.github/workflows/build.yml
     with:
+      ref: ${{ github.sha }}
       runner: ubuntu-latest
       builder-args: --linux --dir
       upload-artifact: false

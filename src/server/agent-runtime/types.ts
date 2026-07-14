@@ -17,6 +17,8 @@ export interface AgentTurnInput {
 
   jobId?: string | undefined
   workloadRunId?: string | undefined
+  /** Stable logical-task idempotency key for side-effect dedupe across retries. */
+  idempotencyKey?: string | undefined
 }
 
 export type RoleWorkerInput = AgentTurnInput
@@ -58,6 +60,8 @@ export interface AgentTurnRunnerInput {
 
   jobId?: string | undefined
   workloadRunId?: string | undefined
+  /** Stable logical-task idempotency key for side-effect dedupe across retries. */
+  idempotencyKey?: string | undefined
 }
 
 export interface AgentTurnProvider {

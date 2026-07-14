@@ -76,6 +76,26 @@ export type ConversationMode =
   | { kind: typeof THREAD_KIND_CHAT; generateDraft: false }
   | { kind: typeof THREAD_KIND_CREATE_TASK; generateDraft: boolean }
 
+export function assertConversationMode(input: {
+  threadKind: ThreadKind
+  requestedCreateTaskMode: boolean
+  requestedDraft: boolean
+}): void {
+  const requestIsCreateTask = input.requestedCreateTaskMode || input.requestedDraft
+  const threadIsCreateTask = input.threadKind === THREAD_KIND_CREATE_TASK
+
+  if (requestIsCreateTask !== threadIsCreateTask) {
+    throw AppError.conflict(
+      'Conversation mode does not match thread kind',
+      {
+        expected: input.threadKind,
+        requested: requestIsCreateTask ? THREAD_KIND_CREATE_TASK : THREAD_KIND_CHAT
+      },
+      'conversation.mode_mismatch'
+    )
+  }
+}
+
 export function resolveConversationMode(input: {
   threadKind: ThreadKind
   requestedDraft: boolean
@@ -91,6 +111,103 @@ export function resolveConversationMode(input: {
   return input.threadKind === THREAD_KIND_CHAT
     ? { kind: THREAD_KIND_CHAT, generateDraft: false }
     : { kind: THREAD_KIND_CREATE_TASK, generateDraft: input.requestedDraft }
+}
+
+export interface PreparedConversationTurn {
+  username: string
+  threadId: string
+  thread: ThreadDto
+  threadRow: NonNullable<Awaited<ReturnType<typeof getThreadRow>>>
+  workspacePath: string
+  threadKind: ThreadKind
+  createTaskMode: boolean
+  conversationMode: ConversationMode
+  wizardPhase: WizardPhase
+  workspaceLeaseId: string
+}
+
+export async function prepareConversationTurn(input: {
+  username: string
+  threadId: string
+  requestedCreateTaskMode: boolean
+  requestedDraft: boolean
+}): Promise<PreparedConversationTurn> {
+  const { username, threadId, requestedCreateTaskMode, requestedDraft } = input
+
+  const resolved = await loadThreadProject(username, threadId)
+  let thread = resolved.thread
+  const workspacePath = resolved.workspacePath
+
+  const { isThreadProjectDeletionBlocked } = await import(
+    '../legacy-control-plane/deletion-coordinator'
+  )
+  if (await isThreadProjectDeletionBlocked(threadId)) {
+    throw AppError.conflict(
+      'Project or thread is being deleted',
+      undefined,
+      'thread.deleting'
+    )
+  }
+
+  const threadRow = await getThreadRow(username, threadId)
+  if (!threadRow) {
+    throw AppError.notFound('Thread not found', 'thread.not_found')
+  }
+
+  const threadKind = resolveThreadKind(threadRow)
+  assertConversationMode({ threadKind, requestedCreateTaskMode, requestedDraft })
+  const conversationMode = resolveConversationMode({ threadKind, requestedDraft })
+  const createTaskMode = threadKind === THREAD_KIND_CREATE_TASK
+  const wizardPhase = resolveWizardPhase(threadRow)
+
+  thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
+  reserveThread(thread, username)
+
+  try {
+    const { acquireWorkspaceLease, findWorkspaceLeaseConflict } = await import(
+      '../legacy-control-plane/workspace-lease-store'
+    )
+    const workspaceLease = acquireWorkspaceLease({
+      workspacePath,
+      ownerKind: 'conversation',
+      ownerId: thread.id
+    })
+    if (!workspaceLease) {
+      const occupant = findWorkspaceLeaseConflict(workspacePath, {
+        ownerKind: 'conversation',
+        ownerId: thread.id
+      })
+      throw AppError.conflict(
+        'Workspace is busy',
+        occupant
+          ? {
+              occupant: {
+                ownerKind: occupant.ownerKind,
+                ownerId: occupant.ownerId,
+                runId: occupant.runId
+              }
+            }
+          : undefined,
+        'workspace.busy'
+      )
+    }
+
+    return {
+      username,
+      threadId: thread.id,
+      thread,
+      threadRow,
+      workspacePath,
+      threadKind,
+      createTaskMode,
+      conversationMode,
+      wizardPhase,
+      workspaceLeaseId: workspaceLease.leaseId
+    }
+  } catch (error) {
+    releaseThread(threadId)
+    throw error
+  }
 }
 
 function isThreadInflight(threadId: string): boolean {
@@ -217,52 +334,43 @@ export async function* streamSendMessage(
     selectedPlanNodeRef?: string
   }
 ): AsyncGenerator<ChatSseEvent> {
+  const prepared = await prepareConversationTurn({
+    username,
+    threadId,
+    requestedCreateTaskMode: options?.createTaskMode === true,
+    requestedDraft: options?.generateDraft === true
+  })
+  yield* executePreparedTurn(prepared, message, options)
+}
+
+export async function* executePreparedTurn(
+  prepared: PreparedConversationTurn,
+  message: string,
+  options?: {
+    attachments?: MessageAttachment[]
+    selectedDraftSection?: string
+    selectedPlanNodeRef?: string
+  }
+): AsyncGenerator<ChatSseEvent> {
   const trimmed = message.trim()
   if (!trimmed) {
     throw AppError.badRequest('Message cannot be empty', 'message.empty')
   }
 
-  const resolved = await loadThreadProject(username, threadId)
-  let thread = resolved.thread
-  const workspacePath = resolved.workspacePath
-  const { isThreadProjectDeletionBlocked } = await import(
-    '../legacy-control-plane/deletion-coordinator'
+  const { username, threadId, workspacePath, threadKind, createTaskMode, conversationMode } =
+    prepared
+  let thread = prepared.thread
+  const threadRow = prepared.threadRow
+  const wizardPhase = prepared.wizardPhase
+
+  const { enterWorkspaceLeaseContext } = await import(
+    '../legacy-control-plane/workspace-lease-context'
   )
-  if (await isThreadProjectDeletionBlocked(threadId)) {
-    throw AppError.conflict(
-      'Project or thread is being deleted',
-      undefined,
-      'thread.deleting'
-    )
-  }
-  const threadRow = await getThreadRow(username, threadId)
-  if (!threadRow) throw AppError.notFound('Thread not found', 'thread.not_found')
-  const threadKind = resolveThreadKind(threadRow)
-  const createTaskMode = options?.createTaskMode === true
-  if (createTaskMode && threadKind !== THREAD_KIND_CREATE_TASK) {
-    throw AppError.badRequest(
-      'Start a task conversation from the Create Task entry',
-      'thread.kind_mismatch',
-      { expected: 'create_task', actual: threadKind }
-    )
-  }
-  if (!createTaskMode && threadKind === THREAD_KIND_CREATE_TASK) {
-    throw AppError.badRequest(
-      'This conversation belongs to a task creation flow; continue in Create Task',
-      'thread.kind_mismatch',
-      { expected: 'chat', actual: threadKind }
-    )
-  }
-  // Server-side mode truth: threadKind alone decides whether a draft turn may
-  // start. Must run before turnRole is computed so a chat thread can never be
-  // coerced into a draft turn, regardless of what the client requests.
-  const conversationMode = resolveConversationMode({
-    threadKind,
-    requestedDraft: options?.generateDraft === true
+  enterWorkspaceLeaseContext({
+    leaseId: prepared.workspaceLeaseId,
+    ownerKind: 'conversation',
+    ownerId: thread.id
   })
-  const wizardPhase = resolveWizardPhase(threadRow)
-  thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
-  reserveThread(thread, username)
 
   try {
     const core = await ensureCoreAvailable(thread.coreCode).catch((error: Error) => {
@@ -281,52 +389,11 @@ export async function* streamSendMessage(
       conversationId: thread.conversationId,
       runtimeSessionId: thread.runtimeSessionId,
       attachments: turnAttachments,
-      wizardPhase: options?.createTaskMode ? wizardPhase : null
+      wizardPhase: createTaskMode ? wizardPhase : null
     })
 
     yield { event: 'user_message', data: { message: userMessage } }
 
-    const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
-      '../legacy-control-plane/workspace-lease-store'
-    )
-    const workspaceLease = acquireWorkspaceLease({
-      workspacePath,
-      ownerKind: 'conversation',
-      ownerId: thread.id
-    })
-    if (!workspaceLease) {
-      const { findWorkspaceLeaseConflict } = await import(
-        '../legacy-control-plane/workspace-lease-store'
-      )
-      const occupant = findWorkspaceLeaseConflict(workspacePath, {
-        ownerKind: 'conversation',
-        ownerId: thread.id
-      })
-      throw AppError.conflict(
-        'Workspace is busy',
-        occupant
-          ? {
-              occupant: {
-                ownerKind: occupant.ownerKind,
-                ownerId: occupant.ownerId,
-                runId: occupant.runId
-              }
-            }
-          : undefined,
-        'workspace.busy'
-      )
-    }
-
-    const { enterWorkspaceLeaseContext } = await import(
-      '../legacy-control-plane/workspace-lease-context'
-    )
-    enterWorkspaceLeaseContext({
-      leaseId: workspaceLease.leaseId,
-      ownerKind: 'conversation',
-      ownerId: thread.id
-    })
-
-    try {
     if (!createTaskMode && threadKind === THREAD_KIND_CHAT) {
       try {
         const firstImage = turnAttachments.find((attachment) =>
@@ -649,9 +716,6 @@ export async function* streamSendMessage(
         state: buildThreadState(thread, workspacePath, updatedCore, 0)
       }
     }
-    } finally {
-      releaseWorkspaceLeaseForOwner('conversation', thread.id)
-    }
   } catch (error) {
     const errMessage = formatSdkTurnError(error)
     const turnError = toTurnErrorDto(error)
@@ -672,6 +736,10 @@ export async function* streamSendMessage(
     }
     yield { event: 'error', data: { message: errMessage, error: turnError } }
   } finally {
+    const { releaseWorkspaceLeaseForOwner } = await import(
+      '../legacy-control-plane/workspace-lease-store'
+    )
+    releaseWorkspaceLeaseForOwner('conversation', threadId)
     releaseThread(threadId)
   }
 }
@@ -693,8 +761,24 @@ export async function reconcileOnStartup(): Promise<void> {
 }
 
 let startupReconciled = false
+let startupReconcilePromise: Promise<void> | null = null
+
 export async function reconcileOnStartupOnce(): Promise<void> {
   if (startupReconciled) return
-  startupReconciled = true
-  await reconcileOnStartup()
+  if (startupReconcilePromise) return startupReconcilePromise
+
+  startupReconcilePromise = reconcileOnStartup()
+    .then(() => {
+      startupReconciled = true
+    })
+    .finally(() => {
+      startupReconcilePromise = null
+    })
+
+  return startupReconcilePromise
+}
+
+export function resetConversationReconcileForTests(): void {
+  startupReconciled = false
+  startupReconcilePromise = null
 }

@@ -65,62 +65,68 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   void LEGACY_RESUME_RUNNING_DISABLED
 
   const db = createDatabase(options.dataDir)
-  const schemaRead = readSchemaGeneration(db)
-  const mode = options.mode ?? 'desktop'
+  try {
+    const schemaRead = readSchemaGeneration(db)
 
-  const settings = new SettingsStore(options.dataDir)
-  const authSecret = getOrCreateAuthSecret(options.dataDir)
-  const bootId = randomUUID()
+    // FIX-PLAN F1 / R6: fail closed before publishing global context or starting janitors.
+    if (schemaRead === 'v3_authoritative') {
+      throw new StartupError('control_plane.v3_not_release_ready')
+    }
 
-  appContext = {
-    dataDir: options.dataDir,
-    db,
-    settings,
-    security: {
-      mode,
-      authSecret
-    },
-    eventBus: new JobEventBus(),
-    runtimeRegistry: new RuntimeRegistry(),
-    executionRuntime: new JobExecutionRuntimeRegistry(),
-    bootId,
-    applicationRuntime: null
-  }
-  process.env.CODETASK_DATA_DIR = options.dataDir
+    const mode = options.mode ?? 'desktop'
+    const settings = new SettingsStore(options.dataDir)
+    const authSecret = getOrCreateAuthSecret(options.dataDir)
+    const bootId = randomUUID()
 
-  // FIX-PLAN F1: production refuses V3 until cutover gate is complete. preparing/copied/legacy
-  // use Legacy Composition Root only (created lazily in startApplicationRuntime).
-  if (schemaRead === 'v3_authoritative') {
-    throw new StartupError('control_plane.v3_not_release_ready')
-  }
+    const nextContext: AppContext = {
+      dataDir: options.dataDir,
+      db,
+      settings,
+      security: {
+        mode,
+        authSecret
+      },
+      eventBus: new JobEventBus(),
+      runtimeRegistry: new RuntimeRegistry(),
+      executionRuntime: new JobExecutionRuntimeRegistry(),
+      bootId,
+      applicationRuntime: null
+    }
+    process.env.CODETASK_DATA_DIR = options.dataDir
 
-  startRetentionJanitor()
-  startAuthJanitor()
+    appContext = nextContext
 
-  void runRetentionJanitorPass()
-    .then((result) => {
-      if (
-        result.expiredArtifacts > 0 ||
-        result.orphanAttachments > 0 ||
-        result.staleRuntimes > 0 ||
-        result.orphanDesignArtifacts > 0 ||
-        result.staleAttachmentDirs > 0 ||
-        result.orphanRuntimeTrees > 0 ||
-        result.sqliteMaintenance.ran
-      ) {
-        bootstrapLogger.info('retention startup janitor pass', {
-          expiredArtifacts: result.expiredArtifacts,
-          orphanAttachments: result.orphanAttachments
-        })
-      }
-    })
-    .catch((error: unknown) => {
-      bootstrapLogger.warn('retention startup janitor failed', {
-        error: error instanceof Error ? error.message : String(error)
+    startRetentionJanitor()
+    startAuthJanitor()
+
+    void runRetentionJanitorPass()
+      .then((result) => {
+        if (
+          result.expiredArtifacts > 0 ||
+          result.orphanAttachments > 0 ||
+          result.staleRuntimes > 0 ||
+          result.orphanDesignArtifacts > 0 ||
+          result.staleAttachmentDirs > 0 ||
+          result.orphanRuntimeTrees > 0 ||
+          result.sqliteMaintenance.ran
+        ) {
+          bootstrapLogger.info('retention startup janitor pass', {
+            expiredArtifacts: result.expiredArtifacts,
+            orphanAttachments: result.orphanAttachments
+          })
+        }
       })
-    })
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('retention startup janitor failed', {
+          error: error instanceof Error ? error.message : String(error)
+        })
+      })
 
-  return appContext
+    return appContext
+  } catch (error) {
+    closeDatabaseForTests()
+    throw error
+  }
 }
 
 /** Fail-closed readiness barrier used before HTTP bind/listen. */
