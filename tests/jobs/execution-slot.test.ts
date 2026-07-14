@@ -14,12 +14,12 @@ test('JobExecutionRuntimeRegistry blocks a second active loop for the same user'
   assert.equal(registry.tryStartLoop('job-b', 'alice'), true)
 })
 
-test('JobExecutionRuntimeRegistry allows parallel loops for different users', () => {
+test('JobExecutionRuntimeRegistry blocks parallel loops globally at capacity 1', () => {
   const registry = new JobExecutionRuntimeRegistry()
   assert.equal(registry.tryStartLoop('job-a', 'alice'), true)
-  assert.equal(registry.tryStartLoop('job-b', 'bob'), true)
+  assert.equal(registry.tryStartLoop('job-b', 'bob'), false)
   assert.equal(registry.findActiveLoopJobIdForUser('alice'), 'job-a')
-  assert.equal(registry.findActiveLoopJobIdForUser('bob'), 'job-b')
+  assert.equal(registry.findActiveLoopJobIdForUser('bob'), null)
 })
 
 test('RuntimeRegistry blocks a second planning session for the same user', () => {

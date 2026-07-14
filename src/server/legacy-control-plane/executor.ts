@@ -17,10 +17,7 @@ import { ensureCursorAcpRuntimeDirs } from '../agent-runtime/env'
 import { memoryDebug } from '../debug/memory'
 import { slimTaskProgressItemsForRuntime } from './evidence/store'
 import { finalizeJobExecution } from './finalize-execution'
-import {
-  getExecutionRunContext,
-  runWithExecutionRunContext
-} from './execution-run-context'
+import { getExecutionRunContext, runWithExecutionRunContext } from './execution-run-context'
 import { updateJobRowFenced, updateJobRowForSnapshotFenced } from './repository'
 import {
   emitJobError,
@@ -62,6 +59,7 @@ import {
 import {
   beginTaskAttempt,
   commitCompletedTaskAttempt,
+  markTaskAttemptProviderStarted,
   markTaskAttemptFailed
 } from './task-attempts'
 import { isDraining } from './shutdown-state'
@@ -172,7 +170,6 @@ type ExecuteSingleTaskResult =
       items: TaskProgressItemDto[]
     }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initJobExecutor(_ctx: AppContext): void {
   getAppContext()
 }
@@ -1000,6 +997,7 @@ function startTaskEvidenceWait(
   sessionId: string,
   jobId: string,
   taskId: string,
+  idempotencyKey: string,
   signal: AbortSignal,
   options?: {
     /** Optional initial arm. Production omits this — timer starts only via resetTimeout after turn complete. */
@@ -1062,6 +1060,7 @@ function startTaskEvidenceWait(
       sessionId,
       jobId,
       taskId,
+      idempotencyKey,
       resolve: (packet) => {
         if (settled) return
         cleanup()
@@ -1393,19 +1392,38 @@ async function executeSingleTask(
     }
   }
 
-  const mcpUrl = buildTaskWorkerMcpUrl({ sessionId, jobId: job.id, taskId })
-  let evidenceTimedOut = false
-  const evidenceWait = startTaskEvidenceWait(sessionId, job.id, taskId, jobSignal, {
-    onTimeout: () => {
-      evidenceTimedOut = true
-      turnAbort.abort(
-        createTurnError('task.evidence_timeout', {
-          params: { taskId },
-          detail: 'Timed out waiting for report_task_result after turn completed'
-        })
-      )
-    }
+  const stableIdempotencyKey = idempotencyKey?.trim()
+  if (!stableIdempotencyKey) {
+    throw createTurnError('task.terminal_failure', {
+      params: { taskId },
+      detail: 'Task attempt is missing its durable idempotency key'
+    })
+  }
+  const mcpUrl = buildTaskWorkerMcpUrl({
+    sessionId,
+    jobId: job.id,
+    taskId,
+    idempotencyKey: stableIdempotencyKey
   })
+  let evidenceTimedOut = false
+  const evidenceWait = startTaskEvidenceWait(
+    sessionId,
+    job.id,
+    taskId,
+    stableIdempotencyKey,
+    jobSignal,
+    {
+      onTimeout: () => {
+        evidenceTimedOut = true
+        turnAbort.abort(
+          createTurnError('task.evidence_timeout', {
+            params: { taskId },
+            detail: 'Timed out waiting for report_task_result after turn completed'
+          })
+        )
+      }
+    }
+  )
   const assignedReferencesMarkdown =
     referenceIds.length > 0 && referenceManifest
       ? buildAssignedReferenceCorpusMarkdown({
@@ -1464,7 +1482,7 @@ async function executeSingleTask(
       mcpUrl,
       signal,
       jobId: job.id,
-      idempotencyKey: idempotencyKey ?? undefined
+      idempotencyKey: stableIdempotencyKey
     })) {
       if (chunk.type === 'completed') {
         evidenceWait.resetTimeout(getTaskEvidenceWaitTimeoutForTests() ?? TASK_EVIDENCE_GRACE_MS)
@@ -1801,579 +1819,579 @@ async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<
   const sliceToVerify = findSliceReadyForVerification(gate.slices)
   if (!sliceToVerify) return 'skip'
 
-      const slicePreflight = preflightSliceTaskEvidence(plan, sliceToVerify.id, items)
-      if (!slicePreflight.ok) {
-        for (const taskId of slicePreflight.missingTaskIds) {
-          items = updateTaskItem(items, taskId, {
-            status: 'queued',
-            executionStatus: 'queued',
-            evidenceStatus: 'incomplete',
-            evidence: null,
-            errorMessage: null,
-            error: createTurnError('task.evidence_missing', {
-              params: { taskId }
-            }).toDto()
-          })
-        }
-        sliceToVerify.runtimeStatus = null
-        sliceToVerify.verificationStatus = null
-        taskProgress = {
-          ...taskProgress,
-          phase: 'running',
-          status: 'running',
-          currentIndex: countCompleted(items),
-          total: items.length,
-          currentTaskId: null,
-          message: null,
-          progressCode: 'execution.evidence_incomplete',
-          progressParams: { sliceId: sliceToVerify.id },
-          tasks: items
-        }
-        await persistTaskProgress(jobId, taskProgress, undefined, gate)
-        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-      }
-
-      const sliceBundleHash = computeSliceEvidenceBundleHash(plan, sliceToVerify.id, items, dataDir)
-      const sliceAttemptGuard = guardVerificationAttempt({
-        progress: taskProgress,
-        scope: 'slice',
-        id: sliceToVerify.id,
-        bundleHash: sliceBundleHash
+  const slicePreflight = preflightSliceTaskEvidence(plan, sliceToVerify.id, items)
+  if (!slicePreflight.ok) {
+    for (const taskId of slicePreflight.missingTaskIds) {
+      items = updateTaskItem(items, taskId, {
+        status: 'queued',
+        executionStatus: 'queued',
+        evidenceStatus: 'incomplete',
+        evidence: null,
+        errorMessage: null,
+        error: createTurnError('task.evidence_missing', {
+          params: { taskId }
+        }).toDto()
       })
-      if (!sliceAttemptGuard.ok) {
-        sliceToVerify.runtimeStatus = 'verification-blocked'
-        sliceToVerify.verificationStatus = 'blocked'
-        await failJobWithProgress(
-          jobId,
-          taskProgress,
-          items,
-          gate,
-          sliceAttemptGuard.progressCode,
-          sliceAttemptGuard.progressParams,
-          taskTerminalError(sliceToVerify.id, sliceAttemptGuard.reason)
-        )
-        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-      }
+    }
+    sliceToVerify.runtimeStatus = null
+    sliceToVerify.verificationStatus = null
+    taskProgress = {
+      ...taskProgress,
+      phase: 'running',
+      status: 'running',
+      currentIndex: countCompleted(items),
+      total: items.length,
+      currentTaskId: null,
+      message: null,
+      progressCode: 'execution.evidence_incomplete',
+      progressParams: { sliceId: sliceToVerify.id },
+      tasks: items
+    }
+    await persistTaskProgress(jobId, taskProgress, undefined, gate)
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'continue'
+  }
 
-      const signal = executionAbortSignal(jobId)
-      sliceToVerify.runtimeStatus = 'verifying'
-      await persistTaskProgress(
+  const sliceBundleHash = computeSliceEvidenceBundleHash(plan, sliceToVerify.id, items, dataDir)
+  const sliceAttemptGuard = guardVerificationAttempt({
+    progress: taskProgress,
+    scope: 'slice',
+    id: sliceToVerify.id,
+    bundleHash: sliceBundleHash
+  })
+  if (!sliceAttemptGuard.ok) {
+    sliceToVerify.runtimeStatus = 'verification-blocked'
+    sliceToVerify.verificationStatus = 'blocked'
+    await failJobWithProgress(
+      jobId,
+      taskProgress,
+      items,
+      gate,
+      sliceAttemptGuard.progressCode,
+      sliceAttemptGuard.progressParams,
+      taskTerminalError(sliceToVerify.id, sliceAttemptGuard.reason)
+    )
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  const signal = executionAbortSignal(jobId)
+  sliceToVerify.runtimeStatus = 'verifying'
+  await persistTaskProgress(
+    jobId,
+    {
+      ...taskProgress,
+      phase: 'running',
+      status: 'running',
+      currentIndex: countCompleted(items),
+      total: items.length,
+      currentTaskId: null,
+      message: null,
+      progressCode: 'execution.verifying_slice',
+      progressParams: { id: sliceToVerify.id },
+      tasks: items
+    },
+    undefined,
+    gate
+  )
+
+  const verificationResult = await runSliceVerificationResilient({
+    jobId,
+    threadId: job.threadId,
+    workspacePath: job.workspacePath ?? '',
+    plan,
+    slice: sliceToVerify,
+    taskItems: items,
+    taskProgress,
+    gate,
+    signal
+  })
+  taskProgress = verificationResult.taskProgress
+  const verification = verificationResult.verification
+
+  if (!verification.ok) {
+    if (verification.verdict?.status === 'needs-repair') {
+      const repair = await handleSliceNeedsRepair({
         jobId,
-        {
-          ...taskProgress,
-          phase: 'running',
-          status: 'running',
-          currentIndex: countCompleted(items),
-          total: items.length,
-          currentTaskId: null,
-          message: null,
-          progressCode: 'execution.verifying_slice',
-          progressParams: { id: sliceToVerify.id },
-          tasks: items
-        },
-        undefined,
-        gate
-      )
-
-      const verificationResult = await runSliceVerificationResilient({
-        jobId,
-        threadId: job.threadId,
-        workspacePath: job.workspacePath ?? '',
         plan,
-        slice: sliceToVerify,
-        taskItems: items,
-        taskProgress,
-        gate,
-        signal
-      })
-      taskProgress = verificationResult.taskProgress
-      const verification = verificationResult.verification
-
-      if (!verification.ok) {
-        if (verification.verdict?.status === 'needs-repair') {
-          const repair = await handleSliceNeedsRepair({
-            jobId,
-            plan,
-            sliceId: sliceToVerify.id,
-            verdict: verification.verdict,
-            items,
-            taskProgress,
-            gate
-          })
-          if (!repair.ok) {
-            await failJobWithProgress(
-              jobId,
-              taskProgress,
-              items,
-              gate,
-              repair.progressCode,
-              repair.progressParams,
-              taskTerminalError(sliceToVerify.id)
-            )
-            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-          }
-          plan = repair.plan
-          items = repair.items
-          taskProgress = repair.taskProgress
-          gate = repair.gate
-          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-        }
-
-        if (verification.verdict?.status === 'blocked') {
-          sliceToVerify.runtimeStatus = 'verification-blocked'
-          sliceToVerify.verificationStatus = 'blocked'
-          if (verification.verdict) {
-            taskProgress = {
-              ...taskProgress,
-              slices: upsertSliceVerdict(
-                taskProgress.slices,
-                sliceToVerify.id,
-                toSliceVerificationRecord(verification.verdict)
-              ),
-              tasks: items
-            }
-          }
-          await failJobWithProgress(
-            jobId,
-            taskProgress,
-            items,
-            gate,
-            'execution.slice_blocked',
-            { id: sliceToVerify.id },
-            taskTerminalError(sliceToVerify.id, verification.message)
-          )
-          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-        }
-
-        if (verification.verdict?.status === 'inconclusive') {
-          const nextAttempt = verificationAttemptCount(taskProgress, 'slice', sliceToVerify.id) + 1
-          if (verification.verdict) {
-            taskProgress = {
-              ...taskProgress,
-              slices: upsertSliceVerdict(
-                taskProgress.slices,
-                sliceToVerify.id,
-                toSliceVerificationRecord(verification.verdict)
-              ),
-              tasks: items
-            }
-          }
-
-          if (nextAttempt >= MAX_VERIFICATION_ATTEMPTS) {
-            sliceToVerify.runtimeStatus = 'verification-blocked'
-            sliceToVerify.verificationStatus = 'inconclusive'
-            await failJobWithProgress(
-              jobId,
-              taskProgress,
-              items,
-              gate,
-              'execution.slice_inconclusive_exhausted',
-              { id: sliceToVerify.id, maxAttempts: MAX_VERIFICATION_ATTEMPTS },
-              taskTerminalError(sliceToVerify.id, verification.message)
-            )
-            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-          }
-
-          const repair = await handleSliceEvidenceRepair({
-            jobId,
-            plan,
-            sliceId: sliceToVerify.id,
-            reason: verification.message,
-            attempt: nextAttempt,
-            bundleHash: sliceBundleHash,
-            items,
-            taskProgress,
-            gate
-          })
-          if (!repair.ok) {
-            await failJobWithProgress(
-              jobId,
-              taskProgress,
-              items,
-              gate,
-              repair.progressCode,
-              repair.progressParams,
-              taskTerminalError(sliceToVerify.id)
-            )
-            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-          }
-          plan = repair.plan
-          items = repair.items
-          taskProgress = repair.taskProgress
-          gate = repair.gate
-          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-        }
-
-        const failed = await persistTaskProgress(
-          jobId,
-          {
-            phase: 'failed',
-            status: 'failed',
-            currentIndex: countCompleted(items),
-            total: items.length,
-            currentTaskId: null,
-            message: null,
-            progressCode: 'execution.slice_blocked',
-            progressParams: { id: sliceToVerify.id },
-            tasks: items
-          },
-          {
-            status: 'failed',
-            lastError: taskTerminalError(sliceToVerify.id, verification.message)
-          },
-          gate,
-          'terminal'
-        )
-        if (failed) {
-          items = slimTaskProgressItemsForRuntime(items)
-        }
-        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-      }
-
-      sliceToVerify.runtimeStatus = 'progress-ok'
-      sliceToVerify.verificationStatus = 'passed'
-      reconcileMilestoneStatuses(gate.milestones, gate.slices)
-      taskProgress = {
-        ...taskProgress,
-        slices: verification.verdict
-          ? upsertSliceVerdict(
-              taskProgress.slices,
-              sliceToVerify.id,
-              toSliceVerificationRecord(verification.verdict)
-            )
-          : taskProgress.slices,
-        phase: 'running',
-        status: 'running',
-        currentIndex: countCompleted(items),
-        total: items.length,
-        currentTaskId: null,
-        message: null,
-        progressCode: 'execution.slice_accepted',
-        progressParams: { id: sliceToVerify.id },
-        tasks: items
-      }
-      await persistTaskProgress(jobId, taskProgress, undefined, gate)
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-}
-
-async function processMilestoneVerificationStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
-  const jobId = ctx.jobId
-  let { plan, items, taskProgress, gate } = ctx
-  const { job, dataDir } = ctx
-  const milestoneToVerify = findMilestoneReadyForVerification(gate.milestones, gate.slices)
-  if (!milestoneToVerify) return 'skip'
-
-      const sliceVerdictMap = Object.fromEntries(
-        (taskProgress.slices ?? []).filter((row) => row.verdict).map((row) => [row.id, row.verdict])
-      )
-      const milestonePreflight = preflightMilestoneSliceVerdicts(
-        milestoneToVerify.sliceIds,
-        sliceVerdictMap
-      )
-      if (!milestonePreflight.ok) {
-        milestoneToVerify.verificationStatus = 'ready-for-verification'
-        taskProgress = {
-          ...taskProgress,
-          phase: 'running',
-          status: 'running',
-          currentIndex: countCompleted(items),
-          total: items.length,
-          currentTaskId: null,
-          message: null,
-          progressCode: 'execution.evidence_incomplete',
-          progressParams: { milestoneId: milestoneToVerify.id },
-          tasks: items
-        }
-        await persistTaskProgress(jobId, taskProgress, undefined, gate)
-        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-      }
-
-      const milestoneBundleHash = computeMilestoneEvidenceBundleHash(
-        plan,
-        milestoneToVerify.id,
+        sliceId: sliceToVerify.id,
+        verdict: verification.verdict,
         items,
-        taskProgress.slices,
-        dataDir
-      )
-      const milestoneAttemptGuard = guardVerificationAttempt({
-        progress: taskProgress,
-        scope: 'milestone',
-        id: milestoneToVerify.id,
-        bundleHash: milestoneBundleHash
-      })
-      if (!milestoneAttemptGuard.ok) {
-        milestoneToVerify.verificationStatus = 'blocked'
-        await failJobWithProgress(
-          jobId,
-          taskProgress,
-          items,
-          gate,
-          milestoneAttemptGuard.progressCode,
-          milestoneAttemptGuard.progressParams,
-          taskTerminalError(milestoneToVerify.id, milestoneAttemptGuard.reason)
-        )
-        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-      }
-
-      const signal = executionAbortSignal(jobId)
-      milestoneToVerify.verificationStatus = 'verifying'
-      await persistTaskProgress(
-        jobId,
-        {
-          ...taskProgress,
-          phase: 'running',
-          status: 'running',
-          currentIndex: countCompleted(items),
-          total: items.length,
-          currentTaskId: null,
-          message: null,
-          progressCode: 'execution.verifying_milestone',
-          progressParams: { id: milestoneToVerify.id },
-          tasks: items
-        },
-        undefined,
-        gate
-      )
-
-      const verificationResult = await runMilestoneVerificationResilient({
-        jobId,
-        threadId: job.threadId,
-        workspacePath: job.workspacePath ?? '',
-        plan,
-        milestone: milestoneToVerify,
-        slices: gate.slices,
-        taskItems: items,
-        progressSlices: taskProgress.slices,
         taskProgress,
-        gate,
-        signal
+        gate
       })
-      taskProgress = verificationResult.taskProgress
-      const verification = verificationResult.verification
-
-      if (!verification.ok) {
-        if (verification.verdict?.status === 'needs-repair') {
-          const repair = await handleMilestoneNeedsRepair({
-            jobId,
-            plan,
-            milestoneId: milestoneToVerify.id,
-            verdict: verification.verdict,
-            items,
-            taskProgress,
-            gate
-          })
-          if (!repair.ok) {
-            await failJobWithProgress(
-              jobId,
-              taskProgress,
-              items,
-              gate,
-              repair.progressCode,
-              repair.progressParams,
-              taskTerminalError(milestoneToVerify.id)
-            )
-            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-          }
-          plan = repair.plan
-          items = repair.items
-          taskProgress = repair.taskProgress
-          gate = repair.gate
-          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-        }
-
-        if (verification.verdict?.status === 'blocked') {
-          milestoneToVerify.verificationStatus = 'blocked'
-          await failJobWithProgress(
-            jobId,
-            taskProgress,
-            items,
-            gate,
-            'execution.milestone_blocked',
-            { id: milestoneToVerify.id },
-            taskTerminalError(milestoneToVerify.id, verification.message)
-          )
-          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-        }
-
-        if (verification.verdict?.status === 'inconclusive') {
-          const nextAttempt =
-            verificationAttemptCount(taskProgress, 'milestone', milestoneToVerify.id) + 1
-
-          if (nextAttempt >= MAX_VERIFICATION_ATTEMPTS) {
-            milestoneToVerify.verificationStatus = 'inconclusive'
-            await failJobWithProgress(
-              jobId,
-              taskProgress,
-              items,
-              gate,
-              'execution.milestone_inconclusive_exhausted',
-              { id: milestoneToVerify.id, maxAttempts: MAX_VERIFICATION_ATTEMPTS },
-              taskTerminalError(milestoneToVerify.id, verification.message)
-            )
-            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-          }
-
-          const repair = await handleMilestoneEvidenceRepair({
-            jobId,
-            plan,
-            milestoneId: milestoneToVerify.id,
-            reason: verification.message,
-            attempt: nextAttempt,
-            bundleHash: milestoneBundleHash,
-            items,
-            taskProgress,
-            gate
-          })
-          if (!repair.ok) {
-            await failJobWithProgress(
-              jobId,
-              taskProgress,
-              items,
-              gate,
-              repair.progressCode,
-              repair.progressParams,
-              taskTerminalError(milestoneToVerify.id)
-            )
-            syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-          }
-          plan = repair.plan
-          items = repair.items
-          taskProgress = repair.taskProgress
-          gate = repair.gate
-          syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-        }
-
+      if (!repair.ok) {
         await failJobWithProgress(
           jobId,
           taskProgress,
           items,
           gate,
-          'execution.milestone_blocked',
-          { id: milestoneToVerify.id },
-          taskTerminalError(milestoneToVerify.id, verification.message)
+          repair.progressCode,
+          repair.progressParams,
+          taskTerminalError(sliceToVerify.id)
         )
         syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
+        return 'return'
       }
-
-      milestoneToVerify.verificationStatus = 'passed'
-      taskProgress = {
-        ...taskProgress,
-        phase: 'running',
-        status: 'running',
-        currentIndex: countCompleted(items),
-        total: items.length,
-        currentTaskId: null,
-        message: null,
-        progressCode: 'execution.milestone_accepted',
-        progressParams: { id: milestoneToVerify.id },
-        tasks: items
-      }
-      await persistTaskProgress(jobId, taskProgress, undefined, gate)
+      plan = repair.plan
+      items = repair.items
+      taskProgress = repair.taskProgress
+      gate = repair.gate
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'continue'
-}
+    }
 
-async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
-  const jobId = ctx.jobId
-  const username = ctx.username
-  let { plan, items, taskProgress, gate, job } = ctx
-const next = findNextReadyTask(gate.slices, gate.tasks)
-    if (!next) {
-      const anyFailed = items.some((item) => item.status === 'failed')
-      const workflowError = createTurnError(
-        anyFailed ? 'workflow.failed_block' : 'workflow.deadlock'
-      ).toDto()
-      const failedProgress: TaskProgressDto = {
+    if (verification.verdict?.status === 'blocked') {
+      sliceToVerify.runtimeStatus = 'verification-blocked'
+      sliceToVerify.verificationStatus = 'blocked'
+      if (verification.verdict) {
+        taskProgress = {
+          ...taskProgress,
+          slices: upsertSliceVerdict(
+            taskProgress.slices,
+            sliceToVerify.id,
+            toSliceVerificationRecord(verification.verdict)
+          ),
+          tasks: items
+        }
+      }
+      await failJobWithProgress(
+        jobId,
+        taskProgress,
+        items,
+        gate,
+        'execution.slice_blocked',
+        { id: sliceToVerify.id },
+        taskTerminalError(sliceToVerify.id, verification.message)
+      )
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
+    }
+
+    if (verification.verdict?.status === 'inconclusive') {
+      const nextAttempt = verificationAttemptCount(taskProgress, 'slice', sliceToVerify.id) + 1
+      if (verification.verdict) {
+        taskProgress = {
+          ...taskProgress,
+          slices: upsertSliceVerdict(
+            taskProgress.slices,
+            sliceToVerify.id,
+            toSliceVerificationRecord(verification.verdict)
+          ),
+          tasks: items
+        }
+      }
+
+      if (nextAttempt >= MAX_VERIFICATION_ATTEMPTS) {
+        sliceToVerify.runtimeStatus = 'verification-blocked'
+        sliceToVerify.verificationStatus = 'inconclusive'
+        await failJobWithProgress(
+          jobId,
+          taskProgress,
+          items,
+          gate,
+          'execution.slice_inconclusive_exhausted',
+          { id: sliceToVerify.id, maxAttempts: MAX_VERIFICATION_ATTEMPTS },
+          taskTerminalError(sliceToVerify.id, verification.message)
+        )
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+        return 'return'
+      }
+
+      const repair = await handleSliceEvidenceRepair({
+        jobId,
+        plan,
+        sliceId: sliceToVerify.id,
+        reason: verification.message,
+        attempt: nextAttempt,
+        bundleHash: sliceBundleHash,
+        items,
+        taskProgress,
+        gate
+      })
+      if (!repair.ok) {
+        await failJobWithProgress(
+          jobId,
+          taskProgress,
+          items,
+          gate,
+          repair.progressCode,
+          repair.progressParams,
+          taskTerminalError(sliceToVerify.id)
+        )
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+        return 'return'
+      }
+      plan = repair.plan
+      items = repair.items
+      taskProgress = repair.taskProgress
+      gate = repair.gate
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
+    }
+
+    const failed = await persistTaskProgress(
+      jobId,
+      {
         phase: 'failed',
         status: 'failed',
         currentIndex: countCompleted(items),
         total: items.length,
         currentTaskId: null,
         message: null,
-        progressCode: anyFailed ? 'execution.workflow_failed_block' : 'execution.workflow_deadlock',
-        progressParams: null,
+        progressCode: 'execution.slice_blocked',
+        progressParams: { id: sliceToVerify.id },
         tasks: items
-      }
-      taskProgress = failedProgress
-      const failed = await persistTaskProgress(
+      },
+      {
+        status: 'failed',
+        lastError: taskTerminalError(sliceToVerify.id, verification.message)
+      },
+      gate,
+      'terminal'
+    )
+    if (failed) {
+      items = slimTaskProgressItemsForRuntime(items)
+    }
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  sliceToVerify.runtimeStatus = 'progress-ok'
+  sliceToVerify.verificationStatus = 'passed'
+  reconcileMilestoneStatuses(gate.milestones, gate.slices)
+  taskProgress = {
+    ...taskProgress,
+    slices: verification.verdict
+      ? upsertSliceVerdict(
+          taskProgress.slices,
+          sliceToVerify.id,
+          toSliceVerificationRecord(verification.verdict)
+        )
+      : taskProgress.slices,
+    phase: 'running',
+    status: 'running',
+    currentIndex: countCompleted(items),
+    total: items.length,
+    currentTaskId: null,
+    message: null,
+    progressCode: 'execution.slice_accepted',
+    progressParams: { id: sliceToVerify.id },
+    tasks: items
+  }
+  await persistTaskProgress(jobId, taskProgress, undefined, gate)
+  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+  return 'continue'
+}
+
+async function processMilestoneVerificationStep(
+  ctx: ExecutionLoopMutable
+): Promise<LoopStepAction> {
+  const jobId = ctx.jobId
+  let { plan, items, taskProgress, gate } = ctx
+  const { job, dataDir } = ctx
+  const milestoneToVerify = findMilestoneReadyForVerification(gate.milestones, gate.slices)
+  if (!milestoneToVerify) return 'skip'
+
+  const sliceVerdictMap = Object.fromEntries(
+    (taskProgress.slices ?? []).filter((row) => row.verdict).map((row) => [row.id, row.verdict])
+  )
+  const milestonePreflight = preflightMilestoneSliceVerdicts(
+    milestoneToVerify.sliceIds,
+    sliceVerdictMap
+  )
+  if (!milestonePreflight.ok) {
+    milestoneToVerify.verificationStatus = 'ready-for-verification'
+    taskProgress = {
+      ...taskProgress,
+      phase: 'running',
+      status: 'running',
+      currentIndex: countCompleted(items),
+      total: items.length,
+      currentTaskId: null,
+      message: null,
+      progressCode: 'execution.evidence_incomplete',
+      progressParams: { milestoneId: milestoneToVerify.id },
+      tasks: items
+    }
+    await persistTaskProgress(jobId, taskProgress, undefined, gate)
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'continue'
+  }
+
+  const milestoneBundleHash = computeMilestoneEvidenceBundleHash(
+    plan,
+    milestoneToVerify.id,
+    items,
+    taskProgress.slices,
+    dataDir
+  )
+  const milestoneAttemptGuard = guardVerificationAttempt({
+    progress: taskProgress,
+    scope: 'milestone',
+    id: milestoneToVerify.id,
+    bundleHash: milestoneBundleHash
+  })
+  if (!milestoneAttemptGuard.ok) {
+    milestoneToVerify.verificationStatus = 'blocked'
+    await failJobWithProgress(
+      jobId,
+      taskProgress,
+      items,
+      gate,
+      milestoneAttemptGuard.progressCode,
+      milestoneAttemptGuard.progressParams,
+      taskTerminalError(milestoneToVerify.id, milestoneAttemptGuard.reason)
+    )
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  const signal = executionAbortSignal(jobId)
+  milestoneToVerify.verificationStatus = 'verifying'
+  await persistTaskProgress(
+    jobId,
+    {
+      ...taskProgress,
+      phase: 'running',
+      status: 'running',
+      currentIndex: countCompleted(items),
+      total: items.length,
+      currentTaskId: null,
+      message: null,
+      progressCode: 'execution.verifying_milestone',
+      progressParams: { id: milestoneToVerify.id },
+      tasks: items
+    },
+    undefined,
+    gate
+  )
+
+  const verificationResult = await runMilestoneVerificationResilient({
+    jobId,
+    threadId: job.threadId,
+    workspacePath: job.workspacePath ?? '',
+    plan,
+    milestone: milestoneToVerify,
+    slices: gate.slices,
+    taskItems: items,
+    progressSlices: taskProgress.slices,
+    taskProgress,
+    gate,
+    signal
+  })
+  taskProgress = verificationResult.taskProgress
+  const verification = verificationResult.verification
+
+  if (!verification.ok) {
+    if (verification.verdict?.status === 'needs-repair') {
+      const repair = await handleMilestoneNeedsRepair({
         jobId,
-        failedProgress,
-        {
-          status: 'failed',
-          lastError: workflowError
-        },
-        gate,
-        'terminal'
-      )
-      if (failed) {
-        items = slimTaskProgressItemsForRuntime(items)
+        plan,
+        milestoneId: milestoneToVerify.id,
+        verdict: verification.verdict,
+        items,
+        taskProgress,
+        gate
+      })
+      if (!repair.ok) {
+        await failJobWithProgress(
+          jobId,
+          taskProgress,
+          items,
+          gate,
+          repair.progressCode,
+          repair.progressParams,
+          taskTerminalError(milestoneToVerify.id)
+        )
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+        return 'return'
       }
+      plan = repair.plan
+      items = repair.items
+      taskProgress = repair.taskProgress
+      gate = repair.gate
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
+    }
+
+    if (verification.verdict?.status === 'blocked') {
+      milestoneToVerify.verificationStatus = 'blocked'
+      await failJobWithProgress(
+        jobId,
+        taskProgress,
+        items,
+        gate,
+        'execution.milestone_blocked',
+        { id: milestoneToVerify.id },
+        taskTerminalError(milestoneToVerify.id, verification.message)
+      )
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'return'
     }
 
-    // FIX-PLAN F3-B (§8.3) + R1: open a durable attempt before any Provider call. Fail closed on
-    // begin errors — never invoke the Provider without an attempt ledger row.
-    let attemptNo: number | null = null
-    let idempotencyKey: string | null = null
-    const runId = getExecutionRunContext()?.runId ?? null
-    try {
-      const attempt = beginTaskAttempt({
-        jobId,
-        taskId: next.id,
-        runId,
-        snapshotPlanRevision: job.snapshotPlanRevision ?? job.planRevision ?? 0
-      })
-      if (attempt.kind === 'already-completed') {
-        items = updateTaskItem(items, next.id, {
-          status: 'completed',
-          executionStatus: 'completed',
-          errorMessage: null
-        })
-        applyTaskProgressToGate(gate.tasks, items)
-        reconcileSliceStatuses(gate.slices)
-        reconcileMilestoneStatuses(gate.milestones, gate.slices)
-        const skipProgress: TaskProgressDto = {
-          ...taskProgress,
-          phase: 'running',
-          status: 'running',
-          currentIndex: countCompleted(items),
-          total: items.length,
-          currentTaskId: null,
-          message: null,
-          progressCode: 'execution.resuming',
-          progressParams: null,
-          tasks: items
-        }
-        taskProgress = skipProgress
-        await persistTaskProgress(jobId, skipProgress, undefined, gate)
+    if (verification.verdict?.status === 'inconclusive') {
+      const nextAttempt =
+        verificationAttemptCount(taskProgress, 'milestone', milestoneToVerify.id) + 1
+
+      if (nextAttempt >= MAX_VERIFICATION_ATTEMPTS) {
+        milestoneToVerify.verificationStatus = 'inconclusive'
+        await failJobWithProgress(
+          jobId,
+          taskProgress,
+          items,
+          gate,
+          'execution.milestone_inconclusive_exhausted',
+          { id: milestoneToVerify.id, maxAttempts: MAX_VERIFICATION_ATTEMPTS },
+          taskTerminalError(milestoneToVerify.id, verification.message)
+        )
         syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-        return 'continue'
+        return 'return'
       }
-      attemptNo = attempt.attemptNo
-      idempotencyKey = attempt.idempotencyKey
-    } catch (error) {
-      memoryDebug('processNextTaskStep: beginTaskAttempt failed', { jobId, taskId: next.id })
-      const detail = error instanceof Error ? error.message : String(error)
+
+      const repair = await handleMilestoneEvidenceRepair({
+        jobId,
+        plan,
+        milestoneId: milestoneToVerify.id,
+        reason: verification.message,
+        attempt: nextAttempt,
+        bundleHash: milestoneBundleHash,
+        items,
+        taskProgress,
+        gate
+      })
+      if (!repair.ok) {
+        await failJobWithProgress(
+          jobId,
+          taskProgress,
+          items,
+          gate,
+          repair.progressCode,
+          repair.progressParams,
+          taskTerminalError(milestoneToVerify.id)
+        )
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+        return 'return'
+      }
+      plan = repair.plan
+      items = repair.items
+      taskProgress = repair.taskProgress
+      gate = repair.gate
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
+    }
+
+    await failJobWithProgress(
+      jobId,
+      taskProgress,
+      items,
+      gate,
+      'execution.milestone_blocked',
+      { id: milestoneToVerify.id },
+      taskTerminalError(milestoneToVerify.id, verification.message)
+    )
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  milestoneToVerify.verificationStatus = 'passed'
+  taskProgress = {
+    ...taskProgress,
+    phase: 'running',
+    status: 'running',
+    currentIndex: countCompleted(items),
+    total: items.length,
+    currentTaskId: null,
+    message: null,
+    progressCode: 'execution.milestone_accepted',
+    progressParams: { id: milestoneToVerify.id },
+    tasks: items
+  }
+  await persistTaskProgress(jobId, taskProgress, undefined, gate)
+  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+  return 'continue'
+}
+
+async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
+  const jobId = ctx.jobId
+  const username = ctx.username
+  let { plan, items, taskProgress, gate, job } = ctx
+  const next = findNextReadyTask(gate.slices, gate.tasks)
+  if (!next) {
+    const anyFailed = items.some((item) => item.status === 'failed')
+    const workflowError = createTurnError(
+      anyFailed ? 'workflow.failed_block' : 'workflow.deadlock'
+    ).toDto()
+    const failedProgress: TaskProgressDto = {
+      phase: 'failed',
+      status: 'failed',
+      currentIndex: countCompleted(items),
+      total: items.length,
+      currentTaskId: null,
+      message: null,
+      progressCode: anyFailed ? 'execution.workflow_failed_block' : 'execution.workflow_deadlock',
+      progressParams: null,
+      tasks: items
+    }
+    taskProgress = failedProgress
+    const failed = await persistTaskProgress(
+      jobId,
+      failedProgress,
+      {
+        status: 'failed',
+        lastError: workflowError
+      },
+      gate,
+      'terminal'
+    )
+    if (failed) {
+      items = slimTaskProgressItemsForRuntime(items)
+    }
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  // FIX-PLAN F3-B (§8.3) + R1: open a durable attempt before any Provider call. Fail closed on
+  // begin errors — never invoke the Provider without an attempt ledger row.
+  let attemptNo: number | null = null
+  let idempotencyKey: string | null = null
+  let providerStartRequired = false
+  const runId = getExecutionRunContext()?.runId ?? null
+  try {
+    const attempt = beginTaskAttempt({
+      jobId,
+      taskId: next.id,
+      runId,
+      snapshotPlanRevision: job.snapshotPlanRevision ?? job.planRevision ?? 0
+    })
+    if (attempt.kind === 'already-completed') {
+      items = updateTaskItem(items, next.id, {
+        status: 'completed',
+        executionStatus: 'completed',
+        errorMessage: null
+      })
+      applyTaskProgressToGate(gate.tasks, items)
+      reconcileSliceStatuses(gate.slices)
+      reconcileMilestoneStatuses(gate.milestones, gate.slices)
+      const skipProgress: TaskProgressDto = {
+        ...taskProgress,
+        phase: 'running',
+        status: 'running',
+        currentIndex: countCompleted(items),
+        total: items.length,
+        currentTaskId: null,
+        message: null,
+        progressCode: 'execution.resuming',
+        progressParams: null,
+        tasks: items
+      }
+      taskProgress = skipProgress
+      await persistTaskProgress(jobId, skipProgress, undefined, gate)
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'continue'
+    }
+    if (attempt.kind === 'blocked-uncertain') {
+      const detail = `Automatic replay blocked: task attempt ${attempt.attemptNo} has an uncertain side-effect outcome (${attempt.status})`
       await failJobWithProgress(
         jobId,
         taskProgress,
@@ -2381,226 +2399,254 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
         gate,
         'execution.failed',
         { id: next.id },
+        createTurnError('task.terminal_failure', { detail }).toDto()
+      )
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
+    }
+    attemptNo = attempt.attemptNo
+    idempotencyKey = attempt.idempotencyKey
+    providerStartRequired = attempt.kind === 'started'
+  } catch (error) {
+    memoryDebug('processNextTaskStep: beginTaskAttempt failed', { jobId, taskId: next.id })
+    const detail = error instanceof Error ? error.message : String(error)
+    await failJobWithProgress(
+      jobId,
+      taskProgress,
+      items,
+      gate,
+      'execution.failed',
+      { id: next.id },
+      createTurnError('task.terminal_failure', {
+        detail: `beginTaskAttempt failed: ${detail}`
+      }).toDto()
+    )
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  const nextFlat = findFlatTask(plan, next.id)
+  if (nextFlat) {
+    items = updateTaskItem(items, next.id, {
+      status: 'running',
+      executionStatus: 'running',
+      coreCode: resolveCoreForTask(job, nextFlat)
+    })
+    applyTaskProgressToGate(gate.tasks, items)
+    reconcileSliceStatuses(gate.slices)
+    reconcileMilestoneStatuses(gate.milestones, gate.slices)
+  }
+
+  const runningProgress: TaskProgressDto = {
+    phase: 'running',
+    status: 'running',
+    currentIndex: countCompleted(items),
+    total: items.length,
+    currentTaskId: next.id,
+    message: null,
+    progressCode: 'execution.running_task',
+    progressParams: { id: next.id },
+    tasks: items
+  }
+  await persistTaskProgress(jobId, runningProgress, undefined, gate)
+
+  // This transition is the durable at-most-once boundary. If it cannot be persisted, the
+  // Provider is never invoked. Once persisted, an unknown result keeps the stable key occupied
+  // and a later recovery fails closed instead of replaying arbitrary external side effects.
+  if (attemptNo == null) {
+    throw new Error('task_attempt.missing_before_provider_start')
+  }
+  if (providerStartRequired) {
+    markTaskAttemptProviderStarted({ jobId, taskId: next.id, attemptNo })
+  }
+
+  const result = await executeSingleTask(
+    username,
+    job,
+    plan,
+    next.id,
+    items,
+    taskProgress,
+    gate,
+    idempotencyKey
+  )
+  const fullItems = result.items
+
+  if (result.kind === 'recovered') {
+    plan = result.plan
+    taskProgress = result.taskProgress
+    gate = result.gate
+    const recoveredProgress: TaskProgressDto = {
+      ...taskProgress,
+      phase: 'running',
+      status: 'running',
+      currentIndex: countCompleted(fullItems),
+      total: fullItems.length,
+      currentTaskId: null,
+      message: null,
+      progressCode: result.progressCode,
+      progressParams: result.progressParams ?? null,
+      tasks: fullItems
+    }
+    await persistPlanAndProgress(
+      jobId,
+      plan,
+      recoveredProgress,
+      {
+        status: 'running',
+        lastError: null
+      },
+      gate
+    )
+    if (result.delayMs) {
+      await sleepMs(result.delayMs)
+    }
+    items = slimTaskProgressItemsForRuntime(fullItems)
+    job = (await getUserJob(username, jobId)) ?? job
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'continue'
+  }
+
+  if (result.kind === 'paused') {
+    const pausedProgress: TaskProgressDto = {
+      ...result.taskProgress,
+      phase: 'running',
+      status: 'running',
+      currentIndex: countCompleted(fullItems),
+      total: fullItems.length,
+      currentTaskId: null,
+      message: null,
+      progressParams: null,
+      tasks: fullItems
+    }
+    await persistTaskProgress(
+      jobId,
+      pausedProgress,
+      {
+        status: 'paused',
+        lastError: result.lastError
+      },
+      gate,
+      'snapshot'
+    )
+    pauseJobExecution(jobId)
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  if (result.kind === 'interrupted') {
+    // App shutdown at a safe checkpoint: leave the Job `running` (recoverable). Do not persist a
+    // paused/failed status. The task attempt is marked interrupted by the shutdown coordinator.
+    items = slimTaskProgressItemsForRuntime(result.items)
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  if (result.kind === 'failed' && shouldStopExecution(jobId) === 'pause') {
+    const nextAttempt = readPausingAttempt(taskProgress, jobId) + 1
+    taskProgress = withPausingAttempt(taskProgress, jobId, nextAttempt)
+    if (nextAttempt >= MAX_PAUSING_TURN_ATTEMPTS) {
+      await failJobWithProgress(
+        jobId,
+        taskProgress,
+        fullItems,
+        gate,
+        'execution.pausing_exhausted',
+        { maxAttempts: MAX_PAUSING_TURN_ATTEMPTS },
         createTurnError('task.terminal_failure', {
-          detail: `beginTaskAttempt failed: ${detail}`
+          detail: `Pause timed out after ${MAX_PAUSING_TURN_ATTEMPTS} attempts`
         }).toDto()
       )
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'return'
     }
+    items = slimTaskProgressItemsForRuntime(fullItems)
+    taskProgress = { ...taskProgress, tasks: fullItems }
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'continue'
+  }
 
-    const nextFlat = findFlatTask(plan, next.id)
-    if (nextFlat) {
-      items = updateTaskItem(items, next.id, {
-        status: 'running',
-        executionStatus: 'running',
-        coreCode: resolveCoreForTask(job, nextFlat)
-      })
-      applyTaskProgressToGate(gate.tasks, items)
-      reconcileSliceStatuses(gate.slices)
-      reconcileMilestoneStatuses(gate.milestones, gate.slices)
-    }
-
-    const runningProgress: TaskProgressDto = {
+  const failed = result.kind === 'failed'
+  if (!failed && shouldStopExecution(jobId) === 'pause') {
+    const completedProgress: TaskProgressDto = {
       phase: 'running',
       status: 'running',
-      currentIndex: countCompleted(items),
-      total: items.length,
-      currentTaskId: next.id,
-      message: null,
-      progressCode: 'execution.running_task',
-      progressParams: { id: next.id },
-      tasks: items
-    }
-    await persistTaskProgress(jobId, runningProgress, undefined, gate)
-
-    const result = await executeSingleTask(
-      username,
-      job,
-      plan,
-      next.id,
-      items,
-      taskProgress,
-      gate,
-      idempotencyKey
-    )
-    const fullItems = result.items
-
-    if (result.kind === 'recovered') {
-      plan = result.plan
-      taskProgress = result.taskProgress
-      gate = result.gate
-      const recoveredProgress: TaskProgressDto = {
-        ...taskProgress,
-        phase: 'running',
-        status: 'running',
-        currentIndex: countCompleted(fullItems),
-        total: fullItems.length,
-        currentTaskId: null,
-        message: null,
-        progressCode: result.progressCode,
-        progressParams: result.progressParams ?? null,
-        tasks: fullItems
-      }
-      await persistPlanAndProgress(
-        jobId,
-        plan,
-        recoveredProgress,
-        {
-          status: 'running',
-          lastError: null
-        },
-        gate
-      )
-      if (result.delayMs) {
-        await sleepMs(result.delayMs)
-      }
-      items = slimTaskProgressItemsForRuntime(fullItems)
-      job = (await getUserJob(username, jobId)) ?? job
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-    }
-
-    if (result.kind === 'paused') {
-      const pausedProgress: TaskProgressDto = {
-        ...result.taskProgress,
-        phase: 'running',
-        status: 'running',
-        currentIndex: countCompleted(fullItems),
-        total: fullItems.length,
-        currentTaskId: null,
-        message: null,
-        progressParams: null,
-        tasks: fullItems
-      }
-      await persistTaskProgress(
-        jobId,
-        pausedProgress,
-        {
-          status: 'paused',
-          lastError: result.lastError
-        },
-        gate,
-        'snapshot'
-      )
-      pauseJobExecution(jobId)
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-    }
-
-    if (result.kind === 'interrupted') {
-      // App shutdown at a safe checkpoint: leave the Job `running` (recoverable). Do not persist a
-      // paused/failed status. The task attempt is marked interrupted by the shutdown coordinator.
-      items = slimTaskProgressItemsForRuntime(result.items)
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-    }
-
-    if (result.kind === 'failed' && shouldStopExecution(jobId) === 'pause') {
-      const nextAttempt = readPausingAttempt(taskProgress, jobId) + 1
-      taskProgress = withPausingAttempt(taskProgress, jobId, nextAttempt)
-      if (nextAttempt >= MAX_PAUSING_TURN_ATTEMPTS) {
-        await failJobWithProgress(
-          jobId,
-          taskProgress,
-          fullItems,
-          gate,
-          'execution.pausing_exhausted',
-          { maxAttempts: MAX_PAUSING_TURN_ATTEMPTS },
-          createTurnError('task.terminal_failure', {
-            detail: `Pause timed out after ${MAX_PAUSING_TURN_ATTEMPTS} attempts`
-          }).toDto()
-        )
-        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-      }
-      items = slimTaskProgressItemsForRuntime(fullItems)
-      taskProgress = { ...taskProgress, tasks: fullItems }
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'continue'
-    }
-
-    const failed = result.kind === 'failed'
-    if (!failed && shouldStopExecution(jobId) === 'pause') {
-      const completedProgress: TaskProgressDto = {
-        phase: 'running',
-        status: 'running',
-        currentIndex: countCompleted(fullItems),
-        total: fullItems.length,
-        currentTaskId: null,
-        message: null,
-        progressCode: 'execution.completed',
-        progressParams: {
-          done: countCompleted(fullItems),
-          total: fullItems.length
-        },
-        tasks: fullItems
-      }
-      taskProgress = completedProgress
-      // The task itself finished successfully before the pause landed: commit the attempt so a
-      // resume never re-runs it (FIX-PLAN F3-B / R1). Commit failures must not advance progress.
-      if (attemptNo != null) {
-        const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
-        commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
-      }
-      items = slimTaskProgressItemsForRuntime(fullItems)
-      await finalizeExecutionPause(jobId, taskProgress, items, gate)
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
-    }
-
-    // FIX-PLAN F3-B (§8.3) + R1: commit task success atomically, or record the failed attempt.
-    // Do not swallow commit failures — memory/job progress must not advance as completed.
-    if (attemptNo != null) {
-      if (result.kind === 'failed') {
-        markTaskAttemptFailed({
-          jobId,
-          taskId: next.id,
-          attemptNo,
-          errorJson: JSON.stringify(result.lastError)
-        })
-      } else if (result.kind === 'completed') {
-        const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
-        commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
-      }
-    }
-
-    const afterProgress: TaskProgressDto = {
-      phase: failed ? 'failed' : 'running',
-      status: failed ? 'failed' : 'running',
       currentIndex: countCompleted(fullItems),
       total: fullItems.length,
       currentTaskId: null,
       message: null,
-      progressCode: failed ? (result.progressCode ?? 'execution.failed') : 'execution.completed',
-      progressParams: failed
-        ? (result.progressParams ?? { id: 'unknown' })
-        : {
-            done: countCompleted(fullItems),
-            total: fullItems.length
-          },
+      progressCode: 'execution.completed',
+      progressParams: {
+        done: countCompleted(fullItems),
+        total: fullItems.length
+      },
       tasks: fullItems
     }
-    await persistTaskProgress(
-      jobId,
-      afterProgress,
-      {
-        status: failed ? 'failed' : 'running',
-        lastError: failed ? result.lastError : null
-      },
-      gate,
-      failed ? 'terminal' : 'delta'
-    )
-
-    items = slimTaskProgressItemsForRuntime(fullItems)
-    if (failed) {
-      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-      return 'return'
+    taskProgress = completedProgress
+    // The task itself finished successfully before the pause landed: commit the attempt so a
+    // resume never re-runs it (FIX-PLAN F3-B / R1). Commit failures must not advance progress.
+    if (attemptNo != null) {
+      const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
+      commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
     }
-
-    job = (await getUserJob(username, jobId)) ?? job
+    items = slimTaskProgressItemsForRuntime(fullItems)
+    await finalizeExecutionPause(jobId, taskProgress, items, gate)
     syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-    return 'continue'
+    return 'return'
+  }
+
+  // FIX-PLAN F3-B (§8.3) + R1: commit task success atomically, or record the failed attempt.
+  // Do not swallow commit failures — memory/job progress must not advance as completed.
+  if (attemptNo != null) {
+    if (result.kind === 'failed') {
+      markTaskAttemptFailed({
+        jobId,
+        taskId: next.id,
+        attemptNo,
+        errorJson: JSON.stringify(result.lastError)
+      })
+    } else if (result.kind === 'completed') {
+      const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
+      commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
+    }
+  }
+
+  const afterProgress: TaskProgressDto = {
+    phase: failed ? 'failed' : 'running',
+    status: failed ? 'failed' : 'running',
+    currentIndex: countCompleted(fullItems),
+    total: fullItems.length,
+    currentTaskId: null,
+    message: null,
+    progressCode: failed ? (result.progressCode ?? 'execution.failed') : 'execution.completed',
+    progressParams: failed
+      ? (result.progressParams ?? { id: 'unknown' })
+      : {
+          done: countCompleted(fullItems),
+          total: fullItems.length
+        },
+    tasks: fullItems
+  }
+  await persistTaskProgress(
+    jobId,
+    afterProgress,
+    {
+      status: failed ? 'failed' : 'running',
+      lastError: failed ? result.lastError : null
+    },
+    gate,
+    failed ? 'terminal' : 'delta'
+  )
+
+  items = slimTaskProgressItemsForRuntime(fullItems)
+  if (failed) {
+    syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+    return 'return'
+  }
+
+  job = (await getUserJob(username, jobId)) ?? job
+  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+  return 'continue'
 }
 
 async function runExecutionLoop(username: string, jobId: string): Promise<void> {
@@ -2664,7 +2710,6 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
   }
 }
 
-
 export function scheduleJobExecution(
   username: string,
   jobId: string,
@@ -2717,7 +2762,7 @@ export function scheduleJobExecution(
       executionRunId = slot.runId
 
       const currentJob = await getUserJob(username, jobId)
-      if (currentJob && !preclaimedSlot) {
+      if (currentJob) {
         const { acquireWorkspaceLease } = await import('./workspace-lease-store')
         const workspaceLease = acquireWorkspaceLease({
           workspacePath: currentJob.workspacePath ?? '',
@@ -2759,9 +2804,8 @@ export function scheduleJobExecution(
         }
         preflightSandbox()
       }
-      await runWithExecutionRunContext(
-        { runId: slot.runId, signal: slot.signal },
-        () => runExecutionLoop(username, jobId)
+      await runWithExecutionRunContext({ runId: slot.runId, signal: slot.signal }, () =>
+        runExecutionLoop(username, jobId)
       )
     } catch (error) {
       // FIX-PLAN F3-C (§8.4): if we are draining for shutdown, an aborted turn is an interruption,
@@ -2808,7 +2852,6 @@ export function scheduleJobExecution(
       }
       throw error
     } finally {
-      await markJobExecutionDone(jobId, username)
       if (executionRunId) {
         const { finishExecutionRunLifecycle } = await import('./run-lifecycle')
         await finishExecutionRunLifecycle(executionRunId, {
@@ -2819,6 +2862,7 @@ export function scheduleJobExecution(
         })
       } else {
         await finalizeJobExecution({ username, jobId })
+        await markJobExecutionDone(jobId, username)
       }
     }
   })().catch(() => {})

@@ -4,6 +4,7 @@ export interface CliOptions {
   mode: AppMode
   host: string
   port: number
+  smokeTest: boolean
 }
 
 const DEFAULT_DESKTOP_PORT = 3000
@@ -28,14 +29,15 @@ function readPort(argv: string[], fallback: number): number {
 }
 
 export function parseCliArgs(argv: string[] = process.argv): CliOptions {
-  const serve = argv.includes('--serve')
+  const smokeTest = argv.includes('--smoke-test')
+  const serve = argv.includes('--serve') || smokeTest
 
   if (serve) {
     const host = readArgValue(argv, '--host') ?? (argv.includes('--host') ? '0.0.0.0' : '127.0.0.1')
     const port = readPort(argv, DEFAULT_SERVER_PORT)
-    return { mode: 'server', host, port }
+    return { mode: 'server', host, port, smokeTest }
   }
 
   const port = readPort(argv, DEFAULT_DESKTOP_PORT)
-  return { mode: 'desktop', host: '127.0.0.1', port }
+  return { mode: 'desktop', host: '127.0.0.1', port, smokeTest }
 }

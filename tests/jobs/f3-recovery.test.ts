@@ -16,12 +16,14 @@ import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-con
 import { findNextPendingJobId } from '../../src/server/legacy-control-plane/repository'
 import { beginDraining, endDraining } from '../../src/server/legacy-control-plane/shutdown-state'
 import {
+  authorizeUncertainTaskAttemptReplayForJob,
   beginTaskAttempt,
   commitCompletedTaskAttempt,
   deriveIdempotencyKey,
   deriveTaskIdempotencyKey,
   hasCompletedAttempt,
   markAllRunningAttemptsInterrupted,
+  markTaskAttemptProviderStarted,
   markRunningAttemptsInterruptedForJob
 } from '../../src/server/legacy-control-plane/task-attempts'
 import {
@@ -30,7 +32,8 @@ import {
   projects,
   threadJobs,
   threadMessages,
-  threads
+  threads,
+  workloadRuns
 } from '../../src/server/db/schema'
 
 let dataDir: string
@@ -243,6 +246,12 @@ test('F3-B: attempt lifecycle — begin, complete, never re-run, unique idempote
     })
     assert.equal(first.idempotencyKey, expectedKey)
 
+    markTaskAttemptProviderStarted({
+      jobId: 'job-att',
+      taskId: 'task-1',
+      attemptNo: first.attemptNo
+    })
+
     // Complete atomically: attempt completed + job checkpoint stamped in one transaction.
     commitCompletedTaskAttempt({
       jobId: 'job-att',
@@ -285,7 +294,7 @@ test('F3-B: attempt lifecycle — begin, complete, never re-run, unique idempote
   }
 })
 
-test('R1: stable idempotency key across retries; begin fails closed for foreign task', async () => {
+test('R1: pre-provider retry keeps its key; uncertain Provider outcome blocks replay', async () => {
   await setupDb()
   try {
     await seedJob('job-r1', { status: 'running' })
@@ -313,17 +322,72 @@ test('R1: stable idempotency key across retries; begin fails closed for foreign 
     })
     assert.equal(first.idempotencyKey, key)
 
+    // The attempt has not crossed the Provider boundary, so recovery may safely retry it.
     markRunningAttemptsInterruptedForJob('job-r1')
+    const now = Math.floor(Date.now() / 1000)
+    await getDb().insert(workloadRuns).values({
+      id: 'run-controlled-retry',
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-r1',
+      kind: 'execution',
+      pool: 'execution',
+      status: 'active',
+      startedAt: now,
+      updatedAt: now
+    })
     const retry = beginTaskAttempt({
       jobId: 'job-r1',
       taskId: 'task-a',
-      runId: null,
+      runId: 'run-controlled-retry',
       snapshotPlanRevision: 3
     })
     assert.equal(retry.kind, 'started')
     if (retry.kind !== 'started') throw new Error('unreachable')
     assert.equal(retry.attemptNo, 2)
     assert.equal(retry.idempotencyKey, key)
+
+    markTaskAttemptProviderStarted({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      attemptNo: retry.attemptNo
+    })
+
+    const sameRun = beginTaskAttempt({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      runId: 'run-controlled-retry',
+      snapshotPlanRevision: 3
+    })
+    assert.equal(sameRun.kind, 'resumed')
+    if (sameRun.kind !== 'resumed') throw new Error('unreachable')
+    assert.equal(sameRun.attemptNo, retry.attemptNo)
+    assert.equal(sameRun.idempotencyKey, key)
+
+    markRunningAttemptsInterruptedForJob('job-r1')
+
+    const blocked = beginTaskAttempt({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      runId: null,
+      snapshotPlanRevision: 3
+    })
+    assert.equal(blocked.kind, 'blocked-uncertain')
+    if (blocked.kind !== 'blocked-uncertain') throw new Error('unreachable')
+    assert.equal(blocked.attemptNo, 2)
+    assert.equal(blocked.idempotencyKey, key)
+
+    assert.equal(authorizeUncertainTaskAttemptReplayForJob('job-r1'), 1)
+    const authorized = beginTaskAttempt({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      runId: null,
+      snapshotPlanRevision: 3
+    })
+    assert.equal(authorized.kind, 'started')
+    if (authorized.kind !== 'started') throw new Error('unreachable')
+    assert.equal(authorized.attemptNo, 3)
+    assert.equal(authorized.idempotencyKey, key)
 
     assert.throws(() => beginTaskAttempt({ jobId: 'job-r1', taskId: 'missing-task', runId: null }))
   } finally {
@@ -346,6 +410,12 @@ test('R1: commit conflict does not stamp task completed', async () => {
     const started = beginTaskAttempt({ jobId: 'job-r1c', taskId: 'task-c', runId: null })
     assert.equal(started.kind, 'started')
     if (started.kind !== 'started') throw new Error('unreachable')
+
+    markTaskAttemptProviderStarted({
+      jobId: 'job-r1c',
+      taskId: 'task-c',
+      attemptNo: started.attemptNo
+    })
 
     markRunningAttemptsInterruptedForJob('job-r1c')
     assert.throws(() =>
@@ -376,45 +446,51 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
     const k1 = deriveTaskIdempotencyKey({ jobId: 'job-x', taskId: 't1', snapshotPlanRevision: 0 })
     const k2 = deriveTaskIdempotencyKey({ jobId: 'job-x', taskId: 't2', snapshotPlanRevision: 0 })
     const k3 = deriveTaskIdempotencyKey({ jobId: 'job-x', taskId: 't3', snapshotPlanRevision: 0 })
-    await getDb().insert(jobTaskAttempts).values([
-      {
-        id: 'a-run',
-        jobId: 'job-x',
-        taskId: 't1',
-        runId: null,
-        attemptNo: 1,
-        idempotencyKey: k1,
-        status: 'running',
-        startedAt: now
-      },
-      {
-        id: 'a-start',
-        jobId: 'job-x',
-        taskId: 't2',
-        runId: null,
-        attemptNo: 1,
-        idempotencyKey: k2,
-        status: 'starting',
-        startedAt: now
-      },
-      {
-        id: 'a-done',
-        jobId: 'job-x',
-        taskId: 't3',
-        runId: null,
-        attemptNo: 1,
-        idempotencyKey: k3,
-        status: 'completed',
-        startedAt: now,
-        endedAt: now
-      }
-    ])
+    await getDb()
+      .insert(jobTaskAttempts)
+      .values([
+        {
+          id: 'a-run',
+          jobId: 'job-x',
+          taskId: 't1',
+          runId: null,
+          attemptNo: 1,
+          idempotencyKey: k1,
+          status: 'running',
+          startedAt: now
+        },
+        {
+          id: 'a-start',
+          jobId: 'job-x',
+          taskId: 't2',
+          runId: null,
+          attemptNo: 1,
+          idempotencyKey: k2,
+          status: 'starting',
+          startedAt: now
+        },
+        {
+          id: 'a-done',
+          jobId: 'job-x',
+          taskId: 't3',
+          runId: null,
+          attemptNo: 1,
+          idempotencyKey: k3,
+          status: 'completed',
+          startedAt: now,
+          endedAt: now
+        }
+      ])
 
     const changed = markAllRunningAttemptsInterrupted()
     assert.equal(changed, 2)
 
     const statuses = await getDb()
-      .select({ id: jobTaskAttempts.id, status: jobTaskAttempts.status })
+      .select({
+        id: jobTaskAttempts.id,
+        status: jobTaskAttempts.status,
+        idempotencyKey: jobTaskAttempts.idempotencyKey
+      })
       .from(jobTaskAttempts)
       .where(eq(jobTaskAttempts.jobId, 'job-x'))
     const byId = new Map(statuses.map((row) => [row.id, row.status]))
@@ -422,6 +498,12 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
     assert.equal(byId.get('a-start'), 'interrupted')
     // Completed attempts are untouched.
     assert.equal(byId.get('a-done'), 'completed')
+
+    const keysById = new Map(statuses.map((row) => [row.id, row.idempotencyKey]))
+    // A Provider-started attempt keeps the stable key as its replay fence. A pre-provider attempt
+    // receives a diagnostic suffix, freeing the stable key for a safe retry.
+    assert.equal(keysById.get('a-run'), k1)
+    assert.match(keysById.get('a-start') ?? '', /^.+:interrupted-safe:1$/u)
 
     // Per-job helper is a no-op once nothing is running.
     assert.equal(markRunningAttemptsInterruptedForJob('job-x'), 0)

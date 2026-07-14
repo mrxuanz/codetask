@@ -28,6 +28,7 @@ import {
 
 const executorPath = join(process.cwd(), 'src/server/legacy-control-plane/executor.ts')
 const queueCoordinatorPath = join(process.cwd(), 'src/server/legacy-control-plane/queue-coordinator.ts')
+const plannerPath = join(process.cwd(), 'src/server/design-session/planner.ts')
 
 let dataDir = ''
 let workspaceRoot = ''
@@ -244,4 +245,18 @@ test('queue-coordinator releases lease by leaseId on slot failure', () => {
   const source = readFileSync(queueCoordinatorPath, 'utf8')
   assert.match(source, /releaseWorkspaceLease\(\{ leaseId: workspaceLease\.leaseId \}\)/)
   assert.doesNotMatch(source, /releaseWorkspaceLeaseForOwner/)
+})
+
+test('planner releases its workspace lease only after runtime lifecycle completion', () => {
+  const source = readFileSync(plannerPath, 'utf8')
+  const finallyStart = source.lastIndexOf('} finally {')
+  assert.ok(finallyStart >= 0)
+  const lifecycleIdx = source.indexOf('await finishPlanningRunLifecycle(', finallyStart)
+  const releaseIdx = source.indexOf("releaseWorkspaceLeaseForOwner('planner'", finallyStart)
+  assert.ok(lifecycleIdx > finallyStart)
+  assert.ok(releaseIdx > lifecycleIdx, 'planner lease must outlive provider runtime close')
+  assert.match(
+    source.slice(releaseIdx, releaseIdx + 100),
+    /designSessionId, run\.runId/
+  )
 })

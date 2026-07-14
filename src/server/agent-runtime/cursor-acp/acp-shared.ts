@@ -148,12 +148,14 @@ export function waitForChildExit(child: ChildProcess, timeoutMs = 10_000): Promi
   })
 }
 
-type AttachableClientContext = {
-  attachSession(response: NewSessionResponse): ActiveSession
-}
-
 export function attachAcpSession(ctx: ClientContext, response: NewSessionResponse): ActiveSession {
-  return (ctx as unknown as AttachableClientContext).attachSession(response)
+  const attachSession = Reflect.get(ctx, 'attachSession')
+  if (typeof attachSession !== 'function') {
+    throw createTurnError('provider.cursor.acp_failed', {
+      detail: 'Cursor ACP client does not support attaching an existing session'
+    })
+  }
+  return Reflect.apply(attachSession, ctx, [response])
 }
 
 export function spawnCursorAcpProcess(

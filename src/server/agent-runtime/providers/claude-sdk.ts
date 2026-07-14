@@ -1,4 +1,8 @@
-import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
+import {
+  applyTaskIdempotencyEnv,
+  buildSandboxPreparedProviderEnv,
+  buildProviderChildEnv
+} from '../env'
 import { throwSdkTurnError } from '../errors'
 import { buildClaudeMcpServers } from '../mcp'
 import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
@@ -48,6 +52,11 @@ export async function* streamClaudeTurn(
   const turnScope = createProviderTurnScope(input.role, options, {})
   turnScope.arm()
 
+  const providerEnv = outerSandbox
+    ? buildSandboxPreparedProviderEnv()
+    : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
+  applyTaskIdempotencyEnv(providerEnv, input.idempotencyKey)
+
   const stream = query({
     prompt: input.prompt,
     options: {
@@ -60,9 +69,7 @@ export async function* streamClaudeTurn(
       permissionMode: 'bypassPermissions',
       persistSession: true,
       abortController: turnAbort,
-      env: outerSandbox
-        ? buildSandboxPreparedProviderEnv()
-        : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true }),
+      env: providerEnv,
       sandbox: { enabled: false },
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),

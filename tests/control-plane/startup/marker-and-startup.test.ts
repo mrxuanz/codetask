@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import type Database from 'better-sqlite3'
-import type { AppDatabase } from '../../../src/server/db'
+import { createAppDatabaseForTests } from '../../../src/server/db'
 import { bootstrapRuntime, ensureRuntimeReady, getAppContext, resetAppContextForTests } from '../../../src/server/bootstrap'
 import { readSchemaGeneration, setCutoverMarkerForTests } from '../../../src/server/application/cutover-state'
 import { StartupError } from '../../../src/server/application/startup-error'
@@ -13,10 +13,6 @@ import { allMigrations } from '../../../src/server/db/migrations/index'
 import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { dataPaths } from '../../../src/server/data-paths'
 import DatabaseConstructor from 'better-sqlite3'
-
-function asAppDatabase(client: Database.Database): AppDatabase {
-  return { $client: client } as unknown as AppDatabase
-}
 
 function createDbAtMigrationVersion(version: number, dataDir: string): Database.Database {
   const dbPath = dataPaths(dataDir).dbFile
@@ -33,7 +29,7 @@ describe('startup: strict marker parsing', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-legacy-'))
     const sqlite = createDbAtMigrationVersion(26, dataDir)
     try {
-      assert.equal(readSchemaGeneration(asAppDatabase(sqlite)), 'legacy_v26')
+      assert.equal(readSchemaGeneration(createAppDatabaseForTests(sqlite)), 'legacy_v26')
     } finally {
       sqlite.close()
       rmSync(dataDir, { recursive: true, force: true })
@@ -45,7 +41,7 @@ describe('startup: strict marker parsing', () => {
     const sqlite = createDbAtMigrationVersion(28, dataDir)
     sqlite.exec('DROP TABLE control_schema_meta')
     try {
-      assert.throws(() => readSchemaGeneration(asAppDatabase(sqlite)), (error: unknown) => {
+      assert.throws(() => readSchemaGeneration(createAppDatabaseForTests(sqlite)), (error: unknown) => {
         return error instanceof StartupError && error.code === 'schema.marker_table_missing'
       })
     } finally {
@@ -63,12 +59,12 @@ describe('startup: strict marker parsing', () => {
           `UPDATE control_schema_meta SET value = 'bogus' WHERE key = 'control_schema_generation'`
         )
         .run()
-      assert.throws(() => readSchemaGeneration(asAppDatabase(sqlite)), (error: unknown) => {
+      assert.throws(() => readSchemaGeneration(createAppDatabaseForTests(sqlite)), (error: unknown) => {
         return error instanceof StartupError && error.code === 'schema.marker_invalid'
       })
 
       sqlite.prepare(`DELETE FROM control_schema_meta WHERE key = 'control_schema_generation'`).run()
-      assert.throws(() => readSchemaGeneration(asAppDatabase(sqlite)), (error: unknown) => {
+      assert.throws(() => readSchemaGeneration(createAppDatabaseForTests(sqlite)), (error: unknown) => {
         return error instanceof StartupError && error.code === 'schema.marker_invalid'
       })
     } finally {

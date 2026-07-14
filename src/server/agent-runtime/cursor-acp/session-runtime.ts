@@ -44,6 +44,22 @@ export interface CursorAcpSessionRuntimeOptions {
   cliArgs: string[]
 }
 
+type CursorAcpErrorDto = {
+  code: string
+  message: string
+  params?: Record<string, unknown>
+  detail?: string
+}
+
+function isCursorAcpErrorDto(error: unknown): error is CursorAcpErrorDto {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code.length > 0
+  )
+}
+
 export class CursorAcpSessionRuntime {
   readonly sessionId: string | null = null
 
@@ -256,24 +272,14 @@ export class CursorAcpSessionRuntime {
     const run = this.runPrompt(input, (chunk) => queue.push(chunk))
       .then(() => queue.close())
       .catch((error) => {
-        const dto =
-          error instanceof Error && 'code' in error
-            ? (
-                error as unknown as {
-                  code: string
-                  message: string
-                  params?: Record<string, unknown>
-                  detail?: string
-                }
-              ).code
-              ? {
-                  code: (error as unknown as { code: string }).code,
-                  message: error.message,
-                  params: (error as unknown as { params?: Record<string, unknown> }).params,
-                  detail: (error as unknown as { detail?: string }).detail ?? null
-                }
-              : null
-            : null
+        const dto = isCursorAcpErrorDto(error)
+          ? {
+              code: error.code,
+              message: error.message,
+              params: error.params,
+              detail: error.detail ?? null
+            }
+          : null
         const message = error instanceof Error ? error.message : formatAcpError(error)
         queue.push({ type: 'error', message })
         queue.close()
@@ -489,7 +495,6 @@ export class CursorAcpSessionRuntime {
 
   async close(): Promise<void> {
     if (this.closed) return
-    this.closed = true
     if (this.activeTaskSession) {
       try {
         this.activeTaskSession.dispose()
@@ -499,18 +504,25 @@ export class CursorAcpSessionRuntime {
       this.activeTaskSession = null
     }
     this.loadedSessionKey = null
-    this.releaseConnection?.()
-    if (this.connectionDone) {
-      await this.connectionDone.catch(() => {})
+    const releaseConnection = this.releaseConnection
+    const connectionDone = this.connectionDone
+    this.releaseConnection = null
+    this.connectionDone = null
+    releaseConnection?.()
+    if (connectionDone) {
+      await connectionDone.catch(() => {})
     }
     if (this.child) {
       const child = this.child
-      this.child = null
       killChildTree(child)
       await waitForChildExit(child, 10_000)
+      if (this.child === child) {
+        this.child = null
+      }
     }
     this.ctx = null
     this.diagnostics = null
+    this.closed = true
     debugCursor('runtime closed')
   }
 }

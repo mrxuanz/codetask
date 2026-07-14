@@ -1,4 +1,13 @@
-import { inject, onMounted, onScopeDispose, provide, ref, watch, type InjectionKey, type Ref } from 'vue'
+import {
+  inject,
+  onMounted,
+  onScopeDispose,
+  provide,
+  ref,
+  watch,
+  type InjectionKey,
+  type Ref
+} from 'vue'
 import { createProject, deleteProject, fetchProjects, type Project } from '@renderer/api/projects'
 import {
   createThread,
@@ -171,8 +180,7 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
             ? (pickLatestThread(nextThreads, keptProjectId)?.id ?? null)
             : null
     } catch (err) {
-      loadError.value =
-        err instanceof Error ? err.message : 'workspace.load_failed'
+      loadError.value = err instanceof Error ? err.message : 'workspace.load_failed'
     } finally {
       loading.value = false
     }
@@ -231,7 +239,7 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
     )
     projects.value = projects.value.filter((item) => item.id !== projectId)
     threads.value = threads.value.filter((item) => item.projectId !== projectId)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     const { [projectId]: _removed, ...restExpanded } = expandedProjectIds.value
     expandedProjectIds.value = restExpanded
 
