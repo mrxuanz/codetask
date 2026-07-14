@@ -62,7 +62,6 @@ import { getAppContext } from '../bootstrap'
 import { assertConcurrentTurnCapacity } from '../middleware/http-limits'
 import { maybeSeedThreadTitleFromFirstMessage } from './thread-title'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initConversationService(_options: { dataDir: string }): void {
   getAppContext()
 }
@@ -138,15 +137,10 @@ export async function prepareConversationTurn(input: {
   let thread = resolved.thread
   const workspacePath = resolved.workspacePath
 
-  const { isThreadProjectDeletionBlocked } = await import(
-    '../legacy-control-plane/deletion-coordinator'
-  )
+  const { isThreadProjectDeletionBlocked } =
+    await import('../legacy-control-plane/deletion-coordinator')
   if (await isThreadProjectDeletionBlocked(threadId)) {
-    throw AppError.conflict(
-      'Project or thread is being deleted',
-      undefined,
-      'thread.deleting'
-    )
+    throw AppError.conflict('Project or thread is being deleted', undefined, 'thread.deleting')
   }
 
   const threadRow = await getThreadRow(username, threadId)
@@ -164,9 +158,8 @@ export async function prepareConversationTurn(input: {
   reserveThread(thread, username)
 
   try {
-    const { acquireWorkspaceLease, findWorkspaceLeaseConflict } = await import(
-      '../legacy-control-plane/workspace-lease-store'
-    )
+    const { acquireWorkspaceLease, findWorkspaceLeaseConflict } =
+      await import('../legacy-control-plane/workspace-lease-store')
     const workspaceLease = acquireWorkspaceLease({
       workspacePath,
       ownerKind: 'conversation',
@@ -313,9 +306,7 @@ export async function switchThreadCore(
   threadId: string,
   coreCode: string
 ): Promise<ThreadDto> {
-  await closeConversationCursorRuntime(threadId).catch((error) => {
-    console.warn('[conversation] failed to close cursor runtime on core switch', threadId, error)
-  })
+  await closeConversationCursorRuntime(threadId)
   await ensureCoreAvailable(coreCode).catch((error: Error) => {
     throw AppError.badRequest(error.message)
   })
@@ -363,9 +354,8 @@ export async function* executePreparedTurn(
   const threadRow = prepared.threadRow
   const wizardPhase = prepared.wizardPhase
 
-  const { enterWorkspaceLeaseContext } = await import(
-    '../legacy-control-plane/workspace-lease-context'
-  )
+  const { enterWorkspaceLeaseContext } =
+    await import('../legacy-control-plane/workspace-lease-context')
   enterWorkspaceLeaseContext({
     leaseId: prepared.workspaceLeaseId,
     ownerKind: 'conversation',
@@ -625,7 +615,9 @@ export async function* executePreparedTurn(
 
         if (chunk.type === 'thinking_delta') {
           if (thinkingStartedAt == null) thinkingStartedAt = Date.now()
-          const advanced = appendTextPiece(thinking, chunk.content, { maxChars: MAX_TURN_TEXT_CHARS })
+          const advanced = appendTextPiece(thinking, chunk.content, {
+            maxChars: MAX_TURN_TEXT_CHARS
+          })
           thinking = advanced.text
           if (advanced.delta) {
             yield { event: 'thinking_delta', data: { content: advanced.delta } }
@@ -736,9 +728,8 @@ export async function* executePreparedTurn(
     }
     yield { event: 'error', data: { message: errMessage, error: turnError } }
   } finally {
-    const { releaseWorkspaceLeaseForOwner } = await import(
-      '../legacy-control-plane/workspace-lease-store'
-    )
+    const { releaseWorkspaceLeaseForOwner } =
+      await import('../legacy-control-plane/workspace-lease-store')
     releaseWorkspaceLeaseForOwner('conversation', threadId)
     releaseThread(threadId)
   }

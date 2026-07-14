@@ -56,6 +56,7 @@
     "test:fast": "node scripts/ensure-node-native.mjs && npm run test:unit && npm run test:provider-contract && npm run test:workflow",
     "test:live": "npm run test:providers:light",
     "test:ci": "npm run typecheck && npm run test:fast",
+    "release:test-gate": "npm run typecheck && npm run typecheck:control-plane && npm run check:control-plane-types && npm run check:legacy-write-guard && npm run check:no-double-assertions && npm run lint && npm run test:fast && npm run test:control-plane",
     "test:sandbox:all": "npm run test:sandbox:tdd && npm run test:sandbox && npm run test:sandbox:v2 && npm run test:sandbox:attachments"
   },
   "dependencies": {

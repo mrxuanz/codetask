@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { and, eq, inArray, ne } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { deletionRequests, projects, threadJobs, threads } from '../db/schema'
@@ -14,6 +14,7 @@ import {
 import { releaseJobCursorResources } from '../sandbox'
 import { getUserJob } from './service'
 import { releaseWorkspaceLeaseForOwner } from './workspace-lease-store'
+import { throwIfCurrentRequestAborted } from '../context/request-abort'
 
 export type DeletionEntityKind = 'thread_job' | 'thread' | 'project'
 
@@ -129,8 +130,7 @@ function findActiveDeletionRequest(
       and(
         eq(deletionRequests.entityKind, entityKind),
         eq(deletionRequests.entityId, entityId),
-        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
-        ne(deletionRequests.status, 'failed')
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES)
       )
     )
     .limit(1)
@@ -156,10 +156,7 @@ async function freezeJobRuntimeIdentity(jobId: string): Promise<FrozenJobRuntime
   }
 }
 
-export function isEntityDeletionBlocked(
-  entityKind: DeletionEntityKind,
-  entityId: string
-): boolean {
+export function isEntityDeletionBlocked(entityKind: DeletionEntityKind, entityId: string): boolean {
   const rows = getDb()
     .select({ id: deletionRequests.id })
     .from(deletionRequests)
@@ -167,8 +164,7 @@ export function isEntityDeletionBlocked(
       and(
         eq(deletionRequests.entityKind, entityKind),
         eq(deletionRequests.entityId, entityId),
-        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
-        ne(deletionRequests.status, 'failed')
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES)
       )
     )
     .limit(1)
@@ -190,8 +186,7 @@ export async function isThreadProjectDeletionBlocked(threadId: string): Promise<
       and(
         eq(deletionRequests.entityKind, 'thread_job'),
         eq(deletionRequests.threadId, threadId),
-        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
-        ne(deletionRequests.status, 'failed')
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES)
       )
     )
     .limit(1)
@@ -290,11 +285,7 @@ async function updateDeletionPhase(
   if ('retryCount' in patch && patch.retryCount !== undefined) next.retryCount = patch.retryCount
   if ('errorJson' in patch) next.errorJson = patch.errorJson ?? null
 
-  getDb()
-    .update(deletionRequests)
-    .set(next)
-    .where(eq(deletionRequests.id, requestId))
-    .run()
+  getDb().update(deletionRequests).set(next).where(eq(deletionRequests.id, requestId)).run()
 }
 
 async function recordDeletionFailure(requestId: string, error: unknown): Promise<void> {
@@ -391,7 +382,10 @@ async function ensureChildJobsDeleted(username: string, childJobIds: string[]): 
   }
 }
 
-async function ensureChildThreadsDeleted(username: string, childThreadIds: string[]): Promise<void> {
+async function ensureChildThreadsDeleted(
+  username: string,
+  childThreadIds: string[]
+): Promise<void> {
   for (const threadId of childThreadIds) {
     const active = findActiveDeletionRequest('thread', threadId)
     if (active) {
@@ -492,7 +486,7 @@ async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<voi
 
 export async function executeDeletionRequest(requestId: string): Promise<void> {
   const request = loadDeletionRequest(requestId)
-  if (request.phase === 'completed' || request.status === 'failed') {
+  if (request.phase === 'completed') {
     return
   }
 
@@ -515,15 +509,10 @@ export async function executeDeletionRequest(requestId: string): Promise<void> {
       }
 
       if (request.entityKind === 'thread' && request.threadId) {
-        await closeConversationCursorRuntime(request.threadId).catch((error) => {
-          console.warn(
-            '[deletion] failed to close cursor runtime for thread',
-            request.threadId,
-            error
-          )
-        })
+        await closeConversationCursorRuntime(request.threadId)
       }
 
+      throwIfCurrentRequestAborted()
       if (phase === 'requested') {
         await updateDeletionPhase(requestId, 'draining')
       }
@@ -532,12 +521,14 @@ export async function executeDeletionRequest(requestId: string): Promise<void> {
     }
 
     if (phase === 'runtime_closed') {
+      throwIfCurrentRequestAborted()
       await deleteEntityDatabaseRows(request)
       await updateDeletionPhase(requestId, 'database_deleted')
       phase = 'database_deleted'
     }
 
     if (phase === 'database_deleted') {
+      throwIfCurrentRequestAborted()
       try {
         await purgeCleanupTargets(request)
       } catch (error) {
@@ -586,7 +577,7 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
     username,
     threadId: job.threadId,
     projectId,
-    workspacePath: job.workspacePath,
+    workspacePath: job.workspacePath ?? null,
     frozenJson: JSON.stringify({
       runtime: frozen,
       draftMessageId: job.draftMessageId
@@ -682,19 +673,19 @@ export async function resumePendingDeletionRequestsOnStartup(): Promise<void> {
   const rows = await getDb()
     .select({ id: deletionRequests.id })
     .from(deletionRequests)
-    .where(
-      and(
-        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
-        ne(deletionRequests.status, 'failed')
-      )
-    )
+    .where(and(inArray(deletionRequests.phase, INCOMPLETE_PHASES)))
 
+  const errors: Error[] = []
   for (const row of rows) {
     try {
       await executeDeletionRequest(row.id)
     } catch (error) {
       console.warn('[deletion] startup janitor failed', row.id, error)
+      errors.push(new Error(`deletion request ${row.id}`, { cause: error }))
     }
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, 'Failed to resume pending deletion requests')
   }
 }
 

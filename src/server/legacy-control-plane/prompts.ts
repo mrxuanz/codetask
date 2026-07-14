@@ -23,6 +23,10 @@ ${PRODUCTION_LANDING_QUALITY_BAR}
 You have access to:
 - **codeteam-manager** (HTTP MCP): call \`report_task_result\` once when done — this is the required completion signal.
 
+## External side-effect idempotency
+- This task has a stable logical identity in \`CODETASK_TASK_IDEMPOTENCY_KEY\`.
+- When an external API, deployment tool, or script accepts an idempotency/request key, pass that value through unchanged. Do not invent a new key on retry and do not print the value in user-facing output.
+
 ## Completion Contract: report_task_result
 Use this tool as the only completion signal. Submit structured evidence:
 - \`status\`: \`completed\`, \`blocked\`, or \`failed\`

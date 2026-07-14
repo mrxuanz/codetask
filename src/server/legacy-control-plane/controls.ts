@@ -19,6 +19,7 @@ import { prepareContinueFailedExecution } from './continue-failed-job'
 import { cancelJobSandboxTurns } from '../sandbox'
 import { getControlPlaneServices } from '../application/control-plane-services'
 import { isV3Authoritative } from '../application/cutover-state'
+import { authorizeUncertainTaskAttemptReplayForJob } from './task-attempts'
 import {
   pauseJobViaCommand,
   cancelJobViaCommand,
@@ -392,6 +393,7 @@ export async function resumePausedJob(username: string, jobId: string): Promise<
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     return updated
   }
+  authorizeUncertainTaskAttemptReplayForJob(jobId)
   return continueJobExecution(username, jobId, job)
 }
 
@@ -452,6 +454,8 @@ export async function continueFailedJob(username: string, jobId: string): Promis
         : 'task.execution_failed'
     throw AppError.badRequest(message, turnErrorCode)
   }
+
+  authorizeUncertainTaskAttemptReplayForJob(jobId)
 
   const occupying = await findOccupyingJobId(username, jobId)
   if (occupying) {
@@ -798,11 +802,15 @@ export function markJobExecuting(jobId: string, username?: string): boolean {
   return executionRuntime().tryStartLoop(jobId, username)
 }
 
-export async function markJobExecutionDone(jobId: string, _username: string): Promise<void> {
+export async function markJobExecutionDone(
+  jobId: string,
+  _username: string,
+  runId?: string
+): Promise<void> {
   executionRuntime().endLoop(jobId)
   await clearExecutionLease(jobId)
   const { releaseWorkspaceLeaseForOwner } = await import('./workspace-lease-store')
-  releaseWorkspaceLeaseForOwner('thread_job', jobId)
+  releaseWorkspaceLeaseForOwner('thread_job', jobId, runId)
 }
 
 export function createExecutionAbortSignal(jobId: string): AbortSignal {

@@ -149,28 +149,6 @@ function loadPlanMilestonesFromDbInTx(
   return assembleMilestones(milestoneRows, sliceRows, flatTasks)
 }
 
-async function loadPlanMilestonesFromDb(
-  db: AppDatabase,
-  jobId: string,
-  flatTasks: FlatTaskPlan[]
-): Promise<PlannerRegisteredMilestone[] | null> {
-  const milestoneRows = await db
-    .select()
-    .from(jobPlanMilestones)
-    .where(eq(jobPlanMilestones.jobId, jobId))
-    .orderBy(asc(jobPlanMilestones.sortOrder))
-
-  if (milestoneRows.length === 0) return null
-
-  const sliceRows = await db
-    .select()
-    .from(jobPlanSlices)
-    .where(eq(jobPlanSlices.jobId, jobId))
-    .orderBy(asc(jobPlanSlices.sortOrder))
-
-  return assembleMilestones(milestoneRows, sliceRows, flatTasks)
-}
-
 export function loadJobAbilitiesInTx(
   db: AppDatabase,
   jobId: string

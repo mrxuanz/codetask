@@ -160,7 +160,6 @@ function registerStreamableMcpRoute(
   })
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createMcpRoutes(_ctx: AppContext): Hono {
   const mcp = new Hono()
 
@@ -189,6 +188,7 @@ export function createMcpRoutes(_ctx: AppContext): Hono {
         role: query.role,
         jobId: query.jobId,
         taskId: query.taskId,
+        idempotencyKey: query.idem,
         capability: query.cap
       }),
     handleTaskMcpJsonRpc

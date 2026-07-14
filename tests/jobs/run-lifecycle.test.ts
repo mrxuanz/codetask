@@ -5,8 +5,18 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
-import { threadJobs, threadMessages, threads, projects } from '../../src/server/db/schema'
-import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/legacy-control-plane/reconcile'
+import {
+  projects,
+  threadJobs,
+  threadMessages,
+  threads,
+  workloadRuns,
+  workspaceLeases
+} from '../../src/server/db/schema'
+import {
+  resetJobReconcileForTests,
+  stopWorkloadReconcilerForTests
+} from '../../src/server/legacy-control-plane/reconcile'
 import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import {
   claimWorkloadSlotTx,
@@ -19,11 +29,14 @@ import {
   stopRunLifecycle
 } from '../../src/server/legacy-control-plane/run-lifecycle'
 import {
+  acquireWorkspaceLease,
+  releaseWorkspaceLeaseForOwner
+} from '../../src/server/legacy-control-plane/workspace-lease-store'
+import {
   hasRunRuntime,
   registerRunRuntime,
   resetRuntimeSupervisorForTests
 } from '../../src/server/legacy-control-plane/runtime-supervisor'
-import { workloadRuns } from '../../src/server/db/schema'
 import { eq } from 'drizzle-orm'
 
 let dataDir: string
@@ -103,6 +116,14 @@ async function seedJob(jobId: string): Promise<void> {
   })
 }
 
+async function activeWorkspaceLeaseCount(): Promise<number> {
+  const rows = await getDb()
+    .select({ id: workspaceLeases.id })
+    .from(workspaceLeases)
+    .where(eq(workspaceLeases.status, 'active'))
+  return rows.length
+}
+
 test('finishPlanningRunLifecycle success closes and releases slot', async () => {
   await setupDb()
   try {
@@ -127,7 +148,7 @@ test('finishPlanningRunLifecycle success closes and releases slot', async () => 
     assert.equal(closed, true)
     assert.equal(await getActiveRun('thread_job', 'job-1'), null)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -179,7 +200,7 @@ test('finishPlanningRunLifecycle failure runs stop lifecycle with injectable dep
     assert.deepEqual(events, ['cancel', 'close', 'kill', 'waitClosed', 'close'])
     assert.equal(await getActiveRun('thread_job', 'job-1'), null)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -203,7 +224,7 @@ test('stopRunLifecycle skipRelease keeps slot until explicit release', async () 
     await stopRunLifecycle(run.runId, 'timeout', { sleep: async () => {} }, { skipRelease: true })
     assert.notEqual(await getActiveRun('thread_job', 'job-1'), null)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -219,11 +240,19 @@ test('finishExecutionRunLifecycle success closes runtime before releasing slot',
     })
     assert.ok(run)
 
-    let closed = false
+    const lease = acquireWorkspaceLease({
+      workspacePath: '/tmp/ws',
+      ownerKind: 'thread_job',
+      ownerId: 'job-exec',
+      runId: run.runId
+    })
+    assert.ok(lease)
+
+    const events: string[] = []
     registerRunRuntime(run.runId, {
       kind: 'cursor-acp',
       close: async () => {
-        closed = true
+        events.push('close')
       }
     })
 
@@ -235,12 +264,120 @@ test('finishExecutionRunLifecycle success closes runtime before releasing slot',
         reason: 'execution_done',
         outcome: 'success'
       },
-      { finalizeExecution: async () => {} }
+      {
+        finalizeExecution: async () => {
+          events.push('finalize')
+          assert.notEqual(await getActiveRun('thread_job', 'job-exec'), null)
+          assert.equal(await activeWorkspaceLeaseCount(), 1)
+        },
+        markExecutionDone: async ({ runId }) => {
+          events.push('release-workspace-lease')
+          assert.notEqual(await getActiveRun('thread_job', 'job-exec'), null)
+          releaseWorkspaceLeaseForOwner('thread_job', 'job-exec', runId)
+        }
+      }
     )
-    assert.equal(closed, true)
+    assert.deepEqual(events, ['close', 'finalize', 'release-workspace-lease'])
+    assert.equal(await activeWorkspaceLeaseCount(), 0)
     assert.equal(await getActiveRun('thread_job', 'job-exec'), null)
   } finally {
-  await teardownDb()
+    await teardownDb()
+  }
+})
+
+test('finishExecutionRunLifecycle quarantines and keeps slot and lease when close fails', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-exec-close-fail')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-exec-close-fail',
+      kind: 'execution'
+    })
+    assert.ok(run)
+    assert.ok(
+      acquireWorkspaceLease({
+        workspacePath: '/tmp/ws',
+        ownerKind: 'thread_job',
+        ownerId: 'job-exec-close-fail',
+        runId: run.runId
+      })
+    )
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        throw new Error('close failed')
+      }
+    })
+
+    let finalized = false
+    let markedDone = false
+    await assert.rejects(
+      () =>
+        finishExecutionRunLifecycle(
+          run.runId,
+          {
+            username: 'user',
+            jobId: 'job-exec-close-fail',
+            reason: 'execution_done',
+            outcome: 'success'
+          },
+          {
+            finalizeExecution: async () => {
+              finalized = true
+            },
+            markExecutionDone: async () => {
+              markedDone = true
+            }
+          }
+        ),
+      /close failed/
+    )
+
+    const active = await getActiveRun('thread_job', 'job-exec-close-fail')
+    assert.ok(active)
+    assert.equal(active.status, 'stopping')
+    assert.equal(finalized, false)
+    assert.equal(markedDone, false)
+    assert.equal(await activeWorkspaceLeaseCount(), 1)
+    assert.equal(hasRunRuntime(run.runId), true)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('finishPlanningRunLifecycle quarantines and keeps slot when close fails', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-plan-close-fail')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-plan-close-fail',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        throw new Error('planning close failed')
+      }
+    })
+
+    await assert.rejects(
+      () => finishPlanningRunLifecycle(run.runId, 'planning_done', 'success'),
+      /planning close failed/
+    )
+
+    const active = await getActiveRun('thread_job', 'job-plan-close-fail')
+    assert.ok(active)
+    assert.equal(active.status, 'stopping')
+    assert.equal(hasRunRuntime(run.runId), true)
+  } finally {
+    await teardownDb()
   }
 })
 
@@ -299,16 +436,10 @@ test('finishExecutionRunLifecycle failure runs stop lifecycle before release', a
       }
     )
 
-    assert.deepEqual(events, [
-      'cancelRun',
-      'stopRun',
-      'hardKill',
-      'waitClosedHook',
-      'close'
-    ])
+    assert.deepEqual(events, ['cancelRun', 'stopRun', 'hardKill', 'waitClosedHook', 'close'])
     assert.equal(await getActiveRun('thread_job', 'job-exec-fail'), null)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -338,7 +469,7 @@ test('finishPlanningRunLifecycle skips release when run already released', async
     await finishPlanningRunLifecycle(run.runId, 'planning_done', 'failure')
     assert.equal(closeCalls, 1)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -375,10 +506,7 @@ test('stopRunLifecycle keeps slot when waitClosed rejects', async () => {
     assert.equal(active.status, 'stopping')
     assert.equal(hasRunRuntime(run.runId), true)
 
-    const [runRow] = await getDb()
-      .select()
-      .from(workloadRuns)
-      .where(eq(workloadRuns.id, run.runId))
+    const [runRow] = await getDb().select().from(workloadRuns).where(eq(workloadRuns.id, run.runId))
     assert.ok(runRow)
     assert.equal(runRow.status, 'stopping')
     assert.match(runRow.cancelReason ?? '', /child_close_unconfirmed/)

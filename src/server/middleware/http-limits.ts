@@ -1,7 +1,14 @@
 import type { MiddlewareHandler } from 'hono'
 import type { SecurityContext } from '../context/types'
 import { AppError } from '../error'
+import { runWithRequestAbortSignal } from '../context/request-abort'
 import { normalizedApiPath } from './require-auth'
+
+declare module 'hono' {
+  interface ContextVariableMap {
+    requestAbortSignal: AbortSignal
+  }
+}
 
 export const REQUEST_TIMEOUT_MS = Number(process.env.CODETASK_REQUEST_TIMEOUT_MS ?? 300_000)
 export const MAX_SSE_CLIENTS_PER_USER = Number(process.env.CODETASK_MAX_SSE_CLIENTS ?? 8)
@@ -37,18 +44,37 @@ export function requestTimeout(): MiddlewareHandler {
       return next()
     }
 
+    const controller = new AbortController()
+    c.set('requestAbortSignal', controller.signal)
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<Response>((resolve) => {
-      timer = setTimeout(() => resolve(requestTimedOut()), REQUEST_TIMEOUT_MS)
+      timer = setTimeout(() => {
+        resolve(requestTimedOut())
+        // Resolve the outer race first so a cooperative handler that observes
+        // this abort cannot win the response race with a late 200 response.
+        queueMicrotask(() => controller.abort(new Error('request.timeout')))
+      }, REQUEST_TIMEOUT_MS)
       timer.unref?.()
     })
 
     try {
-      return await Promise.race([next(), timeout])
+      const downstream = runWithRequestAbortSignal(controller.signal, () => next())
+      return await Promise.race([downstream, timeout])
     } finally {
       if (timer) clearTimeout(timer)
     }
   }
+}
+
+/**
+ * Downstream work can use this signal to stop DB/provider work when a normal
+ * HTTP request times out. Long-lived SSE routes deliberately bypass this
+ * middleware and keep their own lifecycle signal.
+ */
+export function getRequestAbortSignal(c: {
+  get(key: 'requestAbortSignal'): AbortSignal | undefined
+}): AbortSignal {
+  return c.get('requestAbortSignal') ?? new AbortController().signal
 }
 
 export function assertConcurrentTurnCapacity(
@@ -59,7 +85,10 @@ export function assertConcurrentTurnCapacity(
     throw new AppError(
       42901,
       `At most ${max} concurrent turns allowed`,
-      { error: `At most ${max} concurrent turns allowed`, turnErrorCode: 'conversation.concurrent_turn_limit' },
+      {
+        error: `At most ${max} concurrent turns allowed`,
+        turnErrorCode: 'conversation.concurrent_turn_limit'
+      },
       429
     )
   }

@@ -37,6 +37,20 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function closeRunRuntimeOrQuarantine(runId: string, reason: string): Promise<void> {
+  try {
+    await closeRunRuntime(runId)
+  } catch (error) {
+    await markRunQuarantined(runId, {
+      reason,
+      detail: error instanceof Error ? error.message : String(error)
+    }).catch((quarantineError) => {
+      console.warn('[run-lifecycle] quarantine after close failure failed', runId, quarantineError)
+    })
+    throw error
+  }
+}
+
 export async function stopRunLifecycle(
   runId: string,
   reason: string,
@@ -52,7 +66,9 @@ export async function stopRunLifecycle(
 
   const run = await markRunCancelling(runId, reason)
   if (!run) {
-    await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch(() => {})
+    if (!options.skipRelease) {
+      await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch(() => {})
+    }
     return
   }
 
@@ -95,7 +111,7 @@ export async function stopRunLifecycle(
     throw error
   }
 
-  await closeRunRuntime(runId)
+  await closeRunRuntimeOrQuarantine(runId, 'child_close_failed')
 
   if (!options.skipRelease) {
     await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch((error) => {
@@ -110,20 +126,14 @@ export function scheduleStopRunLifecycle(runId: string, reason: string): void {
   })
 }
 
-export async function registerRunRuntime(
-  runId: string,
-  handle: RuntimeHandle
-): Promise<void> {
+export async function registerRunRuntime(runId: string, handle: RuntimeHandle): Promise<void> {
   const { registerRunRuntime: register } = await import('./runtime-supervisor')
   register(runId, handle)
 }
 
-export async function closeAndReleaseWorkloadSlot(
-  runId: string,
-  reason: string
-): Promise<void> {
-  await closeRunRuntime(runId).catch(() => {})
-  await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch(() => {})
+export async function closeAndReleaseWorkloadSlot(runId: string, reason: string): Promise<void> {
+  await closeRunRuntimeOrQuarantine(runId, 'child_close_failed')
+  await releaseWorkloadSlot(runId, { reason, status: 'released' })
 }
 
 export async function stopAndReleaseWorkloadSlot(
@@ -138,6 +148,7 @@ export type ExecutionRunOutcome = 'success' | 'failure'
 
 export interface ExecutionRunLifecycleDependencies extends RunLifecycleDependencies {
   finalizeExecution?: (input: { username: string; jobId: string }) => Promise<void>
+  markExecutionDone?: (input: { username: string; jobId: string; runId: string }) => Promise<void>
 }
 
 export async function finishExecutionRunLifecycle(
@@ -150,36 +161,43 @@ export async function finishExecutionRunLifecycle(
   },
   deps: ExecutionRunLifecycleDependencies = {}
 ): Promise<void> {
-  const { clearExecutionRunId, isRunActive, releaseWorkloadSlot } = await import(
-    './workload-slot-store'
-  )
+  const { clearExecutionRunId, isRunActive, releaseWorkloadSlot } =
+    await import('./workload-slot-store')
   const finalizeExecution =
     deps.finalizeExecution ??
     (async (payload: { username: string; jobId: string }) => {
       const { finalizeJobExecution } = await import('./finalize-execution')
       await finalizeJobExecution(payload)
     })
-
-  clearExecutionRunId(input.jobId)
+  const markExecutionDone =
+    deps.markExecutionDone ??
+    (async (payload: { username: string; jobId: string; runId: string }) => {
+      const { markJobExecutionDone } = await import('./controls')
+      await markJobExecutionDone(payload.jobId, payload.username, payload.runId)
+    })
 
   const active = await isRunActive(runId)
   if (active) {
     if (input.outcome === 'failure') {
       await stopRunLifecycle(runId, input.reason, deps, { skipRelease: true })
     } else {
-      await closeRunRuntime(runId).catch(() => {})
+      await closeRunRuntimeOrQuarantine(runId, 'child_close_failed')
     }
   } else {
-    await closeRunRuntime(runId).catch(() => {})
+    await closeRunRuntimeOrQuarantine(runId, 'child_close_failed')
   }
 
   await finalizeExecution({ username: input.username, jobId: input.jobId })
+  await markExecutionDone({
+    username: input.username,
+    jobId: input.jobId,
+    runId
+  })
 
   if (active) {
-    await releaseWorkloadSlot(runId, { reason: input.reason }).catch((error) => {
-      console.warn('[run-lifecycle] execution release slot failed', runId, error)
-    })
+    await releaseWorkloadSlot(runId, { reason: input.reason })
   }
+  clearExecutionRunId(input.jobId)
 }
 
 export type PlanningRunOutcome = 'success' | 'failure' | 'user_stopped'
@@ -191,7 +209,7 @@ export async function finishPlanningRunLifecycle(
 ): Promise<void> {
   const { isRunActive } = await import('./workload-slot-store')
   if (!(await isRunActive(runId))) {
-    await closeRunRuntime(runId).catch(() => {})
+    await closeRunRuntimeOrQuarantine(runId, 'child_close_failed')
     return
   }
 

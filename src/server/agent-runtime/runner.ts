@@ -11,6 +11,7 @@ import { compactTurnChunkForIpc } from './chunk-ipc'
 import { streamWithTurnRetry } from './retry'
 import { resolveUserMcpServersMap } from '../settings/mcp'
 import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './types'
+import { resolveDownstreamAbortSignal } from '../context/request-abort'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
   const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
@@ -89,8 +90,10 @@ async function* withWorkloadLeaseRefresh<T>(
 export async function* streamAgentTurn(
   input: AgentTurnRunnerInput
 ): AsyncGenerator<AgentTurnChunk> {
-  yield* streamWithTurnRetry(() => streamAgentTurnOnce(input), {
-    signal: input.signal,
+  const signal = resolveDownstreamAbortSignal(input.signal)
+  const downstreamInput = signal === input.signal ? input : { ...input, signal }
+  yield* streamWithTurnRetry(() => streamAgentTurnOnce(downstreamInput), {
+    signal,
     label: `${input.role}/${input.provider}`
   })
 }

@@ -54,24 +54,29 @@ test('permission handler auto-approves write, shell, and MCP prompts', async () 
   }
 })
 
-test('buildCursorTurnPlan: conversation/planner host identity, no full-access flags', () => {
+test('buildCursorTurnPlan: conversation/planner use required outer sandbox', () => {
   for (const role of ['conversation', 'planner'] as const) {
     const plan = buildCursorTurnPlan(
       { ...baseInput(role), mcpUrl: 'http://127.0.0.1:9/mcp' },
-      { outerSandbox: false }
+      { outerSandbox: true }
     )
-    assert.equal(plan.outerSandbox, false)
-    assert.deepEqual(plan.cliArgs, ['--approve-mcps', 'acp'])
+    assert.equal(plan.outerSandbox, true)
+    assert.ok(plan.cliArgs.includes('--sandbox'))
+    assert.ok(plan.cliArgs.includes('disabled'))
     assert.equal(plan.mcpServers.length, 1)
     assert.equal(plan.mcpServers[0]?.name, 'codeteam-manager')
     assert.equal(plan.mcpServers[0]?.type, 'http')
   }
 })
 
-test('buildCursorTurnPlan: task-worker uses outer sandbox full-access CLI', () => {
-  const plan = buildCursorTurnPlan(baseInput('task-worker'), { outerSandbox: true })
+test('buildCursorTurnPlan: task-worker uses outer sandbox full-access CLI and key', () => {
+  const plan = buildCursorTurnPlan(
+    { ...baseInput('task-worker'), idempotencyKey: 'logical-task-key' },
+    { outerSandbox: true }
+  )
   assert.equal(plan.outerSandbox, true)
   assert.ok(plan.cliArgs.includes('--sandbox'))
   assert.ok(plan.cliArgs.includes('disabled'))
   assert.ok(plan.cliArgs.includes('--approve-mcps'))
+  assert.equal(plan.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
 })
