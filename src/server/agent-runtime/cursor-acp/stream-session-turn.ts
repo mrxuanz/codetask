@@ -17,7 +17,7 @@ import type { CursorPromptInput } from './session-runtime'
 import { shouldInvalidateCursorScopedRuntime } from './turn-guards'
 
 export interface StreamCursorSessionTurnInput extends AgentTurnInput {
-  jobId?: string
+  jobId?: string | undefined
 }
 
 export async function* streamCursorSessionTurn(

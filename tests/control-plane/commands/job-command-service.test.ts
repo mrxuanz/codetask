@@ -178,10 +178,18 @@ describe('JobCommandService', () => {
       clock: { nowMs: () => 1_700_000_000_000 },
       idGenerator: { generate: () => randomUUID() },
       logger: {
-        debug() {},
-        info() {},
-        warn() {},
-        error() {}
+        debug() {
+          void 0
+        },
+        info() {
+          void 0
+        },
+        warn() {
+          void 0
+        },
+        error() {
+          void 0
+        }
       },
       runtimeController
     })

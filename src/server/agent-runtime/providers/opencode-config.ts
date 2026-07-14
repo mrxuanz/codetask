@@ -1,4 +1,4 @@
-import type { Config, QuestionAnswer, QuestionInfo } from '@opencode-ai/sdk/v2'
+import type { Config, QuestionAnswer } from '@opencode-ai/sdk/v2'
 
 /**
  * OpenCode interactive `question` handling for CodeTask.
@@ -44,7 +44,7 @@ export const OPENCODE_AUTO_QUESTION_GUIDANCE =
  * Prefer an explicit question deny after wildcard allow (last matching rule wins).
  * Do not rely on this alone — OpenCode may still emit `question.asked`.
  */
-export function resolveOpencodePermissionConfig(): Config['permission'] {
+export function resolveOpencodePermissionConfig(): NonNullable<Config['permission']> {
   return {
     '*': 'allow',
     question: 'deny'
@@ -56,14 +56,65 @@ export function resolveOpencodeToolsConfig(): NonNullable<Config['tools']> {
   return { question: false }
 }
 
-type QuestionLike = Pick<QuestionInfo, 'options' | 'multiple' | 'custom'>
+export interface OpencodeQuestionOptionDto {
+  readonly label: string
+  readonly description: string
+}
+
+export interface OpencodeQuestionDto {
+  readonly options: readonly OpencodeQuestionOptionDto[]
+  readonly multiple: boolean
+  readonly custom: boolean
+}
+
+function parseQuestionOption(value: unknown): OpencodeQuestionOptionDto | null {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+  const row = value as Record<string, unknown>
+  if (row.label !== undefined && typeof row.label !== 'string') {
+    return null
+  }
+  if (row.description !== undefined && typeof row.description !== 'string') {
+    return null
+  }
+  return {
+    label: typeof row.label === 'string' ? row.label : '',
+    description: typeof row.description === 'string' ? row.description : ''
+  }
+}
+
+function parseOpencodeQuestion(value: unknown): OpencodeQuestionDto {
+  if (typeof value !== 'object' || value === null) {
+    return { options: [], multiple: false, custom: false }
+  }
+  const row = value as Record<string, unknown>
+  const options = Array.isArray(row.options)
+    ? row.options
+        .map(parseQuestionOption)
+        .filter((option): option is OpencodeQuestionOptionDto => option !== null)
+    : []
+  return {
+    options,
+    multiple: row.multiple === true,
+    custom: row.custom === true
+  }
+}
+
+/** Normalize provider question payloads before auto-reply. */
+export function parseOpencodeQuestions(value: unknown): ReadonlyArray<OpencodeQuestionDto> {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.map(parseOpencodeQuestion)
+}
 
 /**
  * Build OpenCode `question.reply` answers: pick the first (recommended) option
  * label when present; otherwise send guidance text so the agent loop continues.
  */
 export function buildOpencodeAutoQuestionAnswers(
-  questions: ReadonlyArray<QuestionLike>
+  questions: ReadonlyArray<OpencodeQuestionDto>
 ): Array<QuestionAnswer> {
   return questions.map((question) => {
     const first = question.options?.[0]

@@ -3,14 +3,14 @@
  */
 import type { ApiResponse } from './types'
 import type { ThreadJob } from './jobs'
+import type { ThreadJobDto } from '@shared/contracts/jobs'
 import {
   continueJob,
   deleteJob,
   fetchJob,
   fetchJobs,
   pauseJob,
-  restartJob,
-  type ThreadJobDto
+  restartJob
 } from './jobs'
 import { api } from './client'
 import {

@@ -84,7 +84,7 @@ export function resolveCursorHostAuthPathCandidates(profile = resolveHostProfile
 
 export function resolveCursorHostAuthPath(profile = resolveHostProfilePaths()): string {
   const candidates = resolveCursorHostAuthPathCandidates(profile)
-  return candidates.find((path) => existsSync(path)) ?? candidates[0]
+  return candidates.find((path) => existsSync(path)) ?? candidates[0] ?? ''
 }
 
 export interface CodexHostAuthSnapshot {
@@ -123,7 +123,8 @@ export function snapshotCursorHostAuth(
   profile = resolveHostProfilePaths()
 ): CursorHostAuthSnapshot {
   const authCandidates = resolveCursorHostAuthPathCandidates(profile)
-  const authPath = authCandidates.find((candidate) => existsSync(candidate)) ?? authCandidates[0]
+  const authPath =
+    authCandidates.find((candidate) => existsSync(candidate)) ?? authCandidates[0] ?? ''
   const cursorHome = resolveCursorHostCursorHome(profile)
   const configDir = resolveCursorHostConfigDir(profile)
   const sources: string[] = []
@@ -537,7 +538,7 @@ export function resolveOpencodeExecutable(): string {
     }
   }
 
-  return exeNames[0]
+  return exeNames[0] ?? 'opencode'
 }
 
 export const RUNTIME_CODEX_HOME_DIR = join('provider', 'codex')

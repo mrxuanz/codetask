@@ -49,6 +49,15 @@ export function findInMemoryExecutionOccupant(
   }
 }
 
+/** Process-global in-memory execution occupant (FIX-PLAN F2 capacity 1). */
+export function findInMemoryExecutionOccupantGlobal(exceptJobId?: string): string | null {
+  try {
+    return getAppContext().executionRuntime.findActiveLoopJobId(exceptJobId)
+  } catch {
+    return null
+  }
+}
+
 export function findInMemoryPlanningOccupant(username: string, exceptId?: string): string | null {
   try {
     return getAppContext().runtimeRegistry.findActivePlanningIdForUser(username, exceptId)
@@ -78,6 +87,22 @@ export async function findDbRunningJobId(
   if (!id) return null
   if (exceptJobId && id === exceptJobId) return null
   return id
+}
+
+/** Process-global DB running job (any user). */
+export async function findDbRunningJobGlobal(
+  exceptJobId?: string
+): Promise<{ id: string; username: string } | null> {
+  const rows = await getDb()
+    .select({ id: threadJobs.id, username: threadJobs.username })
+    .from(threadJobs)
+    .where(eq(threadJobs.status, 'running'))
+    .orderBy(threadJobs.updatedAt)
+    .limit(1)
+  const row = rows[0]
+  if (!row) return null
+  if (exceptJobId && row.id === exceptJobId) return null
+  return row
 }
 
 export async function findDbPlanningSessionId(
@@ -133,13 +158,17 @@ export async function findActiveSlotOccupant(
   return null
 }
 
+/**
+ * F2 (§7.2/§7.3): execution/planning slot occupancy is process-global. The pool
+ * capacity is a single process-wide slot, so occupancy must NOT be filtered by
+ * username — otherwise one user's active slot would not block another user.
+ */
 export async function findActiveSlotOccupantInPool(
-  username: string,
   pool: string,
   exceptId?: string
 ): Promise<string | null> {
   await ensureStartupWorkloadReady()
-  const active = await listActiveWorkloadSlots({ username, pool })
+  const active = await listActiveWorkloadSlots({ pool })
   for (const slot of active) {
     if (exceptId && slot.ownerId === exceptId) continue
     if (!isWorkloadSlotLeaseLive(slot)) continue
@@ -157,7 +186,7 @@ export async function findExecutionOccupant(
   const memExec = findInMemoryExecutionOccupant(username, exceptJobId)
   if (memExec) return memExec
 
-  const slotOccupant = await findActiveSlotOccupantInPool(username, 'execution', exceptJobId)
+  const slotOccupant = await findActiveSlotOccupantInPool('execution', exceptJobId)
   if (slotOccupant) return slotOccupant
 
   const dbExec = await findDbRunningJobId(username, exceptJobId)
@@ -175,7 +204,7 @@ export async function findPlanningOccupant(
   const memPlan = findInMemoryPlanningOccupant(username, exceptId)
   if (memPlan) return memPlan
 
-  const slotOccupant = await findActiveSlotOccupantInPool(username, 'planning', exceptId)
+  const slotOccupant = await findActiveSlotOccupantInPool('planning', exceptId)
   if (slotOccupant) return slotOccupant
 
   const dbPlan = await findDbPlanningSessionId(username, exceptId)

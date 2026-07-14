@@ -25,10 +25,18 @@ function buildJob(overrides: Partial<JobAggregate> = {}): JobAggregate {
 }
 
 const silentLogger = {
-  debug() {},
-  info() {},
-  warn() {},
-  error() {}
+  debug() {
+    void 0
+  },
+  info() {
+    void 0
+  },
+  warn() {
+    void 0
+  },
+  error() {
+    void 0
+  }
 }
 
 describe('StartupCoordinator', () => {
@@ -234,7 +242,7 @@ describe('SafeLogger', () => {
 })
 
 describe('legacy resume running', () => {
-  it('should keep auto resume disabled', () => {
-    assert.equal(LEGACY_RESUME_RUNNING_DISABLED, true)
+  it('should enable auto resume for interrupted running jobs (FIX-PLAN F3-A)', () => {
+    assert.equal(LEGACY_RESUME_RUNNING_DISABLED, false)
   })
 })

@@ -1,5 +1,6 @@
 export class RuntimeRegistry {
   private readonly inflightThreads = new Set<string>()
+  private readonly inflightThreadOwners = new Map<string, string>()
   private readonly planningJobs = new Set<string>()
   private readonly planningOwners = new Map<string, string>()
   private readonly planningControl = new Map<string, 'running' | 'paused'>()
@@ -8,12 +9,24 @@ export class RuntimeRegistry {
     return this.inflightThreads.has(threadId)
   }
 
-  addInflightThread(threadId: string): void {
+  addInflightThread(threadId: string, username?: string): void {
     this.inflightThreads.add(threadId)
+    if (username) {
+      this.inflightThreadOwners.set(threadId, username)
+    }
   }
 
   removeInflightThread(threadId: string): void {
     this.inflightThreads.delete(threadId)
+    this.inflightThreadOwners.delete(threadId)
+  }
+
+  countInflightForUser(username: string): number {
+    let count = 0
+    for (const owner of this.inflightThreadOwners.values()) {
+      if (owner === username) count++
+    }
+    return count
   }
 
   isJobPlanning(jobId: string): boolean {

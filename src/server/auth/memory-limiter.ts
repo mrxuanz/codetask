@@ -66,7 +66,8 @@ function evictIfNeeded(): void {
 
   const toRemove = BUCKETS.size - MAX_KEYS
   for (let i = 0; i < toRemove && i < sortedKeys.length; i++) {
-    BUCKETS.delete(sortedKeys[i])
+    const key = sortedKeys[i]
+    if (key !== undefined) BUCKETS.delete(key)
   }
 }
 

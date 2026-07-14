@@ -15,6 +15,8 @@ export type TurnErrorCode =
   | 'sandbox.turn.cancelled'
   | 'sandbox.child_closed'
   | 'sandbox.worker.busy'
+  | 'workspace.busy'
+  | 'runtime.draining'
   | 'sandbox.worker.missing'
   | 'sandbox.required'
   | 'sandbox.turn.timed_out'
@@ -76,6 +78,7 @@ export type TurnErrorCode =
   | 'auth.password_invalid_chars'
   | 'thread.not_found'
   | 'thread.busy'
+  | 'thread.deleting'
   | 'thread.title_empty'
   | 'thread.kind_mismatch'
   | 'thread.read_failed'
@@ -102,6 +105,7 @@ export type TurnErrorCode =
   | 'workflow.failed_block'
   | 'message.empty'
   | 'conversation.sse_required'
+  | 'conversation.mode_mismatch'
   | 'job.not_found'
   | 'job.invalid_status'
   | 'job.already_finished'
@@ -163,6 +167,8 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'sandbox.turn.cancelled': 'Sandbox turn cancelled',
   'sandbox.child_closed': 'Sandbox worker exited unexpectedly',
   'sandbox.worker.busy': 'Sandbox worker is busy',
+  'workspace.busy': 'Workspace is busy; another task is using this project folder',
+  'runtime.draining': 'Runtime is shutting down; try again after restart',
   'sandbox.worker.missing': 'Sandbox worker not available',
   'sandbox.required': 'Sandbox is required for this operation',
   'sandbox.turn.timed_out': 'Sandbox task timed out',
@@ -237,6 +243,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'auth.password_invalid_chars': 'Password may only contain printable ASCII characters',
   'thread.not_found': 'Thread not found',
   'thread.busy': 'Thread is busy; please wait for the current turn to finish',
+  'thread.deleting': 'This conversation is being deleted',
   'thread.title_empty': 'Thread title cannot be empty',
   'thread.kind_mismatch': 'Thread kind mismatch: expected {expected}, got {actual}',
   'thread.read_failed': 'Failed to read thread after update',
@@ -264,6 +271,8 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'workflow.failed_block': 'Failed subtasks present; workflow blocked',
   'message.empty': 'Message cannot be empty',
   'conversation.sse_required': 'Please use SSE streaming (Accept: text/event-stream)',
+  'conversation.mode_mismatch':
+    'This thread mode does not support the requested operation ({threadKind})',
   'job.not_found': 'Job not found',
   'job.invalid_status': 'Job status {status} does not allow this action',
   'job.already_finished': 'Job already finished',

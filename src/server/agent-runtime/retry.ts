@@ -68,7 +68,7 @@ function rethrowTurnChunkError(chunk: Extract<AgentTurnChunk, { type: 'error' }>
 
 export async function* streamWithTurnRetry(
   run: () => AsyncGenerator<AgentTurnChunk>,
-  options?: { signal?: AbortSignal; maxAttempts?: number; label?: string }
+  options?: { signal?: AbortSignal | undefined; maxAttempts?: number; label?: string }
 ): AsyncGenerator<AgentTurnChunk> {
   const maxAttempts = options?.maxAttempts ?? resolveTurnMaxRetries()
   const signal = options?.signal

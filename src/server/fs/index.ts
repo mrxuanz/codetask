@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { AppError } from '../error'
+import { assertWorkspacePathAllowed } from './allowed-workspace-roots'
 
 export interface BrowseEntry {
   name: string
@@ -93,7 +94,9 @@ export function normalizeWorkspacePath(input: string, createIfMissing: boolean):
     )
   }
 
-  return displayPathString(canonical)
+  const canonicalPath = displayPathString(canonical)
+  assertWorkspacePathAllowed(canonicalPath)
+  return canonicalPath
 }
 
 export function inferTitleFromPath(workspaceRoot: string): string {
@@ -128,6 +131,11 @@ function resolveExistingDirectory(path: string): string {
       { path: displayPathString(path) }
     )
   }
+}
+
+function assertBrowsablePathAllowed(resolvedPath: string): string {
+  assertWorkspacePathAllowed(resolvedPath)
+  return resolvedPath
 }
 
 export function browse(partialPath: string): BrowseResult {
@@ -191,7 +199,7 @@ export function browse(partialPath: string): BrowseResult {
   entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
 
   return {
-    parentPath: resolvedParent,
+    parentPath: assertBrowsablePathAllowed(resolvedParent),
     entries
   }
 }
@@ -203,5 +211,5 @@ export function parentBrowsePath(path: string): string {
   if (!parent || parent === trimmed) {
     throw AppError.badRequest('Already at root directory', 'project.already_root')
   }
-  return resolveExistingDirectory(trimTrailingSeparators(parent))
+  return assertBrowsablePathAllowed(resolveExistingDirectory(trimTrailingSeparators(parent)))
 }

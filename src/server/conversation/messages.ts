@@ -63,7 +63,7 @@ async function mapMessage(
     signAssets
       ? {
           ...attachment,
-          assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl)
+          assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl, row.username)
         }
       : attachment
   )
@@ -80,7 +80,7 @@ async function mapMessage(
     wizardPhase: row.wizardPhase ?? null,
     thinking,
     thinkingDurationMs,
-    payload: signAssets ? signAssetUrlsInValue(ctx.security.authSecret, payload) : payload,
+    payload: signAssets ? signAssetUrlsInValue(ctx.security.authSecret, payload, row.username) : payload,
     createdAt: row.createdAt
   }
 }
@@ -171,6 +171,28 @@ export async function getMessage(
 
   const row = rows[0]
   return row ? mapMessage(row, options) : null
+}
+
+/**
+ * Prepare a message payload for storage (strip asset tokens + externalize large
+ * payloads) WITHOUT writing the row. Callers that must persist the payload
+ * atomically alongside other rows can compute this before opening a synchronous
+ * transaction and then apply the returned columns inside it. (F2 §7.1)
+ */
+export async function prepareMessagePayloadColumns(
+  messageId: string,
+  payload: unknown
+): Promise<{ payloadJson: string | null; payloadArtifactId: string | null }> {
+  const ctx = getAppContext()
+  const settings = readRetentionSettings(ctx.settings)
+  const cleanPayload = stripAssetUrlAuthTokensInValue(payload)
+  return prepareMessagePayloadForStorage({
+    messageId,
+    payload: cleanPayload,
+    dataDir: ctx.dataDir,
+    settings,
+    db: getDb()
+  })
 }
 
 export async function updateMessagePayload(

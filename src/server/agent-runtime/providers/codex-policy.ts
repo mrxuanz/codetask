@@ -2,7 +2,8 @@ import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '../env'
 import { buildCodexSdkConfig, type CodexSdkConfig } from '../mcp'
 import type { AgentTurnInput } from '../types'
 import { resolveProviderOuterSandbox } from '../provider-policy'
-import { resolveRoleMcpToolNames, type ConversationRole } from '../roles'
+import { resolveRoleMcpToolNames, roleRequiresOuterSandbox, type ConversationRole } from '../roles'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 
 export type CodexSandboxMode = 'danger-full-access' | 'workspace-write'
 
@@ -36,9 +37,17 @@ export function resolveCodexMcpToolNamesForTurn(
 
 export function buildCodexTurnPlan(
   input: AgentTurnInput,
-  options: { outerSandbox?: boolean; userMcpServers?: Record<string, unknown> } = {}
+  options: {
+    outerSandbox?: boolean | undefined
+    userMcpServers?: Record<string, unknown> | undefined
+  } = {}
 ): CodexTurnPlan {
   const outerSandbox = resolveCodexOuterSandbox(input.role, options.outerSandbox)
+  if (!outerSandbox && roleRequiresOuterSandbox(input.role)) {
+    throw createTurnError('sandbox.required', {
+      detail: 'Codex full-access requires OS outer sandbox'
+    })
+  }
   const mcpToolNames = resolveCodexMcpToolNamesForTurn(input)
 
   const sdkConfig = buildCodexSdkConfig({
@@ -55,12 +64,12 @@ export function buildCodexTurnPlan(
   const sandboxMode: CodexSandboxMode = outerSandbox ? 'danger-full-access' : 'workspace-write'
 
   const threadOptions: CodexThreadOptions = {
-    model: input.model,
     workingDirectory: input.cwd,
     skipGitRepoCheck: true,
     approvalPolicy: 'never',
     sandboxMode,
     networkAccessEnabled: true,
+    ...(input.model !== undefined ? { model: input.model } : {}),
     ...(outerSandbox ? {} : { additionalDirectories: [input.runtimeRoot] })
   }
 

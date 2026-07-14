@@ -118,15 +118,30 @@ export async function findOccupyingJobId(
   return findExecutionOccupant(username, exceptJobId)
 }
 
-export async function findNextPendingJobId(username: string): Promise<string | null> {
+export async function findNextPendingJobId(username?: string): Promise<string | null> {
+  const next = await findNextPendingJob(username)
+  return next?.id ?? null
+}
+
+/**
+ * F2 (§2.2/§7.3): global FIFO by planConfirmedAt, createdAt, id.
+ * When `username` is omitted, selects across all users (process-global pool).
+ */
+export async function findNextPendingJob(
+  username?: string
+): Promise<{ id: string; username: string } | null> {
   const db = getDb()
   const rows = await db
-    .select({ id: threadJobs.id })
+    .select({ id: threadJobs.id, username: threadJobs.username })
     .from(threadJobs)
-    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'pending')))
-    .orderBy(asc(threadJobs.createdAt))
+    .where(
+      username
+        ? and(eq(threadJobs.username, username), eq(threadJobs.status, 'pending'))
+        : eq(threadJobs.status, 'pending')
+    )
+    .orderBy(asc(threadJobs.planConfirmedAt), asc(threadJobs.createdAt), asc(threadJobs.id))
     .limit(1)
-  return rows[0]?.id ?? null
+  return rows[0] ?? null
 }
 
 export async function findRestartInterruptedPausedJobId(username: string): Promise<string | null> {

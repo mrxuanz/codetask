@@ -17,7 +17,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -28,8 +28,29 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-  build:
+  test-gate:
     needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NODE_VERSION: '22'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:control-plane
+      - run: npm run check:control-plane-types
+      - run: npm run check:legacy-write-guard
+      - run: npm run lint
+      - run: npm run test:fast
+      - run: npm run test:control-plane
+
+  build:
+    needs: [prepare, test-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -51,18 +72,18 @@ jobs:
       artifact-name: ${{ matrix.name }}
 
   publish:
-    needs: [prepare, build]
+    needs: [prepare, test-gate, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@ccfa4c90b373a1bba1453ddebf4731d659dd3955 # v4.1.9
         with:
           path: dist
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@0508763985e9303a802fc2637ea176567cb4f220 # v2.2.1
         with:
           name: ${{ needs.prepare.outputs.tag }}
           tag_name: ${{ needs.prepare.outputs.tag }}

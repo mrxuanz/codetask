@@ -14,7 +14,6 @@ import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
 import { availableActions } from '../../../src/server/domain/jobs/job-action-rules'
 import { validateTaskResult } from '../../../src/server/domain/tasks/validate-task-result'
 import { reduceJobSnapshot } from '../../../src/renderer/src/stores/entity-store'
-import { EventReducer } from '../../../src/renderer/src/stores/event-reducer'
 import type { RuntimeController } from '../../../src/server/application/ports/runtime-controller'
 import { seedOwnedThreadJob } from '../fixtures/seed-owned-thread-job'
 
@@ -140,14 +139,31 @@ function createCommandService(rawDb: Database.Database): {
   const controlPlane = createControlPlaneTransaction(drizzleDb)
   const jobRepository = controlPlane.jobs
   const runtimeController: RuntimeController = {
-    notifyPauseRequested() {},
-    async closeThenRelease() {}
+    notifyPauseRequested() {
+      void 0
+    },
+    async closeThenRelease() {
+      void 0
+    }
   }
   const service = new JobCommandServiceImpl({
     unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    logger: {
+      debug() {
+        void 0
+      },
+      info() {
+        void 0
+      },
+      warn() {
+        void 0
+      },
+      error() {
+        void 0
+      }
+    },
     runtimeController
   })
   return { service, jobRepository, controlPlane }

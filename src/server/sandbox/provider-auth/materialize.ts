@@ -93,7 +93,7 @@ export function filterCodexConfigToml(raw: string): string {
     const trimmed = line.trim()
     const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/)
     if (sectionMatch) {
-      const section = sectionMatch[1].toLowerCase()
+      const section = (sectionMatch[1] ?? '').toLowerCase()
       currentSection = section
       skipSection = !shouldKeepCodexSection(section)
       if (!skipSection) kept.push(line)
@@ -110,7 +110,7 @@ export function filterCodexConfigToml(raw: string): string {
 
     const keyMatch = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=/)
     if (!inSection && keyMatch) {
-      const key = keyMatch[1].toLowerCase()
+      const key = (keyMatch[1] ?? '').toLowerCase()
       if (CODEX_TOP_LEVEL_ALLOW_KEYS.has(key) || key.endsWith('_url') || key.includes('model')) {
         kept.push(line)
       }

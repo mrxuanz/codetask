@@ -31,11 +31,11 @@ export interface CursorPromptInput {
   role: ConversationRole
   cwd: string
   prompt: string
-  systemPrompt?: string
-  model?: string
+  systemPrompt?: string | undefined
+  model?: string | undefined
   mcpServers: CursorAcpMcpServer[]
-  runtimeSessionId?: string | null
-  signal?: AbortSignal
+  runtimeSessionId?: string | null | undefined
+  signal?: AbortSignal | undefined
 }
 
 export interface CursorAcpSessionRuntimeOptions {

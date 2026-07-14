@@ -144,7 +144,7 @@ export class SafeLoggerImpl implements SafeLogger {
   }
 
   private installStreamErrorHandlers(): void {
-    const handleStreamError = (stream: NodeJS.WriteStream, name: string) => {
+    const handleStreamError = (stream: NodeJS.WriteStream, name: string): void => {
       stream.on('error', (error: NodeJS.ErrnoException) => {
         if (error.code === 'EIO' || error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
           if (name === 'stdout') {

@@ -34,7 +34,7 @@ function nextTaskIndex(plan: SavedJobPlan, milestoneIndex: number, sliceIndex: n
 }
 
 function formatEvidenceTrace(
-  trace: Array<{ requirement: string; status: string; evidence?: string[] }>
+  trace: Array<{ requirement: string; status: string; evidence?: string[] | undefined }>
 ): string {
   if (trace.length === 0) return '- (no evidence trace entries)'
   return trace

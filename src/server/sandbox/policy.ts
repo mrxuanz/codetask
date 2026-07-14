@@ -34,7 +34,9 @@ export function policyForRole(input: {
   const allowedReadRoots = [workspaceRoot, runtimeRoot]
   const allowedWriteRoots = [runtimeRoot]
 
-  if (input.role === 'task-worker') {
+  // FIX-PLAN §1.1 / §10.1: ordinary chat may perform simple workspace edits under outer sandbox
+  // (protected by workspace_leases). Planner must not write project source; only runtime artifacts.
+  if (input.role === 'task-worker' || input.role === 'conversation') {
     allowedWriteRoots.push(workspaceRoot)
   }
 
@@ -58,7 +60,7 @@ export function policyForRole(input: {
       allowSystemRuntime: true
     },
     network: {
-      mode: 'full',
+      mode: 'none',
       allowLoopback: true,
       allowUnixSockets: []
     },
@@ -218,7 +220,7 @@ export function policyForRoleV2(input: {
       allowSystemRuntime: true
     },
     network: {
-      mode: 'full',
+      mode: 'none',
       allowLoopback: true,
       allowUnixSockets: []
     },

@@ -15,7 +15,7 @@ function randomCode(): string {
   const bytes = randomBytes(CODE_LENGTH)
   let code = ''
   for (let i = 0; i < CODE_LENGTH; i++) {
-    code += CHARSET[bytes[i] % CHARSET.length]
+    code += CHARSET[(bytes[i] ?? 0) % CHARSET.length]
   }
   return code
 }
@@ -161,7 +161,7 @@ function timingSafeEqual(a: Buffer, b: Buffer): boolean {
   if (a.length !== b.length) return false
   let result = 0
   for (let i = 0; i < a.length; i++) {
-    result |= a[i] ^ b[i]
+    result |= (a[i] ?? 0) ^ (b[i] ?? 0)
   }
   return result === 0
 }

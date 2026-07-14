@@ -34,13 +34,13 @@ export async function putJobArtifact(input: {
   db: AppDatabase
   dataDir: string
   jobId: string
-  taskId?: string | null
+  taskId?: string | null | undefined
   kind: JobArtifactKind
-  tier?: JobArtifactTier
+  tier?: JobArtifactTier | undefined
   payload: unknown
-  expiresAt?: number | null
-  settings?: RetentionSettings
-  replaceExisting?: boolean
+  expiresAt?: number | null | undefined
+  settings?: RetentionSettings | undefined
+  replaceExisting?: boolean | undefined
 }): Promise<string> {
   const tier = input.tier ?? 'working'
   const expiresAt = input.expiresAt ?? null

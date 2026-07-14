@@ -8,13 +8,14 @@ import type { AppDatabase } from '../../../src/server/db'
 import { bootstrapRuntime, ensureRuntimeReady, resetAppContextForTests } from '../../../src/server/bootstrap'
 import { readSchemaGeneration, setCutoverMarkerForTests } from '../../../src/server/application/cutover-state'
 import { StartupError } from '../../../src/server/application/startup-error'
+import { createV3ApplicationRuntimeForTests } from '../../../src/server/application/application-runtime'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { dataPaths } from '../../../src/server/data-paths'
 import DatabaseConstructor from 'better-sqlite3'
 
 function asAppDatabase(client: Database.Database): AppDatabase {
-  return { $client: client } as AppDatabase
+  return { $client: client } as unknown as AppDatabase
 }
 
 function createDbAtMigrationVersion(version: number, dataDir: string): Database.Database {
@@ -94,19 +95,37 @@ describe('startup: strict marker parsing', () => {
     }
   })
 
-  it('allows retry after startup failure is cleared', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-retry-'))
+  it('blocks production bootstrap on v3_authoritative until cutover is release-ready', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-v3-block-'))
     await resetAppContextForTests()
     setCutoverMarkerForTests('v3_authoritative')
+    try {
+      assert.throws(() => bootstrapRuntime({ dataDir }), (error: unknown) => {
+        return error instanceof StartupError && error.code === 'control_plane.v3_not_release_ready'
+      })
+    } finally {
+      await resetAppContextForTests()
+      setCutoverMarkerForTests(null)
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('allows retry after legacy startup failure is cleared', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-retry-'))
+    await resetAppContextForTests()
+    setCutoverMarkerForTests('copied')
 
     try {
       const ctx = bootstrapRuntime({ dataDir })
+      await ensureRuntimeReady(ctx)
       const runtime = ctx.applicationRuntime
-      assert.ok(runtime && runtime.kind === 'v3')
+      assert.ok(runtime && runtime.kind === 'legacy')
 
-      const originalEnsureReady = runtime.controlPlane.startup.ensureReady.bind(runtime.controlPlane.startup)
+      runtime.startPromise = null
+      runtime.started = false
+      const originalEnsureReady = runtime.startup.ensureReady.bind(runtime.startup)
       let failOnce = true
-      runtime.controlPlane.startup.ensureReady = async () => {
+      runtime.startup.ensureReady = async () => {
         if (failOnce) {
           failOnce = false
           throw new Error('temp startup failure')
@@ -116,7 +135,25 @@ describe('startup: strict marker parsing', () => {
 
       await assert.rejects(() => ensureRuntimeReady(ctx), /temp startup failure/)
       await ensureRuntimeReady(ctx)
-      assert.equal(runtime.controlPlane.startup.getPhase(), 'ready')
+      assert.equal(runtime.startup.getPhase(), 'ready')
+    } finally {
+      await resetAppContextForTests()
+      setCutoverMarkerForTests(null)
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('test factory can start V3 outside production bootstrap', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-v3-test-'))
+    await resetAppContextForTests()
+    setCutoverMarkerForTests('copied')
+    try {
+      const ctx = bootstrapRuntime({ dataDir })
+      setCutoverMarkerForTests('v3_authoritative')
+      ctx.applicationRuntime = createV3ApplicationRuntimeForTests(ctx)
+      await ensureRuntimeReady(ctx)
+      assert.equal(ctx.applicationRuntime.kind, 'v3')
+      assert.equal(ctx.applicationRuntime.controlPlane.startup.getPhase(), 'ready')
     } finally {
       await resetAppContextForTests()
       setCutoverMarkerForTests(null)

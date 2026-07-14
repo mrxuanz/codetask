@@ -8,7 +8,7 @@ import { spawnCursorAgentSync } from './command'
 export interface CursorAcpErrorContext {
   phase?: string
   stderr?: string
-  exitCode?: number | null
+  exitCode?: number | null | undefined
   signal?: string | null
   command?: string
 }

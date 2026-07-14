@@ -69,19 +69,9 @@ function jobState(job: ThreadJob): string {
   return (job as ThreadJob & { state?: string }).state ?? mapLegacyStatusToState(job.status)
 }
 
-  function requireCommandRevision(job: ThreadJob): number {
-    if (!isAuthoritative) {
-      return typeof job.stateRevision === 'number' ? job.stateRevision : 0
-    }
-    if (typeof job.stateRevision !== 'number') {
-      throw new Error('Control-plane job is missing its state revision')
-    }
-    return job.stateRevision
-  }
-
-  function isRevisionConflict(error: unknown): boolean {
-    return error instanceof ApiError && error.httpStatus === 409 && error.code === 'job.revision_conflict'
-  }
+function isRevisionConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.httpStatus === 409 && error.code === 'job.revision_conflict'
+}
 
 export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOptions): {
   statusFilter: Ref<string>
@@ -124,6 +114,20 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     jobsApi = await resolveJobsApi()
     return jobsApi
   })()
+
+  function requireV3Revision(job: ThreadJob): number {
+    if (typeof job.stateRevision !== 'number') {
+      throw new Error('Control-plane job is missing its state revision')
+    }
+    return job.stateRevision
+  }
+
+  function requireCommandRevision(job: ThreadJob): number {
+    if (!isAuthoritative) {
+      return typeof job.stateRevision === 'number' ? job.stateRevision : 0
+    }
+    return requireV3Revision(job)
+  }
 
   const statusFilter = ref('all')
   const searchQuery = ref('')
@@ -204,6 +208,9 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     existing: ThreadJob | null | undefined,
     job: ThreadJob
   ): ThreadJob | null {
+    if (!isAuthoritative) {
+      return mergeJobPatch(existing, job)
+    }
     const stateRevision = requireV3Revision(job)
     const decision = v3Store.mergeJob(
       {

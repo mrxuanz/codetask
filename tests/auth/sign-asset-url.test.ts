@@ -14,7 +14,8 @@ test('stripAssetUrlAuthTokens removes asset and session query tokens only', () =
 test('signAssetUrl refreshes stale asset_token instead of preserving it', () => {
   const signed = signAssetUrl(
     'test-secret',
-    '/api/threads/thread-1/attachments/att-1?asset_token=old-token&access_token=session&view=1#preview'
+    '/api/threads/thread-1/attachments/att-1?asset_token=old-token&access_token=session&view=1#preview',
+    'alice'
   )
   const parsed = new URL(signed, 'http://codetask.local')
 

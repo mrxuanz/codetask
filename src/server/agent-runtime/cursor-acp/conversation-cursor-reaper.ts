@@ -14,7 +14,7 @@ export const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 export interface ConversationCursorReaperOptions {
   inactivityThresholdMs?: number
-  isThreadInflight?: (threadId: string) => boolean
+  isThreadInflight?: ((threadId: string) => boolean) | undefined
 }
 
 let defaultIsThreadInflight: ((threadId: string) => boolean) | null = null

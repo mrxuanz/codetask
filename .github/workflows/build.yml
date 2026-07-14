@@ -27,15 +27,15 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@3c2a84e9cad3969901890dbc98083c3ad8e21e6d # v2.7.7
         with:
           workspaces: native
 
@@ -52,7 +52,7 @@ jobs:
         run: node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --publish never
 
       - if: ${{ inputs.upload-artifact }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@65c4c08a768d7e4a08fabdd5333d057d994bc549 # v4.6.0
         with:
           name: ${{ inputs.artifact-name }}
           # upload-artifact does not expand bash brace globs; list patterns explicitly

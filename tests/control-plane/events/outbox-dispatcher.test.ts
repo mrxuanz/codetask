@@ -69,7 +69,20 @@ describe('OutboxDispatcher', () => {
       (event) => {
         published.push(event.eventId)
       },
-      { debug() {}, info() {}, warn() {}, error() {} },
+      {
+        debug() {
+          void 0
+        },
+        info() {
+          void 0
+        },
+        warn() {
+          void 0
+        },
+        error() {
+          void 0
+        }
+      },
       () => Date.now()
     )
 
@@ -98,7 +111,20 @@ describe('OutboxDispatcher', () => {
         published.push(event.eventId)
         throw new Error('crash before markDispatched')
       },
-      { debug() {}, info() {}, warn() {}, error() {} },
+      {
+        debug() {
+          void 0
+        },
+        info() {
+          void 0
+        },
+        warn() {
+          void 0
+        },
+        error() {
+          void 0
+        }
+      },
       () => Date.now()
     )
 
@@ -110,7 +136,20 @@ describe('OutboxDispatcher', () => {
     const restarted = new OutboxDispatcher(
       outbox,
       (event) => recovered.push(event.eventId),
-      { debug() {}, info() {}, warn() {}, error() {} },
+      {
+        debug() {
+          void 0
+        },
+        info() {
+          void 0
+        },
+        warn() {
+          void 0
+        },
+        error() {
+          void 0
+        }
+      },
       () => Date.now()
     )
     await restarted.flush()

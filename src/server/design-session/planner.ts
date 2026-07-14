@@ -339,6 +339,48 @@ async function runDesignPlanner(
     return
   }
 
+  const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
+    '../legacy-control-plane/workspace-lease-store'
+  )
+  const workspaceLease = acquireWorkspaceLease({
+    workspacePath,
+    ownerKind: 'planner',
+    ownerId: designSessionId,
+    runId: run.runId
+  })
+  if (!workspaceLease) {
+    plannerSandboxDebug('runDesignPlanner: skipped (workspace lease unavailable), waiting', {
+      designSessionId
+    })
+    const { releaseWorkloadSlot } = await import('../legacy-control-plane/workload-slot-store')
+    await releaseWorkloadSlot(run.runId, {
+      reason: 'workspace_lease_unavailable',
+      skipQueueAdvance: true
+    }).catch(() => {})
+    const planProgress: PlanProgressDto = {
+      ...defaultPlanProgress(),
+      phase: 'idle',
+      status: 'pending',
+      progressCode: 'plan.pending',
+      progressParams: null,
+      message: null
+    }
+    const updated = await updateDesignSessionRow(designSessionId, { planProgress })
+    if (updated) {
+      emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
+      emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: updated } })
+    }
+    const { advanceWorkloadQueue } = await import('../legacy-control-plane/workload-slot-store')
+    await advanceWorkloadQueue(username).catch((error) => {
+      console.warn(
+        '[runDesignPlanner] advance queue after workspace lease wait failed',
+        designSessionId,
+        error
+      )
+    })
+    return
+  }
+
   getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username)
 
   const revisionBefore = options?.planRevisionBefore ?? 0
@@ -445,14 +487,15 @@ async function runDesignPlanner(
       }
     }
 
-    registerPlannerMcpSession(plannerSession)
+    const session = plannerSession
+    registerPlannerMcpSession(session)
 
     plannerSandboxDebug('runDesignPlanner: mcp session registered', {
       designSessionId,
       runId: run.runId,
       mcpSessionId,
-      ...summarizePlannerSession(plannerSession),
-      validReferenceIds: plannerSession.validReferenceIds.length,
+      ...summarizePlannerSession(session),
+      validReferenceIds: session.validReferenceIds.length,
       hasReferenceManifest: Boolean(referenceManifest)
     })
 
@@ -499,6 +542,14 @@ async function runDesignPlanner(
       })
 
       let chunkCount = 0
+      const { enterWorkspaceLeaseContext } = await import(
+        '../legacy-control-plane/workspace-lease-context'
+      )
+      enterWorkspaceLeaseContext({
+        leaseId: workspaceLease.leaseId,
+        ownerKind: 'planner',
+        ownerId: designSessionId
+      })
       await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
         for await (const chunk of streamAgentTurn({
           role: 'planner',
@@ -539,7 +590,7 @@ async function runDesignPlanner(
         designSessionId,
         runId: run.runId,
         chunkCount,
-        ...summarizePlannerSession(plannerSession),
+        ...summarizePlannerSession(session),
         planCommitted
       })
     } finally {
@@ -550,9 +601,9 @@ async function runDesignPlanner(
       })
     }
 
-    await plannerSession.finalizerPromise
+    await session.finalizerPromise
 
-    if (plannerSession.planCommitted) {
+    if (session.planCommitted) {
       planCommitted = true
       plannerSandboxDebug('runDesignPlanner: done (plan committed during stream)', {
         designSessionId
@@ -560,8 +611,7 @@ async function runDesignPlanner(
       return
     }
 
-    const session = plannerSession
-    if (!session?.registeredPlan) {
+    if (!session.registeredPlan) {
       plannerSandboxDebug('runDesignPlanner: failed (no register_plan)', {
         designSessionId,
         ...summarizePlannerSession(session)
@@ -574,14 +624,14 @@ async function runDesignPlanner(
     const savedPlan = flattenRegisteredPlan(session.registeredPlan, session.taskContexts)
     const counts = countPlanUnits(session.registeredPlan)
     const nextRevision = revisionBefore + 1
-    plannerSession.planCommitting = true
+    session.planCommitting = true
     const ok = await commitDesignPlanReady(designSessionId, run.runId, savedPlan, counts, phaseAdvance, {
       planRevision: nextRevision,
       clearConfirmed: Boolean(options?.regenerationInstruction)
     })
     if (ok) {
       planCommitted = true
-      plannerSession.planCommitted = true
+      session.planCommitted = true
       plannerSandboxDebug('runDesignPlanner: done (plan committed after stream)', {
         designSessionId,
         milestones: counts.milestones,
@@ -659,6 +709,7 @@ async function runDesignPlanner(
       emitJobEvent(designSessionId, { event: 'job_done', data: { job } })
     }
   } finally {
+    releaseWorkspaceLeaseForOwner('planner', designSessionId)
     getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
     plannerSandboxDebug('runDesignPlanner: releasing slot', {
       designSessionId,

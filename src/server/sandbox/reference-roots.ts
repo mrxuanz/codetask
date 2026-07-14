@@ -100,8 +100,8 @@ export function resolveDraftReferenceReadRoots(input: {
 export function buildAssignedReferenceCorpusMarkdown(input: {
   manifest: JobReferenceManifest
   referenceIds: string[]
-  referenceReason?: string
-  localPathById?: ReadonlyMap<string, string>
+  referenceReason?: string | undefined
+  localPathById?: ReadonlyMap<string, string> | undefined
 }): string {
   if (input.referenceIds.length === 0) return ''
 

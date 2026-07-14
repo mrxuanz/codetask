@@ -13,7 +13,8 @@ import {
   parseIdempotencyKey,
   parseIfMatch,
   parseJobId,
-  parseListJobsQuery
+  parseListJobsQuery,
+  parseStateRevision
 } from './request-parsers'
 import { formatETag } from './headers'
 
@@ -30,10 +31,19 @@ export interface HttpResponse {
   readonly headers?: Record<string, string>
 }
 
+export interface JobsRoutes {
+  pause(request: HttpRequest, actor: ActorContext): Promise<HttpResponse>
+  continue(request: HttpRequest, actor: ActorContext): Promise<HttpResponse>
+  cancel(request: HttpRequest, actor: ActorContext): Promise<HttpResponse>
+  restartExecution(request: HttpRequest, actor: ActorContext): Promise<HttpResponse>
+  getJob(request: HttpRequest, actor: ActorContext): Promise<HttpResponse>
+  listJobs(request: HttpRequest, actor: ActorContext): Promise<HttpResponse>
+}
+
 export function createJobsRoutes(
   commandService: JobCommandService,
   queryService: JobQueryService
-) {
+): JobsRoutes {
   return {
     async pause(request: HttpRequest, actor: ActorContext): Promise<HttpResponse> {
       const expectedRevision = parseIfMatch(request.headers['if-match'])
@@ -130,7 +140,7 @@ export function createJobsRoutes(
       return {
         status: 200,
         body: { job },
-        headers: { ETag: formatETag(job.stateRevision) }
+        headers: { ETag: formatETag(parseStateRevision(job.stateRevision)) }
       }
     },
 

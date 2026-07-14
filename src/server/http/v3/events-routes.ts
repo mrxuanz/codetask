@@ -5,7 +5,17 @@ export interface SseEventsDependencies {
   readonly subscribe: (connectionId: string, callback: (event: SseEnvelope) => void) => () => void
 }
 
-export function createEventsRoutes(deps: SseEventsDependencies) {
+export interface EventsRoutes {
+  streamEvents(request: {
+    readonly headers: Record<string, string | undefined>
+  }): Promise<{
+    readonly status: number
+    readonly body: ReadableStream
+    readonly headers: Record<string, string>
+  }>
+}
+
+export function createEventsRoutes(deps: SseEventsDependencies): EventsRoutes {
   return {
     async streamEvents(request: {
       readonly headers: Record<string, string | undefined>

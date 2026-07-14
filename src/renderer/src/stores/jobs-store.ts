@@ -9,7 +9,7 @@ export interface JobDto {
 
 export class JobsStore {
   private readonly jobs = new Map<string, VersionedEntity<JobDto>>()
-  private readonly selectedJobId: string | null = null
+  private selectedJobId: string | null = null
 
   mergeJob(job: JobDto, source: 'incremental_event' | 'authoritative_snapshot'): MergeDecision {
     const current = this.jobs.get(job.id)
@@ -30,7 +30,11 @@ export class JobsStore {
     return Array.from(this.jobs.values()).map(v => v.entity)
   }
 
+  getSelectedJobId(): string | null {
+    return this.selectedJobId
+  }
+
   selectJob(jobId: string): void {
-    ;(this as { selectedJobId: string }).selectedJobId = jobId
+    this.selectedJobId = jobId
   }
 }

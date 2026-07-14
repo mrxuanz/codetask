@@ -11,8 +11,34 @@ import {
   cutoverDatabase,
   copyLegacyDatabase
 } from '../../../scripts/control-plane/migration-db'
-import { writeCutoverReleaseGate } from '../../../scripts/control-plane/release-gate'
+import {
+  CR_STAGES,
+  writeCutoverReleaseGate,
+  type CrCommandEvidence,
+  type CrStage
+} from '../../../scripts/control-plane/release-gate'
 import { buildCrVerificationSummary } from '../../../scripts/control-plane/write-release-gate'
+
+function makePassingCrEvidence(
+  commit: string
+): Record<CrStage, { readonly commands: readonly CrCommandEvidence[] }> {
+  const out: Record<string, { readonly commands: readonly CrCommandEvidence[] }> = {}
+  for (const stage of CR_STAGES) {
+    out[stage] = {
+      commands: [
+        {
+          command: `npm run test:control-plane -- --stage=${stage}`,
+          exitCode: 0,
+          startedAtMs: 1_000,
+          endedAtMs: 2_000,
+          logHash: `sha256-${stage.toLowerCase()}`,
+          commit
+        }
+      ]
+    }
+  }
+  return out as Record<CrStage, { readonly commands: readonly CrCommandEvidence[] }>
+}
 
 function makeCopiedDatabase(status: string): {
   readonly dbPath: string
@@ -61,15 +87,24 @@ describe('composition: cutover release gate (CR0)', () => {
     const backup = await backupSqliteDatabase(dbPath, `${dbPath}.backup`)
     try {
       assert.throws(
-        () => cutoverDatabase(dbPath, report, backup.backupId, { expectedAppCommit: 'test-commit-abc' }),
+        () =>
+          cutoverDatabase(dbPath, report, backup.backupId, {
+            expectedAppCommit: 'test-commit-abc'
+          }),
         /migration\.release_gate_missing/
       )
 
       const db = new Database(dbPath, { readonly: true })
       assert.equal(
-        (db.prepare(`SELECT value FROM control_schema_meta WHERE key = 'control_schema_generation'`).get() as {
-          value: string
-        }).value,
+        (
+          db
+            .prepare(
+              `SELECT value FROM control_schema_meta WHERE key = 'control_schema_generation'`
+            )
+            .get() as {
+            value: string
+          }
+        ).value,
         'copied'
       )
       db.close()
@@ -88,7 +123,7 @@ describe('composition: cutover release gate (CR8)', () => {
     const db = new Database(dbPath)
     writeCutoverReleaseGate(db, {
       appCommit: 'cr8-cutover-commit',
-      verificationSummary: buildCrVerificationSummary()
+      verificationSummary: buildCrVerificationSummary(makePassingCrEvidence('cr8-cutover-commit'))
     })
     db.close()
     try {
@@ -96,9 +131,13 @@ describe('composition: cutover release gate (CR8)', () => {
 
       const readDb = new Database(dbPath, { readonly: true })
       assert.equal(
-        (readDb
-          .prepare(`SELECT value FROM control_schema_meta WHERE key = 'control_schema_generation'`)
-          .get() as { value: string }).value,
+        (
+          readDb
+            .prepare(
+              `SELECT value FROM control_schema_meta WHERE key = 'control_schema_generation'`
+            )
+            .get() as { value: string }
+        ).value,
         'v3_authoritative'
       )
       readDb.close()
@@ -115,7 +154,7 @@ describe('composition: cutover release gate (CR8)', () => {
     const db = new Database(dbPath)
     writeCutoverReleaseGate(db, {
       appCommit: 'cr8-wrong-commit',
-      verificationSummary: buildCrVerificationSummary()
+      verificationSummary: buildCrVerificationSummary(makePassingCrEvidence('cr8-wrong-commit'))
     })
     db.close()
     try {
@@ -129,9 +168,13 @@ describe('composition: cutover release gate (CR8)', () => {
 
       const readDb = new Database(dbPath, { readonly: true })
       assert.equal(
-        (readDb
-          .prepare(`SELECT value FROM control_schema_meta WHERE key = 'control_schema_generation'`)
-          .get() as { value: string }).value,
+        (
+          readDb
+            .prepare(
+              `SELECT value FROM control_schema_meta WHERE key = 'control_schema_generation'`
+            )
+            .get() as { value: string }
+        ).value,
         'copied'
       )
       readDb.close()

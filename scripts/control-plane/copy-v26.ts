@@ -16,8 +16,9 @@ import {
   writeReport
 } from './migration-lib'
 import { copyLegacyDatabase } from './migration-db'
+import type { LegacyJobSnapshot } from './migration-lib'
 
-function loadJobsFromJson(jobsPath: string) {
+function loadJobsFromJson(jobsPath: string): LegacyJobSnapshot[] {
   if (!existsSync(jobsPath)) {
     throw new Error(`migration.jobs_missing: ${jobsPath}`)
   }

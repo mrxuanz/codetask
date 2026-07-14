@@ -2,7 +2,7 @@ import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
 import { throwSdkTurnError } from '../errors'
 import { buildClaudeMcpServers } from '../mcp'
 import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
-import { CLI_FULL_ACCESS_BUILTINS } from '../roles'
+import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '../roles'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
@@ -18,6 +18,11 @@ export async function* streamClaudeTurn(
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
   const outerSandbox = options?.outerSandbox ?? false
+  if (!outerSandbox && roleRequiresOuterSandbox(input.role)) {
+    throw createTurnError('sandbox.required', {
+      detail: 'Claude bypassPermissions requires OS outer sandbox'
+    })
+  }
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
   const builtins = [...CLI_FULL_ACCESS_BUILTINS]
   let reply = ''
@@ -47,8 +52,6 @@ export async function* streamClaudeTurn(
     prompt: input.prompt,
     options: {
       cwd: input.cwd,
-      model: input.model,
-      resume: input.runtimeSessionId ?? undefined,
       systemPrompt: resolveClaudeSystemPrompt(input.systemPrompt),
       settingSources: resolveClaudeSettingSources(outerSandbox),
       tools: builtins,
@@ -61,11 +64,13 @@ export async function* streamClaudeTurn(
         ? buildSandboxPreparedProviderEnv()
         : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true }),
       sandbox: { enabled: false },
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),
       ...(mcpServers
         ? {
             mcpServers: mcpServers as NonNullable<
-              Parameters<typeof query>[0]['options']
-            >['mcpServers'],
+              NonNullable<Parameters<typeof query>[0]['options']>['mcpServers']
+            >,
             strictMcpConfig: true
           }
         : {})

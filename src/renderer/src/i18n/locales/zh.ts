@@ -94,6 +94,8 @@ export default {
     addProject: '添加本地文件夹',
     addProjectHint: '添加本地文件夹…',
     loading: '加载中…',
+    loadFailed: '工作区加载失败',
+    retryLoad: '重试',
     noThreads: '暂无对话',
     expand: '展开',
     collapse: '折叠',

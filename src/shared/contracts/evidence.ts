@@ -1,8 +1,8 @@
 export interface TaskEvidenceValidationDto {
   ran: boolean
-  command?: string | null
+  command?: string | null | undefined
   outcome: 'passed' | 'failed' | 'skipped' | 'not-applicable'
-  notes?: string | null
+  notes?: string | null | undefined
 }
 
 export type TaskBlockerKind =
@@ -17,9 +17,9 @@ export interface TaskEvidenceRecoveryDto {
   source: 'classifier' | 'agent' | 'merged'
   confidence: 'high' | 'medium' | 'low'
   reasons: string[]
-  attempt?: number
-  maxAttempts?: number
-  action?: 'infra-retry' | 'inject-prep' | 'inject-repair' | 'pause-human' | 'terminal-fail'
+  attempt?: number | undefined
+  maxAttempts?: number | undefined
+  action?: 'infra-retry' | 'inject-prep' | 'inject-repair' | 'pause-human' | 'terminal-fail' | undefined
 }
 
 export interface TaskEvidenceDto {
@@ -28,15 +28,15 @@ export interface TaskEvidenceDto {
   changedFiles: string[]
   evidence: string[]
   validation: TaskEvidenceValidationDto
-  blockers?: string[]
+  blockers?: string[] | undefined
 
-  blockerKind?: TaskBlockerKind
+  blockerKind?: TaskBlockerKind | undefined
 
-  recovery?: TaskEvidenceRecoveryDto
+  recovery?: TaskEvidenceRecoveryDto | undefined
 
-  evidenceRef?: string
+  evidenceRef?: string | undefined
 
-  evidenceLineCount?: number
+  evidenceLineCount?: number | undefined
 }
 
 export interface SliceVerificationRecordDto {
@@ -46,8 +46,8 @@ export interface SliceVerificationRecordDto {
   evidenceTrace: Array<{
     requirement: string
     status: string
-    evidence?: string[]
+    evidence?: string[] | undefined
   }>
-  satisfiedSignals?: string[]
-  missingSignals?: string[]
+  satisfiedSignals?: string[] | undefined
+  missingSignals?: string[] | undefined
 }

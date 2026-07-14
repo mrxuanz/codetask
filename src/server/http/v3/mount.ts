@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { AppContext } from '../../context'
 import type { ActorContext } from '@shared/contracts/control-plane'
@@ -18,6 +19,13 @@ import { formatSseEvent, formatSseJsonEvent, type SseEnvelope } from './sse-enve
 
 const CONTROL_PLANE_REPLAY_LIMIT = 100
 
+type V3AppEnv = {
+  Bindings: Record<string, never>
+  Variables: Record<string, never>
+}
+
+type RouteContext = Context<V3AppEnv>
+
 function headerRecord(c: {
   req: { header: (name: string) => string | undefined; raw: { headers: Headers } }
 }): Record<string, string | undefined> {
@@ -30,7 +38,7 @@ function headerRecord(c: {
 
 async function toHttpRequest(c: {
   req: {
-    param: (key: string) => string
+    param: (key: string) => string | undefined
     query: (key: string) => string | undefined
     header: (name: string) => string | undefined
     json: () => Promise<unknown>
@@ -49,7 +57,7 @@ async function toHttpRequest(c: {
 
   return {
     headers: headerRecord(c),
-    params: { id: c.req.param('id') },
+    params: { id: c.req.param('id') ?? '' },
     query: {
       ...(c.req.query('projectId') !== undefined
         ? { projectId: c.req.query('projectId') ?? '' }
@@ -136,12 +144,10 @@ function assertAuthoritativeCommands(ctx: AppContext): void {
   }
 }
 
-export function mountV3Routes(ctx: AppContext): Hono {
-  const routes = new Hono()
+export function mountV3Routes(ctx: AppContext): Hono<V3AppEnv> {
+  const routes = new Hono<V3AppEnv>()
   const services = getControlPlaneServices(ctx)
   const jobs = createJobsRoutes(services.commandService, services.queryService)
-
-  type RouteContext = Parameters<Parameters<Hono['get']>[1]>[0]
 
   async function invoke(
     c: RouteContext,
@@ -149,7 +155,7 @@ export function mountV3Routes(ctx: AppContext): Hono {
       request: HttpRequest,
       actor: ActorContext
     ) => Promise<{ status: number; body: unknown; headers?: Record<string, string> }>
-  ) {
+  ): Promise<Response> {
     try {
       const username = await requireUsername(c.req.header('Authorization'))
       const request = await toHttpRequest(c)
@@ -180,7 +186,7 @@ export function mountV3Routes(ctx: AppContext): Hono {
       request: HttpRequest,
       actor: ActorContext
     ) => Promise<{ status: number; body: unknown; headers?: Record<string, string> }>
-  ) {
+  ): Promise<Response> {
     assertAuthoritativeCommands(ctx)
     return invoke(c, handler)
   }
@@ -206,10 +212,10 @@ export function mountV3Routes(ctx: AppContext): Hono {
         let replayReady = false
         let closed = false
         let lastSentEventId = lastEventId
-        let unsubscribe = () => {}
+        let unsubscribe: () => void = () => {}
         let heartbeat: ReturnType<typeof setInterval> | null = null
 
-        const cleanup = () => {
+        const cleanup = (): void => {
           if (closed) return
           closed = true
           if (heartbeat) {
@@ -239,7 +245,7 @@ export function mountV3Routes(ctx: AppContext): Hono {
           reason: 'cursor_too_old' | 'slow_consumer',
           cursor = lastSentEventId,
           latestEventId = getControlPlaneLatestEventId(ctx, actor)
-        ) => {
+        ): void => {
           if (closed) return
           enqueue(
             formatSseJsonEvent({

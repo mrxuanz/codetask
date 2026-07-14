@@ -109,9 +109,9 @@ export interface TaskLaunchDraftReference {
   mimeType: string
   kind: 'image' | 'file' | 'directory'
   assetUrl: string
-  description?: string
-  source?: 'upload' | 'import' | 'message' | 'local_corpus'
-  localPath?: string
+  description?: string | undefined
+  source?: 'upload' | 'import' | 'message' | 'local_corpus' | undefined
+  localPath?: string | undefined
 }
 
 export interface TaskLaunchDraftPayload {

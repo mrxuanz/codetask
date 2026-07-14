@@ -19,7 +19,7 @@ import { rateLimit, LOGIN_REQUEST_RULE, LOGIN_FAILURE_RULE } from './memory-limi
 import { hashIp, bucketKeyForIp, scopeKeyForLogin } from './client-ip'
 
 const AUTH_ROW_ID = 1
-const SESSION_TTL_SEC = 12 * 60 * 60
+const SESSION_TTL_SEC = 4 * 60 * 60
 
 export interface BootstrapData {
   initialized: boolean
