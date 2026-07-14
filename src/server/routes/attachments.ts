@@ -13,7 +13,12 @@ import {
 import { validateAssetToken } from '../auth/asset-token'
 import { signAssetUrl } from '../auth/sign-asset-url'
 import { getThread, getThreadOwnerUsername } from '../threads/service'
-import { assertFrozenAttachmentId, assertFrozenThreadId, FrozenIdError } from '../../shared/frozen-ids'
+import {
+  assertFrozenAttachmentId,
+  assertFrozenThreadId,
+  FrozenIdError
+} from '../../shared/frozen-ids'
+import { throwIfCurrentRequestAborted } from '../context/request-abort'
 
 function frozenIdToAppError(error: FrozenIdError): AppError {
   return AppError.badRequest(error.message, error.code)
@@ -45,6 +50,7 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
       emptyErrorMessage: 'Missing file field'
     })
 
+    throwIfCurrentRequestAborted()
     const attachment = saveThreadAttachment({
       threadId,
       name: file.name,
@@ -92,6 +98,7 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
       }
     }
 
+    throwIfCurrentRequestAborted()
     const result = readThreadAttachment(threadId, attachmentId)
     if (!result) {
       throw AppError.notFound('Attachment not found', 'attachment.not_found')

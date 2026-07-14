@@ -1,4 +1,8 @@
-import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '../env'
+import {
+  applyTaskIdempotencyEnv,
+  buildProviderChildEnv,
+  buildSandboxPreparedProviderEnv
+} from '../env'
 import { buildCodexSdkConfig, type CodexSdkConfig } from '../mcp'
 import type { AgentTurnInput } from '../types'
 import { resolveProviderOuterSandbox } from '../provider-policy'
@@ -60,6 +64,7 @@ export function buildCodexTurnPlan(
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
+  applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const sandboxMode: CodexSandboxMode = outerSandbox ? 'danger-full-access' : 'workspace-write'
 

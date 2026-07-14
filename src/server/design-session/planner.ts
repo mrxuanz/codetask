@@ -709,8 +709,6 @@ async function runDesignPlanner(
       emitJobEvent(designSessionId, { event: 'job_done', data: { job } })
     }
   } finally {
-    releaseWorkspaceLeaseForOwner('planner', designSessionId)
-    getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
     plannerSandboxDebug('runDesignPlanner: releasing slot', {
       designSessionId,
       runId: run.runId,
@@ -718,6 +716,11 @@ async function runDesignPlanner(
     })
     const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
     await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
+    // The workspace is only safe for another owner after the provider runtime
+    // has actually closed. A close failure leaves both the slot and lease in
+    // quarantine for diagnosis instead of admitting a concurrent writer.
+    releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
+    getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
   }
 }
 

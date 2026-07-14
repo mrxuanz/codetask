@@ -380,7 +380,7 @@ function updateLocalReferenceDescription(referenceId: string, description: strin
     ...payload.value,
     references: refs
   }
-  emit('updated', { ...props.message, payload: nextPayload as unknown as Record<string, unknown> })
+  emit('updated', { ...props.message, payload: nextPayload as Record<string, unknown> })
 }
 
 async function handleLaunch(): Promise<void> {

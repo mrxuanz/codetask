@@ -103,7 +103,7 @@ export async function* streamCursorSessionTurn(
     throw error
   } finally {
     if (ephemeral) {
-      await runtime.close().catch(() => {})
+      await runtime.close()
     } else if (registryKey) {
       getCursorProviderRuntimeRegistry().touch(registryKey)
     }

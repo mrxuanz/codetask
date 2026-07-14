@@ -5,7 +5,6 @@ import { requireUsername } from '../auth/session'
 import { createProject, deleteProject, getProject, listProjects } from '../projects/service'
 import { ok } from '../response'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createProjectRoutes(_ctx: AppContext): Hono {
   const projectRoutes = new Hono()
 

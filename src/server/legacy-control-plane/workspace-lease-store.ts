@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb, type AppDatabase } from '../db'
 import { workspaceLeases } from '../db/schema'
@@ -181,13 +181,7 @@ export function acquireWorkspaceLease(
            SET canonical_path = ?, run_id = ?, boot_id = ?, lease_expires_at = ?
            WHERE id = ? AND status = 'active'`
         )
-        .run(
-          canonicalPath,
-          input.runId ?? null,
-          bootId,
-          leaseExpiresAt,
-          existing.leaseId
-        )
+        .run(canonicalPath, input.runId ?? null, bootId, leaseExpiresAt, existing.leaseId)
       activeLeaseByOwner.set(ownerKey(input.ownerKind, input.ownerId), existing.leaseId)
       return { leaseId: existing.leaseId, canonicalPath }
     }
@@ -259,7 +253,12 @@ export function releaseWorkspaceLease(input: string | ReleaseWorkspaceLeaseInput
     return false
   }
 
-  activeLeaseByOwner.delete(ownerKey(row.ownerKind as WorkspaceLeaseOwnerKind, row.ownerId))
+  const expectedRunIdCondition =
+    expectedRunId === undefined
+      ? undefined
+      : expectedRunId === null
+        ? isNull(workspaceLeases.runId)
+        : eq(workspaceLeases.runId, expectedRunId)
 
   const result = getDb()
     .update(workspaceLeases)
@@ -268,25 +267,30 @@ export function releaseWorkspaceLease(input: string | ReleaseWorkspaceLeaseInput
       and(
         eq(workspaceLeases.id, leaseId),
         eq(workspaceLeases.status, 'active'),
-        ...(expectedRunId !== undefined ? [eq(workspaceLeases.runId, expectedRunId)] : [])
+        expectedRunIdCondition
       )
     )
     .run()
-  return result.changes > 0
+  if (result.changes > 0) {
+    activeLeaseByOwner.delete(ownerKey(row.ownerKind as WorkspaceLeaseOwnerKind, row.ownerId))
+    return true
+  }
+  return false
 }
 
 export function releaseWorkspaceLeaseForOwner(
   ownerKind: WorkspaceLeaseOwnerKind,
-  ownerId: string
+  ownerId: string,
+  expectedRunId?: string | null
 ): void {
   const leaseId = activeLeaseByOwner.get(ownerKey(ownerKind, ownerId))
   if (leaseId) {
-    releaseWorkspaceLease(leaseId)
+    releaseWorkspaceLease(expectedRunId === undefined ? leaseId : { leaseId, runId: expectedRunId })
     return
   }
 
   const rows = getDb()
-    .select({ id: workspaceLeases.id })
+    .select({ id: workspaceLeases.id, runId: workspaceLeases.runId })
     .from(workspaceLeases)
     .where(
       and(
@@ -296,10 +300,18 @@ export function releaseWorkspaceLeaseForOwner(
       )
     )
     .all()
+  let released = false
   for (const row of rows) {
-    releaseWorkspaceLease(row.id)
+    if (expectedRunId === undefined || row.runId === expectedRunId) {
+      released =
+        releaseWorkspaceLease(
+          expectedRunId === undefined ? row.id : { leaseId: row.id, runId: expectedRunId }
+        ) || released
+    }
   }
-  activeLeaseByOwner.delete(ownerKey(ownerKind, ownerId))
+  if (released) {
+    activeLeaseByOwner.delete(ownerKey(ownerKind, ownerId))
+  }
 }
 
 /** Release every active workspace lease (tests / drain cleanup). */

@@ -14,12 +14,7 @@ import { jobTaskAttempts, jobTasks, threadJobs } from '../db/schema'
  *   - `task_id` must belong to the same `job_id` (validated in-transaction).
  */
 
-export type TaskAttemptStatus =
-  | 'starting'
-  | 'running'
-  | 'completed'
-  | 'interrupted'
-  | 'failed'
+export type TaskAttemptStatus = 'starting' | 'running' | 'completed' | 'interrupted' | 'failed'
 
 const NON_TERMINAL_STATUSES: readonly TaskAttemptStatus[] = ['starting', 'running']
 
@@ -33,6 +28,13 @@ export interface BeginTaskAttemptInput {
 
 export type BeginTaskAttemptResult =
   | { kind: 'already-completed' }
+  | {
+      kind: 'blocked-uncertain'
+      attemptNo: number
+      idempotencyKey: string
+      status: 'running' | 'interrupted' | 'failed'
+    }
+  | { kind: 'resumed'; attemptNo: number; idempotencyKey: string }
   | { kind: 'started'; id: string; attemptNo: number; idempotencyKey: string }
 
 function nowSec(): number {
@@ -67,7 +69,9 @@ export function deriveIdempotencyKey(
 /** Deterministic result hash for a task's reported evidence packet. */
 export function hashTaskResult(value: unknown): string {
   const json = value === undefined ? 'null' : JSON.stringify(value)
-  return createHash('sha256').update(json ?? 'null').digest('hex')
+  return createHash('sha256')
+    .update(json ?? 'null')
+    .digest('hex')
 }
 
 export function hasCompletedAttempt(jobId: string, taskId: string): boolean {
@@ -86,9 +90,11 @@ export function hasCompletedAttempt(jobId: string, taskId: string): boolean {
 }
 
 /**
- * Open a new attempt for `(jobId, taskId)` unless the task already has a completed attempt.
- * Any leftover non-terminal attempt (from a dead process) is flipped to `interrupted` first so
- * only the newest attempt is ever `running`. Interrupted rows free the stable idempotency key.
+ * Open a new attempt for `(jobId, taskId)` unless the task already has a completed attempt or an
+ * earlier Provider invocation has an unknown outcome. `starting` means no Provider process/tool
+ * has been invoked yet and is safe to supersede. Once an attempt reaches `running`, its stable key
+ * remains occupied across failure/interruption so crash recovery cannot replay arbitrary external
+ * side effects automatically.
  */
 export function beginTaskAttempt(input: BeginTaskAttemptInput): BeginTaskAttemptResult {
   const db = getDb()
@@ -120,17 +126,15 @@ export function beginTaskAttempt(input: BeginTaskAttemptInput): BeginTaskAttempt
     }
 
     const snapshotPlanRevision =
-      input.snapshotPlanRevision ??
-      jobRow.snapshotPlanRevision ??
-      jobRow.planRevision ??
-      0
+      input.snapshotPlanRevision ?? jobRow.snapshotPlanRevision ?? jobRow.planRevision ?? 0
 
     const existing = tx
       .select({
         id: jobTaskAttempts.id,
         attemptNo: jobTaskAttempts.attemptNo,
         status: jobTaskAttempts.status,
-        idempotencyKey: jobTaskAttempts.idempotencyKey
+        idempotencyKey: jobTaskAttempts.idempotencyKey,
+        runId: jobTaskAttempts.runId
       })
       .from(jobTaskAttempts)
       .where(and(eq(jobTaskAttempts.jobId, input.jobId), eq(jobTaskAttempts.taskId, input.taskId)))
@@ -146,9 +150,38 @@ export function beginTaskAttempt(input: BeginTaskAttemptInput): BeginTaskAttempt
       snapshotPlanRevision
     })
 
-    // Supersede lingering non-terminal attempts and free the stable idempotency key.
+    const uncertain = existing.find(
+      (row) =>
+        row.idempotencyKey === idempotencyKey &&
+        (row.status === 'running' || row.status === 'interrupted' || row.status === 'failed')
+    )
+    if (uncertain) {
+      // A controlled retry inside the same live run continues the same durable attempt and key.
+      // Cross-run recovery is deliberately excluded: it cannot prove the old Provider stopped at
+      // a side-effect boundary and therefore requires explicit user authorization below.
+      if (
+        uncertain.status === 'running' &&
+        input.runId != null &&
+        uncertain.runId === input.runId
+      ) {
+        return {
+          kind: 'resumed',
+          attemptNo: uncertain.attemptNo,
+          idempotencyKey
+        }
+      }
+      return {
+        kind: 'blocked-uncertain',
+        attemptNo: uncertain.attemptNo,
+        idempotencyKey,
+        status: uncertain.status as 'running' | 'interrupted' | 'failed'
+      }
+    }
+
+    // A lingering `starting` row is safe to supersede because the durable Provider-start fence was
+    // never crossed. Preserve it for diagnosis while freeing the logical key for the retry.
     for (const row of existing) {
-      if (!NON_TERMINAL_STATUSES.includes(row.status as TaskAttemptStatus)) continue
+      if (row.status !== 'starting') continue
       tx.update(jobTaskAttempts)
         .set({
           status: 'interrupted',
@@ -171,13 +204,93 @@ export function beginTaskAttempt(input: BeginTaskAttemptInput): BeginTaskAttempt
         runId: input.runId ?? null,
         attemptNo,
         idempotencyKey,
-        status: 'running',
+        status: 'starting',
         startedAt: now
       })
       .run()
 
     return { kind: 'started', id, attemptNo, idempotencyKey }
   })
+}
+
+/**
+ * Record explicit operator authorization to replay tasks whose Provider outcome is uncertain.
+ * This is only called by user-driven resume/continue controls after the old runtime is closed.
+ * The next attempt still receives the same logical idempotency key; the suffix is retained on the
+ * old row as an auditable record that automatic replay was not used.
+ */
+export function authorizeUncertainTaskAttemptReplayForJob(jobId: string): number {
+  const now = nowSec()
+  return getDb().transaction((tx) => {
+    const rows = tx
+      .select({
+        id: jobTaskAttempts.id,
+        attemptNo: jobTaskAttempts.attemptNo,
+        idempotencyKey: jobTaskAttempts.idempotencyKey,
+        status: jobTaskAttempts.status
+      })
+      .from(jobTaskAttempts)
+      .where(
+        and(
+          eq(jobTaskAttempts.jobId, jobId),
+          inArray(jobTaskAttempts.status, ['running', 'interrupted', 'failed'])
+        )
+      )
+      .all()
+      // Stable logical keys are raw SHA-256 hex. Suffixed rows were already superseded or
+      // explicitly authorized and must not be rewritten by repeated control requests.
+      .filter((row) => /^[a-f0-9]{64}$/u.test(row.idempotencyKey))
+
+    for (const row of rows) {
+      const result = tx
+        .update(jobTaskAttempts)
+        .set({
+          status: 'interrupted',
+          endedAt: now,
+          idempotencyKey: `${row.idempotencyKey}:authorized-replay:${row.attemptNo}`
+        })
+        .where(
+          and(
+            eq(jobTaskAttempts.id, row.id),
+            eq(jobTaskAttempts.idempotencyKey, row.idempotencyKey),
+            eq(jobTaskAttempts.status, row.status as TaskAttemptStatus)
+          )
+        )
+        .run()
+      if ((result.changes ?? 0) !== 1) {
+        throw new Error('task_attempt.replay_authorization_conflict')
+      }
+    }
+    return rows.length
+  })
+}
+
+/**
+ * Cross the durable side-effect fence immediately before invoking a Provider. After this succeeds,
+ * the stable key must never be freed automatically: a crash or ambiguous Provider failure is an
+ * at-most-once outcome that requires a new logical task revision to run again.
+ */
+export function markTaskAttemptProviderStarted(input: {
+  jobId: string
+  taskId: string
+  attemptNo: number
+}): void {
+  const result = getDb()
+    .update(jobTaskAttempts)
+    .set({ status: 'running' })
+    .where(
+      and(
+        eq(jobTaskAttempts.jobId, input.jobId),
+        eq(jobTaskAttempts.taskId, input.taskId),
+        eq(jobTaskAttempts.attemptNo, input.attemptNo),
+        eq(jobTaskAttempts.status, 'starting')
+      )
+    )
+    .run()
+
+  if ((result.changes ?? 0) !== 1) {
+    throw new Error('task_attempt.provider_start_conflict')
+  }
 }
 
 export interface CompleteTaskAttemptInput {
@@ -192,7 +305,9 @@ export interface CompleteTaskAttemptInput {
  * Commit task success atomically: attempt → completed (+ result hash + ended_at) AND the job
  * checkpoint (job_tasks status stamp + evidence) in the SAME transaction.
  */
-export function commitCompletedTaskAttempt(input: CompleteTaskAttemptInput): { resultHash: string } {
+export function commitCompletedTaskAttempt(input: CompleteTaskAttemptInput): {
+  resultHash: string
+} {
   const db = getDb()
   const now = nowSec()
   const resultHash = hashTaskResult(input.result)
@@ -262,6 +377,31 @@ export function markTaskAttemptFailed(input: FailTaskAttemptInput): void {
   }
 }
 
+function interruptAttempts(
+  rows: Array<{ id: string; attemptNo: number; idempotencyKey: string; status: string }>,
+  now: number,
+  update: (input: {
+    id: string
+    status: 'interrupted'
+    endedAt: number
+    idempotencyKey?: string
+  }) => void
+): number {
+  for (const row of rows) {
+    update({
+      id: row.id,
+      status: 'interrupted',
+      endedAt: now,
+      // `starting` is known not to have crossed the Provider boundary, so it may safely free the
+      // stable key. `running` is ambiguous and deliberately keeps the key as a replay fence.
+      ...(row.status === 'starting'
+        ? { idempotencyKey: `${row.idempotencyKey}:interrupted-safe:${row.attemptNo}` }
+        : {})
+    })
+  }
+  return rows.length
+}
+
 /** Flip a single job's non-terminal attempts to `interrupted` (called during recovery). */
 export function markRunningAttemptsInterruptedForJob(jobId: string): number {
   const now = nowSec()
@@ -271,7 +411,8 @@ export function markRunningAttemptsInterruptedForJob(jobId: string): number {
       .select({
         id: jobTaskAttempts.id,
         attemptNo: jobTaskAttempts.attemptNo,
-        idempotencyKey: jobTaskAttempts.idempotencyKey
+        idempotencyKey: jobTaskAttempts.idempotencyKey,
+        status: jobTaskAttempts.status
       })
       .from(jobTaskAttempts)
       .where(
@@ -282,17 +423,16 @@ export function markRunningAttemptsInterruptedForJob(jobId: string): number {
       )
       .all()
 
-    for (const row of rows) {
+    return interruptAttempts(rows, now, (patch) => {
       tx.update(jobTaskAttempts)
         .set({
-          status: 'interrupted',
-          endedAt: now,
-          idempotencyKey: `${row.idempotencyKey}:interrupted:${row.attemptNo}`
+          status: patch.status,
+          endedAt: patch.endedAt,
+          ...(patch.idempotencyKey ? { idempotencyKey: patch.idempotencyKey } : {})
         })
-        .where(eq(jobTaskAttempts.id, row.id))
+        .where(eq(jobTaskAttempts.id, patch.id))
         .run()
-    }
-    return rows.length
+    })
   })
 }
 
@@ -305,23 +445,23 @@ export function markAllRunningAttemptsInterrupted(): number {
       .select({
         id: jobTaskAttempts.id,
         attemptNo: jobTaskAttempts.attemptNo,
-        idempotencyKey: jobTaskAttempts.idempotencyKey
+        idempotencyKey: jobTaskAttempts.idempotencyKey,
+        status: jobTaskAttempts.status
       })
       .from(jobTaskAttempts)
       .where(inArray(jobTaskAttempts.status, [...NON_TERMINAL_STATUSES]))
       .all()
 
-    for (const row of rows) {
+    return interruptAttempts(rows, now, (patch) => {
       tx.update(jobTaskAttempts)
         .set({
-          status: 'interrupted',
-          endedAt: now,
-          idempotencyKey: `${row.idempotencyKey}:interrupted:${row.attemptNo}`
+          status: patch.status,
+          endedAt: patch.endedAt,
+          ...(patch.idempotencyKey ? { idempotencyKey: patch.idempotencyKey } : {})
         })
-        .where(eq(jobTaskAttempts.id, row.id))
+        .where(eq(jobTaskAttempts.id, patch.id))
         .run()
-    }
-    return rows.length
+    })
   })
 }
 

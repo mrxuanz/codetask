@@ -54,6 +54,11 @@ const schema = {
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>
 
+/** Test helper for migration fixtures that already own a SQLite client. */
+export function createAppDatabaseForTests(client: Database.Database): AppDatabase {
+  return drizzle(client, { schema })
+}
+
 let db: AppDatabase | null = null
 
 export function createIsolatedTestDatabase(dataDir: string): AppDatabase {
@@ -65,7 +70,7 @@ export function createIsolatedTestDatabase(dataDir: string): AppDatabase {
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('auto_vacuum = INCREMENTAL')
   applyMigrations(sqlite)
-  return drizzle(sqlite, { schema })
+  return createAppDatabaseForTests(sqlite)
 }
 
 export function closeIsolatedTestDatabase(database: AppDatabase): void {
@@ -84,7 +89,7 @@ export function createDatabase(dataDir: string): AppDatabase {
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('auto_vacuum = INCREMENTAL')
   applyMigrations(sqlite)
-  db = drizzle(sqlite, { schema })
+  db = createAppDatabaseForTests(sqlite)
   return db
 }
 

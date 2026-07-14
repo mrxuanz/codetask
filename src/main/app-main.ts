@@ -82,12 +82,34 @@ function gracefulShutdownFromApp(): Promise<void> {
   return shutdownPromise
 }
 
+async function runPackagedSmoke(server: ServerInfo): Promise<void> {
+  const response = await fetch(`${server.url}/api/health`, {
+    signal: AbortSignal.timeout(15_000)
+  })
+  if (!response.ok) {
+    throw new Error(`Smoke health check failed with HTTP ${response.status}`)
+  }
+
+  const body = (await response.json()) as { success?: boolean; data?: { status?: string } }
+  if (body.success !== true || body.data?.status !== 'ok') {
+    throw new Error('Smoke health check returned an unexpected response')
+  }
+
+  console.log(`CODETASK_SMOKE_READY ${JSON.stringify({ url: server.url, health: 'ok' })}`)
+  await gracefulShutdownFromApp()
+  app.exit(0)
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
     serverInfo = await startAppServer(cli)
     ipcMain.handle('get-server-info', () => serverInfo)
+    if (cli.smokeTest) {
+      await runPackagedSmoke(serverInfo)
+      return
+    }
     if (cli.mode === 'desktop') {
       createWindow(serverInfo.url)
       app.on('activate', () => {

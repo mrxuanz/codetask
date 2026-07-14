@@ -3,9 +3,11 @@ import { mock, test } from 'node:test'
 import { Hono } from 'hono'
 import {
   isSseStreamRoute,
+  getRequestAbortSignal,
   REQUEST_TIMEOUT_MS,
   requestTimeout
 } from '../../src/server/middleware/http-limits'
+import { getCurrentRequestAbortSignal } from '../../src/server/context/request-abort'
 
 test('isSseStreamRoute recognizes known SSE stream paths', () => {
   assert.equal(isSseStreamRoute('/api/events/stream'), true)
@@ -19,8 +21,13 @@ test('requestTimeout returns 408 when handler exceeds limit', async () => {
   try {
     const app = new Hono()
     app.use('*', requestTimeout())
-    app.get('/slow', async () => {
-      await new Promise<void>(() => {})
+    app.get('/slow', async (c) => {
+      const signal = getRequestAbortSignal(c)
+      assert.equal(getCurrentRequestAbortSignal(), signal)
+      await new Promise<void>((resolve) =>
+        signal.addEventListener('abort', resolve, { once: true })
+      )
+      assert.equal(signal.aborted, true)
       return new Response('ok')
     })
 

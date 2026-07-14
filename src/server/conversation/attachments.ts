@@ -7,7 +7,6 @@ import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
 import { assertFrozenAttachmentId, assertFrozenThreadId } from '../../shared/frozen-ids'
 import type { MessageAttachment } from './types'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initAttachmentStore(_dir: string): void {
   getAppContext()
 }

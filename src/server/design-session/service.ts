@@ -5,7 +5,7 @@ import { isDesignSessionId, DESIGN_SESSION_WORKSPACE_STATUSES } from '@shared/de
 import { coercePersistedTurnError } from '../turn-errors/store'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
-import { loadJobAbilities, loadJobAbilitiesInTx, loadJobPlan, loadJobPlanInTx, saveJobPlanInTx } from '../db/job-plan'
+import { loadJobAbilitiesInTx, loadJobPlan, loadJobPlanInTx, saveJobPlanInTx } from '../db/job-plan'
 import { saveTaskProgressInTx } from '../db/job-progress'
 import { designRuns, threadJobs, threadMessages, threads, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
@@ -319,10 +319,7 @@ export async function launchJobFromDesignSession(
   const session = sessionRows[0]
   if (!session) throw AppError.notFound('Design session not found', 'job.not_found')
 
-  const [plan, abilities] = await Promise.all([
-    loadJobPlan(db, designSessionId),
-    loadJobAbilities(db, designSessionId)
-  ])
+  const plan = await loadJobPlan(db, designSessionId)
   const manifest = parseSessionManifest(session)
 
   try {

@@ -16,7 +16,11 @@ import {
 } from '../settings/mcp'
 import { ok } from '../response'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function unwrapSettings<T extends object>(body: T | { settings?: T }): T {
+  if ('settings' in body && body.settings !== undefined) return body.settings
+  return body as T
+}
+
 export function createSettingsRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 
@@ -55,8 +59,8 @@ export function createSettingsRoutes(_ctx: AppContext): Hono {
 
   routes.put('/prompts', async (c) => {
     await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{ settings?: PromptSettings }>()
-    const settings = body.settings ?? (body as unknown as PromptSettings)
+    const body = await c.req.json<PromptSettings | { settings?: PromptSettings }>()
+    const settings = unwrapSettings(body)
     const saved = savePromptSettings(settings)
     return c.json(ok({ settings: saved }))
   })
@@ -68,8 +72,8 @@ export function createSettingsRoutes(_ctx: AppContext): Hono {
 
   routes.put('/mcp', async (c) => {
     await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{ settings?: UserMcpSettings }>()
-    const settings = body.settings ?? (body as unknown as UserMcpSettings)
+    const body = await c.req.json<UserMcpSettings | { settings?: UserMcpSettings }>()
+    const settings = unwrapSettings(body)
     try {
       const saved = saveUserMcpSettings(settings)
       return c.json(ok({ settings: saved }))

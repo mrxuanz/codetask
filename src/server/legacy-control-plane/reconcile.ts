@@ -21,7 +21,7 @@ import {
   type WorkloadRunSummary
 } from './workload-slot-store'
 import { getRunRuntimeRef } from './workload-slot-store'
-import { hardKill, registerRunRuntime, unregisterRunRuntime } from './runtime-supervisor'
+import { registerRunRuntime } from './runtime-supervisor'
 import { buildCursorPlannerRuntimeHandle } from './runtime-handle-cursor'
 
 function isJobLoopActive(jobId: string): boolean {
@@ -101,21 +101,14 @@ export async function reconcileStaleJobIfNeeded(
 
   // Mark any DB attempt still `running`/`starting` from the dead process as interrupted so the
   // resumed loop creates the next attempt under the same (job_id, task_id) identity.
-  try {
-    const { markRunningAttemptsInterruptedForJob } = await import('./task-attempts')
-    markRunningAttemptsInterruptedForJob(job.id)
-  } catch (error) {
-    console.warn('[reconcile] failed to interrupt running attempts', job.id, error)
-  }
+  const { markRunningAttemptsInterruptedForJob } = await import('./task-attempts')
+  markRunningAttemptsInterruptedForJob(job.id)
 
   emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
 
   // Auto-resume via the single execution-queue entry (does not re-enter reconcile).
-  void import('./queue-coordinator')
-    .then((module) => module.advanceExecutionQueue(username))
-    .catch((error: unknown) => {
-      console.warn('[reconcile] auto-resume advance failed', job.id, error)
-    })
+  const { advanceExecutionQueue } = await import('./queue-coordinator')
+  await advanceExecutionQueue(username)
 
   return updated
 }
@@ -143,14 +136,17 @@ export async function reconcileOrphanRunningJobsForUser(username: string): Promi
       )
     )
 
+  const errors: Error[] = []
   for (const row of rows) {
     try {
       const job = await mapJob(row, { includePlan: true })
       await reconcileStaleJobIfNeeded(username, job)
     } catch (error) {
       console.warn('[jobs] failed to reconcile orphan running job', row.id, error)
+      errors.push(new Error(`running job ${row.id}`, { cause: error }))
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile running jobs')
 }
 
 export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
@@ -162,14 +158,17 @@ export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
       or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing'))
     )
 
+  const errors: Error[] = []
   for (const row of rows) {
     try {
       const job = await mapJob(row, { includePlan: true })
       await reconcileStaleJobIfNeeded(row.username, job)
     } catch (error) {
       console.warn('[jobs] failed to reconcile orphan running job', row.id, error)
+      errors.push(new Error(`running job ${row.id}`, { cause: error }))
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile running jobs')
 }
 
 let startupReconciled = false
@@ -229,26 +228,32 @@ export async function reconcileOrphanPlanningSessionsForUser(username: string): 
     .from(threadJobs)
     .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'planning')))
 
+  const errors: Error[] = []
   for (const row of rows) {
     try {
       await reconcileStalePlanningSessionIfNeeded(row)
     } catch (error) {
       console.warn('[jobs] failed to reconcile orphan planning session', row.id, error)
+      errors.push(new Error(`planning job ${row.id}`, { cause: error }))
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile planning jobs')
 }
 
 export async function reconcileOrphanPlanningSessionsOnStartup(): Promise<void> {
   const db = getDb()
   const rows = await db.select().from(threadJobs).where(eq(threadJobs.status, 'planning'))
 
+  const errors: Error[] = []
   for (const row of rows) {
     try {
       await reconcileStalePlanningSessionIfNeeded(row)
     } catch (error) {
       console.warn('[jobs] failed to reconcile orphan planning session', row.id, error)
+      errors.push(new Error(`planning job ${row.id}`, { cause: error }))
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile planning jobs')
 }
 
 let startupPlanningReconciled = false
@@ -314,10 +319,8 @@ async function killRuntimeForStaleSlot(slot: WorkloadRunSummary): Promise<void> 
     registerRunRuntime(slot.runId, buildCursorPlannerRuntimeHandle(slot.ownerId))
   }
 
-  await hardKill(slot.runId).catch((error) => {
-    console.warn('[reconcile] hardKill stale slot failed', slot.runId, error)
-  })
-  unregisterRunRuntime(slot.runId)
+  const { stopRunLifecycle } = await import('./run-lifecycle')
+  await stopRunLifecycle(slot.runId, 'reconcile_stale', {}, { skipRelease: true })
 }
 
 export async function reconcileOrphanWorkloadSlotsForUser(username: string): Promise<void> {
@@ -325,6 +328,7 @@ export async function reconcileOrphanWorkloadSlotsForUser(username: string): Pro
   const currentOwner = leaseOwner()
   const now = nowSec()
 
+  const errors: Error[] = []
   for (const slot of slots) {
     try {
       const currentPid = slot.leaseOwner === currentOwner
@@ -357,8 +361,10 @@ export async function reconcileOrphanWorkloadSlotsForUser(username: string): Pro
       await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
     } catch (error) {
       console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)
+      errors.push(new Error(`workload slot ${slot.runId}`, { cause: error }))
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile workload slots')
 }
 
 export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
@@ -366,6 +372,7 @@ export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
   const currentOwner = leaseOwner()
   const now = nowSec()
 
+  const errors: Error[] = []
   for (const slot of slots) {
     try {
       const currentPid = slot.leaseOwner === currentOwner
@@ -398,8 +405,10 @@ export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
       await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
     } catch (error) {
       console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)
+      errors.push(new Error(`workload slot ${slot.runId}`, { cause: error }))
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile workload slots')
 }
 
 let startupWorkloadSlotsReconciled = false

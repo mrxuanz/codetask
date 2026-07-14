@@ -88,6 +88,27 @@ test('acquireWorkspaceLease is exclusive across owners for overlapping paths', a
   }
 })
 
+test('owner release with a stale runId keeps the in-memory and durable lease', async () => {
+  await setup()
+  try {
+    const acquired = acquireWorkspaceLease({
+      workspacePath: workspaceRoot,
+      ownerKind: 'thread_job',
+      ownerId: 'job-1',
+      runId: 'run-current'
+    })
+    assert.ok(acquired)
+
+    releaseWorkspaceLeaseForOwner('thread_job', 'job-1', 'run-stale')
+    assert.equal(findWorkspaceLeaseConflict(workspaceRoot)?.runId, 'run-current')
+
+    releaseWorkspaceLeaseForOwner('thread_job', 'job-1', 'run-current')
+    assert.equal(findWorkspaceLeaseConflict(workspaceRoot), null)
+  } finally {
+    await teardown()
+  }
+})
+
 test('reclaimStaleWorkspaceLeasesOnStartup releases leases from prior boot', async () => {
   await setup()
   try {

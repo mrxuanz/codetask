@@ -4,6 +4,11 @@ import Database from 'better-sqlite3'
 import { allMigrations } from '../../src/server/db/migrations'
 import { currentMigrationVersion, runMigrations } from '../../src/server/db/migrations/runner'
 
+const latestMigrationVersion = allMigrations.at(-1)?.version
+if (latestMigrationVersion === undefined) {
+  throw new Error('Expected at least one database migration')
+}
+
 function seedProjectThreadMessage(db: Database.Database, opts?: { messageId?: string }): void {
   const now = Math.floor(Date.now() / 1000)
   const messageId = opts?.messageId ?? 'msg-1'
@@ -204,7 +209,7 @@ test('migrations apply through latest version on empty database', () => {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 26)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
   db.close()
 })
 
@@ -217,7 +222,7 @@ test('migration 017 succeeds when design_sessions references threads (FK on)', (
   assert.equal(currentMigrationVersion(db), 16)
 
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 26)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
   const wizardPhase = db
     .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'`)
     .get() as { sql: string }
@@ -229,7 +234,7 @@ test('migration 026 empty DB has no design_sessions and thread_jobs design colum
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 26)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
 
   const designSessions = db
     .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'design_sessions'`)
@@ -258,7 +263,7 @@ test('migration 026 moves unlaunched design_session into thread_jobs and drops d
 
   seedUnlaunchedDesignSessionWithPlan(db)
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 26)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
 
   const job = db.prepare(`SELECT * FROM thread_jobs WHERE id = ?`).get('ds-unlaunched') as
     | Record<string, unknown>
@@ -295,7 +300,7 @@ test('migration 026 enriches launched job and rewrites plan pointers', () => {
 
   seedLaunchedDesignSessionPair(db)
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 26)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
 
   const job = db.prepare(`SELECT * FROM thread_jobs WHERE id = ?`).get('job-launched') as
     | Record<string, unknown>
@@ -312,7 +317,9 @@ test('migration 026 enriches launched job and rewrites plan pointers', () => {
   assert.equal(thread.active_plan_id, 'job-launched')
 
   const msg = db
-    .prepare(`SELECT json_extract(payload_json, '$.linkedPlanId') AS linked FROM thread_messages WHERE id = ?`)
+    .prepare(
+      `SELECT json_extract(payload_json, '$.linkedPlanId') AS linked FROM thread_messages WHERE id = ?`
+    )
     .get('msg-launched') as { linked: string }
   assert.equal(msg.linked, 'job-launched')
 
@@ -339,9 +346,11 @@ test('migration 026 rewrites workload owner_kind design_session to thread_job', 
 
   seedWorkloadDesignSessionOwner(db)
   runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), 26)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
 
-  const run = db.prepare(`SELECT owner_kind, owner_id FROM workload_runs WHERE id = ?`).get('run-wl') as {
+  const run = db
+    .prepare(`SELECT owner_kind, owner_id FROM workload_runs WHERE id = ?`)
+    .get('run-wl') as {
     owner_kind: string
     owner_id: string
   }

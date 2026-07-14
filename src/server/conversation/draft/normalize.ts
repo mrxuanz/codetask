@@ -251,9 +251,8 @@ export function bindPayloadWorkspace(
 }
 
 export function draftPayloadToClientJson(payload: TaskLaunchDraftPayload): Record<string, unknown> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { workspacePath: _workspacePath, ...rest } = payload
-  return rest as unknown as Record<string, unknown>
+  return rest
 }
 
 export function createTaskLaunchDraftPayload(input: {
@@ -346,7 +345,6 @@ export function buildUnlockedDraftPayload(payload: TaskLaunchDraftPayload): Task
 export function buildUnlockedRequirementsContractPayload(
   payload: TaskLaunchDraftPayload
 ): TaskLaunchDraftPayload {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { requirementsContract: _locked, ...restLockedSections } = payload.lockedSections ?? {}
   return {
     ...payload,

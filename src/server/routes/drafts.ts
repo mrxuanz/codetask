@@ -4,7 +4,6 @@ import { requireUsername } from '../auth/session'
 import { listUserDrafts } from '../legacy-control-plane/draft-plan'
 import { ok } from '../response'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createDraftListRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 

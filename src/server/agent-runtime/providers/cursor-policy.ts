@@ -1,4 +1,5 @@
 import {
+  applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv,
   stripElectronInheritedEnv
@@ -33,6 +34,7 @@ export function buildCursorTurnPlan(
     ? buildSandboxPreparedProviderEnv()
     : buildCursorHostEnv(input.runtimeRoot)
   if (outerSandbox) stripElectronInheritedEnv(env)
+  applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const mcpServers = buildCursorAcpMcpServers(input.mcpUrl, options.userMcpServers ?? {})
   const cliArgs = buildCursorAcpCliArgs({ outerSandbox, cwd: input.cwd })

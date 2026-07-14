@@ -16,7 +16,6 @@ import { releaseWorkspaceLease } from '../legacy-control-plane/workspace-lease-s
 import { toTurnErrorDto } from '../agent-runtime/errors'
 import { ok } from '../response'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createAgentRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 
@@ -29,7 +28,6 @@ export function createAgentRoutes(_ctx: AppContext): Hono {
   return routes
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createThreadAgentRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 

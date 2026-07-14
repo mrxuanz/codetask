@@ -5,7 +5,11 @@ import { createRequire } from 'module'
 import { createServer } from 'net'
 import { buildOpencodeMcpServers } from '../mcp'
 import { resolveOpencodeExecutable } from '../../sandbox/provider-auth/paths'
-import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
+import {
+  applyTaskIdempotencyEnv,
+  buildSandboxPreparedProviderEnv,
+  buildProviderChildEnv
+} from '../env'
 import { throwSdkTurnError } from '../errors'
 import {
   createTurnError,
@@ -381,6 +385,7 @@ export async function* streamOpencodeTurn(
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
+  applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const server = await startOpencodeServer({
     hostname: '127.0.0.1',

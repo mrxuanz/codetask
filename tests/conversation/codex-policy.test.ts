@@ -26,12 +26,16 @@ function baseInput(role: AgentTurnInput['role']): AgentTurnInput {
   }
 }
 
-test('resolveCodexOuterSandbox: conversation off, task/verifier on', () => {
-  assert.equal(resolveCodexOuterSandbox('conversation', false), false)
-  assert.equal(resolveCodexOuterSandbox('planner', false), false)
+test('resolveCodexOuterSandbox: every provider role requires outer sandbox', () => {
+  assert.equal(resolveCodexOuterSandbox('conversation', undefined), true)
+  assert.equal(resolveCodexOuterSandbox('planner', undefined), true)
   assert.equal(resolveCodexOuterSandbox('task-worker', true), true)
   assert.equal(resolveCodexOuterSandbox('slice-verifier', undefined), true)
   assert.equal(resolveCodexOuterSandbox('milestone-verifier', undefined), true)
+  assert.throws(
+    () => resolveCodexOuterSandbox('conversation', false),
+    /cannot disable outer sandbox/
+  )
 })
 
 test('resolveCodexMcpToolNamesForTurn picks role defaults', () => {
@@ -49,10 +53,10 @@ test('resolveCodexMcpToolNamesForTurn picks role defaults', () => {
 test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () => {
   const conversation = buildCodexTurnPlan(
     { ...baseInput('conversation'), mcpUrl: 'http://127.0.0.1:9/mcp' },
-    { outerSandbox: false }
+    { outerSandbox: true }
   )
-  assert.equal(conversation.outerSandbox, false)
-  assert.equal(conversation.threadOptions.sandboxMode, 'workspace-write')
+  assert.equal(conversation.outerSandbox, true)
+  assert.equal(conversation.threadOptions.sandboxMode, 'danger-full-access')
   assert.equal(conversation.mcpToolNames, undefined)
   assert.ok(
     conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
@@ -60,29 +64,34 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
 
   const planner = buildCodexTurnPlan(
     { ...baseInput('planner'), mcpUrl: 'http://127.0.0.1:9/mcp' },
-    { outerSandbox: false }
+    { outerSandbox: true }
   )
-  assert.equal(planner.outerSandbox, false)
+  assert.equal(planner.outerSandbox, true)
   assert.ok(planner.mcpToolNames?.includes('register_plan'))
 
   const task = buildCodexTurnPlan(
-    { ...baseInput('task-worker'), mcpUrl: 'http://127.0.0.1:9/mcp' },
+    {
+      ...baseInput('task-worker'),
+      mcpUrl: 'http://127.0.0.1:9/mcp',
+      idempotencyKey: 'logical-task-key'
+    },
     { outerSandbox: true }
   )
   assert.equal(task.outerSandbox, true)
   assert.equal(task.threadOptions.sandboxMode, 'danger-full-access')
   assert.equal(task.sdkConfig?.sandbox_mode, 'danger-full-access')
   assert.ok(task.mcpToolNames?.includes('report_task_result'))
+  assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
+  assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_SCOPE, 'logical-task')
 })
 
 test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {
   const conversation = buildCodexTurnPlan(
     { ...baseInput('conversation'), mcpUrl: 'http://127.0.0.1:9/mcp' },
-    { outerSandbox: false }
+    { outerSandbox: true }
   )
   const tools =
-    conversation.sdkConfig?.mcp_servers &&
-    'codeteam-manager' in conversation.sdkConfig.mcp_servers
+    conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
       ? (
           conversation.sdkConfig.mcp_servers['codeteam-manager'] as {
             tools?: Record<string, unknown>
