@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import type Database from 'better-sqlite3'
 import type { AppDatabase } from '../../../src/server/db'
-import { bootstrapRuntime, ensureRuntimeReady, resetAppContextForTests } from '../../../src/server/bootstrap'
+import { bootstrapRuntime, ensureRuntimeReady, getAppContext, resetAppContextForTests } from '../../../src/server/bootstrap'
 import { readSchemaGeneration, setCutoverMarkerForTests } from '../../../src/server/application/cutover-state'
 import { StartupError } from '../../../src/server/application/startup-error'
 import { createV3ApplicationRuntimeForTests } from '../../../src/server/application/application-runtime'
@@ -103,9 +103,36 @@ describe('startup: strict marker parsing', () => {
       assert.throws(() => bootstrapRuntime({ dataDir }), (error: unknown) => {
         return error instanceof StartupError && error.code === 'control_plane.v3_not_release_ready'
       })
+      assert.throws(() => getAppContext(), /Runtime not bootstrapped/)
+      assert.throws(() => bootstrapRuntime({ dataDir }), (error: unknown) => {
+        return error instanceof StartupError && error.code === 'control_plane.v3_not_release_ready'
+      })
+      assert.throws(() => getAppContext(), /Runtime not bootstrapped/)
     } finally {
       await resetAppContextForTests()
       setCutoverMarkerForTests(null)
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not leave appContext after schema marker bootstrap failure', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-boot-noctx-'))
+    const sqlite = createDbAtMigrationVersion(28, dataDir)
+    sqlite.exec('DROP TABLE control_schema_meta')
+    sqlite.close()
+
+    await resetAppContextForTests()
+    setCutoverMarkerForTests(null)
+    try {
+      assert.throws(() => bootstrapRuntime({ dataDir }), (error: unknown) => {
+        return error instanceof StartupError && error.code === 'schema.marker_table_missing'
+      })
+      assert.throws(() => getAppContext(), /Runtime not bootstrapped/)
+      assert.throws(() => bootstrapRuntime({ dataDir }), (error: unknown) => {
+        return error instanceof StartupError && error.code === 'schema.marker_table_missing'
+      })
+    } finally {
+      await resetAppContextForTests()
       rmSync(dataDir, { recursive: true, force: true })
     }
   })

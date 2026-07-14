@@ -131,6 +131,7 @@ import {
   createTurnError,
   isInfraTurnError,
   isRetryableTurnError,
+  isTurnError,
   JOB_CANCELLED,
   JOB_PAUSED,
   normalizeTurnError
@@ -1301,7 +1302,8 @@ async function executeSingleTask(
   taskId: string,
   items: TaskProgressItemDto[],
   taskProgress: TaskProgressDto,
-  gate: ReturnType<typeof buildGateStates>
+  gate: ReturnType<typeof buildGateStates>,
+  idempotencyKey?: string | null
 ): Promise<ExecuteSingleTaskResult> {
   const flat = findFlatTask(plan, taskId)
   if (!flat) {
@@ -1425,18 +1427,23 @@ async function executeSingleTask(
   try {
     const { enterWorkspaceLeaseContext } = await import('./workspace-lease-context')
     const { acquireWorkspaceLease } = await import('./workspace-lease-store')
+    const runId = getExecutionRunContext()?.runId ?? null
     const lease = acquireWorkspaceLease({
       workspacePath: job.workspacePath ?? '',
       ownerKind: 'thread_job',
-      ownerId: job.id
+      ownerId: job.id,
+      runId
     })
-    if (lease) {
-      enterWorkspaceLeaseContext({
-        leaseId: lease.leaseId,
-        ownerKind: 'thread_job',
-        ownerId: job.id
+    if (!lease) {
+      throw createTurnError('workspace.lease_lost', {
+        detail: 'Workspace lease is not held by this run'
       })
     }
+    enterWorkspaceLeaseContext({
+      leaseId: lease.leaseId,
+      ownerKind: 'thread_job',
+      ownerId: job.id
+    })
 
     for await (const chunk of streamAgentTurn({
       role: 'task-worker',
@@ -1456,7 +1463,8 @@ async function executeSingleTask(
       systemPrompt: TASK_EXECUTION_SYSTEM_PROMPT,
       mcpUrl,
       signal,
-      jobId: job.id
+      jobId: job.id,
+      idempotencyKey: idempotencyKey ?? undefined
     })) {
       if (chunk.type === 'completed') {
         evidenceWait.resetTimeout(getTaskEvidenceWaitTimeoutForTests() ?? TASK_EVIDENCE_GRACE_MS)
@@ -1511,6 +1519,15 @@ async function executeSingleTask(
     // FIX-PLAN F3-C (§8.4): app shutdown aborted the turn. Distinguish from generic failure — leave
     // the task queued and the Job auto-recoverable instead of mapping to a task/job failure.
     if (isDraining()) {
+      itemsNext = updateTaskItem(itemsNext, taskId, {
+        status: 'queued',
+        executionStatus: 'queued',
+        errorMessage: null
+      })
+      return { kind: 'interrupted', items: itemsNext }
+    }
+
+    if (isTurnError(error) && error.code === 'workspace.lease_lost') {
       itemsNext = updateTaskItem(itemsNext, taskId, {
         status: 'queued',
         executionStatus: 'queued',
@@ -2314,13 +2331,18 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
       return 'return'
     }
 
-    // FIX-PLAN F3-B (§8.3): open a durable attempt for this task. If a completed attempt already
-    // exists (e.g. task finished in a prior boot before the event was emitted), never re-run it —
-    // stamp it completed and advance.
+    // FIX-PLAN F3-B (§8.3) + R1: open a durable attempt before any Provider call. Fail closed on
+    // begin errors — never invoke the Provider without an attempt ledger row.
     let attemptNo: number | null = null
+    let idempotencyKey: string | null = null
     const runId = getExecutionRunContext()?.runId ?? null
     try {
-      const attempt = beginTaskAttempt({ jobId, taskId: next.id, runId })
+      const attempt = beginTaskAttempt({
+        jobId,
+        taskId: next.id,
+        runId,
+        snapshotPlanRevision: job.snapshotPlanRevision ?? job.planRevision ?? 0
+      })
       if (attempt.kind === 'already-completed') {
         items = updateTaskItem(items, next.id, {
           status: 'completed',
@@ -2348,9 +2370,23 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
         return 'continue'
       }
       attemptNo = attempt.attemptNo
+      idempotencyKey = attempt.idempotencyKey
     } catch (error) {
       memoryDebug('processNextTaskStep: beginTaskAttempt failed', { jobId, taskId: next.id })
-      void error
+      const detail = error instanceof Error ? error.message : String(error)
+      await failJobWithProgress(
+        jobId,
+        taskProgress,
+        items,
+        gate,
+        'execution.failed',
+        { id: next.id },
+        createTurnError('task.terminal_failure', {
+          detail: `beginTaskAttempt failed: ${detail}`
+        }).toDto()
+      )
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
     }
 
     const nextFlat = findFlatTask(plan, next.id)
@@ -2378,7 +2414,16 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
     }
     await persistTaskProgress(jobId, runningProgress, undefined, gate)
 
-    const result = await executeSingleTask(username, job, plan, next.id, items, taskProgress, gate)
+    const result = await executeSingleTask(
+      username,
+      job,
+      plan,
+      next.id,
+      items,
+      taskProgress,
+      gate,
+      idempotencyKey
+    )
     const fullItems = result.items
 
     if (result.kind === 'recovered') {
@@ -2493,14 +2538,10 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
       }
       taskProgress = completedProgress
       // The task itself finished successfully before the pause landed: commit the attempt so a
-      // resume never re-runs it (FIX-PLAN F3-B).
+      // resume never re-runs it (FIX-PLAN F3-B / R1). Commit failures must not advance progress.
       if (attemptNo != null) {
         const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
-        try {
-          commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
-        } catch (error) {
-          void error
-        }
+        commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
       }
       items = slimTaskProgressItemsForRuntime(fullItems)
       await finalizeExecutionPause(jobId, taskProgress, items, gate)
@@ -2508,27 +2549,19 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
       return 'return'
     }
 
-    // FIX-PLAN F3-B (§8.3): commit task success (evidence + result hash + attempt completed + job
-    // checkpoint) atomically, or record the failed attempt, before persisting the checkpoint.
+    // FIX-PLAN F3-B (§8.3) + R1: commit task success atomically, or record the failed attempt.
+    // Do not swallow commit failures — memory/job progress must not advance as completed.
     if (attemptNo != null) {
       if (result.kind === 'failed') {
-        try {
-          markTaskAttemptFailed({
-            jobId,
-            taskId: next.id,
-            attemptNo,
-            errorJson: JSON.stringify(result.lastError)
-          })
-        } catch (error) {
-          void error
-        }
+        markTaskAttemptFailed({
+          jobId,
+          taskId: next.id,
+          attemptNo,
+          errorJson: JSON.stringify(result.lastError)
+        })
       } else if (result.kind === 'completed') {
         const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
-        try {
-          commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
-        } catch (error) {
-          void error
-        }
+        commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
       }
     }
 
@@ -2685,9 +2718,7 @@ export function scheduleJobExecution(
 
       const currentJob = await getUserJob(username, jobId)
       if (currentJob && !preclaimedSlot) {
-        const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
-          './workspace-lease-store'
-        )
+        const { acquireWorkspaceLease } = await import('./workspace-lease-store')
         const workspaceLease = acquireWorkspaceLease({
           workspacePath: currentJob.workspacePath ?? '',
           ownerKind: 'thread_job',
@@ -2700,7 +2731,6 @@ export function scheduleJobExecution(
             reason: 'workspace_lease_unavailable',
             skipQueueAdvance: true
           }).catch(() => {})
-          releaseWorkspaceLeaseForOwner('thread_job', jobId)
           const reverted = await updateJobRowForSnapshot(jobId, {
             status: 'pending',
             lastError: null

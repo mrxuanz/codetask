@@ -16,6 +16,7 @@ export type TurnErrorCode =
   | 'sandbox.child_closed'
   | 'sandbox.worker.busy'
   | 'workspace.busy'
+  | 'workspace.lease_lost'
   | 'runtime.draining'
   | 'sandbox.worker.missing'
   | 'sandbox.required'
@@ -141,6 +142,7 @@ export type TurnErrorCode =
   | 'draft.local_corpus.invalid_path'
   | 'draft.local_corpus.file_not_allowed'
   | 'plan.cancelled'
+  | 'plan.confirm_conflict'
   | 'plan.sandbox_timeout'
   | 'plan.sandbox_cleanup_failed'
   | 'wizard.invalid_phase'
@@ -168,6 +170,8 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'sandbox.child_closed': 'Sandbox worker exited unexpectedly',
   'sandbox.worker.busy': 'Sandbox worker is busy',
   'workspace.busy': 'Workspace is busy; another task is using this project folder',
+  'workspace.lease_lost':
+    'Workspace lease is not held by this run; cannot execute without single-writer admission',
   'runtime.draining': 'Runtime is shutting down; try again after restart',
   'sandbox.worker.missing': 'Sandbox worker not available',
   'sandbox.required': 'Sandbox is required for this operation',
@@ -308,6 +312,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'draft.local_corpus.invalid_path': 'Invalid local corpus path',
   'draft.local_corpus.file_not_allowed': 'Single-file local corpus not allowed',
   'plan.cancelled': 'Plan generation cancelled',
+  'plan.confirm_conflict': 'Plan changed while it was being confirmed',
   'plan.sandbox_timeout': 'Plan sandbox task timed out',
   'plan.sandbox_cleanup_failed':
     'Sandbox process exited abnormally. Fully quit the app and restart, then retry plan generation.',

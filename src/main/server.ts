@@ -2,6 +2,7 @@ import { join } from 'path'
 import { serve, type ServerType } from '@hono/node-server'
 import { is } from '@electron-toolkit/utils'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
+import { readSchemaGeneration } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
 import {
   getSandboxSupervisorManager,
@@ -117,18 +118,21 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
 
   const ctx = bootstrapRuntime({ dataDir, mode: cli.mode })
   process.env.CODETASK_MODE = cli.mode
-  // FIX-PLAN F3-C (§8.5): full recovery must complete BEFORE HTTP bind/listen:
+
+  const schemaRead = readSchemaGeneration(ctx.db)
+  const usesLegacyComposition = schemaRead !== 'v3_authoritative'
+
+  // FIX-PLAN F3-C / R6: full recovery must complete BEFORE HTTP bind/listen:
   //   open DB/migrate → select Legacy root → init sandbox/provider (confirm executable) →
   //   reclaim stale run/slot/lease → running attempt → interrupted → resume last running Job →
   //   advance pending FIFO → start reconciler → (only then) listen.
-  // ensureRuntimeReady runs reclaim + interrupt-attempts + reconcile and starts the reconciler.
+  if (usesLegacyComposition) {
+    await confirmSandboxReadyOrThrow(supervisor)
+  }
+
   await ensureRuntimeReady(ctx)
 
-  if (ctx.applicationRuntime?.kind !== 'v3') {
-    // Confirm sandbox/provider is executable (bounded retry) before claiming readiness — fail
-    // closed if it never becomes ready, preserving DB state for a later retry.
-    await confirmSandboxReadyOrThrow(supervisor)
-    // Reclaim + resume running + advance pending FIFO. Fails closed on any user/job error.
+  if (usesLegacyComposition) {
     await import('../server/legacy-control-plane/job-queue').then((module) =>
       module.resumeJobQueuesAfterServerReady(supervisor)
     )

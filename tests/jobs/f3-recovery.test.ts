@@ -3,7 +3,7 @@ import test from 'node:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import {
@@ -19,6 +19,7 @@ import {
   beginTaskAttempt,
   commitCompletedTaskAttempt,
   deriveIdempotencyKey,
+  deriveTaskIdempotencyKey,
   hasCompletedAttempt,
   markAllRunningAttemptsInterrupted,
   markRunningAttemptsInterruptedForJob
@@ -235,7 +236,12 @@ test('F3-B: attempt lifecycle — begin, complete, never re-run, unique idempote
     assert.equal(first.kind, 'started')
     if (first.kind !== 'started') throw new Error('unreachable')
     assert.equal(first.attemptNo, 1)
-    assert.equal(first.idempotencyKey, deriveIdempotencyKey('job-att', 'task-1', 1))
+    const expectedKey = deriveTaskIdempotencyKey({
+      jobId: 'job-att',
+      taskId: 'task-1',
+      snapshotPlanRevision: 0
+    })
+    assert.equal(first.idempotencyKey, expectedKey)
 
     // Complete atomically: attempt completed + job checkpoint stamped in one transaction.
     commitCompletedTaskAttempt({
@@ -268,7 +274,7 @@ test('F3-B: attempt lifecycle — begin, complete, never re-run, unique idempote
           taskId: 'task-1',
           runId: null,
           attemptNo: 99,
-          idempotencyKey: deriveIdempotencyKey('job-att', 'task-1', 1),
+          idempotencyKey: expectedKey,
           status: 'running',
           startedAt: Math.floor(Date.now() / 1000)
         })
@@ -279,11 +285,97 @@ test('F3-B: attempt lifecycle — begin, complete, never re-run, unique idempote
   }
 })
 
+test('R1: stable idempotency key across retries; begin fails closed for foreign task', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-r1', { status: 'running' })
+    await getDb().insert(jobTasks).values({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      title: 'A',
+      sortOrder: 0,
+      status: 'running',
+      executionStatus: 'running'
+    })
+
+    const first = beginTaskAttempt({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      runId: null,
+      snapshotPlanRevision: 3
+    })
+    assert.equal(first.kind, 'started')
+    if (first.kind !== 'started') throw new Error('unreachable')
+    const key = deriveTaskIdempotencyKey({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      snapshotPlanRevision: 3
+    })
+    assert.equal(first.idempotencyKey, key)
+
+    markRunningAttemptsInterruptedForJob('job-r1')
+    const retry = beginTaskAttempt({
+      jobId: 'job-r1',
+      taskId: 'task-a',
+      runId: null,
+      snapshotPlanRevision: 3
+    })
+    assert.equal(retry.kind, 'started')
+    if (retry.kind !== 'started') throw new Error('unreachable')
+    assert.equal(retry.attemptNo, 2)
+    assert.equal(retry.idempotencyKey, key)
+
+    assert.throws(() => beginTaskAttempt({ jobId: 'job-r1', taskId: 'missing-task', runId: null }))
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('R1: commit conflict does not stamp task completed', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-r1c', { status: 'running' })
+    await getDb().insert(jobTasks).values({
+      jobId: 'job-r1c',
+      taskId: 'task-c',
+      title: 'C',
+      sortOrder: 0,
+      status: 'running',
+      executionStatus: 'running'
+    })
+    const started = beginTaskAttempt({ jobId: 'job-r1c', taskId: 'task-c', runId: null })
+    assert.equal(started.kind, 'started')
+    if (started.kind !== 'started') throw new Error('unreachable')
+
+    markRunningAttemptsInterruptedForJob('job-r1c')
+    assert.throws(() =>
+      commitCompletedTaskAttempt({
+        jobId: 'job-r1c',
+        taskId: 'task-c',
+        attemptNo: started.attemptNo,
+        result: { ok: true }
+      })
+    )
+
+    const taskRow = getDb()
+      .select({ status: jobTasks.status })
+      .from(jobTasks)
+      .where(and(eq(jobTasks.jobId, 'job-r1c'), eq(jobTasks.taskId, 'task-c')))
+      .get()
+    assert.equal(taskRow?.status, 'running')
+  } finally {
+    await teardownDb()
+  }
+})
+
 test('F3-B: startup fence flips running/starting attempts to interrupted', async () => {
   await setupDb()
   try {
     await seedJob('job-x', { status: 'running' })
     const now = Math.floor(Date.now() / 1000)
+    const k1 = deriveTaskIdempotencyKey({ jobId: 'job-x', taskId: 't1', snapshotPlanRevision: 0 })
+    const k2 = deriveTaskIdempotencyKey({ jobId: 'job-x', taskId: 't2', snapshotPlanRevision: 0 })
+    const k3 = deriveTaskIdempotencyKey({ jobId: 'job-x', taskId: 't3', snapshotPlanRevision: 0 })
     await getDb().insert(jobTaskAttempts).values([
       {
         id: 'a-run',
@@ -291,7 +383,7 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
         taskId: 't1',
         runId: null,
         attemptNo: 1,
-        idempotencyKey: deriveIdempotencyKey('job-x', 't1', 1),
+        idempotencyKey: k1,
         status: 'running',
         startedAt: now
       },
@@ -301,7 +393,7 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
         taskId: 't2',
         runId: null,
         attemptNo: 1,
-        idempotencyKey: deriveIdempotencyKey('job-x', 't2', 1),
+        idempotencyKey: k2,
         status: 'starting',
         startedAt: now
       },
@@ -311,7 +403,7 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
         taskId: 't3',
         runId: null,
         attemptNo: 1,
-        idempotencyKey: deriveIdempotencyKey('job-x', 't3', 1),
+        idempotencyKey: k3,
         status: 'completed',
         startedAt: now,
         endedAt: now

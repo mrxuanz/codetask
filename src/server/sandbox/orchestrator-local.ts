@@ -46,6 +46,7 @@ export interface RunSandboxedTurnInput {
   signal?: AbortSignal | undefined
   readRoots?: string[] | undefined
   jobId?: string | undefined
+  idempotencyKey?: string | undefined
 }
 
 function resolveRoleWorkerPath(): string {
@@ -175,7 +176,8 @@ export async function* streamSandboxedConversationTurnLocal(
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,
     userMcpServers: input.userMcpServers,
-    jobId: input.jobId
+    jobId: input.jobId,
+    idempotencyKey: input.idempotencyKey
   }
 
   const workerPath = resolveRoleWorkerPath()

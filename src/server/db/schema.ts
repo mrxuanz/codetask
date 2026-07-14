@@ -433,9 +433,16 @@ export const deletionRequests = sqliteTable('deletion_requests', {
   entityId: text('entity_id').notNull(),
   username: text('username').notNull(),
   status: text('status').notNull(),
+  phase: text('phase').notNull().default('requested'),
+  threadId: text('thread_id'),
+  projectId: text('project_id'),
+  workspacePath: text('workspace_path'),
   frozenJson: text('frozen_json'),
+  cleanupTargetsJson: text('cleanup_targets_json'),
   filesystemCleanupJson: text('filesystem_cleanup_json'),
   errorJson: text('error_json'),
+  lastError: text('last_error'),
+  retryCount: integer('retry_count').notNull().default(0),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull()
 })

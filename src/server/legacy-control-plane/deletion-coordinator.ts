@@ -1,17 +1,40 @@
 import { randomUUID } from 'crypto'
-import { and, eq, inArray, or } from 'drizzle-orm'
+import { and, eq, inArray, ne } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { deletionRequests, projects, threadJobs, threads } from '../db/schema'
 import { AppError } from '../error'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
-import { purgeJobFilesystem, collectThreadPurgeTargets, purgeThreadFilesystem } from '../retention/purge'
+import {
+  collectThreadPurgeTargets,
+  purgeJobFilesystemStrict,
+  purgeThreadFilesystemStrict,
+  type ThreadPurgeTargets
+} from '../retention/purge'
 import { releaseJobCursorResources } from '../sandbox'
 import { getUserJob } from './service'
 import { releaseWorkspaceLeaseForOwner } from './workspace-lease-store'
 
 export type DeletionEntityKind = 'thread_job' | 'thread' | 'project'
+
+/** Legacy status kept for the partial unique index; mirrors in-progress vs terminal. */
 export type DeletionRequestStatus = 'pending' | 'draining' | 'deleting' | 'completed' | 'failed'
+
+export type DeletionPhase =
+  | 'requested'
+  | 'draining'
+  | 'runtime_closed'
+  | 'database_deleted'
+  | 'filesystem_cleaned'
+  | 'completed'
+
+const INCOMPLETE_PHASES: DeletionPhase[] = [
+  'requested',
+  'draining',
+  'runtime_closed',
+  'database_deleted',
+  'filesystem_cleaned'
+]
 
 export interface FrozenJobRuntimeIdentity {
   activeRunId: string | null
@@ -20,27 +43,99 @@ export interface FrozenJobRuntimeIdentity {
   workspaceLeaseOwnerId: string
 }
 
-export interface FilesystemCleanupRecord {
-  kind: 'job' | 'thread'
-  threadId: string
-  jobId?: string
-  targetsJson?: string
-  lastError?: string
-  attempts: number
+export interface DeletionFrozenSnapshot {
+  runtime?: FrozenJobRuntimeIdentity | null
+  draftMessageId?: string | null
+  childJobIds?: string[]
+  childThreadIds?: string[]
+}
+
+export type CleanupTargets =
+  | { kind: 'job'; threadId: string; jobId: string }
+  | { kind: 'thread'; threadId: string; targets: ThreadPurgeTargets }
+  | { kind: 'project' }
+
+export interface LoadedDeletionRequest {
+  id: string
+  entityKind: DeletionEntityKind
+  entityId: string
+  username: string
+  status: DeletionRequestStatus
+  phase: DeletionPhase
+  threadId: string | null
+  projectId: string | null
+  workspacePath: string | null
+  frozenJson: string | null
+  cleanupTargetsJson: string | null
+  retryCount: number
 }
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
-function parseFilesystemCleanup(raw: string | null | undefined): FilesystemCleanupRecord[] {
-  if (!raw?.trim()) return []
+function parseFrozenSnapshot(raw: string | null | undefined): DeletionFrozenSnapshot {
+  if (!raw?.trim()) return {}
   try {
-    const parsed = JSON.parse(raw) as FilesystemCleanupRecord[]
-    return Array.isArray(parsed) ? parsed : []
+    return JSON.parse(raw) as DeletionFrozenSnapshot
   } catch {
-    return []
+    return {}
   }
+}
+
+function parseCleanupTargets(raw: string | null | undefined): CleanupTargets | null {
+  if (!raw?.trim()) return null
+  try {
+    return JSON.parse(raw) as CleanupTargets
+  } catch {
+    return null
+  }
+}
+
+function loadDeletionRequest(requestId: string): LoadedDeletionRequest {
+  const row = getDb()
+    .select()
+    .from(deletionRequests)
+    .where(eq(deletionRequests.id, requestId))
+    .limit(1)
+    .all()[0]
+  if (!row) {
+    throw new Error(`deletion_request.not_found:${requestId}`)
+  }
+  return {
+    id: row.id,
+    entityKind: row.entityKind as DeletionEntityKind,
+    entityId: row.entityId,
+    username: row.username,
+    status: row.status as DeletionRequestStatus,
+    phase: (row.phase as DeletionPhase) ?? 'requested',
+    threadId: row.threadId ?? null,
+    projectId: row.projectId ?? null,
+    workspacePath: row.workspacePath ?? null,
+    frozenJson: row.frozenJson ?? null,
+    cleanupTargetsJson: row.cleanupTargetsJson ?? null,
+    retryCount: row.retryCount ?? 0
+  }
+}
+
+function findActiveDeletionRequest(
+  entityKind: DeletionEntityKind,
+  entityId: string
+): { id: string } | null {
+  const row = getDb()
+    .select({ id: deletionRequests.id })
+    .from(deletionRequests)
+    .where(
+      and(
+        eq(deletionRequests.entityKind, entityKind),
+        eq(deletionRequests.entityId, entityId),
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
+        ne(deletionRequests.status, 'failed')
+      )
+    )
+    .limit(1)
+    .all()[0]
+  return row ?? null
 }
 
 async function freezeJobRuntimeIdentity(jobId: string): Promise<FrozenJobRuntimeIdentity> {
@@ -72,7 +167,8 @@ export function isEntityDeletionBlocked(
       and(
         eq(deletionRequests.entityKind, entityKind),
         eq(deletionRequests.entityId, entityId),
-        inArray(deletionRequests.status, ['pending', 'draining', 'deleting'])
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
+        ne(deletionRequests.status, 'failed')
       )
     )
     .limit(1)
@@ -86,65 +182,82 @@ export function isProjectDeletionBlocked(projectId: string): boolean {
 
 export async function isThreadProjectDeletionBlocked(threadId: string): Promise<boolean> {
   if (isEntityDeletionBlocked('thread', threadId)) return true
+
+  const pendingJobDeletion = getDb()
+    .select({ id: deletionRequests.id })
+    .from(deletionRequests)
+    .where(
+      and(
+        eq(deletionRequests.entityKind, 'thread_job'),
+        eq(deletionRequests.threadId, threadId),
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
+        ne(deletionRequests.status, 'failed')
+      )
+    )
+    .limit(1)
+    .all()
+  if (pendingJobDeletion.length > 0) return true
+
   const rows = await getDb()
     .select({ projectId: threads.projectId })
     .from(threads)
     .where(eq(threads.id, threadId))
     .limit(1)
   const projectId = rows[0]?.projectId
-  if (!projectId) return false
+  if (!projectId) {
+    const pending = getDb()
+      .select({ projectId: deletionRequests.projectId })
+      .from(deletionRequests)
+      .where(
+        and(
+          eq(deletionRequests.entityKind, 'thread'),
+          eq(deletionRequests.entityId, threadId),
+          inArray(deletionRequests.phase, INCOMPLETE_PHASES)
+        )
+      )
+      .limit(1)
+      .all()[0]
+    if (pending?.projectId) {
+      return isProjectDeletionBlocked(pending.projectId)
+    }
+    return false
+  }
   return isProjectDeletionBlocked(projectId)
 }
 
-async function upsertDeletionRequest(input: {
+async function createDeletionRequest(input: {
   entityKind: DeletionEntityKind
   entityId: string
   username: string
-  status: DeletionRequestStatus
+  phase?: DeletionPhase
+  threadId?: string | null
+  projectId?: string | null
+  workspacePath?: string | null
   frozenJson?: string | null
-  filesystemCleanupJson?: string | null
-  errorJson?: string | null
+  cleanupTargetsJson?: string | null
 }): Promise<string> {
-  const db = getDb()
-  const now = nowSec()
-  const existing = db
-    .select({ id: deletionRequests.id })
-    .from(deletionRequests)
-    .where(
-      and(
-        eq(deletionRequests.entityKind, input.entityKind),
-        eq(deletionRequests.entityId, input.entityId),
-        inArray(deletionRequests.status, ['pending', 'draining', 'deleting'])
-      )
-    )
-    .limit(1)
-    .all()[0]
-
+  const existing = findActiveDeletionRequest(input.entityKind, input.entityId)
   if (existing) {
-    db.update(deletionRequests)
-      .set({
-        status: input.status,
-        frozenJson: input.frozenJson ?? null,
-        filesystemCleanupJson: input.filesystemCleanupJson ?? null,
-        errorJson: input.errorJson ?? null,
-        updatedAt: now
-      })
-      .where(eq(deletionRequests.id, existing.id))
-      .run()
     return existing.id
   }
 
+  const now = nowSec()
   const id = `del-${randomUUID()}`
-  db.insert(deletionRequests)
+  getDb()
+    .insert(deletionRequests)
     .values({
       id,
       entityKind: input.entityKind,
       entityId: input.entityId,
       username: input.username,
-      status: input.status,
+      status: 'draining',
+      phase: input.phase ?? 'requested',
+      threadId: input.threadId ?? null,
+      projectId: input.projectId ?? null,
+      workspacePath: input.workspacePath ?? null,
       frozenJson: input.frozenJson ?? null,
-      filesystemCleanupJson: input.filesystemCleanupJson ?? null,
-      errorJson: input.errorJson ?? null,
+      cleanupTargetsJson: input.cleanupTargetsJson ?? null,
+      retryCount: 0,
       createdAt: now,
       updatedAt: now
     })
@@ -152,26 +265,65 @@ async function upsertDeletionRequest(input: {
   return id
 }
 
-async function updateDeletionStatus(
+async function updateDeletionPhase(
   requestId: string,
-  status: DeletionRequestStatus,
+  phase: DeletionPhase,
   patch: {
-    frozenJson?: string | null
-    filesystemCleanupJson?: string | null
+    status?: DeletionRequestStatus
+    lastError?: string | null
+    retryCount?: number
     errorJson?: string | null
   } = {}
 ): Promise<void> {
   const next: Record<string, unknown> = {
-    status,
+    phase,
     updatedAt: nowSec()
   }
-  if ('frozenJson' in patch) next.frozenJson = patch.frozenJson ?? null
-  if ('filesystemCleanupJson' in patch) next.filesystemCleanupJson = patch.filesystemCleanupJson ?? null
+  if (phase === 'completed') {
+    next.status = patch.status ?? 'completed'
+  } else if (patch.status) {
+    next.status = patch.status
+  } else {
+    next.status = 'draining'
+  }
+  if ('lastError' in patch) next.lastError = patch.lastError ?? null
+  if ('retryCount' in patch && patch.retryCount !== undefined) next.retryCount = patch.retryCount
   if ('errorJson' in patch) next.errorJson = patch.errorJson ?? null
 
   getDb()
     .update(deletionRequests)
     .set(next)
+    .where(eq(deletionRequests.id, requestId))
+    .run()
+}
+
+async function recordDeletionFailure(requestId: string, error: unknown): Promise<void> {
+  const request = loadDeletionRequest(requestId)
+  const message = error instanceof Error ? error.message : String(error)
+  getDb()
+    .update(deletionRequests)
+    .set({
+      status: 'failed',
+      lastError: message,
+      retryCount: request.retryCount + 1,
+      errorJson: JSON.stringify({ message }),
+      updatedAt: nowSec()
+    })
+    .where(eq(deletionRequests.id, requestId))
+    .run()
+}
+
+async function recordFilesystemCleanupFailure(requestId: string, error: unknown): Promise<void> {
+  const request = loadDeletionRequest(requestId)
+  const message = error instanceof Error ? error.message : String(error)
+  getDb()
+    .update(deletionRequests)
+    .set({
+      lastError: message,
+      retryCount: request.retryCount + 1,
+      errorJson: JSON.stringify({ message }),
+      updatedAt: nowSec()
+    })
     .where(eq(deletionRequests.id, requestId))
     .run()
 }
@@ -221,266 +373,327 @@ async function stopJobRuntimeByFrozenIdentity(
   await releaseJobCursorResources(jobId).catch(() => {})
 }
 
-async function deleteJobDatabaseRow(jobId: string): Promise<void> {
+async function ensureChildJobsDeleted(username: string, childJobIds: string[]): Promise<void> {
+  for (const jobId of childJobIds) {
+    const active = findActiveDeletionRequest('thread_job', jobId)
+    if (active) {
+      await executeDeletionRequest(active.id)
+      continue
+    }
+    const jobExists = await getDb()
+      .select({ id: threadJobs.id })
+      .from(threadJobs)
+      .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
+      .limit(1)
+    if (jobExists.length > 0) {
+      await drainAndDeleteJob(username, jobId)
+    }
+  }
+}
+
+async function ensureChildThreadsDeleted(username: string, childThreadIds: string[]): Promise<void> {
+  for (const threadId of childThreadIds) {
+    const active = findActiveDeletionRequest('thread', threadId)
+    if (active) {
+      await executeDeletionRequest(active.id)
+      continue
+    }
+    const threadExists = await getDb()
+      .select({ id: threads.id })
+      .from(threads)
+      .where(and(eq(threads.id, threadId), eq(threads.username, username)))
+      .limit(1)
+    if (threadExists.length > 0) {
+      await drainAndDeleteThread(username, threadId)
+    }
+  }
+}
+
+async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise<void> {
   const db = getDb()
-  db.transaction((tx) => {
-    tx.delete(threadJobs).where(eq(threadJobs.id, jobId)).run()
-  })
+  if (request.entityKind === 'thread_job') {
+    db.transaction((tx) => {
+      tx.delete(threadJobs).where(eq(threadJobs.id, request.entityId)).run()
+    })
+    getAppContext().eventBus.clearJob(request.entityId)
+    return
+  }
+
+  if (request.entityKind === 'thread') {
+    db.transaction((tx) => {
+      tx.delete(threads)
+        .where(and(eq(threads.username, request.username), eq(threads.id, request.entityId)))
+        .run()
+    })
+    return
+  }
+
+  if (request.entityKind === 'project') {
+    db.transaction((tx) => {
+      tx.delete(projects)
+        .where(and(eq(projects.username, request.username), eq(projects.id, request.entityId)))
+        .run()
+    })
+  }
 }
 
-async function recordFilesystemCleanupFailure(
-  requestId: string,
-  record: FilesystemCleanupRecord,
-  error: unknown
-): Promise<void> {
-  const rows = await getDb()
-    .select({ filesystemCleanupJson: deletionRequests.filesystemCleanupJson })
-    .from(deletionRequests)
-    .where(eq(deletionRequests.id, requestId))
-    .limit(1)
-  const existing = parseFilesystemCleanup(rows[0]?.filesystemCleanupJson)
-  const message = error instanceof Error ? error.message : String(error)
-  existing.push({
-    ...record,
-    lastError: message,
-    attempts: (record.attempts ?? 0) + 1
-  })
-  await updateDeletionStatus(requestId, 'completed', {
-    filesystemCleanupJson: JSON.stringify(existing)
-  })
+async function purgeCleanupTargets(request: LoadedDeletionRequest): Promise<void> {
+  const targets = parseCleanupTargets(request.cleanupTargetsJson)
+  if (!targets || targets.kind === 'project') return
+
+  const dataDir = getAppContext().dataDir
+  if (targets.kind === 'job') {
+    await purgeJobFilesystemStrictHook(dataDir, targets.threadId, targets.jobId)
+    return
+  }
+
+  await purgeThreadFilesystemStrictHook(dataDir, targets.threadId, targets.targets)
 }
 
-export async function drainAndDeleteJob(username: string, jobId: string): Promise<void> {
-  const job = await getUserJob(username, jobId)
-  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
+let purgeJobFilesystemStrictHook = purgeJobFilesystemStrict
+let purgeThreadFilesystemStrictHook = purgeThreadFilesystemStrict
 
-  const requestId = await upsertDeletionRequest({
-    entityKind: 'thread_job',
-    entityId: jobId,
-    username,
-    status: 'draining'
-  })
+/** Test-only hook for fault injection. */
+export function setDeletionPurgeHooksForTests(input: {
+  purgeJob?: typeof purgeJobFilesystemStrict
+  purgeThread?: typeof purgeThreadFilesystemStrict
+}): void {
+  purgeJobFilesystemStrictHook = input.purgeJob ?? purgeJobFilesystemStrict
+  purgeThreadFilesystemStrictHook = input.purgeThread ?? purgeThreadFilesystemStrict
+}
 
-  const threadId = job.threadId
-  const draftMessageId = job.draftMessageId
-
-  try {
-    const frozen = await freezeJobRuntimeIdentity(jobId)
-    await updateDeletionStatus(requestId, 'draining', {
-      frozenJson: JSON.stringify(frozen)
-    })
-
-    await stopJobRuntimeByFrozenIdentity(jobId, frozen)
-
-    await updateDeletionStatus(requestId, 'deleting', {
-      frozenJson: JSON.stringify(frozen)
-    })
-
-    const ctx = getAppContext()
-    await deleteJobDatabaseRow(jobId)
-    ctx.eventBus.clearJob(jobId)
-
-    try {
-      await purgeJobFilesystem(ctx.dataDir, threadId, jobId)
-    } catch (error) {
-      await recordFilesystemCleanupFailure(
-        requestId,
-        { kind: 'job', threadId, jobId, attempts: 0 },
-        error
-      )
+async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<void> {
+  if (request.entityKind === 'thread_job') {
+    const frozen = parseFrozenSnapshot(request.frozenJson)
+    if (request.threadId && frozen.draftMessageId) {
+      const { releaseDraftAfterJobDeleted } = await import('./draft-plan')
+      await releaseDraftAfterJobDeleted(
+        request.username,
+        request.threadId,
+        request.entityId,
+        frozen.draftMessageId
+      ).catch((error) => {
+        console.warn('[deletion] failed to release draft after job delete', request.entityId, error)
+      })
     }
 
-    const { releaseDraftAfterJobDeleted } = await import('./draft-plan')
-    await releaseDraftAfterJobDeleted(username, threadId, jobId, draftMessageId).catch((error) => {
-      console.warn('[deletion] failed to release draft after job delete', jobId, error)
-    })
-
     const { advanceExecutionQueue } = await import('./queue-coordinator')
-    await advanceExecutionQueue(username).catch((error) => {
-      console.warn('[deletion] advance queue after job delete failed', jobId, error)
+    await advanceExecutionQueue(request.username).catch((error) => {
+      console.warn('[deletion] advance queue after job delete failed', request.entityId, error)
     })
+    return
+  }
 
-    await updateDeletionStatus(requestId, 'completed')
+  if (request.entityKind === 'thread' && request.projectId) {
+    const { touchProject } = await import('../projects/service')
+    await touchProject(request.username, request.projectId)
+  }
+}
+
+export async function executeDeletionRequest(requestId: string): Promise<void> {
+  const request = loadDeletionRequest(requestId)
+  if (request.phase === 'completed' || request.status === 'failed') {
+    return
+  }
+
+  let phase = request.phase
+
+  try {
+    if (phase === 'requested' || phase === 'draining') {
+      const frozen = parseFrozenSnapshot(request.frozenJson)
+
+      if (request.entityKind === 'project' && frozen.childThreadIds?.length) {
+        await ensureChildThreadsDeleted(request.username, frozen.childThreadIds)
+      }
+
+      if (request.entityKind === 'thread' && frozen.childJobIds?.length) {
+        await ensureChildJobsDeleted(request.username, frozen.childJobIds)
+      }
+
+      if (request.entityKind === 'thread_job' && frozen.runtime) {
+        await stopJobRuntimeByFrozenIdentity(request.entityId, frozen.runtime)
+      }
+
+      if (request.entityKind === 'thread' && request.threadId) {
+        await closeConversationCursorRuntime(request.threadId).catch((error) => {
+          console.warn(
+            '[deletion] failed to close cursor runtime for thread',
+            request.threadId,
+            error
+          )
+        })
+      }
+
+      if (phase === 'requested') {
+        await updateDeletionPhase(requestId, 'draining')
+      }
+      await updateDeletionPhase(requestId, 'runtime_closed')
+      phase = 'runtime_closed'
+    }
+
+    if (phase === 'runtime_closed') {
+      await deleteEntityDatabaseRows(request)
+      await updateDeletionPhase(requestId, 'database_deleted')
+      phase = 'database_deleted'
+    }
+
+    if (phase === 'database_deleted') {
+      try {
+        await purgeCleanupTargets(request)
+      } catch (error) {
+        await recordFilesystemCleanupFailure(requestId, error)
+        throw error
+      }
+      await updateDeletionPhase(requestId, 'filesystem_cleaned')
+      phase = 'filesystem_cleaned'
+    }
+
+    if (phase === 'filesystem_cleaned') {
+      await runPostDeletionHooks(request)
+      await updateDeletionPhase(requestId, 'completed', { status: 'completed' })
+    }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    await updateDeletionStatus(requestId, 'failed', { errorJson: JSON.stringify({ message }) })
+    const current = loadDeletionRequest(requestId)
+    if (current.phase !== 'completed' && current.phase !== 'database_deleted') {
+      await recordDeletionFailure(requestId, error)
+    }
     throw error
   }
 }
 
+export async function drainAndDeleteJob(username: string, jobId: string): Promise<void> {
+  const active = findActiveDeletionRequest('thread_job', jobId)
+  if (active) {
+    return executeDeletionRequest(active.id)
+  }
+
+  const job = await getUserJob(username, jobId)
+  if (!job) {
+    throw AppError.notFound('Job not found', 'job.not_found')
+  }
+
+  const threadRows = await getDb()
+    .select({ projectId: threads.projectId })
+    .from(threads)
+    .where(eq(threads.id, job.threadId))
+    .limit(1)
+  const projectId = threadRows[0]?.projectId ?? null
+  const frozen = await freezeJobRuntimeIdentity(jobId)
+
+  const requestId = await createDeletionRequest({
+    entityKind: 'thread_job',
+    entityId: jobId,
+    username,
+    threadId: job.threadId,
+    projectId,
+    workspacePath: job.workspacePath,
+    frozenJson: JSON.stringify({
+      runtime: frozen,
+      draftMessageId: job.draftMessageId
+    }),
+    cleanupTargetsJson: JSON.stringify({
+      kind: 'job',
+      threadId: job.threadId,
+      jobId
+    } satisfies CleanupTargets)
+  })
+
+  await executeDeletionRequest(requestId)
+}
+
 export async function drainAndDeleteThread(username: string, threadId: string): Promise<void> {
+  const active = findActiveDeletionRequest('thread', threadId)
+  if (active) {
+    return executeDeletionRequest(active.id)
+  }
+
   const threadRows = await getDb()
     .select()
     .from(threads)
     .where(and(eq(threads.username, username), eq(threads.id, threadId)))
     .limit(1)
   const existing = threadRows[0]
-  if (!existing) throw AppError.notFound('Thread not found', 'thread.not_found')
+  if (!existing) {
+    throw AppError.notFound('Thread not found', 'thread.not_found')
+  }
 
-  const requestId = await upsertDeletionRequest({
+  const db = getDb()
+  const jobRows = await db
+    .select({ id: threadJobs.id })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.threadId, threadId), eq(threadJobs.username, username)))
+  const purgeTargets = await collectThreadPurgeTargets(db, threadId)
+
+  const requestId = await createDeletionRequest({
     entityKind: 'thread',
     entityId: threadId,
     username,
-    status: 'draining'
+    threadId,
+    projectId: existing.projectId,
+    frozenJson: JSON.stringify({
+      childJobIds: jobRows.map((row) => row.id)
+    } satisfies DeletionFrozenSnapshot),
+    cleanupTargetsJson: JSON.stringify({
+      kind: 'thread',
+      threadId,
+      targets: purgeTargets
+    } satisfies CleanupTargets)
   })
 
-  try {
-    const jobRows = await getDb()
-      .select({ id: threadJobs.id })
-      .from(threadJobs)
-      .where(and(eq(threadJobs.threadId, threadId), eq(threadJobs.username, username)))
-
-    for (const row of jobRows) {
-      await drainAndDeleteJob(username, row.id)
-    }
-
-    await updateDeletionStatus(requestId, 'deleting')
-
-    const db = getDb()
-    const purgeTargets = await collectThreadPurgeTargets(db, threadId)
-    db.transaction((tx) => {
-      tx.delete(threads)
-        .where(and(eq(threads.username, username), eq(threads.id, threadId)))
-        .run()
-    })
-
-    const dataDir = getAppContext().dataDir
-    try {
-      await purgeThreadFilesystem(dataDir, threadId, purgeTargets)
-    } catch (error) {
-      await recordFilesystemCleanupFailure(
-        requestId,
-        {
-          kind: 'thread',
-          threadId,
-          targetsJson: JSON.stringify(purgeTargets),
-          attempts: 0
-        },
-        error
-      )
-    }
-
-    await closeConversationCursorRuntime(threadId).catch((error) => {
-      console.warn('[deletion] failed to close cursor runtime for thread', threadId, error)
-    })
-
-    const { touchProject } = await import('../projects/service')
-    await touchProject(username, existing.projectId)
-    await updateDeletionStatus(requestId, 'completed')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    await updateDeletionStatus(requestId, 'failed', { errorJson: JSON.stringify({ message }) })
-    throw error
-  }
+  await executeDeletionRequest(requestId)
 }
 
 export async function drainAndDeleteProject(username: string, projectId: string): Promise<void> {
+  const active = findActiveDeletionRequest('project', projectId)
+  if (active) {
+    return executeDeletionRequest(active.id)
+  }
+
   const projectRows = await getDb()
     .select()
     .from(projects)
     .where(and(eq(projects.username, username), eq(projects.id, projectId)))
     .limit(1)
   const existing = projectRows[0]
-  if (!existing) throw AppError.notFound('Project not found', 'project.not_found')
+  if (!existing) {
+    throw AppError.notFound('Project not found', 'project.not_found')
+  }
 
-  const requestId = await upsertDeletionRequest({
+  const threadRows = await getDb()
+    .select({ id: threads.id })
+    .from(threads)
+    .where(and(eq(threads.projectId, projectId), eq(threads.username, username)))
+
+  const requestId = await createDeletionRequest({
     entityKind: 'project',
     entityId: projectId,
     username,
-    status: 'draining'
+    projectId,
+    frozenJson: JSON.stringify({
+      childThreadIds: threadRows.map((row) => row.id)
+    } satisfies DeletionFrozenSnapshot),
+    cleanupTargetsJson: JSON.stringify({ kind: 'project' } satisfies CleanupTargets)
   })
 
-  try {
-    const threadRows = await getDb()
-      .select({ id: threads.id })
-      .from(threads)
-      .where(and(eq(threads.projectId, projectId), eq(threads.username, username)))
-
-    for (const row of threadRows) {
-      await drainAndDeleteThread(username, row.id)
-    }
-
-    await updateDeletionStatus(requestId, 'deleting')
-    getDb()
-      .transaction((tx) => {
-        tx.delete(projects)
-          .where(and(eq(projects.username, username), eq(projects.id, projectId)))
-          .run()
-      })
-    await updateDeletionStatus(requestId, 'completed')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    await updateDeletionStatus(requestId, 'failed', { errorJson: JSON.stringify({ message }) })
-    throw error
-  }
+  await executeDeletionRequest(requestId)
 }
 
 export async function resumePendingDeletionRequestsOnStartup(): Promise<void> {
   const rows = await getDb()
-    .select()
+    .select({ id: deletionRequests.id })
     .from(deletionRequests)
     .where(
-      or(
-        eq(deletionRequests.status, 'pending'),
-        eq(deletionRequests.status, 'draining'),
-        eq(deletionRequests.status, 'deleting')
+      and(
+        inArray(deletionRequests.phase, INCOMPLETE_PHASES),
+        ne(deletionRequests.status, 'failed')
       )
     )
 
   for (const row of rows) {
     try {
-      if (row.entityKind === 'thread_job') {
-        await drainAndDeleteJob(row.username, row.entityId)
-      } else if (row.entityKind === 'thread') {
-        await drainAndDeleteThread(row.username, row.entityId)
-      } else if (row.entityKind === 'project') {
-        await drainAndDeleteProject(row.username, row.entityId)
-      }
+      await executeDeletionRequest(row.id)
     } catch (error) {
-      console.warn('[deletion] startup janitor failed', row.entityKind, row.entityId, error)
-    }
-  }
-
-  const cleanupRows = await getDb()
-    .select()
-    .from(deletionRequests)
-    .where(eq(deletionRequests.status, 'completed'))
-
-  const dataDir = getAppContext().dataDir
-  for (const row of cleanupRows) {
-    const pending = parseFilesystemCleanup(row.filesystemCleanupJson)
-    if (pending.length === 0) continue
-    const remaining: FilesystemCleanupRecord[] = []
-    for (const item of pending) {
-      try {
-        if (item.kind === 'job' && item.jobId) {
-          await purgeJobFilesystem(dataDir, item.threadId, item.jobId)
-        } else if (item.kind === 'thread') {
-          const targets = item.targetsJson
-            ? (JSON.parse(item.targetsJson) as Awaited<ReturnType<typeof collectThreadPurgeTargets>>)
-            : { designSessionIds: [], messageIds: [] }
-          await purgeThreadFilesystem(dataDir, item.threadId, targets)
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        remaining.push({ ...item, lastError: message, attempts: item.attempts + 1 })
-      }
-    }
-    if (remaining.length > 0) {
-      getDb()
-        .update(deletionRequests)
-        .set({
-          filesystemCleanupJson: JSON.stringify(remaining),
-          updatedAt: nowSec()
-        })
-        .where(eq(deletionRequests.id, row.id))
-        .run()
-    } else {
-      getDb()
-        .update(deletionRequests)
-        .set({ filesystemCleanupJson: null, updatedAt: nowSec() })
-        .where(eq(deletionRequests.id, row.id))
-        .run()
+      console.warn('[deletion] startup janitor failed', row.id, error)
     }
   }
 }

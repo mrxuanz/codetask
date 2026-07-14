@@ -6,6 +6,10 @@ import {
   resolveBodyLimit
 } from '../../src/server/middleware/body-limiter'
 
+test('MAX_FORM_BODY_BYTES allows large multipart uploads', () => {
+  assert.equal(MAX_FORM_BODY_BYTES, 32 * 1024 * 1024)
+})
+
 test('resolveBodyLimit separates json and form defaults', () => {
   assert.equal(resolveBodyLimit('application/json'), MAX_JSON_BODY_BYTES)
   assert.equal(resolveBodyLimit('application/json; charset=utf-8'), MAX_JSON_BODY_BYTES)

@@ -500,6 +500,32 @@ export class WorkflowHarness {
     }
   }
 
+  async postMessageExpectHttpError(
+    threadId: string,
+    message: string,
+    options?: { createTaskMode?: boolean; generateDraft?: boolean }
+  ): Promise<{ httpStatus: number; code: string | null }> {
+    const response = await fetch(`${this.baseUrl}/api/threads/${threadId}/messages`, {
+      method: 'POST',
+      headers: {
+        ...this.authHeaders(),
+        Accept: 'text/event-stream'
+      },
+      body: JSON.stringify({
+        message,
+        createTaskMode: options?.createTaskMode === true,
+        generateDraft: options?.generateDraft === true
+      })
+    })
+    const payload = (await response.json()) as {
+      data?: { turnErrorCode?: string }
+    }
+    return {
+      httpStatus: response.status,
+      code: payload.data?.turnErrorCode ?? null
+    }
+  }
+
   async jsonExpectError(
     method: string,
     path: string,
