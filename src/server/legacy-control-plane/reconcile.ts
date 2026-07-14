@@ -41,7 +41,7 @@ function nowSec(): number {
 }
 
 export async function reconcileStaleJobIfNeeded(
-  _username: string,
+  username: string,
   job: ThreadJobDto
 ): Promise<ThreadJobDto> {
   const action = resolveStaleExecutionJobAction(job)
@@ -75,28 +75,48 @@ export async function reconcileStaleJobIfNeeded(
     return updated
   }
 
-  // Auto-resume removed: interrupted jobs are now settled to failed/recoverable
-  // The user must explicitly Continue to resume execution
+  // FIX-PLAN F3-A (§8.1): process interruption (app shutdown / crash) must AUTO-RESUME the
+  // running Job. It is NOT a user failure. Keep the Job in a recoverable `running` state, reset
+  // interrupted in-flight tasks to queued, drop the stale lease so a fresh boot can re-lease, then
+  // trigger the single execution-queue entry to resume it. Any DB-completed task is never re-run
+  // (its job_tasks row stays `completed`, so the gate will not re-select it).
   const taskProgress: TaskProgressDto = {
     ...progress,
     phase: 'running',
-    status: 'failed',
+    status: 'running',
     message: null,
-    progressCode: 'execution.interrupted_resume',
+    progressCode: 'execution.resuming',
     progressParams: null
   }
 
   const updated = await updateJobRowForSnapshot(job.id, {
-    status: 'failed',
+    status: 'running',
     taskProgress,
-    lastError: createTurnError('turn.unknown', {
-      detail: 'Execution interrupted - use Continue to resume'
-    }).toDto()
+    lastError: null
   })
   if (!updated) return job
 
+  // Drop the dead process's lease so advanceExecutionQueue can re-acquire it this boot.
   await clearExecutionLease(job.id)
+
+  // Mark any DB attempt still `running`/`starting` from the dead process as interrupted so the
+  // resumed loop creates the next attempt under the same (job_id, task_id) identity.
+  try {
+    const { markRunningAttemptsInterruptedForJob } = await import('./task-attempts')
+    markRunningAttemptsInterruptedForJob(job.id)
+  } catch (error) {
+    console.warn('[reconcile] failed to interrupt running attempts', job.id, error)
+  }
+
   emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
+
+  // Auto-resume via the single execution-queue entry (does not re-enter reconcile).
+  void import('./queue-coordinator')
+    .then((module) => module.advanceExecutionQueue(username))
+    .catch((error: unknown) => {
+      console.warn('[reconcile] auto-resume advance failed', job.id, error)
+    })
+
   return updated
 }
 

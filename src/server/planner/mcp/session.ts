@@ -13,23 +13,27 @@ export interface PlannerMcpSession {
 
   allowedAbilityCodes: string[]
   validReferenceIds: string[]
-  referenceManifest?: JobReferenceManifest | null
+  referenceManifest?: JobReferenceManifest | null | undefined
   taskContexts: Map<string, PlannerRegisteredTaskContext>
   registeredPlan: PlannerRegisteredPlan | null
-  planCommitted?: boolean
-  planCommitting?: boolean
-  finalizerPromise?: Promise<void>
-  phaseAdvance?: {
-    username: string
-    threadId: string
-    coreCode: string
-    draftMessageId: string
-  }
-  planRevision?: number
-  clearConfirmed?: boolean
-  abortTurn?: () => void
-  onTaskContextRegistered?: (key: string, done: number) => void
-  onPlanRegistered?: (counts: { milestones: number; slices: number; tasks: number }) => void
+  planCommitted?: boolean | undefined
+  planCommitting?: boolean | undefined
+  finalizerPromise?: Promise<void> | undefined
+  phaseAdvance?:
+    | {
+        username: string
+        threadId: string
+        coreCode: string
+        draftMessageId: string
+      }
+    | undefined
+  planRevision?: number | undefined
+  clearConfirmed?: boolean | undefined
+  abortTurn?: (() => void) | undefined
+  onTaskContextRegistered?: ((key: string, done: number) => void) | undefined
+  onPlanRegistered?:
+    | ((counts: { milestones: number; slices: number; tasks: number }) => void)
+    | undefined
 }
 
 const sessions = new Map<string, PlannerMcpSession>()

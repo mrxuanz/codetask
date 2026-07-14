@@ -4,6 +4,7 @@ import { join, extname, basename, dirname } from 'path'
 import { getAppContext } from '../bootstrap'
 import { attachmentDir, threadAttachmentsDir } from '../data-paths'
 import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
+import { assertFrozenAttachmentId, assertFrozenThreadId } from '../../shared/frozen-ids'
 import type { MessageAttachment } from './types'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -75,9 +76,10 @@ export function saveThreadAttachment(input: {
   mimeType: string
   buffer: Buffer
 }): MessageAttachment {
+  const threadId = assertFrozenThreadId(input.threadId)
   const id = `att-${randomUUID()}`
   const filename = safeFilename(input.name)
-  const isolatedDir = isolatedAttachmentDir(input.threadId, id)
+  const isolatedDir = isolatedAttachmentDir(threadId, id)
   const absolutePath = join(isolatedDir, filename)
   writeFileSync(absolutePath, input.buffer)
   const relativePath = `${id}/${filename}`
@@ -89,7 +91,7 @@ export function saveThreadAttachment(input: {
     sizeBytes: input.buffer.length,
     kind: inferKind(input.mimeType),
     relativePath,
-    assetUrl: `/api/threads/${encodeURIComponent(input.threadId)}/attachments/${encodeURIComponent(id)}`
+    assetUrl: `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(id)}`
   }
 }
 
@@ -112,18 +114,25 @@ export function resolveAttachmentRelativePath(
 }
 
 export function readThreadAttachment(
-  threadId: string,
-  attachmentId: string
+  threadIdInput: string,
+  attachmentIdInput: string
 ): {
   attachment: MessageAttachment
   buffer: Buffer
 } | null {
+  const threadId = assertFrozenThreadId(threadIdInput)
+  const attachmentId = assertFrozenAttachmentId(attachmentIdInput)
   migrateFlatAttachmentIfNeeded(threadId, attachmentId)
   const relativePath = resolveAttachmentRelativePath(threadId, attachmentId)
   if (!relativePath) return null
 
-  const absolutePath = join(threadAttachmentsDir(attachmentDataDir(), threadId), relativePath)
-  if (!existsSync(absolutePath)) return null
+  const dataDir = attachmentDataDir()
+  let absolutePath: string
+  try {
+    absolutePath = resolveAttachmentAbsolutePath(dataDir, threadId, relativePath)
+  } catch {
+    return null
+  }
 
   const buffer = readFileSync(absolutePath)
   const filename = basename(relativePath)

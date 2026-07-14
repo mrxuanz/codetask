@@ -6,7 +6,10 @@
 
 import type { CutoverMarker } from './cutover-marker'
 
-export function createLegacyApiGuard(marker: CutoverMarker) {
+export function createLegacyApiGuard(marker: CutoverMarker): {
+  isBlocked(): boolean
+  assertNotBlocked(): void
+} {
   return {
     isBlocked(): boolean {
       return marker.value === 'v3_authoritative'

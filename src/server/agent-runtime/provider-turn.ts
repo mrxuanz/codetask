@@ -3,6 +3,8 @@ import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
 import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
 import { refreshWorkloadLease } from '../legacy-control-plane/workload-slot-store'
+import { refreshWorkspaceLease } from '../legacy-control-plane/workspace-lease-store'
+import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
 import { ProgressGuard } from './progress-guard'
 import { TurnScope } from './turn-scope'
 
@@ -38,6 +40,10 @@ export function createProviderTurnScope(
       const ectx = getExecutionRunContext()
       if (ectx?.runId) {
         void refreshWorkloadLease(ectx.runId)
+      }
+      const wctx = getWorkspaceLeaseContext()
+      if (wctx) {
+        refreshWorkspaceLease(wctx.leaseId)
       }
     }
   })

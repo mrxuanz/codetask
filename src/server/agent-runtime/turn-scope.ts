@@ -21,10 +21,10 @@ const KEEPALIVE_INTERVAL_MS = 60_000
 
 export interface TurnScopeInput {
   role: ConversationRole
-  externalSignal?: AbortSignal
-  processExit?: Promise<never>
-  progressGuard?: ProgressGuard
-  onKeepAlive?: () => void
+  externalSignal?: AbortSignal | undefined
+  processExit?: Promise<never> | undefined
+  progressGuard?: ProgressGuard | undefined
+  onKeepAlive?: (() => void) | undefined
 }
 
 export class TurnScope {
@@ -32,9 +32,9 @@ export class TurnScope {
   readonly signal: AbortSignal
 
   private readonly _abort = new AbortController()
-  private readonly _processExit?: Promise<never>
-  private readonly _onKeepAlive?: () => void
-  private readonly _progressGuard?: ProgressGuard
+  private readonly _processExit?: Promise<never> | undefined
+  private readonly _onKeepAlive?: (() => void) | undefined
+  private readonly _progressGuard?: ProgressGuard | undefined
 
   private _disposed = false
   private _sawFirstSignal = false

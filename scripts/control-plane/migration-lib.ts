@@ -61,6 +61,7 @@ export interface MigrationStableReport {
 export interface MigrationCopyReport extends MigrationStableReport {
   readonly generatedAtMs: number
   readonly warningCount: number
+  readonly conflictCount: number
   readonly hasConflicts: boolean
   readonly mapped: readonly ControlJobSeed[]
   readonly warnings: readonly string[]
@@ -222,6 +223,7 @@ export function buildMigrationCopyReport(input: {
   return {
     generatedAtMs: input.generatedAtMs,
     warningCount: input.warnings.length,
+    conflictCount: input.conflicts.length,
     hasConflicts: input.conflicts.length > 0,
     mapped: input.mapped,
     warnings: input.warnings,
@@ -538,7 +540,7 @@ export function summarizeReport(report: MigrationCopyReport): string {
     `generatedAtMs: ${report.generatedAtMs}`,
     `sourceJobCount: ${report.sourceJobCount}`,
     `mappedCount: ${report.mappedCount}`,
-    `conflictCount: ${report.conflicts.length}`,
+    `conflictCount: ${report.conflictCount}`,
     `warningCount: ${report.warningCount}`,
     `hasConflicts: ${report.hasConflicts}`,
     `reportHash: ${report.reportHash}`,

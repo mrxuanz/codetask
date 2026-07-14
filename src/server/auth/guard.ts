@@ -79,7 +79,7 @@ export function recordLoginFailure(): void {
   if (newFailCount >= 6 && newFailCount <= 9) {
     captchaRequired = 1
     const delays = [1, 2, 5, 10]
-    lockedUntil = now + delays[newFailCount - 6]
+    lockedUntil = now + (delays[newFailCount - 6] ?? 10)
   }
 
   if (newFailCount >= 10 && newFailCount <= 14) {

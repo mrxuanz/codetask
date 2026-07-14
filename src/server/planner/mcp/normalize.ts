@@ -257,6 +257,7 @@ function countInitiallyReadySliceRoots(plan: PlannerRegisteredPlan): number {
       if (slice.dependsOnSliceRefs && slice.dependsOnSliceRefs.length > 0) return
 
       const firstTask = slice.tasks[0]
+      if (!firstTask) return
       const { taskCoords } = buildPlannerRefGraph(plan)
       let blockedByCrossSliceTask = false
       for (const taskRef of firstTask.dependsOnTaskRefs ?? []) {

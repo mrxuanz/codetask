@@ -11,6 +11,7 @@ import {
   shutdownControlPlaneRuntime,
   startControlPlaneScheduler
 } from '../../../src/server/application/control-plane-runtime'
+import { createV3ApplicationRuntimeForTests } from '../../../src/server/application/application-runtime'
 import {
   setCutoverMarkerForTests,
   type SchemaGeneration
@@ -127,6 +128,10 @@ export interface CompositionContextOptions {
   readonly seed?: (db: Database.Database) => void
 }
 
+/**
+ * Boots an isolated composition context. Production bootstrap refuses v3_authoritative;
+ * authoritative fixtures use the test-only V3 factory after a Legacy-safe bootstrap.
+ */
 export async function withCompositionContext(
   options: CompositionContextOptions,
   fn: (ctx: AppContext) => Promise<void>
@@ -136,8 +141,14 @@ export async function withCompositionContext(
   try {
     dataDir = mkdtempSync(join(tmpdir(), 'cp-composition-'))
     await resetAppContextForTests()
-    setCutoverMarkerForTests(options.generation)
+    const bootGeneration =
+      options.generation === 'v3_authoritative' ? 'copied' : options.generation
+    setCutoverMarkerForTests(bootGeneration)
     ctx = bootstrapRuntime({ dataDir })
+    if (options.generation === 'v3_authoritative') {
+      setCutoverMarkerForTests('v3_authoritative')
+      ctx.applicationRuntime = createV3ApplicationRuntimeForTests(ctx)
+    }
     const db = getSqliteClient(ctx)
     if (options.seed) {
       options.seed(db)

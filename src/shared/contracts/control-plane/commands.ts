@@ -22,7 +22,9 @@ export const UserCommandEnvelopeSchema = Type.Object(
 
 export type UserCommandEnvelope = Static<typeof UserCommandEnvelopeSchema>
 
-export const PayloadCommandEnvelopeSchema = <TPayload extends TSchema>(payloadSchema: TPayload) =>
+export const PayloadCommandEnvelopeSchema = <TPayload extends TSchema>(
+  payloadSchema: TPayload
+): TSchema =>
   Type.Object(
     {
       actor: ActorContextSchema,
@@ -38,7 +40,9 @@ export type PayloadCommandEnvelope<TPayload> = UserCommandEnvelope & {
   readonly payload: TPayload
 }
 
-export const WorkerCommandEnvelopeSchema = <TPayload extends TSchema>(payloadSchema: TPayload) =>
+export const WorkerCommandEnvelopeSchema = <TPayload extends TSchema>(
+  payloadSchema: TPayload
+): TSchema =>
   Type.Object(
     {
       jobId: Type.String({ minLength: 1, maxLength: 128 }),

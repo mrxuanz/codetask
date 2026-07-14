@@ -89,6 +89,13 @@ function parsePositiveIntField(
   return parsed
 }
 
+export function parseStateRevision(value: number | undefined): number {
+  if (value === undefined || !Number.isSafeInteger(value) || value < 1) {
+    throw commandError('contract.invalid_payload', { field: 'stateRevision' })
+  }
+  return value
+}
+
 export function parseListJobsQuery(query?: Record<string, string>): ParsedListJobsQuery {
   const page = parsePositiveIntField(query?.page, 'page', 1)
   const limit = parsePositiveIntField(query?.limit, 'limit', DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT)

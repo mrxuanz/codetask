@@ -48,7 +48,8 @@ export default defineConfig(
           varsIgnorePattern: '^_',
           caughtErrorsIgnorePattern: '^_'
         }
-      ]
+      ],
+      '@typescript-eslint/no-explicit-any': 'error'
     }
   },
   {
@@ -61,7 +62,6 @@ export default defineConfig(
       'tests/control-plane/**/*.{ts,tsx}'
     ],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/ban-ts-comment': [
         'error',
         { 'ts-ignore': true, 'ts-nocheck': true, 'ts-check': false, 'ts-expect-error': 'allow-with-description' }

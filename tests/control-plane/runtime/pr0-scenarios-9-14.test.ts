@@ -96,7 +96,20 @@ function createInternalService(rawDb: Database.Database): {
     unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
-    logger: { debug() {}, info() {}, warn() {}, error() {} }
+    logger: {
+      debug() {
+        void 0
+      },
+      info() {
+        void 0
+      },
+      warn() {
+        void 0
+      },
+      error() {
+        void 0
+      }
+    }
   })
   return { service, jobRepository }
 }
@@ -329,7 +342,20 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
     it('closes only the slow production EventHub subscriber with resync metadata', () => {
       const hub = new EventHub(
         { maxQueueSize: 2, maxQueueBytes: 1024 },
-        { debug() {}, info() {}, warn() {}, error() {} }
+        {
+          debug() {
+            void 0
+          },
+          info() {
+            void 0
+          },
+          warn() {
+            void 0
+          },
+          error() {
+            void 0
+          }
+        }
       )
       const slowEvents: number[] = []
       const fastEvents: number[] = []

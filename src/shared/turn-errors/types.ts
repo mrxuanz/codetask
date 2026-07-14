@@ -4,7 +4,7 @@ import { TURN_ERROR_SCHEMA_VERSION } from './codes.ts'
 export interface TurnErrorDto {
   code: TurnErrorCode
   message: string
-  params?: TurnErrorParams
+  params?: TurnErrorParams | undefined
   detail?: string | null
 }
 
@@ -12,7 +12,7 @@ export interface StoredTurnErrorPayload {
   v: typeof TURN_ERROR_SCHEMA_VERSION
   code: TurnErrorCode
   message: string
-  params?: TurnErrorParams
+  params?: TurnErrorParams | undefined
   detail?: string | null
 }
 

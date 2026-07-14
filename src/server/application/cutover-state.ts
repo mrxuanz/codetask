@@ -77,11 +77,12 @@ export function readSchemaGeneration(db: AppDatabase): SchemaGenerationRead {
     .prepare(`SELECT value FROM control_schema_meta WHERE key = ?`)
     .all(CUTOVER_MARKER_KEY) as Array<{ value: string }>
 
-  if (rows.length !== 1) {
+  const row = rows[0]
+  if (rows.length !== 1 || row === undefined) {
     throw new StartupError('schema.marker_invalid')
   }
 
-  return parseSchemaGeneration(rows[0].value)
+  return parseSchemaGeneration(row.value)
 }
 
 /**

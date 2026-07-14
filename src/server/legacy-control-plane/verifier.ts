@@ -240,13 +240,13 @@ export async function runMilestoneVerification(input: {
   milestone: GateMilestoneState
   slices: GateSliceState[]
   taskItems: TaskProgressItemDto[]
-  progressSlices?: TaskProgressSliceDto[]
+  progressSlices?: TaskProgressSliceDto[] | undefined
   signal: AbortSignal
 }): Promise<{
   ok: boolean
   message: string
-  verdict?: MilestoneVerificationVerdict
-  infraMiss?: boolean
+  verdict?: MilestoneVerificationVerdict | undefined
+  infraMiss?: boolean | undefined
 }> {
   const coreCode = await resolveMilestoneVerifierCoreCode()
   const core = await ensureCoreAvailable(coreCode)

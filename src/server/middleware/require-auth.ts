@@ -74,8 +74,9 @@ export function requireAuth(): MiddlewareHandler {
       return next()
     }
 
+    const authHeader = c.req.header('Authorization')
     const token = resolveSessionTokenFromRequest({
-      authHeader: c.req.header('Authorization')
+      ...(authHeader !== undefined ? { authHeader } : {})
     })
 
     if (!token) {

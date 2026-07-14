@@ -10,7 +10,7 @@ export interface JobCursorRuntimeKeyInput {
   jobId: string
   provider: string
   workspaceRoot: string
-  model?: string
+  model?: string | undefined
   mcpProfile: string
 }
 
@@ -18,7 +18,7 @@ export interface CursorRuntimeKeyInput {
   scopeId: string
   provider: string
   workspaceRoot: string
-  model?: string
+  model?: string | undefined
   mcpProfile: string
 }
 

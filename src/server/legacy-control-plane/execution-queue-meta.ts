@@ -15,13 +15,18 @@ export function computeExecutionQueueMeta(
   }
 }
 
-export async function listPendingJobIds(username: string): Promise<string[]> {
+export async function listPendingJobIds(username?: string): Promise<string[]> {
   const db = getDb()
+  // F2 (§2.2/§7.3): global FIFO by planConfirmedAt, then createdAt, then id.
   const rows = await db
     .select({ id: threadJobs.id })
     .from(threadJobs)
-    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'pending')))
-    .orderBy(asc(threadJobs.createdAt))
+    .where(
+      username
+        ? and(eq(threadJobs.username, username), eq(threadJobs.status, 'pending'))
+        : eq(threadJobs.status, 'pending')
+    )
+    .orderBy(asc(threadJobs.planConfirmedAt), asc(threadJobs.createdAt), asc(threadJobs.id))
   return rows.map((row) => row.id)
 }
 

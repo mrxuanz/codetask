@@ -60,6 +60,12 @@ import {
   shouldStopExecution
 } from './controls'
 import {
+  beginTaskAttempt,
+  commitCompletedTaskAttempt,
+  markTaskAttemptFailed
+} from './task-attempts'
+import { isDraining } from './shutdown-state'
+import {
   registerTaskMcpSession,
   unregisterTaskMcpSession,
   type TaskEvidencePacket
@@ -158,6 +164,12 @@ type ExecuteSingleTaskResult =
       lastError: TurnErrorDto
       taskProgress: TaskProgressDto
     }
+  // FIX-PLAN F3-C (§8.4): app shutdown interrupted the turn at a safe checkpoint. NOT a failure and
+  // NOT a user pause — the Job stays auto-recoverable `running`.
+  | {
+      kind: 'interrupted'
+      items: TaskProgressItemDto[]
+    }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initJobExecutor(_ctx: AppContext): void {
@@ -195,7 +207,7 @@ function resolveCoreForAbility(job: ThreadJobDto, abilityCode: string): Supporte
 
 function resolveCoreForTask(
   job: ThreadJobDto,
-  flat: { abilityCode: string; coreCode?: string }
+  flat: { abilityCode: string; coreCode?: string | undefined }
 ): SupportedCoreCode {
   const override = flat.coreCode?.trim()
   if (override) return override as SupportedCoreCode
@@ -305,8 +317,9 @@ function upsertSliceVerdict(
 ): TaskProgressSliceDto[] {
   const list = [...(slices ?? [])]
   const index = list.findIndex((row) => row.id === sliceId)
-  if (index >= 0) {
-    list[index] = { ...list[index], verdict }
+  const existing = index >= 0 ? list[index] : undefined
+  if (existing) {
+    list[index] = { ...existing, verdict }
   } else {
     list.push({ id: sliceId, verdict })
   }
@@ -1222,7 +1235,7 @@ async function runMilestoneVerificationResilient(input: {
   milestone: GateMilestoneState
   slices: GateSliceState[]
   taskItems: TaskProgressItemDto[]
-  progressSlices?: TaskProgressSliceDto[]
+  progressSlices?: TaskProgressSliceDto[] | undefined
   taskProgress: TaskProgressDto
   gate: ReturnType<typeof buildGateStates>
   signal: AbortSignal
@@ -1410,6 +1423,21 @@ async function executeSingleTask(
       : []
 
   try {
+    const { enterWorkspaceLeaseContext } = await import('./workspace-lease-context')
+    const { acquireWorkspaceLease } = await import('./workspace-lease-store')
+    const lease = acquireWorkspaceLease({
+      workspacePath: job.workspacePath ?? '',
+      ownerKind: 'thread_job',
+      ownerId: job.id
+    })
+    if (lease) {
+      enterWorkspaceLeaseContext({
+        leaseId: lease.leaseId,
+        ownerKind: 'thread_job',
+        ownerId: job.id
+      })
+    }
+
     for await (const chunk of streamAgentTurn({
       role: 'task-worker',
       provider: core.code as SupportedCoreCode,
@@ -1478,6 +1506,17 @@ async function executeSingleTask(
         lastError: cancelled.error,
         taskProgress: { ...taskProgress, tasks: itemsNext }
       }
+    }
+
+    // FIX-PLAN F3-C (§8.4): app shutdown aborted the turn. Distinguish from generic failure — leave
+    // the task queued and the Job auto-recoverable instead of mapping to a task/job failure.
+    if (isDraining()) {
+      itemsNext = updateTaskItem(itemsNext, taskId, {
+        status: 'queued',
+        executionStatus: 'queued',
+        errorMessage: null
+      })
+      return { kind: 'interrupted', items: itemsNext }
     }
 
     // Evidence wait timeout aborts the agent turn; do not mislabel AbortError as user cancel.
@@ -2008,9 +2047,6 @@ async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<
       await persistTaskProgress(jobId, taskProgress, undefined, gate)
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'continue'
-    
-  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-  return 'continue'
 }
 
 async function processMilestoneVerificationStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
@@ -2237,9 +2273,6 @@ async function processMilestoneVerificationStep(ctx: ExecutionLoopMutable): Prom
       await persistTaskProgress(jobId, taskProgress, undefined, gate)
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'continue'
-    
-  syncLoopState(ctx, { plan, items, taskProgress, gate, job })
-  return 'continue'
 }
 
 async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepAction> {
@@ -2279,6 +2312,45 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
       }
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'return'
+    }
+
+    // FIX-PLAN F3-B (§8.3): open a durable attempt for this task. If a completed attempt already
+    // exists (e.g. task finished in a prior boot before the event was emitted), never re-run it —
+    // stamp it completed and advance.
+    let attemptNo: number | null = null
+    const runId = getExecutionRunContext()?.runId ?? null
+    try {
+      const attempt = beginTaskAttempt({ jobId, taskId: next.id, runId })
+      if (attempt.kind === 'already-completed') {
+        items = updateTaskItem(items, next.id, {
+          status: 'completed',
+          executionStatus: 'completed',
+          errorMessage: null
+        })
+        applyTaskProgressToGate(gate.tasks, items)
+        reconcileSliceStatuses(gate.slices)
+        reconcileMilestoneStatuses(gate.milestones, gate.slices)
+        const skipProgress: TaskProgressDto = {
+          ...taskProgress,
+          phase: 'running',
+          status: 'running',
+          currentIndex: countCompleted(items),
+          total: items.length,
+          currentTaskId: null,
+          message: null,
+          progressCode: 'execution.resuming',
+          progressParams: null,
+          tasks: items
+        }
+        taskProgress = skipProgress
+        await persistTaskProgress(jobId, skipProgress, undefined, gate)
+        syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+        return 'continue'
+      }
+      attemptNo = attempt.attemptNo
+    } catch (error) {
+      memoryDebug('processNextTaskStep: beginTaskAttempt failed', { jobId, taskId: next.id })
+      void error
     }
 
     const nextFlat = findFlatTask(plan, next.id)
@@ -2371,6 +2443,14 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
       return 'return'
     }
 
+    if (result.kind === 'interrupted') {
+      // App shutdown at a safe checkpoint: leave the Job `running` (recoverable). Do not persist a
+      // paused/failed status. The task attempt is marked interrupted by the shutdown coordinator.
+      items = slimTaskProgressItemsForRuntime(result.items)
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
+    }
+
     if (result.kind === 'failed' && shouldStopExecution(jobId) === 'pause') {
       const nextAttempt = readPausingAttempt(taskProgress, jobId) + 1
       taskProgress = withPausingAttempt(taskProgress, jobId, nextAttempt)
@@ -2412,10 +2492,44 @@ const next = findNextReadyTask(gate.slices, gate.tasks)
         tasks: fullItems
       }
       taskProgress = completedProgress
+      // The task itself finished successfully before the pause landed: commit the attempt so a
+      // resume never re-runs it (FIX-PLAN F3-B).
+      if (attemptNo != null) {
+        const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
+        try {
+          commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
+        } catch (error) {
+          void error
+        }
+      }
       items = slimTaskProgressItemsForRuntime(fullItems)
       await finalizeExecutionPause(jobId, taskProgress, items, gate)
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'return'
+    }
+
+    // FIX-PLAN F3-B (§8.3): commit task success (evidence + result hash + attempt completed + job
+    // checkpoint) atomically, or record the failed attempt, before persisting the checkpoint.
+    if (attemptNo != null) {
+      if (result.kind === 'failed') {
+        try {
+          markTaskAttemptFailed({
+            jobId,
+            taskId: next.id,
+            attemptNo,
+            errorJson: JSON.stringify(result.lastError)
+          })
+        } catch (error) {
+          void error
+        }
+      } else if (result.kind === 'completed') {
+        const evidence = fullItems.find((item) => item.id === next.id)?.evidence ?? null
+        try {
+          commitCompletedTaskAttempt({ jobId, taskId: next.id, attemptNo, result: evidence })
+        } catch (error) {
+          void error
+        }
+      }
     }
 
     const afterProgress: TaskProgressDto = {
@@ -2474,6 +2588,18 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
   while (true) {
     refreshExecutionLease(jobId)
 
+    // FIX-PLAN F3-C (§8.4): app shutdown — stop between tasks at a safe checkpoint and leave the
+    // Job auto-recoverable `running`; the shutdown coordinator interrupts the attempt + releases.
+    if (isDraining()) {
+      try {
+        const { markRunningAttemptsInterruptedForJob } = await import('./task-attempts')
+        markRunningAttemptsInterruptedForJob(jobId)
+      } catch (error) {
+        void error
+      }
+      return
+    }
+
     const stop = shouldStopExecution(jobId)
     if (stop === 'cancel') return
     if (stop === 'pause') {
@@ -2506,14 +2632,44 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
 }
 
 
-export function scheduleJobExecution(username: string, jobId: string): void {
-  if (!markJobExecuting(jobId, username)) return
+export function scheduleJobExecution(
+  username: string,
+  jobId: string,
+  preclaimedSlot?: { runId: string; signal: AbortSignal }
+): void {
+  if (!markJobExecuting(jobId, username)) {
+    // A loop is already active for this job. If we arrived with a pre-claimed
+    // slot (should not happen: advanceExecutionQueue guards this), release it
+    // and revert to pending so we never leave an orphan run/slot behind.
+    if (preclaimedSlot) {
+      void (async () => {
+        const { releaseWorkloadSlot } = await import('./workload-slot-store')
+        await releaseWorkloadSlot(preclaimedSlot.runId, {
+          reason: 'loop_already_active',
+          skipQueueAdvance: true
+        }).catch(() => {})
+        const reverted = await updateJobRowForSnapshot(jobId, {
+          status: 'pending',
+          lastError: null
+        }).catch(() => null)
+        if (reverted) {
+          emitJobEvent(jobId, { event: 'job_snapshot', data: { job: reverted } })
+        }
+      })()
+    }
+    return
+  }
   void (async () => {
     let executionRunId: string | undefined
     let executionOutcome: import('./run-lifecycle').ExecutionRunOutcome = 'success'
     try {
-      const { claimExecutionWorkloadSlot } = await import('./workload-slot-store')
-      const slot = await claimExecutionWorkloadSlot(username, jobId)
+      // Fresh pending→running promotions arrive with an already-claimed slot
+      // (single atomic claim). Resume/continue/restart paths still claim here.
+      let slot: { runId: string; signal: AbortSignal } | null | undefined = preclaimedSlot
+      if (!slot) {
+        const { claimExecutionWorkloadSlot } = await import('./workload-slot-store')
+        slot = await claimExecutionWorkloadSlot(username, jobId)
+      }
       if (!slot) {
         memoryDebug('scheduleJobExecution: no execution slot, reverting to pending', { jobId })
         const reverted = await updateJobRowForSnapshot(jobId, {
@@ -2526,6 +2682,35 @@ export function scheduleJobExecution(username: string, jobId: string): void {
         return
       }
       executionRunId = slot.runId
+
+      const currentJob = await getUserJob(username, jobId)
+      if (currentJob && !preclaimedSlot) {
+        const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
+          './workspace-lease-store'
+        )
+        const workspaceLease = acquireWorkspaceLease({
+          workspacePath: currentJob.workspacePath ?? '',
+          ownerKind: 'thread_job',
+          ownerId: jobId,
+          runId: slot.runId
+        })
+        if (!workspaceLease) {
+          const { releaseWorkloadSlot } = await import('./workload-slot-store')
+          await releaseWorkloadSlot(slot.runId, {
+            reason: 'workspace_lease_unavailable',
+            skipQueueAdvance: true
+          }).catch(() => {})
+          releaseWorkspaceLeaseForOwner('thread_job', jobId)
+          const reverted = await updateJobRowForSnapshot(jobId, {
+            status: 'pending',
+            lastError: null
+          })
+          if (reverted) {
+            emitJobEvent(jobId, { event: 'job_snapshot', data: { job: reverted } })
+          }
+          return
+        }
+      }
 
       const { registerRunRuntime } = await import('./runtime-supervisor')
       const { buildCursorJobRuntimeHandle } = await import('./runtime-handle-cursor')
@@ -2549,6 +2734,17 @@ export function scheduleJobExecution(username: string, jobId: string): void {
         () => runExecutionLoop(username, jobId)
       )
     } catch (error) {
+      // FIX-PLAN F3-C (§8.4): if we are draining for shutdown, an aborted turn is an interruption,
+      // not a failure. Keep the Job auto-recoverable `running` and let the finally release the run.
+      if (isDraining()) {
+        try {
+          const { markRunningAttemptsInterruptedForJob } = await import('./task-attempts')
+          markRunningAttemptsInterruptedForJob(jobId)
+        } catch (interruptError) {
+          void interruptError
+        }
+        return
+      }
       executionOutcome = 'failure'
       const turnError = normalizeTurnError(error)
       const existing = await getUserJob(username, jobId)

@@ -1,4 +1,4 @@
-import { integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
 
 export const authState = sqliteTable('auth_state', {
   id: integer('id').primaryKey(),
@@ -173,6 +173,39 @@ export const jobTasks = sqliteTable(
     coreCode: text('core_code')
   },
   (table) => [primaryKey({ columns: [table.jobId, table.taskId] })]
+)
+
+/**
+ * FIX-PLAN F3-B (§8.3): minimal crash-recovery ledger for task execution attempts.
+ * A row is created when a task attempt starts and finalised (completed/interrupted/failed) with a
+ * result hash + checkpoint in the same transaction. Startup converts stale `running` attempts to
+ * `interrupted`, then a fresh attempt is created under the same (job_id, task_id) identity.
+ */
+export const jobTaskAttempts = sqliteTable(
+  'job_task_attempts',
+  {
+    id: text('id').primaryKey(),
+    jobId: text('job_id')
+      .notNull()
+      .references(() => threadJobs.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').notNull(),
+    runId: text('run_id').references(() => workloadRuns.id, { onDelete: 'set null' }),
+    attemptNo: integer('attempt_no').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    status: text('status').notNull(),
+    resultHash: text('result_hash'),
+    errorJson: text('error_json'),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at')
+  },
+  (table) => [
+    uniqueIndex('idx_job_task_attempts_job_task_no').on(
+      table.jobId,
+      table.taskId,
+      table.attemptNo
+    ),
+    uniqueIndex('idx_job_task_attempts_idempotency').on(table.idempotencyKey)
+  ]
 )
 
 export const jobArtifacts = sqliteTable('job_artifacts', {
@@ -373,12 +406,47 @@ export const workloadSlots = sqliteTable(
   (table) => [uniqueIndex('idx_workload_slots_run_id').on(table.runId)]
 )
 
+/** FIX-PLAN F4-A (§9.1): exclusive workspace write lease. */
+export const workspaceLeases = sqliteTable(
+  'workspace_leases',
+  {
+    id: text('id').primaryKey(),
+    canonicalPath: text('canonical_path').notNull(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    runId: text('run_id'),
+    bootId: text('boot_id').notNull(),
+    status: text('status').notNull(),
+    leaseExpiresAt: integer('lease_expires_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    releasedAt: integer('released_at')
+  },
+  (table) => [
+    index('idx_workspace_leases_active_owner').on(table.ownerKind, table.ownerId, table.status)
+  ]
+)
+
+/** FIX-PLAN F4-B (§9.2–9.3): durable delete intent for drain coordinator + startup janitor. */
+export const deletionRequests = sqliteTable('deletion_requests', {
+  id: text('id').primaryKey(),
+  entityKind: text('entity_kind').notNull(),
+  entityId: text('entity_id').notNull(),
+  username: text('username').notNull(),
+  status: text('status').notNull(),
+  frozenJson: text('frozen_json'),
+  filesystemCleanupJson: text('filesystem_cleanup_json'),
+  errorJson: text('error_json'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
+
 export type AuthState = typeof authState.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Thread = typeof threads.$inferSelect
 export type ThreadMessage = typeof threadMessages.$inferSelect
 export type ThreadJob = typeof threadJobs.$inferSelect
 export type JobTask = typeof jobTasks.$inferSelect
+export type JobTaskAttempt = typeof jobTaskAttempts.$inferSelect
 export type JobArtifact = typeof jobArtifacts.$inferSelect
 export type JobCounter = typeof jobCounters.$inferSelect
 export type JobAbility = typeof jobAbilities.$inferSelect
@@ -389,3 +457,5 @@ export type DraftReferenceRow = typeof draftReferences.$inferSelect
 export type DesignRun = typeof designRuns.$inferSelect
 export type WorkloadRun = typeof workloadRuns.$inferSelect
 export type WorkloadSlot = typeof workloadSlots.$inferSelect
+export type WorkspaceLease = typeof workspaceLeases.$inferSelect
+export type DeletionRequest = typeof deletionRequests.$inferSelect

@@ -5,7 +5,6 @@ import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { and, desc, eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
-import { collectThreadPurgeTargets, purgeThreadFilesystem } from '../retention/purge'
 import { getAppContext } from '../bootstrap'
 import { threads, threadMessages, type Thread } from '../db/schema'
 import { getProject, touchProject } from '../projects/service'
@@ -142,6 +141,16 @@ export async function getThreadRow(username: string, threadId: string): Promise<
   return rows[0] ?? null
 }
 
+export async function getThreadOwnerUsername(threadId: string): Promise<string | null> {
+  const db = getDb()
+  const rows = await db
+    .select({ username: threads.username })
+    .from(threads)
+    .where(eq(threads.id, threadId))
+    .limit(1)
+  return rows[0]?.username ?? null
+}
+
 export async function getThread(username: string, threadId: string): Promise<ThreadDto | null> {
   const row = await getThreadRow(username, threadId)
   return row ? toThreadDto(row) : null
@@ -168,6 +177,10 @@ export async function createThread(
   const project = await getProject(username, projectId)
   if (!project) {
     throw AppError.notFound('Project not found', 'project.not_found')
+  }
+  const { isProjectDeletionBlocked } = await import('../legacy-control-plane/deletion-coordinator')
+  if (isProjectDeletionBlocked(projectId)) {
+    throw AppError.conflict('Project is being deleted', undefined, 'project.deleting')
   }
 
   const resolvedTitle = title?.trim() || DEFAULT_THREAD_TITLE
@@ -448,32 +461,8 @@ export async function pruneEmptyCreateTaskThreads(): Promise<{ removed: number }
 }
 
 export async function deleteThread(username: string, threadId: string): Promise<void> {
-  const existing = await getThreadRow(username, threadId)
-  if (!existing) {
-    throw AppError.notFound('Thread not found', 'thread.not_found')
-  }
-
-  const db = getDb()
-  const purgeTargets = await collectThreadPurgeTargets(db, threadId)
-
-  db.transaction((tx) => {
-    tx.delete(threads)
-      .where(and(eq(threads.username, username), eq(threads.id, threadId)))
-      .run()
-  })
-
-  const dataDir = getAppContext().dataDir
-  await purgeThreadFilesystem(dataDir, threadId, purgeTargets).catch((error) => {
-    console.warn('[threads] failed to purge thread filesystem state', threadId, error)
-  })
-
-  await import('../agent-runtime/cursor-acp/stream-session-turn')
-    .then((module) => module.closeConversationCursorRuntime(threadId))
-    .catch((error) => {
-      console.warn('[threads] failed to close cursor runtime for thread', threadId, error)
-    })
-
-  await touchProject(username, existing.projectId)
+  const { drainAndDeleteThread } = await import('../legacy-control-plane/deletion-coordinator')
+  await drainAndDeleteThread(username, threadId)
 }
 
 export async function reconcileStaleThreadRuntime(

@@ -5,8 +5,8 @@ export const TASK_EVIDENCE_BASIC_FACTS_OK = 'basic-facts-ok'
 export interface GateTaskState {
   id: string
   status: string
-  executionStatus?: string | null
-  evidenceStatus?: string | null
+  executionStatus?: string | null | undefined
+  evidenceStatus?: string | null | undefined
   order: number
   milestoneIndex: number
   sliceIndex: number
@@ -19,8 +19,8 @@ export interface GateSliceState {
   id: string
   milestoneId: string
   status: string
-  runtimeStatus?: string | null
-  verificationStatus?: string | null
+  runtimeStatus?: string | null | undefined
+  verificationStatus?: string | null | undefined
   dependsOnSliceIds: string[]
   tasks: GateTaskState[]
 }
@@ -29,7 +29,7 @@ export interface GateMilestoneState {
   id: string
   title: string
   status: string
-  verificationStatus?: string | null
+  verificationStatus?: string | null | undefined
   sliceIds: string[]
 }
 
@@ -212,8 +212,8 @@ export function applyTaskProgressToGate(
   items: Array<{
     id: string
     status: string
-    executionStatus?: string | null
-    evidenceStatus?: string | null
+    executionStatus?: string | null | undefined
+    evidenceStatus?: string | null | undefined
   }>
 ): void {
   const byId = new Map(items.map((item) => [item.id, item]))
@@ -361,15 +361,22 @@ export function isWorkflowComplete(
 export function applyVerificationProgress(
   slices: GateSliceState[],
   milestones: GateMilestoneState[],
-  progress?: {
-    slices?: Array<{
-      id: string
-      runtimeStatus?: string | null
-      verificationStatus?: string | null
-      verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null
-    }>
-    milestones?: Array<{ id: string; verificationStatus?: string | null }>
-  } | null
+  progress?:
+    | {
+        slices?:
+          | Array<{
+              id: string
+              runtimeStatus?: string | null | undefined
+              verificationStatus?: string | null | undefined
+              verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null | undefined
+            }>
+          | undefined
+        milestones?:
+          | Array<{ id: string; verificationStatus?: string | null | undefined }>
+          | undefined
+      }
+    | null
+    | undefined
 ): void {
   if (!progress) return
   for (const row of progress.slices ?? []) {
@@ -389,19 +396,21 @@ export function exportVerificationProgress(
   slices: GateSliceState[],
   milestones: GateMilestoneState[],
   existing?: {
-    slices?: Array<{
-      id: string
-      verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null
-    }>
+    slices?:
+      | Array<{
+          id: string
+          verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null | undefined
+        }>
+      | undefined
   }
 ): {
   slices: Array<{
     id: string
-    runtimeStatus?: string | null
-    verificationStatus?: string | null
-    verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null
+    runtimeStatus?: string | null | undefined
+    verificationStatus?: string | null | undefined
+    verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null | undefined
   }>
-  milestones: Array<{ id: string; verificationStatus?: string | null }>
+  milestones: Array<{ id: string; verificationStatus?: string | null | undefined }>
 } {
   return {
     slices: slices.map((s) => {

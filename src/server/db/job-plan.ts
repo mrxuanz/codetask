@@ -14,9 +14,9 @@ import { jobAbilities, jobPlanMilestones, jobPlanSlices, jobPlanTasks, threadJob
 type AppDatabase = ReturnType<typeof getDb>
 
 type PlanCounts = {
-  milestones?: number
-  slices?: number
-  tasks?: number
+  milestones?: number | undefined
+  slices?: number | undefined
+  tasks?: number | undefined
 }
 
 function parseJsonArray(value: string | null | undefined): string[] | undefined {

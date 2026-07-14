@@ -8,15 +8,15 @@ export interface AgentTurnInput {
   cwd: string
   runtimeRoot: string
   prompt: string
-  runtimeSessionId?: string | null
-  model?: string
-  systemPrompt?: string
-  mcpUrl?: string
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
+  runtimeSessionId?: string | null | undefined
+  model?: string | undefined
+  systemPrompt?: string | undefined
+  mcpUrl?: string | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
 
-  jobId?: string
-  workloadRunId?: string
+  jobId?: string | undefined
+  workloadRunId?: string | undefined
 }
 
 export type RoleWorkerInput = AgentTurnInput
@@ -30,8 +30,8 @@ export type AgentTurnChunk =
 export type SdkTurnChunk = AgentTurnChunk
 
 export interface AgentTurnOptions {
-  outerSandbox?: boolean
-  signal?: AbortSignal
+  outerSandbox?: boolean | undefined
+  signal?: AbortSignal | undefined
 }
 
 export type { ProviderRunPolicy, ProviderAuthMode } from './provider-policy'
@@ -45,19 +45,19 @@ export interface AgentTurnRunnerInput {
   workspaceRoot: string
   runtimeRoot: string
   prompt: string
-  runtimeSessionId?: string | null
-  model?: string
-  systemPrompt?: string
-  mcpUrl?: string
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
-  mcpToken?: string
-  signal?: AbortSignal
+  runtimeSessionId?: string | null | undefined
+  model?: string | undefined
+  systemPrompt?: string | undefined
+  mcpUrl?: string | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
+  mcpToken?: string | undefined
+  signal?: AbortSignal | undefined
 
-  readRoots?: string[]
+  readRoots?: string[] | undefined
 
-  jobId?: string
-  workloadRunId?: string
+  jobId?: string | undefined
+  workloadRunId?: string | undefined
 }
 
 export interface AgentTurnProvider {

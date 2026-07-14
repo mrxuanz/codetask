@@ -10,7 +10,6 @@ import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-pl
 import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { JobCommandServiceImpl } from '../../../src/server/application/job-command-service'
 import { InternalExecutionCommandServiceImpl } from '../../../src/server/application/internal-execution-command-service'
-import { SqliteVerificationRepository } from '../../../src/server/infra/sqlite/control-plane/verification-repository'
 import { StartupReconciler } from '../../../src/server/application/startup-reconciler-impl'
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
@@ -92,7 +91,9 @@ function createServices(rawDb: Database.Database): {
   const jobRepository = controlPlane.jobs
   const runtimeStops: string[] = []
   const runtimeController: RuntimeController = {
-    notifyPauseRequested() {},
+    notifyPauseRequested() {
+      void 0
+    },
     async closeThenRelease(runId) {
       runtimeStops.push(runId)
     }
@@ -101,14 +102,40 @@ function createServices(rawDb: Database.Database): {
     unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    logger: {
+      debug() {
+        void 0
+      },
+      info() {
+        void 0
+      },
+      warn() {
+        void 0
+      },
+      error() {
+        void 0
+      }
+    },
     runtimeController
   })
   const internal = new InternalExecutionCommandServiceImpl({
     unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
-    logger: { debug() {}, info() {}, warn() {}, error() {} }
+    logger: {
+      debug() {
+        void 0
+      },
+      info() {
+        void 0
+      },
+      warn() {
+        void 0
+      },
+      error() {
+        void 0
+      }
+    }
   })
   return { command, internal, jobRepository, controlPlane, runtimeStops }
 }

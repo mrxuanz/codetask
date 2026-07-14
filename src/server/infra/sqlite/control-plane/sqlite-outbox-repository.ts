@@ -1,4 +1,4 @@
-import { eq, and, sql, type SQL } from 'drizzle-orm'
+import { and, sql, type SQL } from 'drizzle-orm'
 import type { OutboxRepository } from '../../../application/ports/outbox-repository'
 import type { ActorContext } from '../../../application/ports/job-repository'
 import type { DbExecutor } from './db-executor'

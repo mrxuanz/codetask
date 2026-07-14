@@ -74,6 +74,16 @@ describe('role matrix: filesystem permissions', () => {
     )
   })
 
+  it('conversation can write workspace under outer sandbox', async () => {
+    const probe = join(fixture.workspace, 'chat-probe.txt')
+    const policy = policyForRoleV2('conversation', fixture.workspace, fixture.runtime)
+    await assertSucceeds(
+      runInSandbox(native, policy, writeCmd(probe, 'ok')),
+      'conversation can write workspace'
+    )
+    assert.equal(readFileSync(probe, 'utf8').trim(), 'ok')
+  })
+
   it('task-worker can write workspace and runtime', async () => {
     const probe = join(fixture.workspace, 'task-probe.txt')
     const runtimeProbe = join(fixture.runtime, 'runtime-probe.txt')

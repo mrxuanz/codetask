@@ -87,7 +87,7 @@ export function subscribeJobEvents(
 
 export async function listUserJobs(
   username: string,
-  options?: { status?: string; page?: number; limit?: number; q?: string }
+  options?: { status?: string; page?: number; limit?: number; q?: string | undefined }
 ): Promise<{ jobs: ThreadJobDto[]; total: number }> {
   const db = getDb()
   const page = Math.max(1, options?.page ?? 1)
@@ -429,7 +429,9 @@ export async function updateDraftReferenceDescription(
   const nextReferences = [...payload.references]
   const index = nextReferences.findIndex((item) => item.id === referenceId)
   if (index >= 0) {
-    nextReferences[index] = { ...nextReferences[index], description: trimmed }
+    const existing = nextReferences[index]
+    if (!existing) throw AppError.notFound('Reference not found', 'draft.reference_not_found')
+    nextReferences[index] = { ...existing, description: trimmed }
   } else {
     const attachment = payload.sourceAttachments.find((item) => item.id === referenceId)
     if (!attachment) {
@@ -451,7 +453,7 @@ export async function addLocalCorpusDraftReference(
     localPath: string
     name: string
     description: string
-    kind?: 'file' | 'directory'
+    kind?: 'file' | 'directory' | undefined
   }
 ): Promise<{ messageId: string; payload: Record<string, unknown> }> {
   const payload = await loadDraftPayload(username, threadId, messageId)

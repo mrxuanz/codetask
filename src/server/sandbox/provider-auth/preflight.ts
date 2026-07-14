@@ -11,7 +11,7 @@ export class ProviderAuthError extends SandboxError {
   constructor(
     message: string,
     readonly provider: SupportedCoreCode,
-    readonly code: string = 'provider.auth.missing',
+    override readonly code: string = 'provider.auth.missing',
     readonly userAction?: string
   ) {
     super(message, code, provider)

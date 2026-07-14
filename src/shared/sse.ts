@@ -1,7 +1,7 @@
 export interface SseBlock {
   event: string
   data: string
-  id?: string
+  id?: string | undefined
 }
 
 export function parseSseBlock(block: string): SseBlock | null {

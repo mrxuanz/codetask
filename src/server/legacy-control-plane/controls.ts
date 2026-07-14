@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto'
-import { eq } from 'drizzle-orm'
 import { isPlanningJobStatus } from '@shared/design-session'
 import { deriveJobRecoveryState } from '@shared/job-recovery-state'
 import { JOB_CANCELLED, JOB_PAUSED } from '../../shared/turn-errors.ts'
@@ -7,8 +6,8 @@ import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { loadJobPlan } from '../db/job-plan'
-import { threadJobs } from '../db/schema'
 import type { TaskProgressDto, ThreadJobDto } from './types'
+import type { JobDto } from '../application/job-query-service'
 import type { ThreadJobStatus } from '@shared/contracts/jobs'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultPlanProgress } from '../planner/save-plan'
@@ -17,8 +16,7 @@ import { claimJobSlotOrEnqueue, findOccupyingJobId } from './job-queue'
 import { acquireExecutionLease, clearExecutionLease } from './repository'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { prepareContinueFailedExecution } from './continue-failed-job'
-import { releaseJobCursorResources, cancelJobSandboxTurns } from '../sandbox'
-import { purgeJobFilesystem } from '../retention/purge'
+import { cancelJobSandboxTurns } from '../sandbox'
 import { getControlPlaneServices } from '../application/control-plane-services'
 import { isV3Authoritative } from '../application/cutover-state'
 import {
@@ -114,7 +112,7 @@ function mapV3StateToLegacyStatus(state: string): ThreadJobStatus | null {
   }
 }
 
-function getAuthoritativeControlJob(jobId: string, username: string) {
+function getAuthoritativeControlJob(jobId: string, username: string): JobDto | null {
   const ctx = getAppContext()
   if (!isV3Authoritative(ctx.db)) return null
   return getControlPlaneServices(ctx).queryService.getJob(jobId, { username })
@@ -792,39 +790,8 @@ export async function restartJob(username: string, jobId: string): Promise<Threa
 }
 
 export async function deleteJob(username: string, jobId: string): Promise<void> {
-  const job = await getUserJob(username, jobId)
-  if (!job) throw AppError.notFound('Job not found', 'job.not_found')
-
-  if (isJobExecuting(jobId)) {
-    executionRuntime().setControl(jobId, 'cancelling')
-    abortActiveTurn(jobId, JOB_CANCELLED)
-    clearAbortController(jobId)
-    cancelJobSandboxTurns(jobId)
-    executionRuntime().dropRuntime(jobId)
-  }
-
-  await clearExecutionLease(jobId)
-  await releaseJobCursorResources(jobId).catch(() => {})
-
-  const ctx = getAppContext()
-  const db = getDb()
-  const threadId = job.threadId
-  const draftMessageId = job.draftMessageId
-  await db.delete(threadJobs).where(eq(threadJobs.id, jobId))
-
-  ctx.eventBus.clearJob(jobId)
-  await purgeJobFilesystem(ctx.dataDir, threadId, jobId).catch((error) => {
-    console.warn('[jobs] failed to purge job filesystem state', jobId, error)
-  })
-
-  const { stopAndReleaseActiveRun } = await import('./workload-slot-store')
-  await stopAndReleaseActiveRun('thread_job', jobId, 'deleted')
-
-  // Trigger clears threads.active_plan_id; also clear draft linkedPlanId so Unlock UI matches server.
-  const { releaseDraftAfterJobDeleted } = await import('./draft-plan')
-  await releaseDraftAfterJobDeleted(username, threadId, jobId, draftMessageId).catch((error) => {
-    console.warn('[jobs] failed to release draft after job delete', jobId, error)
-  })
+  const { drainAndDeleteJob } = await import('./deletion-coordinator')
+  await drainAndDeleteJob(username, jobId)
 }
 
 export function markJobExecuting(jobId: string, username?: string): boolean {
@@ -834,6 +801,8 @@ export function markJobExecuting(jobId: string, username?: string): boolean {
 export async function markJobExecutionDone(jobId: string, _username: string): Promise<void> {
   executionRuntime().endLoop(jobId)
   await clearExecutionLease(jobId)
+  const { releaseWorkspaceLeaseForOwner } = await import('./workspace-lease-store')
+  releaseWorkspaceLeaseForOwner('thread_job', jobId)
 }
 
 export function createExecutionAbortSignal(jobId: string): AbortSignal {

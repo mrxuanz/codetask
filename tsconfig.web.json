@@ -9,6 +9,9 @@
   ],
   "compilerOptions": {
     "composite": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": true,
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {

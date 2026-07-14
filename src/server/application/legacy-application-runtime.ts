@@ -7,12 +7,6 @@ import { bindStartupWorkloadGate } from '../legacy-control-plane/workload-slot'
 import { StartupCoordinator } from './startup-coordinator'
 import { SafeLoggerImpl } from './safe-logger'
 import type { SchemaGenerationRead } from './cutover-state'
-import {
-  bootstrapControlPlaneRuntime,
-  createControlPlaneRuntime,
-  shutdownControlPlaneRuntime,
-  type ControlPlaneRuntime
-} from './control-plane-runtime'
 import type { LegacyApplicationRuntime } from './application-runtime'
 import type { ShutdownReason } from './shutdown-coordinator'
 
@@ -21,11 +15,45 @@ export function createLegacyApplicationRuntime(
   schemaRead: SchemaGenerationRead
 ): LegacyApplicationRuntime {
   const logger = new SafeLoggerImpl()
-  const controlPlane = createControlPlaneRuntime(ctx)
 
   const startup = new StartupCoordinator({
     logger,
     stages: [
+      {
+        // FIX-PLAN F3-B (§8.5): fence stale task attempts from a dead process to `interrupted`
+        // before any Job is resumed, so resume creates a fresh attempt under the same identity.
+        name: 'interrupt-orphan-task-attempts',
+        execute: async () => {
+          const { markAllRunningAttemptsInterrupted } = await import(
+            '../legacy-control-plane/task-attempts'
+          )
+          const changed = markAllRunningAttemptsInterrupted()
+          if (changed > 0) {
+            logger.info('interrupted orphan task attempts on startup', { count: changed })
+          }
+        }
+      },
+      {
+        name: 'reclaim-workspace-leases',
+        execute: async () => {
+          const { reclaimStaleWorkspaceLeasesOnStartup } = await import(
+            '../legacy-control-plane/workspace-lease-store'
+          )
+          const changed = reclaimStaleWorkspaceLeasesOnStartup()
+          if (changed > 0) {
+            logger.info('reclaimed stale workspace leases on startup', { count: changed })
+          }
+        }
+      },
+      {
+        name: 'resume-deletion-requests',
+        execute: async () => {
+          const { resumePendingDeletionRequestsOnStartup } = await import(
+            '../legacy-control-plane/deletion-coordinator'
+          )
+          await resumePendingDeletionRequestsOnStartup()
+        }
+      },
       {
         name: 'reconcile-workload-slots',
         execute: async () => {
@@ -76,7 +104,6 @@ export function createLegacyApplicationRuntime(
     ctx,
     schemaRead,
     startup,
-    controlPlane,
     started: false,
     startPromise: null,
     shutdownPromise: null
@@ -141,13 +168,6 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
   try {
     await runtime.startup.ensureReady()
 
-    if (runtime.controlPlane !== null) {
-      await bootstrapControlPlaneRuntime(runtime.ctx)
-      rollback.push(async () => {
-        await shutdownControlPlaneRuntime('app_shutdown', runtime.ctx)
-      })
-    }
-
     const { startWorkloadReconciler } = await import('../legacy-control-plane/reconcile')
     startWorkloadReconciler()
     rollback.push(async () => {
@@ -173,6 +193,17 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
   }
 }
 
+/**
+ * FIX-PLAN F3-C (§8.4): graceful Legacy shutdown. Same promise serves Electron before-quit,
+ * SIGINT/SIGTERM and server stop (see `getShutdownPromise`/`gracefulShutdown`).
+ *
+ * Order:
+ *   1. enter draining (reject new claim / plan-confirm promotion)
+ *   2. stop queue/reconciler timers
+ *   3. request running turns to stop at a safe checkpoint, wait for provider child/handle closed,
+ *      mark the in-flight attempt `interrupted` (NOT failed), end the old run, release slot + lease
+ *   4. keep the Job auto-recoverable (`running`), then flush durable events
+ */
 export async function shutdownLegacyApplicationRuntime(
   runtime: LegacyApplicationRuntime,
   reason: ShutdownReason
@@ -181,24 +212,83 @@ export async function shutdownLegacyApplicationRuntime(
     return runtime.shutdownPromise
   }
 
-  runtime.shutdownPromise = (async () => {
-    const { stopWorkloadReconciler } = await import('../legacy-control-plane/reconcile')
-    stopWorkloadReconciler()
-
-    if (runtime.controlPlane !== null) {
-      await shutdownControlPlaneRuntime(reason, runtime.ctx)
-    }
-
-    runtime.started = false
-  })()
-
+  runtime.shutdownPromise = runShutdown(runtime, reason)
   return runtime.shutdownPromise
+}
+
+async function runShutdown(
+  runtime: LegacyApplicationRuntime,
+  reason: ShutdownReason
+): Promise<void> {
+  const logger = new SafeLoggerImpl()
+  logger.info('legacy shutdown started', { reason })
+
+  // 1. Enter draining: reject new claims / promotions.
+  const { beginDraining } = await import('../legacy-control-plane/shutdown-state')
+  beginDraining()
+
+  // 2. Stop queue/reconciler timers.
+  const { stopWorkloadReconciler } = await import('../legacy-control-plane/reconcile')
+  stopWorkloadReconciler()
+
+  // 3. Drain in-flight execution runs at a safe checkpoint.
+  await drainActiveExecutionRuns(logger)
+
+  // 4. Flush durable events (Legacy emits in-memory SSE; nothing durable to persist here yet).
+  await flushDurableEvents(logger)
+
+  runtime.started = false
+  logger.info('legacy shutdown completed')
+}
+
+async function drainActiveExecutionRuns(logger: SafeLoggerImpl): Promise<void> {
+  try {
+    const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
+    const { stopRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
+    const { markRunningAttemptsInterruptedForJob } = await import(
+      '../legacy-control-plane/task-attempts'
+    )
+
+    const slots = await listActiveWorkloadSlots({})
+    const executionSlots = slots.filter((slot) => slot.kind === 'execution')
+
+    for (const slot of executionSlots) {
+      try {
+        // Mark the interrupted attempt BEFORE tearing the run down so a late writer cannot
+        // resurrect it as completed/failed.
+        if (slot.ownerKind === 'thread_job') {
+          markRunningAttemptsInterruptedForJob(slot.ownerId)
+        }
+        // Request stop → wait provider child/handle closed → end run → release slot + lease.
+        // The Job row is left `running` (auto-recoverable); we never mark it failed here.
+        await stopRunLifecycle(slot.runId, 'app_shutdown')
+      } catch (error) {
+        logger.warn('drain execution run failed', {
+          runId: slot.runId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+  } catch (error) {
+    logger.warn('drain active execution runs failed', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
+async function flushDurableEvents(logger: SafeLoggerImpl): Promise<void> {
+  // Legacy delivers progress via the in-memory SSE JobEventBus; there is no durable outbox in the
+  // Legacy generation, so there is nothing to flush. Kept as an explicit, documented step so the
+  // shutdown contract stays complete and easy to extend.
+  void logger
 }
 
 export async function resetLegacyApplicationRuntimeForTests(
   runtime: LegacyApplicationRuntime
 ): Promise<void> {
   await shutdownLegacyApplicationRuntime(runtime, 'app_shutdown').catch(() => {})
+  const { endDraining } = await import('../legacy-control-plane/shutdown-state')
+  endDraining()
   runtime.startPromise = null
   runtime.shutdownPromise = null
   runtime.started = false

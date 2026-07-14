@@ -32,10 +32,10 @@ export interface ConversationCoreDto {
   label: string
   description: string
   available: boolean
-  reason?: string | null
-  detectedCommand?: string | null
-  launchCommand?: string | null
-  executablePath?: string | null
+  reason?: string | null | undefined
+  detectedCommand?: string | null | undefined
+  launchCommand?: string | null | undefined
+  executablePath?: string | null | undefined
 }
 
 import type { TurnErrorDto } from './turn-errors'

@@ -69,7 +69,9 @@ export async function* streamCodexTurn(
     env: plan.env,
     ...(plan.sdkConfig
       ? {
-          config: plan.sdkConfig as NonNullable<ConstructorParameters<typeof Codex>[0]>['config']
+          config: plan.sdkConfig as NonNullable<
+            NonNullable<ConstructorParameters<typeof Codex>[0]>['config']
+          >
         }
       : {})
   })

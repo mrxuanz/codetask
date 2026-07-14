@@ -6,10 +6,10 @@ import type { SpawnedSandboxWorker } from './launcher'
 export const TURN_DONE_MARKER = '{"type":"_turn_done"}'
 
 export interface SandboxChunkReaderOptions {
-  signal?: AbortSignal
-  stopOnDoneMarker?: boolean
-  pollExit?: () => { code: number | null; status: string } | null
-  debugPrefix?: string
+  signal?: AbortSignal | undefined
+  stopOnDoneMarker?: boolean | undefined
+  pollExit?: (() => { code: number | null; status: string } | null) | undefined
+  debugPrefix?: string | undefined
 }
 
 export function sandboxErrorFromErrorChunk(

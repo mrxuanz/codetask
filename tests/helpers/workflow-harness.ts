@@ -254,6 +254,20 @@ export class WorkflowHarness {
     } catch {
       /* best-effort, ignore errors */
     }
+    try {
+      const { releaseAllActiveWorkspaceLeases } = await import(
+        '../../src/server/legacy-control-plane/workspace-lease-store'
+      )
+      releaseAllActiveWorkspaceLeases()
+    } catch {
+      /* best-effort */
+    }
+    try {
+      const { endDraining } = await import('../../src/server/legacy-control-plane/shutdown-state')
+      endDraining()
+    } catch {
+      /* best-effort */
+    }
   }
 
   setScript(key: string, script: FakeTurnScript): void {
@@ -475,7 +489,7 @@ export class WorkflowHarness {
   async sendMessageExpectError(
     threadId: string,
     message: string,
-    options?: { createTaskMode?: boolean }
+    options?: { createTaskMode?: boolean; generateDraft?: boolean }
   ): Promise<{ message: string; code: string | null }> {
     const events = await this.sendMessage(threadId, message, options)
     const errorEvent = events.find((item) => item.event === 'error')

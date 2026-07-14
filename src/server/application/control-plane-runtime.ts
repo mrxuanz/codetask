@@ -30,6 +30,7 @@ import { ShutdownCoordinator, type ShutdownReason } from './shutdown-coordinator
 import { StartupCoordinator } from './startup-coordinator'
 import { StartupReconciler } from './startup-reconciler-impl'
 import type { SseEnvelope } from '../http/v3/sse-envelope'
+import type { RuntimeController } from './ports/runtime-controller'
 
 interface RuntimeBinding {
   readonly jobId: string
@@ -352,13 +353,10 @@ async function startV3ExecutorRuntime(
       workIdentity: '',
       abortSignal: abortController.signal
     }
-    const deps = createExecutorDependencies(
-      {
-        runtime,
-        taskExecutionProvider: createRegistryTaskExecutionProvider(runtime.taskExecutionRegistry)
-      },
-      context
-    )
+    const deps = createExecutorDependencies({
+      runtime,
+      taskExecutionProvider: createRegistryTaskExecutionProvider(runtime.taskExecutionRegistry)
+    })
     void executeRun(context, deps, abortController.signal)
       .then(() => {
         binding.resolveClosed({ kind: 'normal' })
@@ -388,9 +386,12 @@ function publishOutboxEvent(runtime: ControlPlaneRuntime, event: OutboxEvent): v
   runtime.eventHub.publish(toEnvelope(event))
 }
 
-function buildRuntimeController(runtime: ControlPlaneRuntime) {
+function buildRuntimeController(runtime: ControlPlaneRuntime): RuntimeController {
   return {
-    notifyPauseRequested(): void {},
+    notifyPauseRequested(): void {
+      // No-op: pause requests are observed via the job repository state,
+      // not pushed to the running executor.
+    },
     async closeThenRelease(runId: string, reason: string): Promise<void> {
       const binding = runtime.bindingsByRunId.get(runId)
       if (binding) {
@@ -421,6 +422,10 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
   )
   const taskExecutionRegistry = new TaskExecutionRegistry()
   const runtimeSupervisor = new RuntimeSupervisor(logger, taskExecutionRegistry)
+  // Closures below capture `runtime` by reference; they are only invoked
+  // after the assignment further down has run, so this is safe. Must stay
+  // `let` (not `const`) because of the definite-assignment split below.
+  // eslint-disable-next-line prefer-const
   let runtime!: ControlPlaneRuntime
   const outboxDispatcher = new OutboxDispatcher(
     baseControlPlane.outbox,
@@ -459,7 +464,6 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
   )
   const runtimeController = buildRuntimeController(runtime)
   const taskRepository = controlPlane.tasks
-  const evidenceRepository = controlPlane.evidence
   const commandService = new JobCommandServiceImpl({
     unitOfWork: controlPlane,
     clock: { nowMs: () => Date.now() },
@@ -563,7 +567,8 @@ export function ensureControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime 
   if (applicationRuntime.kind === 'v3') {
     return applicationRuntime.controlPlane
   }
-  return applicationRuntime.controlPlane
+  // Legacy root never owns a V3 control-plane runtime (FIX-PLAN F1).
+  return null
 }
 
 export async function bootstrapControlPlaneRuntime(ctx: AppContext): Promise<void> {

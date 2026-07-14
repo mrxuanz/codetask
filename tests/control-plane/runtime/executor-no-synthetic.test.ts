@@ -57,14 +57,31 @@ function buildRuntimeStub(rawDb: Database.Database): ExecutorRuntimePorts {
   const controlPlane = createControlPlaneTransaction(drizzleDb)
   const registry = new TaskExecutionRegistry()
   const runtimeController: RuntimeController = {
-    notifyPauseRequested() {},
-    async closeThenRelease() {}
+    notifyPauseRequested() {
+      void 0
+    },
+    async closeThenRelease() {
+      void 0
+    }
   }
   const commandService = new JobCommandServiceImpl({
     unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    logger: {
+      debug() {
+        void 0
+      },
+      info() {
+        void 0
+      },
+      warn() {
+        void 0
+      },
+      error() {
+        void 0
+      }
+    },
     runtimeController
   })
 
@@ -74,7 +91,20 @@ function buildRuntimeStub(rawDb: Database.Database): ExecutorRuntimePorts {
     unitOfWork: controlPlane,
     commandService,
     runtimeSupervisor: new RuntimeSupervisor(
-      { debug() {}, info() {}, warn() {}, error() {} },
+      {
+        debug() {
+          void 0
+        },
+        info() {
+          void 0
+        },
+        warn() {
+          void 0
+        },
+        error() {
+          void 0
+        }
+      },
       registry
     )
   }
@@ -115,15 +145,12 @@ describe('executor-no-synthetic (CR5)', () => {
       workIdentity: '',
       abortSignal: abort.signal
     }
-    const deps = createExecutorDependencies(
-      {
-        runtime,
-        taskExecutionProvider: provider,
-        clock: { nowMs: () => 1_700_000_000_000 },
-        idGenerator: { generate: () => randomUUID() }
-      },
-      context
-    )
+    const deps = createExecutorDependencies({
+      runtime,
+      taskExecutionProvider: provider,
+      clock: { nowMs: () => 1_700_000_000_000 },
+      idGenerator: { generate: () => randomUUID() }
+    })
     await executeRun(context, deps, abort.signal)
 
     const task = rawDb
@@ -162,15 +189,12 @@ describe('executor-no-synthetic (CR5)', () => {
       workIdentity: '',
       abortSignal: abort.signal
     }
-    const deps = createExecutorDependencies(
-      {
-        runtime,
-        taskExecutionProvider: provider,
-        clock: { nowMs: () => 1_700_000_000_000 },
-        idGenerator: { generate: () => randomUUID() }
-      },
-      context
-    )
+    const deps = createExecutorDependencies({
+      runtime,
+      taskExecutionProvider: provider,
+      clock: { nowMs: () => 1_700_000_000_000 },
+      idGenerator: { generate: () => randomUUID() }
+    })
     await executeRun(context, deps, abort.signal)
 
     const task = rawDb
