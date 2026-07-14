@@ -6,12 +6,18 @@
  */
 
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import Database from 'better-sqlite3'
 
 export type MigrationResult<T> =
   | { readonly kind: 'mapped'; readonly value: T; readonly warnings: readonly string[] }
   | { readonly kind: 'conflict'; readonly code: string; readonly detail: string }
+
+export interface DatabaseIdentity {
+  readonly absolutePath: string
+  readonly sha256: string
+}
 
 export interface LegacyJobSnapshot {
   readonly id: string
@@ -34,19 +40,48 @@ export interface MigrationConflict {
   readonly detail: string
 }
 
-export interface MigrationCopyReport {
-  readonly generatedAtMs: number
+export interface MigrationInvariantSummary {
+  readonly integrityCheck: string
+  readonly foreignKeyViolations: number
+  readonly invariantViolations: readonly { readonly jobId: string; readonly code: string }[]
+}
+
+export interface MigrationStableReport {
+  readonly sourceDatabaseIdentity: DatabaseIdentity
+  readonly sourceUserVersion: number
   readonly sourceJobCount: number
   readonly mappedCount: number
-  readonly conflictCount: number
-  readonly warningCount: number
-  readonly hasConflicts: boolean
   readonly conflicts: readonly MigrationConflict[]
-  readonly mapped: readonly ControlJobSeed[]
-  readonly warnings: readonly string[]
+  readonly countsByTable: Readonly<Record<string, number>>
   readonly countsByState: Readonly<Record<string, number>>
   readonly perJobProjectionHashes: Readonly<Record<string, string>>
+  readonly invariantSummary: MigrationInvariantSummary
+}
+
+export interface MigrationCopyReport extends MigrationStableReport {
+  readonly generatedAtMs: number
+  readonly warningCount: number
+  readonly hasConflicts: boolean
+  readonly mapped: readonly ControlJobSeed[]
+  readonly warnings: readonly string[]
   readonly reportHash: string
+}
+
+export interface VerifiedBackupRecord {
+  readonly backupId: string
+  readonly sourceDatabaseIdentity: DatabaseIdentity
+  readonly backupPath: string
+  readonly backupSha256: string
+  readonly backupBytes: number
+  readonly sqliteVersion: string
+  readonly userVersion: number
+  readonly appCommit: string
+  readonly createdAtMs: number
+  readonly restoreCommand: string
+  readonly verification: {
+    readonly integrityCheck: string
+    readonly foreignKeyViolations: number
+  }
 }
 
 export interface BackupResult {
@@ -85,6 +120,116 @@ const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 const SCHEMA_GENERATIONS = new Set(['preparing', 'copied', 'v3_authoritative'])
 
+export const MIGRATION_COPY_SCOPE_TABLES = [
+  'control_runtime_instances',
+  'control_task_attempts',
+  'control_resource_slots',
+  'control_verifications',
+  'control_job_runs',
+  'control_job_tasks',
+  'control_plan_tasks',
+  'control_plan_slices',
+  'control_plan_milestones',
+  'control_plan_revisions',
+  'control_job_failures',
+  'control_jobs',
+  'control_evidence_blobs'
+] as const
+
+export const MIGRATION_COUNT_TABLES = [
+  'control_jobs',
+  'control_job_runs',
+  'control_job_tasks',
+  'control_task_attempts',
+  'control_verifications',
+  'control_plan_revisions',
+  'control_plan_milestones',
+  'control_plan_slices',
+  'control_plan_tasks',
+  'control_job_failures',
+  'control_evidence_blobs',
+  'control_runtime_instances',
+  'control_resource_slots'
+] as const
+
+export function resolveLegacySourceIdentity(dbPath: string, db?: Database.Database): DatabaseIdentity {
+  const absolutePath = realpathSync(dbPath)
+  const conn = db ?? new Database(dbPath, { readonly: true, fileMustExist: true })
+  const closeAfter = db === undefined
+  try {
+    if (!conn.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_jobs'`).get()) {
+      return { absolutePath, sha256: hashCanonicalJson({ jobs: [] as const }) }
+    }
+    const jobs = conn
+      .prepare(
+        `SELECT id, status, plan_status, plan_revision, plan_confirmed_at
+         FROM thread_jobs ORDER BY id`
+      )
+      .all()
+    return { absolutePath, sha256: hashCanonicalJson({ jobs }) }
+  } finally {
+    if (closeAfter) conn.close()
+  }
+}
+
+export function resolveDatabaseIdentity(dbPath: string): DatabaseIdentity {
+  return resolveLegacySourceIdentity(dbPath)
+}
+
+export function migrationBackupMetaKey(backupId: string): string {
+  return `migration_backup:${backupId}`
+}
+
+export function hashStableReport(stable: MigrationStableReport): string {
+  return hashCanonicalJson({
+    sourceDatabaseIdentity: stable.sourceDatabaseIdentity,
+    sourceUserVersion: stable.sourceUserVersion,
+    sourceJobCount: stable.sourceJobCount,
+    mappedCount: stable.mappedCount,
+    conflicts: stable.conflicts,
+    countsByTable: stable.countsByTable,
+    countsByState: stable.countsByState,
+    perJobProjectionHashes: stable.perJobProjectionHashes,
+    invariantSummary: stable.invariantSummary
+  })
+}
+
+export function buildMigrationCopyReport(input: {
+  readonly generatedAtMs: number
+  readonly sourceDatabaseIdentity: DatabaseIdentity
+  readonly sourceUserVersion: number
+  readonly sourceJobCount: number
+  readonly mappedCount: number
+  readonly conflicts: readonly MigrationConflict[]
+  readonly countsByTable: Readonly<Record<string, number>>
+  readonly countsByState: Readonly<Record<string, number>>
+  readonly perJobProjectionHashes: Readonly<Record<string, string>>
+  readonly invariantSummary: MigrationInvariantSummary
+  readonly mapped: readonly ControlJobSeed[]
+  readonly warnings: readonly string[]
+}): MigrationCopyReport {
+  const stableReport: MigrationStableReport = {
+    sourceDatabaseIdentity: input.sourceDatabaseIdentity,
+    sourceUserVersion: input.sourceUserVersion,
+    sourceJobCount: input.sourceJobCount,
+    mappedCount: input.mappedCount,
+    conflicts: input.conflicts,
+    countsByTable: input.countsByTable,
+    countsByState: input.countsByState,
+    perJobProjectionHashes: input.perJobProjectionHashes,
+    invariantSummary: input.invariantSummary
+  }
+  return {
+    generatedAtMs: input.generatedAtMs,
+    warningCount: input.warnings.length,
+    hasConflicts: input.conflicts.length > 0,
+    mapped: input.mapped,
+    warnings: input.warnings,
+    reportHash: hashStableReport(stableReport),
+    ...stableReport
+  }
+}
+
 export function mapLegacyJob(input: LegacyJobSnapshot): MigrationResult<ControlJobSeed> {
   if (!KNOWN_LEGACY_STATUSES.has(input.status)) {
     return {
@@ -105,16 +250,25 @@ export function mapLegacyJob(input: LegacyJobSnapshot): MigrationResult<ControlJ
     }
   }
 
-  if (input.status === 'pausing') {
+  if (input.status === 'paused' || input.status === 'pausing') {
+    const hasEvidence = input.planConfirmedAt != null && (input.currentPlanRevision ?? 0) > 0
+    if (!hasEvidence) {
+      return {
+        kind: 'conflict',
+        code: 'migration.paused_resume_unproven',
+        detail: `job ${input.id} is ${input.status} without plan confirmation evidence`
+      }
+    }
     return {
       kind: 'mapped',
       value: {
         id: input.id,
         state: 'paused',
         controlIntent: 'none',
-        resumeTarget: inferResumeTarget(input)
+        resumeTarget: 'execution_queued'
       },
-      warnings: ['legacy pausing settled to paused during maintenance']
+      warnings:
+        input.status === 'pausing' ? ['legacy pausing settled to paused during maintenance'] : []
     }
   }
 
@@ -148,7 +302,7 @@ export function mapLegacyJob(input: LegacyJobSnapshot): MigrationResult<ControlJ
     kind: 'mapped',
     value: {
       id: input.id,
-      state: mapLegacyStatus(input.status),
+      state: mapLegacyStatus(input.status, input.planProgress?.status),
       controlIntent: 'none',
       resumeTarget: null
     },
@@ -156,7 +310,17 @@ export function mapLegacyJob(input: LegacyJobSnapshot): MigrationResult<ControlJ
   }
 }
 
-export function mapLegacyJobs(jobs: readonly LegacyJobSnapshot[]): MigrationCopyReport {
+export function mapLegacyJobs(
+  jobs: readonly LegacyJobSnapshot[],
+  options: {
+    readonly sourceDatabaseIdentity?: DatabaseIdentity
+    readonly sourceUserVersion?: number
+    readonly generatedAtMs?: number
+    readonly countsByTable?: Readonly<Record<string, number>>
+    readonly perJobProjectionHashes?: Readonly<Record<string, string>>
+    readonly invariantSummary?: MigrationInvariantSummary
+  } = {}
+): MigrationCopyReport {
   const mapped: ControlJobSeed[] = []
   const conflicts: MigrationConflict[] = []
   const warnings: string[] = []
@@ -176,34 +340,40 @@ export function mapLegacyJobs(jobs: readonly LegacyJobSnapshot[]): MigrationCopy
 
     mapped.push(result.value)
     countsByState[result.value.state] = (countsByState[result.value.state] ?? 0) + 1
-    perJobProjectionHashes[result.value.id] = hashCanonicalJson(result.value)
+    perJobProjectionHashes[result.value.id] = hashCanonicalJson({
+      seed: result.value,
+      legacyStatus: job.status,
+      planProgressStatus: job.planProgress?.status ?? null,
+      currentPlanRevision: job.currentPlanRevision ?? null,
+      planConfirmedAt: job.planConfirmedAt ?? null
+    })
     for (const warning of result.warnings) {
       warnings.push(`${job.id}: ${warning}`)
     }
   }
 
-  const stableReport = {
+  const emptyCounts = Object.fromEntries(MIGRATION_COUNT_TABLES.map((table) => [table, 0]))
+  return buildMigrationCopyReport({
+    generatedAtMs: options.generatedAtMs ?? Date.now(),
+    sourceDatabaseIdentity: options.sourceDatabaseIdentity ?? {
+      absolutePath: '',
+      sha256: ''
+    },
+    sourceUserVersion: options.sourceUserVersion ?? 0,
     sourceJobCount: jobs.length,
     mappedCount: mapped.length,
-    conflictCount: conflicts.length,
-    warningCount: warnings.length,
-    hasConflicts: conflicts.length > 0,
     conflicts,
+    countsByTable: options.countsByTable ?? emptyCounts,
     countsByState,
-    perJobProjectionHashes
-  }
-  const draft: Omit<MigrationCopyReport, 'reportHash'> = {
-    generatedAtMs: Date.now(),
-    ...stableReport,
+    perJobProjectionHashes: options.perJobProjectionHashes ?? perJobProjectionHashes,
+    invariantSummary: options.invariantSummary ?? {
+      integrityCheck: 'ok',
+      foreignKeyViolations: 0,
+      invariantViolations: []
+    },
     mapped,
-    warnings,
-    perJobProjectionHashes
-  }
-
-  return {
-    ...draft,
-    reportHash: hashCanonicalJson(stableReport)
-  }
+    warnings
+  })
 }
 
 export function hashFile(filePath: string): string {
@@ -230,19 +400,28 @@ export function readReport(reportPath: string): MigrationCopyReport {
   return parseMigrationCopyReport(parsed)
 }
 
+export function loadParseAndRehashReport(reportPath: string): MigrationCopyReport {
+  const report = readReport(reportPath)
+  const validation = validateCopyReport(report)
+  if (!validation.ok) {
+    throw new Error(validation.errors.join('; '))
+  }
+  return report
+}
+
 export function validateCopyReport(report: MigrationCopyReport): {
   readonly ok: boolean
   readonly errors: readonly string[]
 } {
   const errors: string[] = []
 
-  if (report.hasConflicts || report.conflictCount > 0) {
-    errors.push(`migration.has_conflicts: ${report.conflictCount}`)
+  if (report.hasConflicts || report.conflicts.length > 0) {
+    errors.push(`migration.has_conflicts: ${report.conflicts.length}`)
   }
 
-  if (report.sourceJobCount !== report.mappedCount + report.conflictCount) {
+  if (report.sourceJobCount !== report.mappedCount + report.conflicts.length) {
     errors.push(
-      `migration.count_mismatch: source=${report.sourceJobCount} mapped=${report.mappedCount} conflicts=${report.conflictCount}`
+      `migration.count_mismatch: source=${report.sourceJobCount} mapped=${report.mappedCount} conflicts=${report.conflicts.length}`
     )
   }
 
@@ -253,16 +432,11 @@ export function validateCopyReport(report: MigrationCopyReport): {
     )
   }
 
-  const recomputed = hashCanonicalJson({
-    sourceJobCount: report.sourceJobCount,
-    mappedCount: report.mappedCount,
-    conflictCount: report.conflictCount,
-    warningCount: report.warningCount,
-    hasConflicts: report.hasConflicts,
-    conflicts: report.conflicts,
-    countsByState: report.countsByState,
-    perJobProjectionHashes: report.perJobProjectionHashes
-  })
+  if (!report.sourceDatabaseIdentity.absolutePath || !report.sourceDatabaseIdentity.sha256) {
+    errors.push('migration.source_database_identity_missing')
+  }
+
+  const recomputed = hashStableReport(report)
   if (recomputed !== report.reportHash) {
     errors.push('migration.report_hash_mismatch')
   }
@@ -278,7 +452,6 @@ export function runPreflight(dbPath: string): PreflightResult | PreflightFailure
     return { ok: false, reason: `migration.db_missing: ${dbPath}` }
   }
 
-  // Schema generation marker is always readable as a typed union in-process.
   if (!SCHEMA_GENERATIONS.has('preparing')) {
     return { ok: false, reason: 'migration.schema_generation_unreadable' }
   }
@@ -365,11 +538,12 @@ export function summarizeReport(report: MigrationCopyReport): string {
     `generatedAtMs: ${report.generatedAtMs}`,
     `sourceJobCount: ${report.sourceJobCount}`,
     `mappedCount: ${report.mappedCount}`,
-    `conflictCount: ${report.conflictCount}`,
+    `conflictCount: ${report.conflicts.length}`,
     `warningCount: ${report.warningCount}`,
     `hasConflicts: ${report.hasConflicts}`,
     `reportHash: ${report.reportHash}`,
-    `countsByState: ${JSON.stringify(report.countsByState)}`
+    `countsByState: ${JSON.stringify(report.countsByState)}`,
+    `countsByTable: ${JSON.stringify(report.countsByTable)}`
   ]
   if (report.conflicts.length > 0) {
     lines.push('conflicts:')
@@ -383,17 +557,10 @@ export function summarizeReport(report: MigrationCopyReport): string {
   return lines.join('\n')
 }
 
-function inferResumeTarget(input: LegacyJobSnapshot): string | null {
-  if (input.planConfirmedAt != null && (input.currentPlanRevision ?? 0) > 0) {
-    return 'execution_queued'
-  }
-  return null
-}
-
-function mapLegacyStatus(status: string): string {
+function mapLegacyStatus(status: string, planProgressStatus?: string): string {
   switch (status) {
     case 'planning':
-      return 'planning_queued'
+      return planProgressStatus === 'pending' ? 'planning_queued' : 'planning_queued'
     case 'plan_editing':
     case 'plan_ready':
       return 'plan_review'
@@ -406,8 +573,6 @@ function mapLegacyStatus(status: string): string {
       return 'failed'
     case 'cancelled':
       return 'cancelled'
-    case 'paused':
-      return 'paused'
     default:
       return 'failed'
   }
@@ -422,7 +587,6 @@ function parseMigrationCopyReport(value: unknown): MigrationCopyReport {
     typeof row.generatedAtMs !== 'number' ||
     typeof row.sourceJobCount !== 'number' ||
     typeof row.mappedCount !== 'number' ||
-    typeof row.conflictCount !== 'number' ||
     typeof row.warningCount !== 'number' ||
     typeof row.hasConflicts !== 'boolean' ||
     typeof row.reportHash !== 'string' ||
@@ -430,21 +594,43 @@ function parseMigrationCopyReport(value: unknown): MigrationCopyReport {
     !Array.isArray(row.mapped) ||
     !Array.isArray(row.warnings) ||
     !row.countsByState ||
-    typeof row.countsByState !== 'object'
+    typeof row.countsByState !== 'object' ||
+    !row.countsByTable ||
+    typeof row.countsByTable !== 'object' ||
+    !row.sourceDatabaseIdentity ||
+    typeof row.sourceDatabaseIdentity !== 'object' ||
+    typeof row.sourceUserVersion !== 'number' ||
+    !row.invariantSummary ||
+    typeof row.invariantSummary !== 'object'
   ) {
     throw new Error('migration.report_invalid')
   }
 
-  return {
+  const identity = row.sourceDatabaseIdentity as Record<string, unknown>
+  if (typeof identity.absolutePath !== 'string' || typeof identity.sha256 !== 'string') {
+    throw new Error('migration.report_invalid')
+  }
+
+  const invariantSummary = row.invariantSummary as Record<string, unknown>
+  if (
+    typeof invariantSummary.integrityCheck !== 'string' ||
+    typeof invariantSummary.foreignKeyViolations !== 'number' ||
+    !Array.isArray(invariantSummary.invariantViolations)
+  ) {
+    throw new Error('migration.report_invalid')
+  }
+
+  const report = buildMigrationCopyReport({
     generatedAtMs: row.generatedAtMs,
+    sourceDatabaseIdentity: {
+      absolutePath: identity.absolutePath,
+      sha256: identity.sha256
+    },
+    sourceUserVersion: row.sourceUserVersion,
     sourceJobCount: row.sourceJobCount,
     mappedCount: row.mappedCount,
-    conflictCount: row.conflictCount,
-    warningCount: row.warningCount,
-    hasConflicts: row.hasConflicts,
     conflicts: row.conflicts as MigrationConflict[],
-    mapped: row.mapped as ControlJobSeed[],
-    warnings: row.warnings as string[],
+    countsByTable: row.countsByTable as Record<string, number>,
     countsByState: row.countsByState as Record<string, number>,
     perJobProjectionHashes:
       row.perJobProjectionHashes && typeof row.perJobProjectionHashes === 'object'
@@ -452,8 +638,23 @@ function parseMigrationCopyReport(value: unknown): MigrationCopyReport {
         : Object.fromEntries(
             (row.mapped as ControlJobSeed[]).map((seed) => [seed.id, hashCanonicalJson(seed)])
           ),
-    reportHash: row.reportHash
+    invariantSummary: {
+      integrityCheck: invariantSummary.integrityCheck,
+      foreignKeyViolations: invariantSummary.foreignKeyViolations,
+      invariantViolations: invariantSummary.invariantViolations as Array<{
+        jobId: string
+        code: string
+      }>
+    },
+    mapped: row.mapped as ControlJobSeed[],
+    warnings: row.warnings as string[]
+  })
+
+  if (report.reportHash !== row.reportHash) {
+    throw new Error('migration.report_hash_mismatch')
   }
+
+  return report
 }
 
 function stableStringify(value: unknown): string {

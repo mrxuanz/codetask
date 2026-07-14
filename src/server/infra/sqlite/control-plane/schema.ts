@@ -46,8 +46,6 @@ export const controlJobRuns = sqliteTable(
     executionGeneration: integer('execution_generation').notNull(),
     leaseOwnerBootId: text('lease_owner_boot_id'),
     currentRuntimeInstanceId: text('current_runtime_instance_id'),
-    pendingAttemptId: text('pending_attempt_id'),
-    lifecycleOperationId: text('lifecycle_operation_id'),
     heartbeatAtMs: integer('heartbeat_at_ms'),
     stopReason: text('stop_reason'),
     startedAtMs: integer('started_at_ms').notNull(),
@@ -120,7 +118,8 @@ export const controlTaskAttempts = sqliteTable(
     startedAtMs: integer('started_at_ms').notNull(),
     endedAtMs: integer('ended_at_ms'),
     resultHash: text('result_hash'),
-    resultRevision: integer('result_revision').notNull()
+    resultRevision: integer('result_revision').notNull(),
+    mustPauseAtCommit: integer('must_pause_at_commit')
   },
   (table) => [
     uniqueIndex('idx_control_task_attempts_unique').on(
@@ -147,6 +146,7 @@ export const controlVerifications = sqliteTable(
     fenceToken: text('fence_token'),
     verdictBlobHash: text('verdict_blob_hash'),
     resultHash: text('result_hash'),
+    resultRevision: integer('result_revision'),
     failureId: text('failure_id'),
     startedAtMs: integer('started_at_ms').notNull(),
     endedAtMs: integer('ended_at_ms')
@@ -163,14 +163,20 @@ export const controlVerifications = sqliteTable(
   ]
 )
 
-export const controlPlanRevisions = sqliteTable('control_plan_revisions', {
-  id: text('id').primaryKey(),
-  jobId: text('job_id').notNull(),
-  planRevision: integer('plan_revision').notNull(),
-  status: text('status').notNull(),
-  contentHash: text('content_hash').notNull(),
-  createdAtMs: integer('created_at_ms').notNull()
-})
+export const controlPlanRevisions = sqliteTable(
+  'control_plan_revisions',
+  {
+    id: text('id').primaryKey(),
+    jobId: text('job_id').notNull(),
+    planRevision: integer('plan_revision').notNull(),
+    status: text('status').notNull(),
+    contentHash: text('content_hash').notNull(),
+    createdAtMs: integer('created_at_ms').notNull()
+  },
+  (table) => [
+    uniqueIndex('idx_control_plan_revisions_job_revision').on(table.jobId, table.planRevision)
+  ]
+)
 
 export const controlPlanMilestones = sqliteTable('control_plan_milestones', {
   id: text('id').primaryKey(),
@@ -237,20 +243,31 @@ export const controlOutboxEvents = sqliteTable(
   },
   (table) => [
     index('idx_control_outbox_dispatch').on(table.dispatchedAtMs, table.eventId),
-    index('idx_control_outbox_topic').on(table.topic, table.eventId)
+    index('idx_control_outbox_topic').on(table.topic, table.eventId),
+    uniqueIndex('idx_control_outbox_entity_revision').on(table.entityId, table.aggregateRevision)
   ]
 )
 
-export const controlCommandDedup = sqliteTable('control_command_dedup', {
-  actorUsername: text('actor_username').notNull(),
-  idempotencyKey: text('idempotency_key').notNull(),
-  commandType: text('command_type').notNull(),
-  requestHash: text('request_hash').notNull(),
-  responseJson: text('response_json').notNull(),
-  responseRevision: integer('response_revision').notNull(),
-  createdAtMs: integer('created_at_ms').notNull(),
-  expiresAtMs: integer('expires_at_ms').notNull()
-})
+export const controlCommandDedup = sqliteTable(
+  'control_command_dedup',
+  {
+    actorUsername: text('actor_username').notNull(),
+    commandType: text('command_type').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    responseJson: text('response_json').notNull(),
+    responseRevision: integer('response_revision').notNull(),
+    createdAtMs: integer('created_at_ms').notNull(),
+    expiresAtMs: integer('expires_at_ms').notNull()
+  },
+  (table) => [
+    uniqueIndex('idx_control_command_dedup_pk').on(
+      table.actorUsername,
+      table.commandType,
+      table.idempotencyKey
+    )
+  ]
+)
 
 export const controlJobFailures = sqliteTable('control_job_failures', {
   id: text('id').primaryKey(),
@@ -266,6 +283,8 @@ export const controlSchemaMeta = sqliteTable('control_schema_meta', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
   sourceMigration: integer('source_migration').notNull(),
+  sourceSchemaVersion: integer('source_schema_version'),
+  createdByMigration: integer('created_by_migration'),
   copyReportHash: text('copy_report_hash'),
   backupId: text('backup_id'),
   validationSummaryJson: text('validation_summary_json'),

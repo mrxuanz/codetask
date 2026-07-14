@@ -1,8 +1,7 @@
 import { join } from 'path'
 import { serve, type ServerType } from '@hono/node-server'
 import { is } from '@electron-toolkit/utils'
-import { bootstrapRuntime, createApp, ensureRuntimeReady } from '../server'
-import { isV3Authoritative } from '../server/application/cutover-state'
+import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
 import {
   getSandboxSupervisorManager,
@@ -24,6 +23,7 @@ export interface ServerInfo {
 }
 
 let activeServer: ServerType | null = null
+let shutdownPromise: Promise<void> | null = null
 
 function formatUrl(host: string, port: number): string {
   const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
@@ -56,6 +56,15 @@ function listen(
   })
 }
 
+export function getShutdownPromise(): Promise<void> | null {
+  return shutdownPromise
+}
+
+export async function gracefulShutdown(): Promise<void> {
+  shutdownPromise ??= stopAppServer()
+  return shutdownPromise
+}
+
 export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   const rendererDevUrl = process.env['ELECTRON_RENDERER_URL']
   const staticDir = join(__dirname, '../renderer')
@@ -84,7 +93,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   )
 
   const ctx = bootstrapRuntime({ dataDir, mode: cli.mode })
-  // Do not expose HTTP until database facts, reconciliation, and outbox are ready.
+  // Scheduler, outbox, and reconciliation must finish before HTTP bind/listen.
   await ensureRuntimeReady(ctx)
 
   if (cli.mode === 'server') {
@@ -123,10 +132,8 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
       activeServer = await listen(app, cli.host, port)
       boundPort = port
       bindChanged = cli.port !== port
-      const { startControlPlaneScheduler } = await import('../server/application/control-plane-runtime')
-      await startControlPlaneScheduler(ctx)
       initConversationMcpBackend(port)
-      if (!isV3Authoritative(ctx.db)) {
+      if (ctx.applicationRuntime?.kind !== 'v3') {
         void import('../server/legacy-control-plane/job-queue')
           .then((module) => module.resumeJobQueuesAfterServerReady(supervisor))
           .catch((error: unknown) => {
@@ -167,13 +174,11 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
 }
 
 export async function stopAppServer(): Promise<void> {
-  // 1) Stop accepting new connections
   if (activeServer) {
     activeServer.close()
     activeServer = null
   }
 
-  // 2) Stop background timers before draining work
   try {
     const { stopRetentionJanitor } = await import('../server/retention/lifecycle')
     stopRetentionJanitor()
@@ -189,23 +194,13 @@ export async function stopAppServer(): Promise<void> {
   }
 
   try {
-    const { stopWorkloadReconcilerForTests } = await import('../server/legacy-control-plane/reconcile')
-    stopWorkloadReconcilerForTests()
+    await shutdownRuntime('app_shutdown')
   } catch (error) {
-    console.warn('[server] failed to stop workload reconciler', error)
+    console.warn('[server] failed to shutdown application runtime', error)
   }
 
-  try {
-    const { shutdownControlPlaneRuntime } = await import('../server/application/control-plane-runtime')
-    await shutdownControlPlaneRuntime('app_shutdown')
-  } catch (error) {
-    console.warn('[server] failed to shutdown control-plane runtime', error)
-  }
-
-  // 3) Reap sandbox children
   await shutdownSandboxSupervisor()
 
-  // 4) Close DB last
   try {
     const { closeDatabaseForTests } = await import('../server/db')
     closeDatabaseForTests()

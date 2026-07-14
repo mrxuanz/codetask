@@ -1,10 +1,79 @@
 import { eq, and, sql } from 'drizzle-orm'
 import type { TaskRepository, TaskRow, TaskAttemptRow, TaskState } from '../../../application/ports/task-repository'
-import type { ControlPlaneDatabase } from './job-repository'
+import type { DbExecutor } from './db-executor'
 import { controlJobTasks, controlTaskAttempts } from './schema'
 
+function mapTaskRow(result: {
+  jobId: string
+  executionGeneration: number
+  taskId: string
+  sourcePlanRevision: number
+  state: string
+  sortOrder: number
+  originKind: string | null
+  parentTaskId: string | null
+  title: string
+  abilityCode: string | null
+  coreCode: string | null
+  createdAtMs: number
+  updatedAtMs: number
+}): TaskRow {
+  return {
+    jobId: result.jobId,
+    executionGeneration: result.executionGeneration,
+    taskId: result.taskId,
+    sourcePlanRevision: result.sourcePlanRevision,
+    state: result.state as TaskState,
+    sortOrder: result.sortOrder,
+    originKind: result.originKind,
+    parentTaskId: result.parentTaskId,
+    title: result.title,
+    abilityCode: result.abilityCode,
+    coreCode: result.coreCode,
+    createdAtMs: result.createdAtMs,
+    updatedAtMs: result.updatedAtMs
+  }
+}
+
+function mapAttemptRow(result: {
+  id: string
+  jobId: string
+  executionGeneration: number
+  taskId: string
+  attemptNo: number
+  runId: string
+  state: string
+  provider: string | null
+  evidenceBlobHash: string | null
+  failureId: string | null
+  startedAtMs: number
+  endedAtMs: number | null
+  resultHash: string | null
+  resultRevision: number | null
+  mustPauseAtCommit: number | null
+}): TaskAttemptRow {
+  return {
+    id: result.id,
+    jobId: result.jobId,
+    executionGeneration: result.executionGeneration,
+    taskId: result.taskId,
+    attemptNo: result.attemptNo,
+    runId: result.runId,
+    state: result.state,
+    provider: result.provider,
+    evidenceBlobHash: result.evidenceBlobHash,
+    failureId: result.failureId,
+    startedAtMs: result.startedAtMs,
+    endedAtMs: result.endedAtMs,
+    resultHash: result.resultHash,
+    resultRevision: result.resultRevision,
+    mustPauseAtCommit:
+      result.mustPauseAtCommit === null ? null : result.mustPauseAtCommit === 1
+  }
+}
+
 export class SqliteTaskRepository implements TaskRepository {
-  constructor(private readonly db: ControlPlaneDatabase) {}
+  constructor(private readonly db: DbExecutor) {}
 
   getCurrentTask(jobId: string, generation: number, taskId: string): TaskRow | null {
     const result = this.db
@@ -19,23 +88,7 @@ export class SqliteTaskRepository implements TaskRepository {
       )
       .get()
 
-    if (!result) return null
-
-    return {
-      jobId: result.jobId,
-      executionGeneration: result.executionGeneration,
-      taskId: result.taskId,
-      sourcePlanRevision: result.sourcePlanRevision,
-      state: result.state as TaskState,
-      sortOrder: result.sortOrder,
-      originKind: result.originKind,
-      parentTaskId: result.parentTaskId,
-      title: result.title,
-      abilityCode: result.abilityCode,
-      coreCode: result.coreCode,
-      createdAtMs: result.createdAtMs,
-      updatedAtMs: result.updatedAtMs
-    }
+    return result ? mapTaskRow(result) : null
   }
 
   listTasksForGeneration(jobId: string, generation: number): readonly TaskRow[] {
@@ -50,21 +103,7 @@ export class SqliteTaskRepository implements TaskRepository {
       )
       .orderBy(controlJobTasks.sortOrder)
       .all()
-      .map((task) => ({
-        jobId: task.jobId,
-        executionGeneration: task.executionGeneration,
-        taskId: task.taskId,
-        sourcePlanRevision: task.sourcePlanRevision,
-        state: task.state as TaskState,
-        sortOrder: task.sortOrder,
-        originKind: task.originKind,
-        parentTaskId: task.parentTaskId,
-        title: task.title,
-        abilityCode: task.abilityCode,
-        coreCode: task.coreCode,
-        createdAtMs: task.createdAtMs,
-        updatedAtMs: task.updatedAtMs
-      }))
+      .map((task) => mapTaskRow(task))
   }
 
   updateTaskState(
@@ -72,12 +111,12 @@ export class SqliteTaskRepository implements TaskRepository {
     generation: number,
     taskId: string,
     expectedState: TaskState,
-    nextState: TaskState
+    nextState: TaskState,
+    updatedAtMs: number
   ): boolean {
-    const now = Date.now()
     const result = this.db
       .update(controlJobTasks)
-      .set({ state: nextState, updatedAtMs: now })
+      .set({ state: nextState, updatedAtMs })
       .where(
         and(
           eq(controlJobTasks.jobId, jobId),
@@ -140,24 +179,7 @@ export class SqliteTaskRepository implements TaskRepository {
       .where(eq(controlTaskAttempts.id, attemptId))
       .get()
 
-    if (!result) return null
-
-    return {
-      id: result.id,
-      jobId: result.jobId,
-      executionGeneration: result.executionGeneration,
-      taskId: result.taskId,
-      attemptNo: result.attemptNo,
-      runId: result.runId,
-      state: result.state,
-      provider: result.provider,
-      evidenceBlobHash: result.evidenceBlobHash,
-      failureId: result.failureId,
-      startedAtMs: result.startedAtMs,
-      endedAtMs: result.endedAtMs,
-      resultHash: result.resultHash,
-      resultRevision: result.resultRevision
-    }
+    return result ? mapAttemptRow(result) : null
   }
 
   getRunningAttempt(attemptId: string): TaskAttemptRow | null {
@@ -165,13 +187,26 @@ export class SqliteTaskRepository implements TaskRepository {
     return attempt?.state === 'running' ? attempt : null
   }
 
+  getPendingAttemptForRun(runId: string): TaskAttemptRow | null {
+    const result = this.db
+      .select()
+      .from(controlTaskAttempts)
+      .where(
+        and(eq(controlTaskAttempts.runId, runId), eq(controlTaskAttempts.state, 'pending'))
+      )
+      .get()
+
+    return result ? mapAttemptRow(result) : null
+  }
+
   finishAttempt(
     attemptId: string,
     resultHash: string,
     evidenceHash: string,
-    resultRevision: number
+    resultRevision: number,
+    endedAtMs: number,
+    mustPauseAtCommit?: boolean
   ): void {
-    const now = Date.now()
     this.db
       .update(controlTaskAttempts)
       .set({
@@ -179,47 +214,54 @@ export class SqliteTaskRepository implements TaskRepository {
         resultHash,
         evidenceBlobHash: evidenceHash,
         resultRevision,
-        endedAtMs: now
+        endedAtMs,
+        mustPauseAtCommit: mustPauseAtCommit === true ? 1 : mustPauseAtCommit === false ? 0 : null
       })
       .where(eq(controlTaskAttempts.id, attemptId))
       .run()
   }
 
-  createAttempt(jobId: string, generation: number, taskId: string, runId: string): string {
-    const attemptId = crypto.randomUUID()
-    const now = Date.now()
-
-    // Get next attempt number
-    const maxAttempt = this.db
-      .select({ maxNo: sql`MAX(${controlTaskAttempts.attemptNo})` })
-      .from(controlTaskAttempts)
-      .where(
-        and(
-          eq(controlTaskAttempts.jobId, jobId),
-          eq(controlTaskAttempts.executionGeneration, generation),
-          eq(controlTaskAttempts.taskId, taskId)
+  createAttempt(input: {
+    readonly id: string
+    readonly jobId: string
+    readonly generation: number
+    readonly taskId: string
+    readonly runId: string
+    readonly state: 'pending' | 'running' | 'starting'
+    readonly startedAtMs: number
+    readonly attemptNo?: number
+  }): void {
+    let attemptNo = input.attemptNo
+    if (attemptNo === undefined) {
+      const maxAttempt = this.db
+        .select({ maxNo: sql<number>`MAX(${controlTaskAttempts.attemptNo})` })
+        .from(controlTaskAttempts)
+        .where(
+          and(
+            eq(controlTaskAttempts.jobId, input.jobId),
+            eq(controlTaskAttempts.executionGeneration, input.generation),
+            eq(controlTaskAttempts.taskId, input.taskId)
+          )
         )
-      )
-      .get() as { maxNo: number | null } | undefined
+        .get()
 
-    const nextAttemptNo = (maxAttempt?.maxNo ?? 0) + 1
+      attemptNo = (maxAttempt?.maxNo ?? 0) + 1
+    }
 
     this.db
       .insert(controlTaskAttempts)
       .values({
-        id: attemptId,
-        jobId,
-        executionGeneration: generation,
-        taskId,
-        attemptNo: nextAttemptNo,
-        runId,
-        state: 'running',
-        startedAtMs: now,
+        id: input.id,
+        jobId: input.jobId,
+        executionGeneration: input.generation,
+        taskId: input.taskId,
+        attemptNo,
+        runId: input.runId,
+        state: input.state,
+        startedAtMs: input.startedAtMs,
         resultRevision: 0
       })
       .run()
-
-    return attemptId
   }
 
   startAttempt(attemptId: string): boolean {
@@ -229,7 +271,7 @@ export class SqliteTaskRepository implements TaskRepository {
       .where(
         and(
           eq(controlTaskAttempts.id, attemptId),
-          eq(controlTaskAttempts.state, 'starting')
+          sql`${controlTaskAttempts.state} IN ('pending', 'starting')`
         )
       )
       .run()
@@ -251,21 +293,6 @@ export class SqliteTaskRepository implements TaskRepository {
       .orderBy(controlTaskAttempts.attemptNo)
       .all()
 
-    return results.map((r) => ({
-      id: r.id,
-      jobId: r.jobId,
-      executionGeneration: r.executionGeneration,
-      taskId: r.taskId,
-      attemptNo: r.attemptNo,
-      runId: r.runId,
-      state: r.state,
-      provider: r.provider,
-      evidenceBlobHash: r.evidenceBlobHash,
-      failureId: r.failureId,
-      startedAtMs: r.startedAtMs,
-      endedAtMs: r.endedAtMs,
-      resultHash: r.resultHash,
-      resultRevision: r.resultRevision
-    }))
+    return results.map((r) => mapAttemptRow(r))
   }
 }

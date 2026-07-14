@@ -12,7 +12,8 @@ import {
 import { createJobsRoutes, type HttpRequest } from './jobs-routes'
 import { fail, ok } from '../../response'
 import { code } from '../../error'
-import { CommandError, DomainError, commandError } from '../../domain/jobs/job-errors'
+import { CommandError, commandError } from '../../domain/jobs/job-errors'
+import { isV3Authoritative } from '../../application/cutover-state'
 import { formatSseEvent, formatSseJsonEvent, type SseEnvelope } from './sse-envelope'
 
 const CONTROL_PLANE_REPLAY_LIMIT = 100
@@ -42,7 +43,7 @@ async function toHttpRequest(c: {
     try {
       body = await c.req.json()
     } catch {
-      body = undefined
+      throw commandError('contract.invalid_payload', { field: 'body' })
     }
   }
 
@@ -67,21 +68,6 @@ function toActor(username: string, requestId: string): ActorContext {
 }
 
 function mapRouteError(error: unknown): { status: number; body: ReturnType<typeof fail> } | null {
-  if (!(error instanceof Error)) {
-    return null
-  }
-
-  if (
-    error.message.includes('header required') ||
-    error.message.includes('Invalid If-Match') ||
-    error.message.includes('Invalid Idempotency-Key')
-  ) {
-    return {
-      status: 400,
-      body: fail(code.BAD_REQUEST, error.message)
-    }
-  }
-
   if (error instanceof CommandError) {
     return {
       status: error.httpStatus,
@@ -95,6 +81,10 @@ function mapRouteError(error: unknown): { status: number; body: ReturnType<typeo
         error.details
       )
     }
+  }
+
+  if (!(error instanceof Error)) {
+    return null
   }
 
   if (error.message === 'job.not_found') {
@@ -140,13 +130,21 @@ function parseLastEventId(header: string | undefined): number {
   return parsed
 }
 
+function assertAuthoritativeCommands(ctx: AppContext): void {
+  if (!isV3Authoritative(ctx.db)) {
+    throw commandError('control_plane.not_authoritative')
+  }
+}
+
 export function mountV3Routes(ctx: AppContext): Hono {
   const routes = new Hono()
   const services = getControlPlaneServices(ctx)
   const jobs = createJobsRoutes(services.commandService, services.queryService)
 
+  type RouteContext = Parameters<Parameters<Hono['get']>[1]>[0]
+
   async function invoke(
-    c: Parameters<Parameters<Hono['post']>[1]>[0],
+    c: RouteContext,
     handler: (
       request: HttpRequest,
       actor: ActorContext
@@ -174,6 +172,17 @@ export function mountV3Routes(ctx: AppContext): Hono {
       }
       throw error
     }
+  }
+
+  async function invokeCommand(
+    c: RouteContext,
+    handler: (
+      request: HttpRequest,
+      actor: ActorContext
+    ) => Promise<{ status: number; body: unknown; headers?: Record<string, string> }>
+  ) {
+    assertAuthoritativeCommands(ctx)
+    return invoke(c, handler)
   }
 
   routes.get('/events', async (c) => {
@@ -334,10 +343,10 @@ export function mountV3Routes(ctx: AppContext): Hono {
 
   routes.get('/jobs', (c) => invoke(c, jobs.listJobs))
   routes.get('/jobs/:id', (c) => invoke(c, jobs.getJob))
-  routes.post('/jobs/:id/pause', (c) => invoke(c, jobs.pause))
-  routes.post('/jobs/:id/continue', (c) => invoke(c, jobs.continue))
-  routes.post('/jobs/:id/cancel', (c) => invoke(c, jobs.cancel))
-  routes.post('/jobs/:id/restart-execution', (c) => invoke(c, jobs.restartExecution))
+  routes.post('/jobs/:id/pause', (c) => invokeCommand(c, jobs.pause))
+  routes.post('/jobs/:id/continue', (c) => invokeCommand(c, jobs.continue))
+  routes.post('/jobs/:id/cancel', (c) => invokeCommand(c, jobs.cancel))
+  routes.post('/jobs/:id/restart-execution', (c) => invokeCommand(c, jobs.restartExecution))
 
   return routes
 }

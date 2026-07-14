@@ -3,7 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { parseCliArgs } from './cli'
-import { startAppServer, stopAppServer, type ServerInfo } from './server'
+import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
 import { SafeLoggerImpl } from '../server/application/safe-logger'
 
 let logDir: string | undefined
@@ -42,8 +42,8 @@ function createWindow(serverUrl: string): void {
 }
 
 let shutdownPromise: Promise<void> | null = null
-function gracefulShutdown(): Promise<void> {
-  shutdownPromise ??= stopAppServer()
+function gracefulShutdownFromApp(): Promise<void> {
+  shutdownPromise ??= gracefulShutdown()
   return shutdownPromise
 }
 
@@ -73,9 +73,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async (event) => {
   if (!shutdownPromise) {
     event.preventDefault()
-    await gracefulShutdown()
+    await gracefulShutdownFromApp()
     app.quit()
   }
 })
-process.on('SIGTERM', () => void gracefulShutdown().finally(() => process.exit(0)))
-process.on('SIGINT', () => void gracefulShutdown().finally(() => process.exit(0)))
+process.on('SIGTERM', () => void gracefulShutdownFromApp().finally(() => process.exit(0)))
+process.on('SIGINT', () => void gracefulShutdownFromApp().finally(() => process.exit(0)))

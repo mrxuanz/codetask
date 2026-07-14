@@ -105,6 +105,7 @@ export type StartVerificationPayload = Static<typeof StartVerificationPayloadSch
 
 export const CompleteSliceVerificationPayloadSchema = Type.Object(
   {
+    verificationId: Type.String({ minLength: 1, maxLength: 128 }),
     scopeId: Type.String({ minLength: 1, maxLength: 128 }),
     verdict: Type.Unknown()
   },
@@ -115,6 +116,7 @@ export type CompleteSliceVerificationPayload = Static<typeof CompleteSliceVerifi
 
 export const CompleteMilestoneVerificationPayloadSchema = Type.Object(
   {
+    verificationId: Type.String({ minLength: 1, maxLength: 128 }),
     scopeId: Type.String({ minLength: 1, maxLength: 128 }),
     verdict: Type.Unknown()
   },

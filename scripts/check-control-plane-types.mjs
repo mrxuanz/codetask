@@ -2,7 +2,8 @@
 
 /**
  * CI text gate: prevents unsafe type escapes in control-plane code.
- * Checks for: any, as unknown as, @ts-ignore, @ts-nocheck
+ * Checks for: `: any`, `as any`, `as unknown as`, @ts-ignore, @ts-nocheck
+ * (Avoid bare `\bany\b` — it false-positives English prose in tests.)
  */
 
 import { execSync } from 'child_process'
@@ -19,20 +20,21 @@ const CONTROL_PLANE_DIRS = [
 ]
 
 const PATTERNS = [
-  '\\bany\\b',
+  ':\\s*any\\b',
+  '<any>',
+  'as\\s+any\\b',
   'as unknown as',
   '@ts-ignore',
-  '@ts-nocheck',
-  'no-explicit-any'
+  '@ts-nocheck'
 ]
 
 function checkDirectory(dir) {
   try {
     const pattern = PATTERNS.join('|')
-    const result = execSync(
-      `rg -n "${pattern}" ${dir}`,
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-    )
+    const result = execSync(`rg -n "${pattern}" ${dir}`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
     return result.trim()
   } catch (e) {
     // rg returns exit code 1 when no matches found

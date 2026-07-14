@@ -12,8 +12,6 @@ export interface ActiveRunSummary {
   readonly fenceToken: string
   readonly executionGeneration: number
   readonly currentRuntimeInstanceId: string | null
-  readonly pendingAttemptId: string | null
-  readonly lifecycleOperationId: string | null
 }
 
 export function validateJobInvariant(

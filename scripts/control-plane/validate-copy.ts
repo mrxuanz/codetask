@@ -6,12 +6,12 @@
  *   node --import tsx scripts/control-plane/validate-copy.ts --report <report.json>
  */
 
-import { parseArgs, readReport, requireArg, validateCopyReport } from './migration-lib'
+import { parseArgs, requireArg, validateCopyReport, loadParseAndRehashReport } from './migration-lib'
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2))
   const reportPath = requireArg(args, 'report')
-  const report = readReport(reportPath)
+  const report = loadParseAndRehashReport(reportPath)
   const result = validateCopyReport(report)
   console.log(
     JSON.stringify(

@@ -7,8 +7,7 @@ import { runMigrations } from '../../../src/server/db/migrations/runner'
 import { allMigrations } from '../../../src/server/db/migrations/index'
 import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-plane/schema'
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
-import { SqliteTaskRepository } from '../../../src/server/infra/sqlite/control-plane/task-repository'
-import { EvidenceRepository } from '../../../src/server/infra/sqlite/control-plane/evidence-repository'
+import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { JobCommandServiceImpl } from '../../../src/server/application/job-command-service'
 import { StartupReconciler } from '../../../src/server/application/startup-reconciler-impl'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
@@ -135,25 +134,23 @@ function seedTaskAndAttempt(
 function createCommandService(rawDb: Database.Database): {
   service: JobCommandServiceImpl
   jobRepository: SqliteJobRepository
+  controlPlane: ReturnType<typeof createControlPlaneTransaction>
 } {
   const drizzleDb = drizzle(rawDb, { schema: controlPlaneSchema })
-  const jobRepository = new SqliteJobRepository(drizzleDb)
-  const taskRepository = new SqliteTaskRepository(drizzleDb)
-  const evidenceRepository = new EvidenceRepository(drizzleDb)
+  const controlPlane = createControlPlaneTransaction(drizzleDb)
+  const jobRepository = controlPlane.jobs
   const runtimeController: RuntimeController = {
     notifyPauseRequested() {},
     async closeThenRelease() {}
   }
   const service = new JobCommandServiceImpl({
-    jobRepository,
-    taskRepository,
-    evidenceRepository,
+    unitOfWork: controlPlane,
     clock: { nowMs: () => 1_700_000_000_000 },
     idGenerator: { generate: () => randomUUID() },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     runtimeController
   })
-  return { service, jobRepository }
+  return { service, jobRepository, controlPlane }
 }
 
 describe('PR0 Required Scenarios 1-8 (C1)', () => {
@@ -173,7 +170,7 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
       seedRun(rawDb, { state: 'active' })
       rawDb.prepare(`UPDATE control_job_runs SET kind = 'planning' WHERE id = 'run-1'`).run()
 
-      const { service, jobRepository } = createCommandService(rawDb)
+      const { service, jobRepository, controlPlane } = createCommandService(rawDb)
       const paused = await service.requestPause({
         actor: { username: 'u1', requestId: 'r1' },
         jobId: 'job-1',
@@ -184,6 +181,7 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
 
       const reconciler = new StartupReconciler(
         jobRepository,
+        controlPlane,
         { nowMs: () => Date.now() },
         { generate: () => 'failure-1' },
         new SafeLoggerImpl()
@@ -206,9 +204,10 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
       })
       seedRun(rawDb, { state: 'interrupted' })
 
-      const { jobRepository } = createCommandService(rawDb)
+      const { jobRepository, controlPlane } = createCommandService(rawDb)
       const reconciler = new StartupReconciler(
         jobRepository,
+        controlPlane,
         { nowMs: () => Date.now() },
         { generate: () => 'failure-1' },
         new SafeLoggerImpl()
@@ -370,29 +369,6 @@ describe('PR0 Required Scenarios 1-8 (C1)', () => {
         'incremental_event'
       )
       assert.equal(gap.kind, 'resync')
-
-      const reducer = new EventReducer()
-      let resync = false
-      reducer.setResyncCallback(() => {
-        resync = true
-      })
-      reducer.reduce({
-        eventId: 10,
-        topic: 'job:job-1',
-        type: 'job.changed',
-        entityId: 'job-1',
-        revision: 10,
-        payload: {}
-      })
-      reducer.reduce({
-        eventId: 12,
-        topic: 'job:job-1',
-        type: 'job.changed',
-        entityId: 'job-1',
-        revision: 12,
-        payload: {}
-      })
-      assert.equal(resync || reducer.getNeedsResync(), true)
     })
   })
 

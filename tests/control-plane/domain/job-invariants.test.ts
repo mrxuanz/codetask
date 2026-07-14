@@ -34,8 +34,6 @@ function buildActiveRun(
     fenceToken: 'fence-1',
     executionGeneration: 1,
     currentRuntimeInstanceId: 'instance-1',
-    pendingAttemptId: null,
-    lifecycleOperationId: null,
     ...overrides
   }
 }

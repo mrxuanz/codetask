@@ -13,6 +13,7 @@ export {
   ensureRuntimeReady,
   getAppContext,
   resetAppContextForTests,
+  shutdownRuntime,
   type AppContext,
   type BootstrapOptions
 } from './bootstrap'

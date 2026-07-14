@@ -1,27 +1,58 @@
-import type { ControlPlaneRuntime } from './control-plane-runtime'
 import type {
   ExecutionRunContext,
   ExecutionStepResult,
   ExecutorDependencies,
   NextWorkDecision
 } from './executor-loop'
-import type { WorkerCommandEnvelope } from '@shared/contracts/control-plane'
+import type { TaskExecutionProvider } from './ports/task-execution-provider'
+import type { Clock } from './ports/clock'
+import type { IdGenerator } from './ports/id-generator'
+import type { JobCommandService, WorkerCommandEnvelope } from '@shared/contracts/control-plane'
+import type { JobRepository } from './ports/job-repository'
+import type { TaskRepository } from './ports/task-repository'
+import type { ControlPlaneUnitOfWork } from './ports/unit-of-work'
+import type { RuntimeSupervisor } from './runtime-supervisor'
+import {
+  TaskResultValidationError,
+  validateTaskResult
+} from '../domain/tasks/validate-task-result'
 
 type EmptyWorkerCommand = WorkerCommandEnvelope<Record<string, never>>
 
+/** Narrow ports the executor loop needs — avoids casting a full ControlPlaneRuntime in tests. */
+export type ExecutorRuntimePorts = {
+  readonly jobRepository: JobRepository
+  readonly taskRepository: TaskRepository
+  readonly unitOfWork: ControlPlaneUnitOfWork
+  readonly commandService: JobCommandService
+  readonly runtimeSupervisor: RuntimeSupervisor
+}
+
+export type ExecutorAdapterConfig = {
+  readonly runtime: ExecutorRuntimePorts
+  readonly taskExecutionProvider: TaskExecutionProvider
+  readonly clock?: Clock
+  readonly idGenerator?: IdGenerator
+}
+
+const defaultClock: Clock = { nowMs: () => Date.now() }
+const defaultIds: IdGenerator = { generate: () => crypto.randomUUID() }
+
 /**
  * Binds the generic V3 loop to the authoritative control-plane repositories.
- * Job macro-state changes remain command-service operations; the adapter only
- * selects work and creates task-attempt records immediately before checkpointing.
+ * Task results come only from the injected TaskExecutionProvider — never synthesized here.
  */
 export function createExecutorDependencies(
-  runtime: ControlPlaneRuntime,
-  _context: ExecutionRunContext
+  config: ExecutorAdapterConfig,
+  context: ExecutionRunContext
 ): ExecutorDependencies {
+  const { runtime, taskExecutionProvider } = config
+  const clock = config.clock ?? defaultClock
+  const idGenerator = config.idGenerator ?? defaultIds
   return {
     queryNextWork: async (runContext) => queryNextWork(runtime, runContext),
     executeOneDecision: async (decision, runContext) =>
-      executeOneDecision(runtime, decision, runContext),
+      executeOneDecision(runtime, taskExecutionProvider, clock, idGenerator, decision, runContext),
     commandService: {
       acknowledgePause: async (input) =>
         runtime.commandService.acknowledgePause(input as EmptyWorkerCommand),
@@ -42,7 +73,7 @@ export function createExecutorDependencies(
 }
 
 async function queryNextWork(
-  runtime: ControlPlaneRuntime,
+  runtime: ExecutorRuntimePorts,
   context: ExecutionRunContext
 ): Promise<NextWorkDecision> {
   const job = runtime.jobRepository.getWorkerAggregate({
@@ -64,6 +95,9 @@ async function queryNextWork(
   const nextQueued = tasks.find((task) => task.state === 'queued')
   if (nextQueued) return { kind: 'work', key: `task:${nextQueued.taskId}` }
 
+  const nextRunning = tasks.find((task) => task.state === 'running')
+  if (nextRunning) return { kind: 'work', key: `task:${nextRunning.taskId}` }
+
   if (tasks.every((task) => task.state === 'completed' || task.state === 'skipped')) {
     return { kind: 'complete', revision: job.stateRevision }
   }
@@ -72,7 +106,10 @@ async function queryNextWork(
 }
 
 async function executeOneDecision(
-  runtime: ControlPlaneRuntime,
+  runtime: ExecutorRuntimePorts,
+  taskExecutionProvider: TaskExecutionProvider,
+  clock: Clock,
+  idGenerator: IdGenerator,
   decision: NextWorkDecision,
   context: ExecutionRunContext
 ): Promise<ExecutionStepResult> {
@@ -86,23 +123,94 @@ async function executeOneDecision(
     context.executionGeneration,
     taskId
   )
-  if (task === null || task.state !== 'queued') return { kind: 'stale_run' }
+  if (task === null || (task.state !== 'queued' && task.state !== 'running')) {
+    return { kind: 'stale_run' }
+  }
 
-  const started = runtime.taskRepository.updateTaskState(
-    context.jobId,
-    context.executionGeneration,
-    taskId,
-    'queued',
-    'running'
-  )
-  if (!started) return { kind: 'stale_run' }
+  let attemptId: string
+  if (task.state === 'queued') {
+    const nowMs = clock.nowMs()
+    const started = runtime.taskRepository.updateTaskState(
+      context.jobId,
+      context.executionGeneration,
+      taskId,
+      'queued',
+      'running',
+      nowMs
+    )
+    if (!started) return { kind: 'stale_run' }
 
-  const attemptId = runtime.taskRepository.createAttempt(
-    context.jobId,
-    context.executionGeneration,
+    attemptId = runtime.unitOfWork.transaction((tx) => {
+      const id = idGenerator.generate()
+      tx.tasks.createAttempt({
+        id,
+        jobId: context.jobId,
+        generation: context.executionGeneration,
+        taskId,
+        runId: context.runId,
+        state: 'running',
+        startedAtMs: nowMs
+      })
+      return id
+    })
+  } else {
+    const attempts = runtime.taskRepository.getTaskAttempts(
+      context.jobId,
+      context.executionGeneration,
+      taskId
+    )
+    const running = attempts.find(
+      (attempt) =>
+        attempt.runId === context.runId &&
+        attempt.state === 'running' &&
+        attempt.resultHash === null
+    )
+    if (running === undefined) {
+      return { kind: 'stale_run' }
+    }
+    attemptId = running.id
+  }
+
+  const providerOutcome = await taskExecutionProvider.executeTask({
+    jobId: context.jobId,
+    runId: context.runId,
+    fenceToken: context.fenceToken,
+    executionGeneration: context.executionGeneration,
     taskId,
-    context.runId
-  )
+    attemptId,
+    title: task.title,
+    abortSignal: context.abortSignal
+  })
+
+  if (providerOutcome.kind === 'waiting') {
+    return {
+      kind: 'waiting',
+      externalOperationId: providerOutcome.externalOperationId
+    }
+  }
+
+  let validated
+  try {
+    validated = validateTaskResult(providerOutcome.raw)
+  } catch (error: unknown) {
+    if (error instanceof TaskResultValidationError) {
+      await runtime.commandService.reportNoProgress({
+        jobId: context.jobId,
+        runId: context.runId,
+        fenceToken: context.fenceToken,
+        executionGeneration: context.executionGeneration,
+        expectedRevision: context.expectedRevision,
+        payload: {
+          decisionKey: decision.key,
+          observedRevision: context.expectedRevision,
+          workIdentity: decision.key
+        }
+      })
+      return { kind: 'stale_run' }
+    }
+    throw error
+  }
+
   const checkpoint = await runtime.commandService.checkpointTask({
     jobId: context.jobId,
     runId: context.runId,
@@ -111,15 +219,7 @@ async function executeOneDecision(
     expectedRevision: context.expectedRevision,
     payload: {
       attemptId,
-      result: {
-        status: 'completed',
-        summary: `Completed task: ${task.title}`,
-        changedFiles: [],
-        evidence: [`V3 executor completed task ${taskId}.`],
-        validation: { ran: false, outcome: 'not-applicable' },
-        blockers: [],
-        blockerKind: null
-      }
+      result: validated.result
     }
   })
 

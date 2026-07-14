@@ -383,9 +383,14 @@ export function startWorkloadReconciler(): void {
   reconcilerTimer.unref?.()
 }
 
-export function stopWorkloadReconcilerForTests(): void {
+export function stopWorkloadReconciler(): void {
   if (reconcilerTimer) {
     clearInterval(reconcilerTimer)
     reconcilerTimer = null
   }
+}
+
+/** @deprecated Use stopWorkloadReconciler */
+export function stopWorkloadReconcilerForTests(): void {
+  stopWorkloadReconciler()
 }

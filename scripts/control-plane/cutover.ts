@@ -11,7 +11,7 @@ import { dirname } from 'node:path'
 import {
   type CutoverMarker
 } from './cutover-marker'
-import { parseArgs, readReport, requireArg } from './migration-lib'
+import { parseArgs, loadParseAndRehashReport, requireArg } from './migration-lib'
 import { cutoverDatabase } from './migration-db'
 
 function writeMarker(path: string, marker: CutoverMarker): void {
@@ -23,7 +23,7 @@ function main(): void {
   const args = parseArgs(process.argv.slice(2))
   const dbPath = requireArg(args, 'db')
   const backupId = requireArg(args, 'backup-id')
-  const report = readReport(requireArg(args, 'report'))
+  const report = loadParseAndRehashReport(requireArg(args, 'report'))
   cutoverDatabase(dbPath, report, backupId)
   const auditPath = typeof args.marker === 'string' ? args.marker : null
   if (auditPath) {
