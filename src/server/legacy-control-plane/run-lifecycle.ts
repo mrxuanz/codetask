@@ -1,4 +1,9 @@
-import { getRunController, markRunCancelling, releaseWorkloadSlot } from './workload-slot-store'
+import {
+  getRunController,
+  markRunCancelling,
+  markRunQuarantined,
+  releaseWorkloadSlot
+} from './workload-slot-store'
 import {
   cancelRun,
   closeRunRuntime,
@@ -80,11 +85,18 @@ export async function stopRunLifecycle(
     console.warn('[run-lifecycle] hardKill failed', runId, error)
   })
 
-  await doWaitClosed(runId, config.killGraceMs + 5_000).catch((error) => {
-    console.warn('[run-lifecycle] waitClosed failed', runId, error)
-  })
+  try {
+    await doWaitClosed(runId, config.killGraceMs + 5_000)
+  } catch (error) {
+    await markRunQuarantined(runId, {
+      reason: 'child_close_unconfirmed',
+      detail: error instanceof Error ? error.message : String(error)
+    })
+    throw error
+  }
 
-  await closeRunRuntime(runId).catch(() => {})
+  await closeRunRuntime(runId)
+
   if (!options.skipRelease) {
     await releaseWorkloadSlot(runId, { reason, status: 'released' }).catch((error) => {
       console.warn('[run-lifecycle] release slot failed', runId, error)

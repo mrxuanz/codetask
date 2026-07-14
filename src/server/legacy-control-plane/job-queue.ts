@@ -111,20 +111,29 @@ export async function resumeJobQueuesOnStartup(): Promise<void> {
 }
 
 let startupQueueResumed = false
+let startupQueueResumePromise: Promise<void> | null = null
 
 /**
- * FIX-PLAN F3-C (§8.5): `startupQueueResumed` flips to true only after a fully successful resume.
- * On failure it stays false so startup can be retried (fail closed, no permanent skip).
+ * FIX-PLAN F3-C / R6 (§8.5): `startupQueueResumed` flips to true only after a fully successful
+ * resume. On failure it stays false so startup can be retried (fail closed, no permanent skip).
  */
 export async function resumeJobQueuesOnStartupOnce(): Promise<void> {
   if (startupQueueResumed) return
-  try {
-    await resumeJobQueuesOnStartup()
-    startupQueueResumed = true
-  } catch (error) {
-    startupQueueResumed = false
-    throw error
-  }
+  if (startupQueueResumePromise) return startupQueueResumePromise
+
+  startupQueueResumePromise = resumeJobQueuesOnStartup()
+    .then(() => {
+      startupQueueResumed = true
+    })
+    .catch((error) => {
+      startupQueueResumed = false
+      throw error
+    })
+    .finally(() => {
+      startupQueueResumePromise = null
+    })
+
+  return startupQueueResumePromise
 }
 
 export function isStartupQueueResumed(): boolean {
@@ -133,6 +142,7 @@ export function isStartupQueueResumed(): boolean {
 
 export function resetJobQueueStartupForTests(): void {
   startupQueueResumed = false
+  startupQueueResumePromise = null
 }
 
 export {

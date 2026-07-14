@@ -1,11 +1,11 @@
 import { randomUUID } from 'crypto'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '@shared/job-references'
 import { isDesignSessionId, DESIGN_SESSION_WORKSPACE_STATUSES } from '@shared/design-session'
 import { coercePersistedTurnError } from '../turn-errors/store'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
-import { loadJobAbilities, loadJobPlan, saveJobPlanInTx } from '../db/job-plan'
+import { loadJobAbilities, loadJobAbilitiesInTx, loadJobPlan, loadJobPlanInTx, saveJobPlanInTx } from '../db/job-plan'
 import { saveTaskProgressInTx } from '../db/job-progress'
 import { designRuns, threadJobs, threadMessages, threads, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
@@ -14,7 +14,13 @@ import { defaultTaskProgress } from '../planner/save-plan'
 import { mapJob } from '../legacy-control-plane/repository'
 import { AppError } from '../error'
 import { ReferenceFileMissingError } from '../legacy-control-plane/reference-paths'
-import { buildJobSnapshot, parseSessionManifest, validateLaunchPreconditions } from './launch'
+import {
+  assertConfirmRevisionMatches,
+  buildJobSnapshot,
+  captureConfirmRevisionExpectations,
+  parseSessionManifest,
+  validateLaunchPreconditions
+} from './launch'
 import { advanceWorkloadQueue } from '../legacy-control-plane/workload-slot-store'
 import { emitJobEvent } from '../legacy-control-plane/service'
 
@@ -332,27 +338,8 @@ export async function launchJobFromDesignSession(
     throw error
   }
 
-  const snapshot = buildJobSnapshot({
-    session,
-    plan: plan!,
-    abilities,
-    manifest: manifest!
-  })
-
+  const expectedRevisions = captureConfirmRevisionExpectations(session)
   const confirmedAt = nowSec()
-  const planProgress: PlanProgressDto = {
-    phase: 'plan_ready',
-    status: 'completed',
-    contextsRegistered: snapshot.executionPlan.tasks.length,
-    contextsTotal: snapshot.executionPlan.tasks.length,
-    milestones: snapshot.executionPlan.milestones.length,
-    slices: snapshot.executionPlan.milestones.reduce((n, m) => n + m.slices.length, 0),
-    tasks: snapshot.executionPlan.tasks.length,
-    progressCode: 'plan.plan_ready',
-    progressParams: { tasks: snapshot.executionPlan.tasks.length },
-    message: null
-  }
-  const taskProgress = defaultTaskProgress(snapshot.executionPlan.tasks)
 
   // F2 (§7.1): the draft message's linkedPlanId MUST be frozen in the SAME
   // transaction that makes the job executable. Prepare the payload columns
@@ -374,33 +361,81 @@ export async function launchJobFromDesignSession(
     })
   }
 
-  // Single atomic confirm boundary: freeze snapshot revisions, flip the job to
+  // Single atomic confirm boundary: re-read session state inside the transaction,
+  // CAS on owner/thread/status/revisions, freeze snapshot revisions, flip the job to
   // pending, write planConfirmedAt, clear old errors AND old lease, persist task
   // progress, link the draft message payload, and mark the thread's active plan.
-  db.transaction(() => {
+  const txResult = db.transaction(() => {
+    const currentRows = db
+      .select()
+      .from(threadJobs)
+      .where(
+        and(
+          eq(threadJobs.id, designSessionId),
+          eq(threadJobs.threadId, threadId),
+          eq(threadJobs.username, username)
+        )
+      )
+      .limit(1)
+      .all()
+    const current = currentRows[0]
+    if (!current) return { ok: false as const }
+
+    assertConfirmRevisionMatches(current, expectedRevisions)
+
+    const currentPlan = loadJobPlanInTx(db, designSessionId)
+    const currentAbilities = loadJobAbilitiesInTx(db, designSessionId)
+    const currentManifest = parseSessionManifest(current)
+
+    validateLaunchPreconditions({
+      session: current,
+      plan: currentPlan,
+      manifest: currentManifest
+    })
+
+    const currentSnapshot = buildJobSnapshot({
+      session: current,
+      plan: currentPlan!,
+      abilities: currentAbilities,
+      manifest: currentManifest!
+    })
+    const currentPlanProgress: PlanProgressDto = {
+      phase: 'plan_ready',
+      status: 'completed',
+      contextsRegistered: currentSnapshot.executionPlan.tasks.length,
+      contextsTotal: currentSnapshot.executionPlan.tasks.length,
+      milestones: currentSnapshot.executionPlan.milestones.length,
+      slices: currentSnapshot.executionPlan.milestones.reduce((n, m) => n + m.slices.length, 0),
+      tasks: currentSnapshot.executionPlan.tasks.length,
+      progressCode: 'plan.plan_ready',
+      progressParams: { tasks: currentSnapshot.executionPlan.tasks.length },
+      message: null
+    }
+    const currentTaskProgress = defaultTaskProgress(currentSnapshot.executionPlan.tasks)
     const planCounts = {
-      milestones: planProgress.milestones,
-      slices: planProgress.slices,
-      tasks: planProgress.tasks
+      milestones: currentPlanProgress.milestones,
+      slices: currentPlanProgress.slices,
+      tasks: currentPlanProgress.tasks
     }
 
-    db.update(threadJobs)
+    const result = db
+      .update(threadJobs)
       .set({
         status: 'pending',
         phase: 'archived',
-        workspacePath: snapshot.workspaceRoot,
-        planPhase: planProgress.phase,
-        planStatus: planProgress.status,
-        planContextsRegistered: planProgress.contextsRegistered,
-        planContextsTotal: planProgress.contextsTotal,
-        planMessage: planProgress.message ?? null,
+        workspacePath: currentSnapshot.workspaceRoot,
+        planPhase: currentPlanProgress.phase,
+        planStatus: currentPlanProgress.status,
+        planContextsRegistered: currentPlanProgress.contextsRegistered,
+        planContextsTotal: currentPlanProgress.contextsTotal,
+        planMessage: currentPlanProgress.message ?? null,
         planCountsJson: JSON.stringify(planCounts),
-        draftConfirmedAt: session.draftConfirmedAt ?? confirmedAt,
+        draftConfirmedAt: current.draftConfirmedAt ?? confirmedAt,
         planConfirmedAt: confirmedAt,
         designSessionId: designSessionId,
-        snapshotDraftRevision: snapshot.draftRevision,
-        snapshotPlanRevision: snapshot.planRevision,
-        snapshotManifestRevision: snapshot.manifestRevision,
+        snapshotDraftRevision: currentSnapshot.draftRevision,
+        snapshotPlanRevision: currentSnapshot.planRevision,
+        snapshotManifestRevision: currentSnapshot.manifestRevision,
         lastError: null,
         // Clear any stale lease from a previous run so recovery/claim starts clean.
         executionLeaseOwner: null,
@@ -408,10 +443,28 @@ export async function launchJobFromDesignSession(
         activeRunId: null,
         updatedAt: confirmedAt
       })
-      .where(eq(threadJobs.id, designSessionId))
+      .where(
+        and(
+          eq(threadJobs.id, designSessionId),
+          eq(threadJobs.username, username),
+          eq(threadJobs.threadId, threadId),
+          eq(threadJobs.status, 'plan_editing'),
+          isNull(threadJobs.planConfirmedAt),
+          eq(threadJobs.draftRevision, expectedRevisions.draftRevision),
+          eq(threadJobs.planRevision, expectedRevisions.planRevision),
+          eq(threadJobs.manifestRevision, expectedRevisions.manifestRevision)
+        )
+      )
       .run()
 
-    saveTaskProgressInTx(db, designSessionId, taskProgress, eq(threadJobs.id, designSessionId))
+    if (result.changes !== 1) return { ok: false as const }
+
+    saveTaskProgressInTx(
+      db,
+      designSessionId,
+      currentTaskProgress,
+      eq(threadJobs.id, designSessionId)
+    )
 
     if (draftPayloadColumns) {
       db.update(threadMessages)
@@ -421,7 +474,7 @@ export async function launchJobFromDesignSession(
         })
         .where(
           and(
-            eq(threadMessages.id, session.draftMessageId),
+            eq(threadMessages.id, current.draftMessageId),
             eq(threadMessages.threadId, threadId),
             eq(threadMessages.username, username)
           )
@@ -433,7 +486,23 @@ export async function launchJobFromDesignSession(
       .set({ activePlanId: designSessionId, updatedAt: confirmedAt })
       .where(and(eq(threads.id, threadId), eq(threads.username, username)))
       .run()
+
+    return {
+      ok: true as const,
+      taskProgress: currentTaskProgress,
+      planProgress: currentPlanProgress
+    }
   })
+
+  if (!txResult.ok) {
+    throw AppError.conflict(
+      'Plan changed while it was being confirmed',
+      undefined,
+      'plan.confirm_conflict'
+    )
+  }
+
+  const { taskProgress } = txResult
 
   const jobRows = db
     .select()

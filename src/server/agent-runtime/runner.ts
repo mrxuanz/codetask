@@ -141,7 +141,8 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       mcpToken: input.mcpToken,
       signal: input.signal,
       readRoots: input.readRoots,
-      jobId: input.jobId
+      jobId: input.jobId,
+      idempotencyKey: input.idempotencyKey
     })
     if (input.workloadRunId) {
       yield* withWorkloadLeaseRefresh(sandboxStream, input.workloadRunId, input.signal)
@@ -163,7 +164,9 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
     mcpUrl: input.mcpUrl,
     mcpToolNames,
     userMcpServers,
-    jobId: input.jobId
+    jobId: input.jobId,
+    workloadRunId: input.workloadRunId,
+    idempotencyKey: input.idempotencyKey
   }
 
   for await (const chunk of provider.streamTurn(workerInput, {

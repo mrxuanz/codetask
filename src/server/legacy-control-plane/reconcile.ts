@@ -173,11 +173,21 @@ export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
 }
 
 let startupReconciled = false
+let startupReconcilePromise: Promise<void> | null = null
 
 export async function reconcileOrphanRunningJobsOnStartupOnce(): Promise<void> {
   if (startupReconciled) return
-  startupReconciled = true
-  await reconcileOrphanRunningJobsOnStartup()
+  if (startupReconcilePromise) return startupReconcilePromise
+
+  startupReconcilePromise = reconcileOrphanRunningJobsOnStartup()
+    .then(() => {
+      startupReconciled = true
+    })
+    .finally(() => {
+      startupReconcilePromise = null
+    })
+
+  return startupReconcilePromise
 }
 
 async function reconcileStalePlanningSessionIfNeeded(session: ThreadJob): Promise<void> {
@@ -242,11 +252,21 @@ export async function reconcileOrphanPlanningSessionsOnStartup(): Promise<void> 
 }
 
 let startupPlanningReconciled = false
+let startupPlanningReconcilePromise: Promise<void> | null = null
 
 export async function reconcileOrphanPlanningSessionsOnStartupOnce(): Promise<void> {
   if (startupPlanningReconciled) return
-  startupPlanningReconciled = true
-  await reconcileOrphanPlanningSessionsOnStartup()
+  if (startupPlanningReconcilePromise) return startupPlanningReconcilePromise
+
+  startupPlanningReconcilePromise = reconcileOrphanPlanningSessionsOnStartup()
+    .then(() => {
+      startupPlanningReconciled = true
+    })
+    .finally(() => {
+      startupPlanningReconcilePromise = null
+    })
+
+  return startupPlanningReconcilePromise
 }
 
 export async function reconcileUserPlanningState(username: string): Promise<void> {
@@ -266,9 +286,16 @@ export async function reconcileUserWorkloadState(username: string): Promise<void
 export function resetJobReconcileForTests(): void {
   startupReconciled = false
   startupPlanningReconciled = false
+  startupWorkloadSlotsReconciled = false
+  startupReconcilePromise = null
+  startupPlanningReconcilePromise = null
+  startupWorkloadSlotsReconcilePromise = null
   void import('./job-queue').then((module) => module.resetJobQueueStartupForTests()).catch(() => {})
   void import('./workload-slot')
     .then((module) => module.resetStartupWorkloadGateForTests())
+    .catch(() => {})
+  void import('../conversation/service')
+    .then((module) => module.resetConversationReconcileForTests())
     .catch(() => {})
 }
 
@@ -376,11 +403,21 @@ export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
 }
 
 let startupWorkloadSlotsReconciled = false
+let startupWorkloadSlotsReconcilePromise: Promise<void> | null = null
 
 export async function reconcileOrphanWorkloadSlotsOnStartupOnce(): Promise<void> {
   if (startupWorkloadSlotsReconciled) return
-  startupWorkloadSlotsReconciled = true
-  await reconcileOrphanWorkloadSlotsOnStartup()
+  if (startupWorkloadSlotsReconcilePromise) return startupWorkloadSlotsReconcilePromise
+
+  startupWorkloadSlotsReconcilePromise = reconcileOrphanWorkloadSlotsOnStartup()
+    .then(() => {
+      startupWorkloadSlotsReconciled = true
+    })
+    .finally(() => {
+      startupWorkloadSlotsReconcilePromise = null
+    })
+
+  return startupWorkloadSlotsReconcilePromise
 }
 
 let reconcilerTimer: ReturnType<typeof setInterval> | null = null

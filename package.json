@@ -15,6 +15,7 @@
     "test:control-plane": "node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/control-plane/**/*.test.ts",
     "check:control-plane-types": "node scripts/check-control-plane-types.mjs",
     "check:legacy-write-guard": "node scripts/control-plane/legacy-write-guard.mjs",
+    "check:no-double-assertions": "node scripts/check-no-double-assertions.mjs",
     "write:release-gate": "node --import tsx scripts/control-plane/write-release-gate.ts",
     "start": "electron-vite preview",
     "dev": "node scripts/ensure-electron-native.mjs && electron-vite dev",

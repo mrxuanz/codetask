@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 
 export const MAX_JSON_BODY_BYTES = 1 * 1024 * 1024
-export const MAX_FORM_BODY_BYTES = 4 * 1024 * 1024
+export const MAX_FORM_BODY_BYTES = 32 * 1024 * 1024
 export const MAX_DEFAULT_BODY_BYTES = MAX_JSON_BODY_BYTES
 
 const PAYLOAD_TOO_LARGE_STATUS = 41301

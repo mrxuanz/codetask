@@ -25,24 +25,28 @@ function requestTimedOut(): Response {
   )
 }
 
+function isLongLivedSsePath(path: string): boolean {
+  if (isSseStreamRoute(path)) return true
+  const p = normalizedApiPath(path)
+  return /^\/threads\/[^/]+\/messages$/.test(p)
+}
+
 export function requestTimeout(): MiddlewareHandler {
-  return async (_c, next) => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-    timer.unref?.()
+  return async (c, next) => {
+    if (isLongLivedSsePath(c.req.path)) {
+      return next()
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<Response>((resolve) => {
+      timer = setTimeout(() => resolve(requestTimedOut()), REQUEST_TIMEOUT_MS)
+      timer.unref?.()
+    })
 
     try {
-      if (controller.signal.aborted) {
-        return requestTimedOut()
-      }
-      return await next()
-    } catch (error) {
-      if (controller.signal.aborted) {
-        return requestTimedOut()
-      }
-      throw error
+      return await Promise.race([next(), timeout])
     } finally {
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
     }
   }
 }

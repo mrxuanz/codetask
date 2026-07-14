@@ -50,7 +50,7 @@ async function teardownDb(): Promise<void> {
 
 interface SeedOptions {
   status?: string
-  planConfirmedAt?: number
+  planConfirmedAt?: number | null
   createdAt?: number
   username?: string
 }
@@ -104,7 +104,7 @@ async function seedJob(jobId: string, options: SeedOptions = {}): Promise<void> 
     summary: '',
     status: options.status ?? 'pending',
     workspacePath: '/tmp/ws',
-    planConfirmedAt: options.planConfirmedAt ?? now,
+    planConfirmedAt: options.planConfirmedAt === undefined ? now : options.planConfirmedAt,
     createdAt: options.createdAt ?? now,
     updatedAt: now
   })
@@ -126,6 +126,20 @@ async function jobStatus(jobId: string): Promise<string | undefined> {
     .limit(1)
   return rows[0]?.status
 }
+
+test('pending job without planConfirmedAt cannot be claimed', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-unconfirmed', { planConfirmedAt: null })
+
+    const slot = await claimExecutionSlotForJobTx('user', 'job-unconfirmed')
+    assert.equal(slot, null)
+    assert.equal(await jobStatus('job-unconfirmed'), 'pending')
+    assert.equal(await countActiveExecutionSlots(), 0)
+  } finally {
+    await teardownDb()
+  }
+})
 
 test('empty pool: atomic claim promotes A to running with run+slot+activeRunId', async () => {
   await setupDb()

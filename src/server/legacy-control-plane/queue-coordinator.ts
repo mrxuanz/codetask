@@ -25,7 +25,7 @@ export async function startPendingExecutionJob(username: string, jobId: string):
     return
   }
 
-  const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
+  const { acquireWorkspaceLease, releaseWorkspaceLease } = await import(
     './workspace-lease-store'
   )
   const workspaceLease = acquireWorkspaceLease({
@@ -40,7 +40,10 @@ export async function startPendingExecutionJob(username: string, jobId: string):
   const { claimExecutionSlotForJobTx } = await import('./workload-slot-store')
   const slot = await claimExecutionSlotForJobTx(username, jobId)
   if (!slot) {
-    releaseWorkspaceLeaseForOwner('thread_job', jobId)
+    const jobAfterClaim = await getUserJob(username, jobId)
+    if (jobAfterClaim?.status !== 'running') {
+      releaseWorkspaceLease({ leaseId: workspaceLease.leaseId })
+    }
     return
   }
 
