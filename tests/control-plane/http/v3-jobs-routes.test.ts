@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createJobsRoutes } from '../../../src/server/http/v3/jobs-routes'
 import type { JobCommandService } from '@shared/contracts/control-plane'
 import type { JobQueryService } from '../../../src/server/application/job-query-service'
+import { CommandError } from '../../../src/server/domain/jobs/job-errors'
 
 const noopCommandService: JobCommandService = {
   async requestPause() {
@@ -28,6 +29,12 @@ const noopCommandService: JobCommandService = {
   },
   async interruptRun() {
     throw new Error('not used')
+  },
+  async completeExecution() {
+    throw new Error('not used')
+  },
+  async reportNoProgress() {
+    throw new Error('not used')
   }
 }
 
@@ -42,7 +49,7 @@ function makeQueryService(overrides?: Partial<JobQueryService>): JobQueryService
 }
 
 describe('V3 jobs routes query snapshots', () => {
-  it('omits ETag for legacy-only detail fallback without stateRevision', async () => {
+  it('returns ETag for control-plane detail snapshots', async () => {
     const routes = createJobsRoutes(
       noopCommandService,
       makeQueryService({
@@ -75,7 +82,8 @@ describe('V3 jobs routes query snapshots', () => {
           snapshotPlanRevision: null,
           snapshotManifestRevision: null,
           createdAt: 1,
-          updatedAt: 2
+          updatedAt: 2,
+          stateRevision: 4
         })
       })
     )
@@ -86,10 +94,10 @@ describe('V3 jobs routes query snapshots', () => {
     )
 
     assert.equal(response.status, 200)
-    assert.equal(response.headers, undefined)
+    assert.deepEqual(response.headers, { ETag: '"4"' })
   })
 
-  it('passes list query params through to task snapshot query', async () => {
+  it('passes parsed list query params through to task snapshot query', async () => {
     let seen:
       | {
           status?: string
@@ -133,5 +141,22 @@ describe('V3 jobs routes query snapshots', () => {
       q: 'worker',
       projectId: 'project-1'
     })
+  })
+
+  it('rejects invalid list pagination with stable 400', async () => {
+    const routes = createJobsRoutes(noopCommandService, makeQueryService())
+
+    await assert.rejects(
+      () =>
+        routes.listJobs(
+          {
+            headers: {},
+            params: {},
+            query: { page: '0' }
+          },
+          { username: 'u1', requestId: 'r1' }
+        ),
+      (error: unknown) => error instanceof CommandError && error.httpStatus === 400
+    )
   })
 })

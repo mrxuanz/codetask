@@ -1,66 +1,19 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { JobQueryServiceImpl } from '../../../src/server/application/job-query-service'
-import type { JobAggregateView } from '../../../src/server/application/ports/job-repository'
-import type { ThreadJobDto } from '@shared/contracts/jobs'
+import type { JobDetailView } from '../../../src/server/application/ports/job-repository'
+import type { TaskRow } from '../../../src/server/application/ports/task-repository'
 
-function makeLegacyJob(
-  overrides: Partial<ThreadJobDto> & Pick<ThreadJobDto, 'id'>
-): ThreadJobDto {
-  return {
-    id: overrides.id,
-    threadId: overrides.threadId ?? `thread-${overrides.id}`,
-    draftMessageId: overrides.draftMessageId ?? `draft-${overrides.id}`,
-    title: overrides.title ?? `Job ${overrides.id}`,
-    summary: overrides.summary ?? '',
-    status: overrides.status ?? 'running',
-    planProgress:
-      overrides.planProgress ?? {
-        phase: 'idle',
-        status: 'pending',
-        contextsRegistered: 0,
-        contextsTotal: 0
-      },
-    taskProgress:
-      overrides.taskProgress ?? {
-        phase: 'idle',
-        status: 'pending',
-        currentIndex: 0,
-        total: 0,
-        tasks: []
-      },
-    abilities: overrides.abilities ?? [],
-    plan: overrides.plan,
-    referenceManifest: overrides.referenceManifest,
-    referenceManifestStale: overrides.referenceManifestStale,
-    workspacePath: overrides.workspacePath,
-    lastError: overrides.lastError,
-    lifecycle: overrides.lifecycle,
-    execution: overrides.execution,
-    failure: overrides.failure,
-    recovery: overrides.recovery,
-    availableActions: overrides.availableActions,
-    stateRevision: overrides.stateRevision,
-    queue: overrides.queue,
-    planRevision: overrides.planRevision ?? null,
-    draftConfirmedAt: overrides.draftConfirmedAt ?? null,
-    planConfirmedAt: overrides.planConfirmedAt ?? null,
-    designSessionId: overrides.designSessionId ?? null,
-    snapshotDraftRevision: overrides.snapshotDraftRevision ?? null,
-    snapshotPlanRevision: overrides.snapshotPlanRevision ?? null,
-    snapshotManifestRevision: overrides.snapshotManifestRevision ?? null,
-    createdAt: overrides.createdAt ?? 1000,
-    updatedAt: overrides.updatedAt ?? 2000
-  }
-}
-
-function makeAggregate(
-  overrides: Partial<JobAggregateView> & Pick<JobAggregateView, 'id'>
-): JobAggregateView {
+function makeJobDetail(
+  overrides: Partial<JobDetailView> & Pick<JobDetailView, 'id'>
+): JobDetailView {
   return {
     id: overrides.id,
     threadId: overrides.threadId ?? `thread-${overrides.id}`,
     projectId: overrides.projectId ?? `project-${overrides.id}`,
+    draftMessageId: overrides.draftMessageId ?? `draft-${overrides.id}`,
+    title: overrides.title ?? `Job ${overrides.id}`,
+    requirementsSummary: overrides.requirementsSummary ?? 'summary',
     state: overrides.state ?? 'execution_running',
     stateRevision: overrides.stateRevision ?? 1,
     controlIntent: overrides.controlIntent ?? 'none',
@@ -68,31 +21,44 @@ function makeAggregate(
     currentPlanRevision: overrides.currentPlanRevision ?? 1,
     executionGeneration: overrides.executionGeneration ?? 0,
     activeRunId: overrides.activeRunId ?? null,
-    lastFailureId: overrides.lastFailureId ?? null
+    lastFailureId: overrides.lastFailureId ?? null,
+    createdAtMs: overrides.createdAtMs ?? 11,
+    updatedAtMs: overrides.updatedAtMs ?? 22,
+    terminalAtMs: overrides.terminalAtMs ?? null
   }
 }
 
-describe('JobQueryService task snapshots', () => {
-  it('overlays control-plane authoritative fields on legacy task snapshot', async () => {
-    const aggregate = makeAggregate({
+describe('JobQueryService control projections', () => {
+  it('builds task snapshots from control tables only', async () => {
+    const job = makeJobDetail({
       id: 'job-1',
       state: 'paused',
       stateRevision: 7,
       activeRunId: 'run-1',
       lastFailureId: 'failure-1'
     })
-    const legacy = makeLegacyJob({
-      id: 'job-1',
-      status: 'running',
-      availableActions: ['delete']
-    })
+    const tasks: TaskRow[] = [
+      {
+        jobId: 'job-1',
+        executionGeneration: 0,
+        taskId: 'task-1',
+        sourcePlanRevision: 1,
+        state: 'completed',
+        sortOrder: 1,
+        originKind: null,
+        parentTaskId: null,
+        title: 'Task 1',
+        abilityCode: 'code',
+        coreCode: null,
+        createdAtMs: 1,
+        updatedAtMs: 2
+      }
+    ]
 
     const service = new JobQueryServiceImpl({
-      getJobAggregate: () => aggregate,
-      listJobAggregates: () => [aggregate],
-      getLegacyJobSnapshot: async () => legacy,
-      listLegacyJobSnapshots: async () => ({ jobs: [legacy], total: 1 }),
-      getJobTimestamps: () => ({ createdAtMs: 11, updatedAtMs: 22, terminalAtMs: null }),
+      getOwnedJobDetail: () => job,
+      listOwnedJobDetails: () => ({ jobs: [job], total: 1 }),
+      listTasksForGeneration: () => tasks,
       getJobFailure: () => ({
         code: 'runtime.interrupted',
         recoverability: 'recoverable',
@@ -118,34 +84,18 @@ describe('JobQueryService task snapshots', () => {
     })
     assert.equal(task?.createdAtMs, 11)
     assert.equal(task?.updatedAtMs, 22)
+    assert.equal(task?.taskProgress.total, 1)
+    assert.equal(task?.recovery?.recoverable, true)
   })
 
-  it('keeps legacy-only jobs unchanged in task list snapshots', async () => {
-    const aggregate = makeAggregate({
-      id: 'job-1',
-      state: 'execution_running',
-      stateRevision: 3
-    })
-    const legacyWithControl = makeLegacyJob({
-      id: 'job-1',
-      status: 'pending'
-    })
-    const legacyOnly = makeLegacyJob({
-      id: 'job-2',
-      status: 'failed',
-      availableActions: ['continue', 'delete']
-    })
+  it('lists owned control jobs without legacy snapshots', async () => {
+    const jobOne = makeJobDetail({ id: 'job-1', state: 'execution_queued', stateRevision: 3 })
+    const jobTwo = makeJobDetail({ id: 'job-2', state: 'failed', stateRevision: 5 })
 
     const service = new JobQueryServiceImpl({
-      getJobAggregate: (_actor, jobId) => (jobId === 'job-1' ? aggregate : null),
-      listJobAggregates: () => [aggregate],
-      getLegacyJobSnapshot: async (_actor, jobId) =>
-        jobId === 'job-1' ? legacyWithControl : legacyOnly,
-      listLegacyJobSnapshots: async () => ({
-        jobs: [legacyWithControl, legacyOnly],
-        total: 2
-      }),
-      getJobTimestamps: () => ({ createdAtMs: 11, updatedAtMs: 22, terminalAtMs: null })
+      getOwnedJobDetail: (_actor, jobId) => (jobId === 'job-1' ? jobOne : jobId === 'job-2' ? jobTwo : null),
+      listOwnedJobDetails: () => ({ jobs: [jobOne, jobTwo], total: 2 }),
+      listTasksForGeneration: () => []
     })
 
     const result = await service.listTaskJobs({ username: 'u1' })
@@ -153,13 +103,10 @@ describe('JobQueryService task snapshots', () => {
     assert.equal(result.total, 2)
     assert.equal(result.jobs[0]?.id, 'job-1')
     assert.equal(result.jobs[0]?.stateRevision, 3)
-    assert.equal(result.jobs[0]?.state, 'execution_running')
-    assert.equal(result.jobs[0]?.status, 'running')
-
+    assert.equal(result.jobs[0]?.state, 'execution_queued')
+    assert.equal(result.jobs[0]?.status, 'pending')
     assert.equal(result.jobs[1]?.id, 'job-2')
-    assert.equal(result.jobs[1]?.stateRevision, undefined)
-    assert.equal(result.jobs[1]?.state, undefined)
-    assert.deepEqual(result.jobs[1]?.availableActions, ['continue', 'delete'])
-    assert.equal(result.jobs[1]?.status, 'failed')
+    assert.equal(result.jobs[1]?.state, 'failed')
+    assert.deepEqual(result.jobs[1]?.availableActions, ['restart_execution', 'delete'])
   })
 })

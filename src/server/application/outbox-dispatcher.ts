@@ -1,4 +1,4 @@
-import type { JobRepository, OutboxEvent } from './ports/job-repository'
+import type { OutboxRepository, OutboxEvent } from './ports/outbox-repository'
 import type { SafeLogger } from './ports/safe-logger'
 
 export interface OutboxDispatcherConfig {
@@ -14,7 +14,7 @@ export class OutboxDispatcher {
   private flushing: Promise<void> | null = null
 
   constructor(
-    private readonly jobRepository: JobRepository,
+    private readonly outboxRepository: OutboxRepository,
     private readonly publisher: EventPublisher,
     private readonly logger: SafeLogger,
     private readonly nowMs: () => number,
@@ -24,7 +24,7 @@ export class OutboxDispatcher {
   async start(): Promise<void> {
     if (this.running) return
     this.running = true
-    this.pollTimer = setInterval(() => void this.dispatch(), this.config.pollIntervalMs)
+    this.pollTimer = setInterval(() => void this.flush(), this.config.pollIntervalMs)
   }
 
   async stop(): Promise<void> {
@@ -38,44 +38,35 @@ export class OutboxDispatcher {
     }
   }
 
+  flush(): Promise<void> {
+    if (this.flushing !== null) {
+      return this.flushing
+    }
+
+    this.flushing = this.flushLoop().finally(() => {
+      this.flushing = null
+    })
+    return this.flushing
+  }
+
   async flushWithin(deadlineMs: number): Promise<void> {
     const deadline = Date.now() + deadlineMs
-    await this.runSingleFlight(() => this.flushUntilDeadline(deadline))
-  }
-
-  private async flushUntilDeadline(deadline: number): Promise<void> {
     while (Date.now() < deadline) {
-      const dispatched = this.dispatchBatch()
-      if (dispatched === 0) return
-    }
-  }
-
-  private async dispatch(): Promise<void> {
-    if (!this.running) return
-    await this.runSingleFlight(async () => {
-      this.dispatchBatch()
-    })
-  }
-
-  private async runSingleFlight(work: () => Promise<void>): Promise<void> {
-    if (this.flushing !== null) {
-      await this.flushing
-      return
-    }
-
-    const flushing = work()
-    this.flushing = flushing
-    try {
-      await flushing
-    } finally {
-      if (this.flushing === flushing) {
-        this.flushing = null
+      await this.flush()
+      if (this.outboxRepository.getUndispatchedEvents(1).length === 0) {
+        return
       }
     }
   }
 
+  private async flushLoop(): Promise<void> {
+    while (this.dispatchBatch() > 0) {
+      // Drain committed outbox rows serially before accepting the next flush.
+    }
+  }
+
   private dispatchBatch(): number {
-    const events = this.jobRepository.getUndispatchedEvents(this.config.batchSize)
+    const events = this.outboxRepository.getUndispatchedEvents(this.config.batchSize)
     if (events.length === 0) return 0
 
     const ids: number[] = []
@@ -93,9 +84,9 @@ export class OutboxDispatcher {
     }
 
     if (ids.length > 0) {
-      this.jobRepository.markDispatched({ eventIds: ids, dispatchedAtMs: this.nowMs() })
+      this.outboxRepository.markDispatched({ eventIds: ids, dispatchedAtMs: this.nowMs() })
     }
 
-    return events.length
+    return ids.length
   }
 }

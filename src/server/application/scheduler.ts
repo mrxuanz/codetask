@@ -1,4 +1,5 @@
 import type { JobRepository } from './ports/job-repository'
+import type { ControlPlaneUnitOfWork } from './ports/unit-of-work'
 import type { IdGenerator } from './ports/id-generator'
 import type { Clock } from './ports/clock'
 import type { SafeLogger } from './ports/safe-logger'
@@ -8,7 +9,14 @@ export interface SchedulerConfig {
   readonly maxConcurrentJobs: number
 }
 
+export interface SchedulerCapabilities {
+  readonly planning: boolean
+  readonly execution: boolean
+}
+
 export type RuntimeStarter = (jobId: string, runId: string, kind: 'planning' | 'execution') => void
+
+const DEFAULT_POOL = 'default'
 
 export class Scheduler {
   private running = false
@@ -16,7 +24,9 @@ export class Scheduler {
 
   constructor(
     private readonly config: SchedulerConfig,
+    private readonly capabilities: SchedulerCapabilities,
     private readonly jobRepository: JobRepository,
+    private readonly unitOfWork: ControlPlaneUnitOfWork,
     private readonly idGenerator: IdGenerator,
     private readonly clock: Clock,
     private readonly logger: SafeLogger,
@@ -43,7 +53,15 @@ export class Scheduler {
     if (!this.running) return
 
     try {
-      const eligibleJobs = this.jobRepository.getQueuedJobsForClaim(this.config.maxConcurrentJobs)
+      const activeSlots = this.unitOfWork.transaction((tx) =>
+        tx.slots.countActiveSlots(DEFAULT_POOL)
+      )
+      const remainingCapacity = Math.max(0, this.config.maxConcurrentJobs - activeSlots)
+      if (remainingCapacity === 0) return
+
+      const eligibleJobs = this.jobRepository
+        .getQueuedJobsForClaim(remainingCapacity)
+        .filter((job) => this.canClaimState(job.state))
 
       for (const job of eligibleJobs) {
         this.claimJob(job)
@@ -53,23 +71,34 @@ export class Scheduler {
     }
   }
 
-  private claimJob(job: { id: string; state: string; stateRevision: number; executionGeneration: number }): void {
+  private canClaimState(state: string): boolean {
+    if (state === 'planning_queued') return this.capabilities.planning
+    if (state === 'execution_queued') return this.capabilities.execution
+    return false
+  }
+
+  private claimJob(job: {
+    id: string
+    state: string
+    stateRevision: number
+    executionGeneration: number
+  }): void {
     const now = this.clock.nowMs()
     const fenceToken = this.idGenerator.generate()
     const runId = this.idGenerator.generate()
-    const pendingAttemptId = this.idGenerator.generate()
-    const lifecycleOperationId = this.idGenerator.generate()
     const kind = job.state.startsWith('planning') ? ('planning' as const) : ('execution' as const)
     const targetState = job.state.startsWith('planning')
       ? ('planning_running' as const)
       : ('execution_running' as const)
 
-    const claimed = this.jobRepository.transaction(() => {
-      const cas = this.jobRepository.compareAndSetJob({
+    const claimed = this.unitOfWork.transaction((tx) => {
+      tx.slots.assertCapacityAvailable(DEFAULT_POOL, this.config.maxConcurrentJobs)
+
+      const cas = tx.jobs.compareAndSetJob({
         jobId: job.id,
         updatedAtMs: now,
         expectedRevision: job.stateRevision,
-        expectedState: job.state as Parameters<typeof this.jobRepository.compareAndSetJob>[0]['expectedState'],
+        expectedState: job.state as Parameters<typeof tx.jobs.compareAndSetJob>[0]['expectedState'],
         expectedActiveRunId: null,
         next: {
           state: targetState,
@@ -85,26 +114,24 @@ export class Scheduler {
         return null
       }
 
-      this.jobRepository.createRun({
+      tx.runs.createRun({
         id: runId,
         jobId: job.id,
         kind,
         fenceToken,
         executionGeneration: job.executionGeneration,
-        pendingAttemptId,
-        lifecycleOperationId,
         startedAtMs: now
       })
 
-      this.jobRepository.createSlot({
+      tx.slots.createSlot({
         id: this.idGenerator.generate(),
         jobId: job.id,
         runId,
-        pool: 'default',
+        pool: DEFAULT_POOL,
         createdAtMs: now
       })
 
-      this.jobRepository.appendOutbox({
+      tx.outbox.appendOutbox({
         topic: `job:${job.id}`,
         eventType: 'job.changed',
         entityId: job.id,

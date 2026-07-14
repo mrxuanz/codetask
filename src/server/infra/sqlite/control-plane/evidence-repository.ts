@@ -1,13 +1,13 @@
 import { createHash } from 'crypto'
 import { eq } from 'drizzle-orm'
-import type { ControlPlaneDatabase } from './job-repository'
-import type { EvidenceStore } from '../../../application/ports/evidence-store'
+import type { DbExecutor } from './db-executor'
+import type { EvidenceRepository as EvidenceRepositoryPort } from '../../../application/ports/evidence-repository'
 import { controlEvidenceBlobs } from './schema'
 
-export class EvidenceRepository implements EvidenceStore {
-  constructor(private readonly db: ControlPlaneDatabase) {}
+export class SqliteEvidenceRepository implements EvidenceRepositoryPort {
+  constructor(private readonly db: DbExecutor) {}
 
-  putImmutable(evidence: readonly string[]): string {
+  putImmutable(evidence: readonly string[], createdAtMs: number): string {
     const content = JSON.stringify(evidence)
     const hash = createHash('sha256').update(content).digest('hex')
 
@@ -20,14 +20,14 @@ export class EvidenceRepository implements EvidenceStore {
         hash,
         contentJson: content,
         bytes: content.length,
-        createdAtMs: Date.now()
+        createdAtMs
       })
       .run()
 
     return hash
   }
 
-  putVerdictBlob(verdict: unknown): string {
+  putVerdictBlob(verdict: unknown, createdAtMs: number): string {
     const content = JSON.stringify(verdict)
     const hash = createHash('sha256').update(content).digest('hex')
     const existing = this.getByHash(hash)
@@ -39,7 +39,7 @@ export class EvidenceRepository implements EvidenceStore {
         hash,
         contentJson: content,
         bytes: content.length,
-        createdAtMs: Date.now()
+        createdAtMs
       })
       .run()
 

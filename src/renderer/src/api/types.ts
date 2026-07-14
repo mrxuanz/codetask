@@ -5,6 +5,7 @@ export interface BootstrapData {
   authenticated: boolean
   username?: string
   setupTokenRequired?: boolean
+  controlPlaneGeneration?: 'preparing' | 'copied' | 'v3_authoritative' | null
 }
 
 export interface AuthData {

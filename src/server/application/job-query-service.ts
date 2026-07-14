@@ -1,7 +1,16 @@
-import type { JobState, JobAction, ResumeTarget } from '@shared/contracts/control-plane'
-import type { ThreadJobDto, ThreadJobStatus } from '@shared/contracts/jobs'
-import type { JobAggregateView } from './ports/job-repository'
+import type { JobState, JobAction, ResumeTarget, Recoverability } from '@shared/contracts/control-plane'
+import type {
+  ThreadJobDto,
+  ThreadJobStatus,
+  PlanProgressDto,
+  TaskProgressDto,
+  TaskProgressItemDto
+} from '@shared/contracts/jobs'
+import type { JobFailureDto, JobRecoveryDto } from '../../shared/job-recovery-state'
+import type { JobDetailView } from './ports/job-repository'
+import type { TaskRow } from './ports/task-repository'
 import { availableActions } from '../domain/jobs/job-action-rules'
+import { defaultPlanProgress, defaultTaskProgress } from '../planner/save-plan'
 
 export interface JobDto {
   readonly id: string
@@ -39,20 +48,18 @@ export interface JobQueryService {
 }
 
 export interface JobQueryDependencies {
-  readonly getJobAggregate: (actor: { username: string }, jobId: string) => JobAggregateView | null
-  readonly listJobAggregates: (
-    actor: { username: string },
-    projectId?: string
-  ) => readonly JobAggregateView[]
-  readonly getLegacyJobSnapshot: (
+  readonly getOwnedJobDetail: (
     actor: { username: string },
     jobId: string
-  ) => Promise<ThreadJobDto | null>
-  readonly listLegacyJobSnapshots: (
+  ) => JobDetailView | null
+  readonly listOwnedJobDetails: (
     actor: { username: string },
     options?: TaskJobListOptions
-  ) => Promise<{ jobs: ThreadJobDto[]; total: number }>
-  readonly getJobTimestamps: (jobId: string) => { createdAtMs: number; updatedAtMs: number; terminalAtMs: number | null } | null
+  ) => { jobs: readonly JobDetailView[]; total: number }
+  readonly listTasksForGeneration: (
+    jobId: string,
+    executionGeneration: number
+  ) => readonly TaskRow[]
   readonly getJobFailure?: (failureId: string) => JobFailureProjection | null
 }
 
@@ -78,7 +85,7 @@ export interface TaskJobSnapshotDto extends ThreadJobDto {
   readonly terminalAtMs?: number | null
 }
 
-function mapStateToLegacyStatus(state: JobState): ThreadJobStatus | null {
+function mapStateToLegacyStatus(state: JobState): ThreadJobStatus {
   switch (state) {
     case 'planning_queued':
     case 'execution_queued':
@@ -100,7 +107,124 @@ function mapStateToLegacyStatus(state: JobState): ThreadJobStatus | null {
     case 'cancelled':
       return 'cancelled'
     default:
-      return null
+      return 'pending'
+  }
+}
+
+function toRecoverability(failure: JobFailureProjection | null): Recoverability | null {
+  if (failure === null) return null
+  return failure.recoverability === 'recoverable' ? 'recoverable' : 'non_recoverable'
+}
+
+function mapTaskState(state: TaskRow['state']): TaskProgressItemDto['status'] {
+  switch (state) {
+    case 'queued':
+      return 'queued'
+    case 'running':
+      return 'running'
+    case 'completed':
+      return 'completed'
+    case 'failed':
+    case 'blocked':
+      return 'failed'
+    case 'skipped':
+      return 'skipped'
+    default:
+      return 'queued'
+  }
+}
+
+function buildPlanProgress(job: JobDetailView): PlanProgressDto {
+  const base = defaultPlanProgress()
+  switch (job.state) {
+    case 'planning_queued':
+    case 'planning_running':
+      return { ...base, phase: 'planning', status: 'running' }
+    case 'plan_review':
+      return { ...base, phase: 'plan_ready', status: 'completed' }
+    case 'failed':
+      if (job.currentPlanRevision === null) {
+        return { ...base, phase: 'failed', status: 'failed' }
+      }
+      return { ...base, phase: 'plan_ready', status: 'completed' }
+    default:
+      return job.currentPlanRevision === null
+        ? base
+        : { ...base, phase: 'plan_ready', status: 'completed' }
+  }
+}
+
+function buildTaskProgress(
+  tasks: readonly TaskRow[],
+  job: JobDetailView
+): TaskProgressDto {
+  if (tasks.length === 0) {
+    return defaultTaskProgress()
+  }
+
+  const items: TaskProgressItemDto[] = tasks.map((task) => ({
+    id: task.taskId,
+    title: task.title,
+    status: mapTaskState(task.state),
+    abilityCode: task.abilityCode ?? undefined,
+    executionStatus: mapTaskState(task.state),
+    evidenceStatus: null,
+    errorMessage: null,
+    coreCode: task.coreCode ?? undefined
+  }))
+
+  const runningIndex = items.findIndex((task) => task.status === 'running')
+  const currentIndex = runningIndex >= 0 ? runningIndex : items.findIndex((task) => task.status === 'queued')
+  const phase =
+    job.state === 'succeeded'
+      ? 'completed'
+      : job.state === 'failed'
+        ? 'failed'
+        : runningIndex >= 0
+          ? 'running'
+          : 'idle'
+  const status =
+    phase === 'completed'
+      ? 'completed'
+      : phase === 'failed'
+        ? 'failed'
+        : phase === 'running'
+          ? 'running'
+          : 'pending'
+
+  return {
+    phase,
+    status,
+    currentIndex: currentIndex >= 0 ? currentIndex : 0,
+    total: items.length,
+    currentTaskId: currentIndex >= 0 ? items[currentIndex]?.id ?? null : null,
+    message: null,
+    tasks: items
+  }
+}
+
+function buildFailureFields(
+  failure: JobFailureProjection | null
+): { failure?: JobFailureDto; recovery?: JobRecoveryDto } {
+  if (failure === null) return {}
+  const recoverable = failure.recoverability === 'recoverable'
+  return {
+    failure: {
+      kind: null,
+      message: failure.reason,
+      taskId: null
+    },
+    recovery: {
+      recoverable,
+      strategy: null,
+      reason: failure.reason,
+      nextAction: null,
+      failedTaskId: null,
+      autoRetryAttempt: 0,
+      maxAutoRetryAttempts: 0,
+      repairGeneration: 0,
+      maxRepairGenerations: 0
+    }
   }
 }
 
@@ -108,58 +232,46 @@ export class JobQueryServiceImpl implements JobQueryService {
   constructor(private readonly deps: JobQueryDependencies) {}
 
   getJob(jobId: string, actor: { username: string }): JobDto | null {
-    const job = this.deps.getJobAggregate(actor, jobId)
+    const job = this.deps.getOwnedJobDetail(actor, jobId)
     if (!job) return null
-
-    const timestamps = this.deps.getJobTimestamps(jobId)
-
-    return this.toDto(job, timestamps)
+    return this.toDto(job)
   }
 
   listJobs(actor: { username: string }, projectId?: string): readonly JobDto[] {
-    const jobs = this.deps.listJobAggregates(actor, projectId)
-    return jobs.map((job) => {
-      const timestamps = this.deps.getJobTimestamps(job.id)
-      return this.toDto(job, timestamps)
-    })
+    const result = this.deps.listOwnedJobDetails(
+      actor,
+      projectId === undefined ? {} : { projectId }
+    )
+    return result.jobs.map((job) => this.toDto(job))
   }
 
   async getTaskJob(
     jobId: string,
     actor: { username: string }
   ): Promise<TaskJobSnapshotDto | null> {
-    const [legacy, aggregate] = await Promise.all([
-      this.deps.getLegacyJobSnapshot(actor, jobId),
-      Promise.resolve(this.deps.getJobAggregate(actor, jobId))
-    ])
-
-    if (!legacy) {
-      return null
-    }
-
-    return this.toTaskSnapshot(legacy, aggregate)
+    const job = this.deps.getOwnedJobDetail(actor, jobId)
+    if (job === null) return null
+    return this.buildTaskSnapshot(job)
   }
 
   async listTaskJobs(
     actor: { username: string },
     options?: TaskJobListOptions
   ): Promise<{ jobs: readonly TaskJobSnapshotDto[]; total: number }> {
-    const result = await this.deps.listLegacyJobSnapshots(actor, options)
+    const result = this.deps.listOwnedJobDetails(actor, options)
     return {
-      jobs: result.jobs.map((job) =>
-        this.toTaskSnapshot(job, this.deps.getJobAggregate(actor, job.id))
-      ),
+      jobs: result.jobs.map((job) => this.buildTaskSnapshot(job)),
       total: result.total
     }
   }
 
-  private toDto(
-    job: JobAggregateView,
-    timestamps: { createdAtMs: number; updatedAtMs: number; terminalAtMs: number | null } | null
-  ): JobDto {
+  private toDto(job: JobDetailView): JobDto {
+    const failure =
+      job.lastFailureId === null ? null : (this.deps.getJobFailure?.(job.lastFailureId) ?? null)
+    const recoverability = toRecoverability(failure)
     const actions = availableActions({
       state: job.state,
-      recoverability: null,
+      recoverability,
       hasConfirmedPlan: job.currentPlanRevision !== null
     })
 
@@ -175,30 +287,38 @@ export class JobQueryServiceImpl implements JobQueryService {
       executionGeneration: job.executionGeneration,
       activeRunId: job.activeRunId,
       lastFailureId: job.lastFailureId,
-      failure:
-        job.lastFailureId === null ? null : (this.deps.getJobFailure?.(job.lastFailureId) ?? null),
+      failure,
       availableActions: actions,
-      createdAtMs: timestamps?.createdAtMs ?? 0,
-      updatedAtMs: timestamps?.updatedAtMs ?? 0,
-      terminalAtMs: timestamps?.terminalAtMs ?? null
+      createdAtMs: job.createdAtMs,
+      updatedAtMs: job.updatedAtMs,
+      terminalAtMs: job.terminalAtMs
     }
   }
 
-  private toTaskSnapshot(
-    legacy: ThreadJobDto,
-    aggregate: JobAggregateView | null
-  ): TaskJobSnapshotDto {
-    if (aggregate === null) {
-      return legacy
-    }
-
-    const timestamps = this.deps.getJobTimestamps(aggregate.id)
-    const status = mapStateToLegacyStatus(aggregate.state) ?? legacy.status
-    const control = this.toDto(aggregate, timestamps)
+  private buildTaskSnapshot(job: JobDetailView): TaskJobSnapshotDto {
+    const control = this.toDto(job)
+    const tasks = this.deps.listTasksForGeneration(job.id, job.executionGeneration)
+    const failureFields = buildFailureFields(control.failure)
 
     return {
-      ...legacy,
-      status,
+      id: job.id,
+      threadId: job.threadId,
+      draftMessageId: job.draftMessageId,
+      title: job.title,
+      summary: job.requirementsSummary,
+      status: mapStateToLegacyStatus(job.state),
+      planProgress: buildPlanProgress(job),
+      taskProgress: buildTaskProgress(tasks, job),
+      abilities: [],
+      planRevision: job.currentPlanRevision,
+      draftConfirmedAt: null,
+      planConfirmedAt: job.currentPlanRevision === null ? null : job.updatedAtMs,
+      designSessionId: null,
+      snapshotDraftRevision: null,
+      snapshotPlanRevision: job.currentPlanRevision,
+      snapshotManifestRevision: null,
+      createdAt: job.createdAtMs,
+      updatedAt: job.updatedAtMs,
       state: control.state,
       projectId: control.projectId,
       stateRevision: control.stateRevision,
@@ -211,7 +331,8 @@ export class JobQueryServiceImpl implements JobQueryService {
       lastFailureId: control.lastFailureId,
       createdAtMs: control.createdAtMs,
       updatedAtMs: control.updatedAtMs,
-      terminalAtMs: control.terminalAtMs
+      terminalAtMs: control.terminalAtMs,
+      ...failureFields
     }
   }
 }

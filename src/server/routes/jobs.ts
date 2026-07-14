@@ -47,6 +47,7 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createJobRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
+  const legacyWriteGuard = createLegacyCutoverGuard()
 
   routes.get('/:threadId/drafts', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
@@ -86,7 +87,7 @@ export function createJobRoutes(_ctx: AppContext): Hono {
     return c.json(ok(detail))
   })
 
-  routes.post('/:threadId/jobs', async (c) => {
+  routes.post('/:threadId/jobs', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const body = await c.req.json<{ draftMessageId?: string }>()
     if (!body.draftMessageId?.trim()) {
@@ -100,13 +101,13 @@ export function createJobRoutes(_ctx: AppContext): Hono {
     return c.json(ok(result))
   })
 
-  routes.post('/:threadId/jobs/:jobId/confirm-plan', async (c) => {
+  routes.post('/:threadId/jobs/:jobId/confirm-plan', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const job = await confirmExecutionPlan(username, c.req.param('threadId'), c.req.param('jobId'))
     return c.json(ok({ job }))
   })
 
-  routes.patch('/:threadId/jobs/:jobId/plan', async (c) => {
+  routes.patch('/:threadId/jobs/:jobId/plan', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const body = await c.req.json<{
       nodeRef?: string

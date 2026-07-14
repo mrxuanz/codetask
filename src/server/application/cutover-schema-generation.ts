@@ -1,8 +1,7 @@
 /**
  * Schema generation reader for legacy cutover guards.
  *
- * Delegates to cutover-state (DB meta + in-memory test override).
- * Defaults to `preparing` so legacy-only DBs and non-cutover runtimes stay open.
+ * Delegates to cutover-state (strict DB read + in-memory test override).
  */
 
 import {

@@ -36,7 +36,7 @@ describe('Migration copy', () => {
     }
   })
 
-  it('should handle pausing jobs', () => {
+  it('should handle pausing jobs with plan confirmation evidence', () => {
     const result = mapLegacyJob({
       id: 'job-2',
       status: 'pausing',
@@ -48,6 +48,14 @@ describe('Migration copy', () => {
       assert.equal(result.value.state, 'paused')
       assert.equal(result.value.resumeTarget, 'execution_queued')
       assert.ok(result.warnings.length > 0)
+    }
+  })
+
+  it('should conflict on paused jobs without resume evidence', () => {
+    const result = mapLegacyJob({ id: 'job-paused', status: 'paused' })
+    assert.equal(result.kind, 'conflict')
+    if (result.kind === 'conflict') {
+      assert.equal(result.code, 'migration.paused_resume_unproven')
     }
   })
 
@@ -68,10 +76,31 @@ describe('Migration CLI helpers', () => {
   it('should hash, write, and read reports', () => {
     const dir = mkdtempSync(join(tmpdir(), 'migration-report-'))
     const reportPath = join(dir, 'report.json')
-    const report = mapLegacyJobs([
-      { id: 'job-a', status: 'paused' },
-      { id: 'job-b', status: 'running' }
-    ])
+    const report = mapLegacyJobs(
+      [
+        { id: 'job-a', status: 'paused', currentPlanRevision: 1, planConfirmedAt: 1 },
+        { id: 'job-b', status: 'running' }
+      ],
+      {
+        sourceDatabaseIdentity: { absolutePath: '/tmp/test.db', sha256: 'abc123' },
+        sourceUserVersion: 27,
+        countsByTable: {
+          control_jobs: 2,
+          control_job_runs: 0,
+          control_job_tasks: 0,
+          control_task_attempts: 0,
+          control_verifications: 0,
+          control_plan_revisions: 0,
+          control_plan_milestones: 0,
+          control_plan_slices: 0,
+          control_plan_tasks: 0,
+          control_job_failures: 0,
+          control_evidence_blobs: 0,
+          control_runtime_instances: 0,
+          control_resource_slots: 0
+        }
+      }
+    )
     assert.equal(report.hasConflicts, false)
     assert.equal(report.mappedCount, 2)
 
@@ -88,13 +117,19 @@ describe('Migration CLI helpers', () => {
   })
 
   it('should fail validate-copy when conflicts exist', () => {
-    const report = mapLegacyJobs([
+    const report = mapLegacyJobs(
+      [
+        {
+          id: 'job-conflict',
+          status: 'completed',
+          planProgress: { status: 'running' }
+        }
+      ],
       {
-        id: 'job-conflict',
-        status: 'completed',
-        planProgress: { status: 'running' }
+        sourceDatabaseIdentity: { absolutePath: '/tmp/conflict.db', sha256: 'def456' },
+        sourceUserVersion: 27
       }
-    ])
+    )
     assert.equal(report.hasConflicts, true)
     const validation = validateCopyReport(report)
     assert.equal(validation.ok, false)

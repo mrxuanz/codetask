@@ -17,18 +17,28 @@ import {
   parseIfMatch,
   parseIdempotencyKey
 } from '@server/http/v3/headers'
+import { CommandError } from '@server/domain/jobs/job-errors'
 
 describe('API V3 headers', () => {
   it('should require If-Match header', () => {
-    assert.throws(() => parseIfMatch(undefined), /If-Match header required/)
+    assert.throws(
+      () => parseIfMatch(undefined),
+      (error: unknown) => error instanceof CommandError && error.code === 'contract.invalid_payload'
+    )
   })
 
   it('should require Idempotency-Key header', () => {
-    assert.throws(() => parseIdempotencyKey(undefined), /Idempotency-Key header required/)
+    assert.throws(
+      () => parseIdempotencyKey(undefined),
+      (error: unknown) => error instanceof CommandError && error.code === 'contract.invalid_payload'
+    )
   })
 
   it('should reject weak ETag', () => {
-    assert.throws(() => parseIfMatch('W/"91"'), /Invalid If-Match/)
+    assert.throws(
+      () => parseIfMatch('W/"91"'),
+      (error: unknown) => error instanceof CommandError && error.code === 'contract.invalid_payload'
+    )
   })
 
   it('should accept strong ETag', () => {
@@ -65,12 +75,12 @@ describe('Renderer entity-store merge', () => {
   })
 })
 
-describe('Renderer event-reducer gap', () => {
-  it('should detect gap and expose needsResync', () => {
+describe('Renderer event-reducer owner-safe cursor', () => {
+  it('should accept non-contiguous global event ids without false gap resync', () => {
     const reducer = new EventReducer()
-    const resyncEvents: Array<{ reason: string; lastEventId: number; newEventId: number }> = []
-    reducer.setResyncCallback((info) => {
-      resyncEvents.push(info)
+    let handled = 0
+    reducer.registerHandler('job.changed', () => {
+      handled += 1
     })
 
     reducer.reduce({
@@ -83,19 +93,16 @@ describe('Renderer event-reducer gap', () => {
     })
 
     reducer.reduce({
-      eventId: 3,
+      eventId: 5,
       topic: 'job:job-1',
       type: 'job.changed',
       entityId: 'job-1',
-      revision: 3,
+      revision: 2,
       payload: {}
     })
 
-    assert.equal(reducer.getNeedsResync(), true)
-    assert.equal(resyncEvents.length, 1)
-    assert.equal(resyncEvents[0]?.reason, 'event_gap')
-    assert.equal(resyncEvents[0]?.lastEventId, 1)
-    assert.equal(resyncEvents[0]?.newEventId, 3)
+    assert.equal(handled, 2)
+    assert.equal(reducer.getLastEventId(), 5)
   })
 
   it('should ignore duplicate replayed event ids', () => {
