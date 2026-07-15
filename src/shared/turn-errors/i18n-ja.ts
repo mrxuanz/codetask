@@ -17,6 +17,8 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'workspace.lease_lost':
     'ワークスペースリースが無効です。単一ライター許可なしでは実行できません',
   'runtime.draining': 'ランタイムはシャットダウン中です。再起動後に再試行してください',
+  'runtime.quota_exceeded':
+    'ジョブのランタイム容量が上限を超えました（{actualBytes} / {maxBytes} バイト）',
   'sandbox.worker.missing': 'サンドボックス worker を利用できません',
   'sandbox.required': 'この操作にはサンドボックスが必要です',
   'sandbox.turn.timed_out': 'サンドボックスタスクがタイムアウトしました',

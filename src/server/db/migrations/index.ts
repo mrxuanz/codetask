@@ -29,6 +29,9 @@ import { migration028ControlPlaneCorrectiveSchema } from './028_control_plane_co
 import { migration029JobTaskAttempts } from './029_job_task_attempts'
 import { migration030WorkspaceLeasesAndDeletion } from './030_workspace_leases_and_deletion'
 import { migration031DeletionRequestPhases } from './031_deletion_request_phases'
+import { migration032StorageSettings } from './032_storage_settings'
+import { migration033DesignPlanRevisions } from './033_design_plan_revisions'
+import { migration034JobArtifactBlob } from './034_job_artifact_blob'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -63,7 +66,10 @@ export const allMigrations = [
   migration028ControlPlaneCorrectiveSchema,
   migration029JobTaskAttempts,
   migration030WorkspaceLeasesAndDeletion,
-  migration031DeletionRequestPhases
+  migration031DeletionRequestPhases,
+  migration032StorageSettings,
+  migration033DesignPlanRevisions,
+  migration034JobArtifactBlob
 ]
 
 export function applyMigrations(db: Database.Database): void {

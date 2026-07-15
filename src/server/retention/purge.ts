@@ -1,7 +1,6 @@
 import { eq } from 'drizzle-orm'
 import type { getDb } from '../db'
-import { threadJobs, threadMessages } from '../db/schema'
-import { designArtifactDir } from '../data-paths'
+import { threadMessages } from '../db/schema'
 import { deleteMessageArtifactFiles } from './message-artifacts'
 import { removeThreadAttachmentsDir } from './janitor'
 import { cleanupJobRuntimeTree, cleanupThreadRuntimeTree } from '../runtime/cleanup'
@@ -9,7 +8,6 @@ import { cleanupJobRuntimeTree, cleanupThreadRuntimeTree } from '../runtime/clea
 type AppDatabase = ReturnType<typeof getDb>
 
 export interface ThreadPurgeTargets {
-  designSessionIds: string[]
   messageIds: string[]
 }
 
@@ -17,29 +15,14 @@ export async function collectThreadPurgeTargets(
   db: AppDatabase,
   threadId: string
 ): Promise<ThreadPurgeTargets> {
-  const [jobRows, messageRows] = await Promise.all([
-    db.select({ id: threadJobs.id }).from(threadJobs).where(eq(threadJobs.threadId, threadId)),
-    db
-      .select({ id: threadMessages.id })
-      .from(threadMessages)
-      .where(eq(threadMessages.threadId, threadId))
-  ])
+  const messageRows = await db
+    .select({ id: threadMessages.id })
+    .from(threadMessages)
+    .where(eq(threadMessages.threadId, threadId))
 
   return {
-    designSessionIds: jobRows.map((row) => row.id),
     messageIds: messageRows.map((row) => row.id)
   }
-}
-
-export async function deleteDesignArtifactFiles(
-  dataDir: string,
-  designSessionId: string
-): Promise<void> {
-  const { rm } = await import('fs/promises')
-  await rm(designArtifactDir(dataDir, designSessionId), {
-    recursive: true,
-    force: true
-  }).catch(() => {})
 }
 
 export async function purgeJobFilesystem(
@@ -56,7 +39,7 @@ export async function purgeJobFilesystemStrict(
   threadId: string,
   jobId: string
 ): Promise<void> {
-  await cleanupJobRuntimeTree(dataDir, threadId, jobId)
+  await cleanupJobRuntimeTree(dataDir, threadId, jobId, { deletionDrained: true })
 }
 
 export async function purgeThreadFilesystem(
@@ -67,12 +50,9 @@ export async function purgeThreadFilesystem(
   await cleanupThreadRuntimeTree(dataDir, threadId).catch(() => {})
   await removeThreadAttachmentsDir(dataDir, threadId).catch(() => {})
 
-  await Promise.all([
-    ...targets.designSessionIds.map((designSessionId) =>
-      deleteDesignArtifactFiles(dataDir, designSessionId)
-    ),
-    ...targets.messageIds.map((messageId) => deleteMessageArtifactFiles(dataDir, messageId))
-  ])
+  await Promise.all(
+    targets.messageIds.map((messageId) => deleteMessageArtifactFiles(dataDir, messageId))
+  )
 }
 
 /** Strict variant for deletion coordinator — surfaces filesystem errors instead of swallowing. */
@@ -81,12 +61,9 @@ export async function purgeThreadFilesystemStrict(
   threadId: string,
   targets: ThreadPurgeTargets
 ): Promise<void> {
-  await cleanupThreadRuntimeTree(dataDir, threadId)
+  await cleanupThreadRuntimeTree(dataDir, threadId, { deletionDrained: true })
   await removeThreadAttachmentsDir(dataDir, threadId)
-  await Promise.all([
-    ...targets.designSessionIds.map((designSessionId) =>
-      deleteDesignArtifactFiles(dataDir, designSessionId)
-    ),
-    ...targets.messageIds.map((messageId) => deleteMessageArtifactFiles(dataDir, messageId))
-  ])
+  await Promise.all(
+    targets.messageIds.map((messageId) => deleteMessageArtifactFiles(dataDir, messageId))
+  )
 }

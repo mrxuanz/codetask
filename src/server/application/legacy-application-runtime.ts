@@ -1,7 +1,7 @@
 import type { AppContext } from '../context'
 import { reconcileOnStartupOnce } from '../conversation/service'
 import { pruneOrphanRuntimeTrees } from '../runtime/cleanup'
-import { runRetentionJanitorPass } from '../retention'
+import { runRetentionJanitorPass } from '../retention/lifecycle'
 import { runAuthJanitorPass } from '../auth/janitor'
 import { bindStartupWorkloadGate } from '../legacy-control-plane/workload-slot'
 import { StartupCoordinator } from './startup-coordinator'
@@ -20,13 +20,24 @@ export function createLegacyApplicationRuntime(
     logger,
     stages: [
       {
+        name: 'scrub-runtime-credentials',
+        execute: async () => {
+          const { dataPaths } = await import('../data-paths')
+          const { scrubCredentialSnapshotsInTree } =
+            await import('../sandbox/provider-auth/snapshot-manifest')
+          const scrubbed = scrubCredentialSnapshotsInTree(dataPaths(ctx.dataDir).runtimes)
+          if (scrubbed.manifests > 0 || scrubbed.rejectedPaths > 0) {
+            logger.info('scrubbed provider credential snapshots on startup', { ...scrubbed })
+          }
+        }
+      },
+      {
         // FIX-PLAN F3-B (§8.5): fence stale task attempts from a dead process to `interrupted`
         // before any Job is resumed, so resume creates a fresh attempt under the same identity.
         name: 'interrupt-orphan-task-attempts',
         execute: async () => {
-          const { markAllRunningAttemptsInterrupted } = await import(
-            '../legacy-control-plane/task-attempts'
-          )
+          const { markAllRunningAttemptsInterrupted } =
+            await import('../legacy-control-plane/task-attempts')
           const changed = markAllRunningAttemptsInterrupted()
           if (changed > 0) {
             logger.info('interrupted orphan task attempts on startup', { count: changed })
@@ -36,9 +47,8 @@ export function createLegacyApplicationRuntime(
       {
         name: 'reclaim-workspace-leases',
         execute: async () => {
-          const { reclaimStaleWorkspaceLeasesOnStartup } = await import(
-            '../legacy-control-plane/workspace-lease-store'
-          )
+          const { reclaimStaleWorkspaceLeasesOnStartup } =
+            await import('../legacy-control-plane/workspace-lease-store')
           const changed = reclaimStaleWorkspaceLeasesOnStartup()
           if (changed > 0) {
             logger.info('reclaimed stale workspace leases on startup', { count: changed })
@@ -48,27 +58,24 @@ export function createLegacyApplicationRuntime(
       {
         name: 'resume-deletion-requests',
         execute: async () => {
-          const { resumePendingDeletionRequestsOnStartup } = await import(
-            '../legacy-control-plane/deletion-coordinator'
-          )
+          const { resumePendingDeletionRequestsOnStartup } =
+            await import('../legacy-control-plane/deletion-coordinator')
           await resumePendingDeletionRequestsOnStartup()
         }
       },
       {
         name: 'reconcile-workload-slots',
         execute: async () => {
-          const { reconcileOrphanWorkloadSlotsOnStartupOnce } = await import(
-            '../legacy-control-plane/reconcile'
-          )
+          const { reconcileOrphanWorkloadSlotsOnStartupOnce } =
+            await import('../legacy-control-plane/reconcile')
           await reconcileOrphanWorkloadSlotsOnStartupOnce()
         }
       },
       {
         name: 'reconcile-orphan-jobs',
         execute: async () => {
-          const { reconcileOrphanRunningJobsOnStartupOnce } = await import(
-            '../legacy-control-plane/reconcile'
-          )
+          const { reconcileOrphanRunningJobsOnStartupOnce } =
+            await import('../legacy-control-plane/reconcile')
           // Startup owns the workload gate. Advancing the queue from inside this stage would wait
           // on that same gate and deadlock, so defer it until startup and executor init complete.
           await reconcileOrphanRunningJobsOnStartupOnce({ deferQueueAdvance: true })
@@ -77,9 +84,8 @@ export function createLegacyApplicationRuntime(
       {
         name: 'reconcile-planning-sessions',
         execute: async () => {
-          const { reconcileOrphanPlanningSessionsOnStartupOnce } = await import(
-            '../legacy-control-plane/reconcile'
-          )
+          const { reconcileOrphanPlanningSessionsOnStartupOnce } =
+            await import('../legacy-control-plane/reconcile')
           await reconcileOrphanPlanningSessionsOnStartupOnce()
         }
       },
@@ -120,7 +126,6 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
       result.orphanAttachments > 0 ||
       result.staleRuntimes > 0 ||
       result.completedTaskRuntimes > 0 ||
-      result.orphanDesignArtifacts > 0 ||
       result.staleAttachmentDirs > 0 ||
       result.orphanRuntimeTrees > 0 ||
       result.sqliteMaintenance.ran
@@ -138,7 +143,10 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
   }
 }
 
-async function startConversationCursorReaper(ctx: AppContext, logger: SafeLoggerImpl): Promise<void> {
+async function startConversationCursorReaper(
+  ctx: AppContext,
+  logger: SafeLoggerImpl
+): Promise<void> {
   try {
     const module = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
     module.configureConversationCursorReaper({
@@ -152,7 +160,9 @@ async function startConversationCursorReaper(ctx: AppContext, logger: SafeLogger
   }
 }
 
-export async function startLegacyApplicationRuntime(runtime: LegacyApplicationRuntime): Promise<void> {
+export async function startLegacyApplicationRuntime(
+  runtime: LegacyApplicationRuntime
+): Promise<void> {
   if (runtime.startPromise !== null) {
     return runtime.startPromise
   }
@@ -254,9 +264,8 @@ async function drainActiveExecutionRuns(logger: SafeLoggerImpl): Promise<void> {
   try {
     const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
     const { stopRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
-    const { markRunningAttemptsInterruptedForJob } = await import(
-      '../legacy-control-plane/task-attempts'
-    )
+    const { markRunningAttemptsInterruptedForJob } =
+      await import('../legacy-control-plane/task-attempts')
 
     const slots = await listActiveWorkloadSlots({})
     const executionSlots = slots.filter((slot) => slot.kind === 'execution')

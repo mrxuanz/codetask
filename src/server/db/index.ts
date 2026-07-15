@@ -5,6 +5,8 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { dataPaths } from '../data-paths'
 import { applyMigrations } from './migrations/index'
 import {
+  appSettings,
+  designPlanRevisions,
   authState,
   authGuardState,
   authRateBucket,
@@ -29,6 +31,8 @@ import {
 } from './schema'
 
 const schema = {
+  appSettings,
+  designPlanRevisions,
   authState,
   authGuardState,
   authRateBucket,

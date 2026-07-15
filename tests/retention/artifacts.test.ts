@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import test from 'node:test'
@@ -8,6 +8,7 @@ import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src
 import {
   putJobArtifact,
   getJobArtifactPayload,
+  deleteJobArtifact,
   deleteExpiredArtifacts,
   scheduleJobArtifactExpiry
 } from '../../src/server/retention/artifacts'
@@ -19,8 +20,10 @@ import {
 import { summarizeEvidence } from '../../src/server/retention/lifecycle-helpers'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
 import type { TaskEvidenceDto } from '../../src/shared/contracts/evidence'
+import { eq } from 'drizzle-orm'
+import { jobArtifacts } from '../../src/server/db/schema'
 
-test('putJobArtifact stores payloads inline and hydrates round-trip', async () => {
+test('putJobArtifact uses the configured threshold and hydrates file payloads', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-artifact-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
@@ -48,6 +51,76 @@ test('putJobArtifact stores payloads inline and hydrates round-trip', async () =
     const loaded = await getJobArtifactPayload<TaskEvidenceDto>(db, dataDir, artifactId)
     assert.equal(loaded?.summary, 'done')
     assert.equal(loaded?.evidence.length, 200)
+    const row = await db
+      .select()
+      .from(jobArtifacts)
+      .where(eq(jobArtifacts.id, artifactId))
+      .limit(1)
+      .then((rows) => rows[0])
+    assert.equal(row?.storage, 'file')
+    assert.equal(row?.contentBlob, null)
+    assert.ok(row?.contentPath && existsSync(join(dataDir, row.contentPath)))
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('putJobArtifact stores small compressed payloads as SQLite BLOB rather than base64 TEXT', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-artifact-inline-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    await seedMinimalJob(db, 'job-inline', 'running')
+    const artifactId = await putJobArtifact({
+      db,
+      dataDir,
+      jobId: 'job-inline',
+      kind: 'verifier_bundle',
+      payload: { verdict: 'pass' },
+      settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 1024 }
+    })
+    const row = await db
+      .select()
+      .from(jobArtifacts)
+      .where(eq(jobArtifacts.id, artifactId))
+      .limit(1)
+      .then((rows) => rows[0])
+    assert.equal(row?.storage, 'inline')
+    assert.ok(Buffer.isBuffer(row?.contentBlob))
+    assert.equal(row?.contentInline, null)
+    assert.deepEqual(await getJobArtifactPayload(db, dataDir, artifactId), { verdict: 'pass' })
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('content-addressed files remain until their final metadata reference is deleted', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-artifact-shared-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    await seedMinimalJob(db, 'job-shared', 'running')
+    const options = {
+      db,
+      dataDir,
+      jobId: 'job-shared',
+      kind: 'task_evidence' as const,
+      payload: { repeated: 'x'.repeat(1024) },
+      settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 0 }
+    }
+    const first = await putJobArtifact({ ...options, taskId: 'task-1' })
+    const second = await putJobArtifact({ ...options, taskId: 'task-2' })
+    const row = db.select().from(jobArtifacts).where(eq(jobArtifacts.id, first)).limit(1).all()[0]
+    assert.ok(row?.contentPath)
+    const sharedPath = join(dataDir, row.contentPath)
+    assert.equal(existsSync(sharedPath), true)
+
+    await deleteJobArtifact({ db, dataDir, artifactId: first })
+    assert.equal(existsSync(sharedPath), true)
+    assert.deepEqual(await getJobArtifactPayload(db, dataDir, second), options.payload)
+
+    await deleteJobArtifact({ db, dataDir, artifactId: second })
+    assert.equal(existsSync(sharedPath), false)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

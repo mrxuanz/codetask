@@ -94,26 +94,6 @@ export async function commitDesignPlanReady(
   })
   if (!updated) return false
 
-  const { getAppContext } = await import('../bootstrap')
-  const { putDesignPlanArtifact } = await import('../retention/design-plan-artifacts')
-  const artifact = await putDesignPlanArtifact({
-    dataDir: getAppContext().dataDir,
-    designSessionId,
-    planRevision,
-    plan: planToSave
-  })
-  const db = getDb()
-  await db
-    .update(threadJobs)
-    .set({
-      planArtifactId: artifact.artifactId,
-      planArtifactPath: artifact.contentPath,
-      planSummaryJson: artifact.summaryJson,
-      planCountsJson: JSON.stringify(counts),
-      updatedAt: nowSec()
-    })
-    .where(and(eq(threadJobs.id, designSessionId), eq(threadJobs.activeRunId, runId)))
-
   emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress: planReady } })
   emitJobEvent(designSessionId, {
     event: 'task_progress',

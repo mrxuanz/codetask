@@ -29,15 +29,9 @@ export {
   removeThreadAttachmentsDir,
   pruneOrphanAttachments,
   pruneOrphanMessageArtifactDirs,
-  pruneOrphanDesignArtifactDirs,
   pruneStaleThreadAttachmentDirs
 } from './janitor'
-export {
-  collectThreadPurgeTargets,
-  deleteDesignArtifactFiles,
-  purgeJobFilesystem,
-  purgeThreadFilesystem
-} from './purge'
+export { collectThreadPurgeTargets, purgeJobFilesystem, purgeThreadFilesystem } from './purge'
 export {
   runSqliteMaintenance,
   runSqliteMaintenanceIfDue,

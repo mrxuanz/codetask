@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from 'crypto'
 import { gunzipSync, gzipSync } from 'zlib'
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
-import { dirname, join } from 'path'
-import { and, eq } from 'drizzle-orm'
+import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
+import { and, eq, inArray, lte } from 'drizzle-orm'
 import { DEFAULT_RETENTION_SETTINGS } from '../../shared/contracts/retention.ts'
 import type { RetentionSettings } from '../../shared/contracts/retention.ts'
 import { messageArtifactDir, messageArtifactRelPath } from '../data-paths'
 import type { getDb } from '../db'
 import { messageArtifacts } from '../db/schema'
+import { signalArtifactExpiry } from './expiry-signal'
 
 type AppDatabase = ReturnType<typeof getDb>
 
@@ -32,15 +33,26 @@ function messageArtifactFileAbsPath(
   return join(dataDir, messageArtifactRelPath(messageId, artifactId))
 }
 
-async function writeMessageArtifactFile(
+async function stageMessageArtifactFile(
   dataDir: string,
   messageId: string,
   artifactId: string,
   raw: string
-): Promise<void> {
+): Promise<{ staging: string; final: string }> {
   const abs = messageArtifactFileAbsPath(dataDir, messageId, artifactId)
   await mkdir(dirname(abs), { recursive: true })
-  await writeFile(abs, gzipSync(raw))
+  const staging = `${abs}.staging-${randomUUID()}`
+  await writeFile(staging, gzipSync(raw))
+  return { staging, final: abs }
+}
+
+function safeMessageArtifactPath(dataDir: string, relPath: string): string | null {
+  if (isAbsolute(relPath)) return null
+  const root = resolve(dataDir)
+  const target = resolve(root, relPath)
+  const rel = relative(root, target)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null
+  return target
 }
 
 async function readMessageArtifactFile(dataDir: string, relPath: string): Promise<string | null> {
@@ -76,11 +88,12 @@ export async function putMessageArtifact(input: {
   let contentInline: string | null = raw
   let contentPath: string | null = null
 
+  let staged: { staging: string; final: string } | null = null
   if (byteSize > inlineMax) {
     storage = 'file'
     contentInline = null
     contentPath = messageArtifactRelPath(input.messageId, id)
-    await writeMessageArtifactFile(input.dataDir, input.messageId, id, raw)
+    staged = await stageMessageArtifactFile(input.dataDir, input.messageId, id, raw)
   }
 
   const existing = await input.db
@@ -88,31 +101,50 @@ export async function putMessageArtifact(input: {
     .from(messageArtifacts)
     .where(and(eq(messageArtifacts.messageId, input.messageId), eq(messageArtifacts.kind, kind)))
 
-  for (const row of existing) {
-    if (row.storage === 'file' && row.contentPath) {
-      await rm(join(input.dataDir, row.contentPath.replace(/\\/g, '/')), { force: true }).catch(
-        () => {}
-      )
+  if (staged) {
+    try {
+      await rename(staged.staging, staged.final)
+    } catch (error) {
+      await rm(staged.staging, { force: true }).catch(() => {})
+      throw error
     }
   }
-  if (existing.length > 0) {
-    await input.db
-      .delete(messageArtifacts)
-      .where(and(eq(messageArtifacts.messageId, input.messageId), eq(messageArtifacts.kind, kind)))
+  try {
+    input.db.transaction((tx) => {
+      if (existing.length > 0) {
+        tx.delete(messageArtifacts)
+          .where(
+            and(eq(messageArtifacts.messageId, input.messageId), eq(messageArtifacts.kind, kind))
+          )
+          .run()
+      }
+      tx.insert(messageArtifacts)
+        .values({
+          id,
+          messageId: input.messageId,
+          kind,
+          contentHash,
+          byteSize,
+          storage,
+          contentInline,
+          contentPath,
+          createdAt,
+          expiresAt: input.expiresAt ?? null
+        })
+        .run()
+    })
+  } catch (error) {
+    if (staged) await rm(staged.final, { force: true }).catch(() => {})
+    throw error
   }
 
-  await input.db.insert(messageArtifacts).values({
-    id,
-    messageId: input.messageId,
-    kind,
-    contentHash,
-    byteSize,
-    storage,
-    contentInline,
-    contentPath,
-    createdAt,
-    expiresAt: input.expiresAt ?? null
-  })
+  for (const row of existing) {
+    if (row.storage !== 'file' || !row.contentPath) continue
+    const oldPath = safeMessageArtifactPath(input.dataDir, row.contentPath)
+    if (oldPath) await rm(oldPath, { force: true }).catch(() => {})
+  }
+
+  signalArtifactExpiry(input.expiresAt)
 
   return id
 }
@@ -163,4 +195,34 @@ export async function deleteMessageArtifactFiles(
     recursive: true,
     force: true
   }).catch(() => {})
+}
+
+export async function deleteExpiredMessageArtifacts(
+  db: AppDatabase,
+  dataDir: string,
+  cutoff = nowSec()
+): Promise<{ deleted: number; deletedBytes: number }> {
+  const rows = await db
+    .select()
+    .from(messageArtifacts)
+    .where(lte(messageArtifacts.expiresAt, cutoff))
+    .limit(250)
+  if (rows.length === 0) return { deleted: 0, deletedBytes: 0 }
+  await db.delete(messageArtifacts).where(
+    inArray(
+      messageArtifacts.id,
+      rows.map((row) => row.id)
+    )
+  )
+  await Promise.all(
+    rows.map(async (row) => {
+      if (row.storage !== 'file' || !row.contentPath) return
+      const path = safeMessageArtifactPath(dataDir, row.contentPath)
+      if (path) await rm(path, { force: true }).catch(() => {})
+    })
+  )
+  return {
+    deleted: rows.length,
+    deletedBytes: rows.reduce((total, row) => total + row.byteSize, 0)
+  }
 }

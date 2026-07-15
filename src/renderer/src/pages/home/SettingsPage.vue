@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   fetchControlPlaneSettings,
@@ -28,8 +28,16 @@ import CardTitle from '@renderer/components/ui/CardTitle.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
 import { toast, toastError } from '@renderer/lib/toast'
+import {
+  confirmOldStorageDelete,
+  fetchStorageMigration,
+  fetchStorageStats,
+  startStorageMigration,
+  type StorageMigrationData,
+  type StorageStatsData
+} from '@renderer/api/storage'
 
-type SettingsSection = 'language' | 'sandbox' | 'control-plane' | 'mcp' | 'prompts'
+type SettingsSection = 'language' | 'storage' | 'sandbox' | 'control-plane' | 'mcp' | 'prompts'
 
 const { t } = useI18n()
 
@@ -46,14 +54,94 @@ const mcpDraft = ref<UserMcpSettings | null>(null)
 const mcpConstraints = ref<McpSettingsConstraints | null>(null)
 const sandboxHealth = ref<SandboxHealthReport | null>(null)
 const sandboxHealthLoading = ref(false)
+const storageStats = ref<StorageStatsData | null>(null)
+const storageTarget = ref('')
+const storageMigration = ref<StorageMigrationData | null>(null)
+const storageLoading = ref(false)
+let migrationPoll: ReturnType<typeof setTimeout> | null = null
 
 const sections = [
   { key: 'language' as const, labelKey: 'workspace.settings.sections.language' },
+  { key: 'storage' as const, labelKey: 'workspace.settings.sections.storage' },
   { key: 'sandbox' as const, labelKey: 'workspace.settings.sections.sandbox' },
   { key: 'control-plane' as const, labelKey: 'workspace.settings.sections.controlPlane' },
   { key: 'mcp' as const, labelKey: 'workspace.settings.sections.mcp' },
   { key: 'prompts' as const, labelKey: 'workspace.settings.sections.prompts' }
 ]
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes / 1024
+  let unit = units[0]
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024
+    unit = units[index]
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`
+}
+
+async function pollStorageMigration(migrationId: string): Promise<void> {
+  if (migrationPoll) clearTimeout(migrationPoll)
+  try {
+    const response = await fetchStorageMigration(migrationId)
+    storageMigration.value = response.data
+    if (!['restart_required', 'failed'].includes(response.data.phase)) {
+      migrationPoll = setTimeout(() => void pollStorageMigration(migrationId), 750)
+    }
+  } catch (err) {
+    toastError(err, t('workspace.settings.storage.loadFailed'))
+  }
+}
+
+async function loadStorage(): Promise<void> {
+  storageLoading.value = true
+  try {
+    storageStats.value = (await fetchStorageStats()).data
+    const migrationId = localStorage.getItem('codetask.storageMigrationId')
+    if (migrationId) await pollStorageMigration(migrationId)
+  } catch (err) {
+    toastError(err, t('workspace.settings.storage.loadFailed'))
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function chooseStorageTarget(): Promise<void> {
+  const selected = await window.api?.selectDataDirectory?.()
+  if (selected) storageTarget.value = selected
+}
+
+async function migrateStorage(): Promise<void> {
+  if (!storageTarget.value.trim()) return
+  storageLoading.value = true
+  try {
+    const response = await startStorageMigration(storageTarget.value.trim())
+    storageMigration.value = response.data
+    localStorage.setItem('codetask.storageMigrationId', response.data.migrationId)
+    await pollStorageMigration(response.data.migrationId)
+  } catch (err) {
+    toastError(err, t('workspace.settings.storage.migrationFailed'))
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function deleteOldStorage(): Promise<void> {
+  if (!storageMigration.value) return
+  try {
+    await confirmOldStorageDelete(storageMigration.value.migrationId)
+    localStorage.removeItem('codetask.storageMigrationId')
+    storageMigration.value = null
+    await loadStorage()
+  } catch (err) {
+    toastError(err, t('workspace.settings.storage.deleteOldFailed'))
+  }
+}
+
+async function restartApp(): Promise<void> {
+  await window.api.relaunchApp()
+}
 
 async function loadSandboxHealth(): Promise<void> {
   sandboxHealthLoading.value = true
@@ -173,18 +261,27 @@ async function handleSave(): Promise<void> {
 onMounted(() => {
   void loadSettings()
   void loadSandboxHealth()
+  void loadStorage()
+})
+
+onUnmounted(() => {
+  if (migrationPoll) clearTimeout(migrationPoll)
 })
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row">
+  <div
+    class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background lg:flex-row"
+  >
     <aside
       class="w-full shrink-0 border-b border-border p-2 lg:w-48 lg:border-r lg:border-b-0 lg:p-3 xl:w-56"
     >
       <p class="px-2 py-1 text-[11px] font-semibold tracking-wide text-muted-foreground lg:py-2">
         {{ t('workspace.settings.sidebar') }}
       </p>
-      <div class="flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+      <div
+        class="flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0"
+      >
         <button
           v-for="item in sections"
           :key="item.key"
@@ -227,6 +324,122 @@ onMounted(() => {
             </CardHeader>
             <CardContent>
               <LanguageSwitcher />
+            </CardContent>
+          </Card>
+
+          <Card v-if="section === 'storage'">
+            <CardHeader class="pb-3">
+              <CardTitle class="text-lg">{{ t('workspace.settings.storage.title') }}</CardTitle>
+              <p class="mt-1 text-sm text-muted-foreground">
+                {{ t('workspace.settings.storage.description') }}
+              </p>
+            </CardHeader>
+            <CardContent class="space-y-5">
+              <div
+                v-if="storageLoading && !storageStats"
+                class="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Spinner class="size-4" />
+                {{ t('workspace.settings.storage.loading') }}
+              </div>
+              <template v-if="storageStats">
+                <div>
+                  <p class="text-xs font-medium text-muted-foreground">
+                    {{ t('workspace.settings.storage.currentPath') }}
+                  </p>
+                  <p class="mt-1 break-all font-mono text-sm">{{ storageStats.dataDir }}</p>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    {{ t('workspace.settings.storage.source', { source: storageStats.source }) }}
+                  </p>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+                  <div class="rounded-md border p-3">
+                    <p class="text-muted-foreground">{{ t('workspace.settings.storage.total') }}</p>
+                    <p class="mt-1 font-medium">{{ formatBytes(storageStats.bytes.total) }}</p>
+                  </div>
+                  <div class="rounded-md border p-3">
+                    <p class="text-muted-foreground">DB + WAL</p>
+                    <p class="mt-1 font-medium">
+                      {{ formatBytes(storageStats.bytes.database + storageStats.bytes.wal) }}
+                    </p>
+                  </div>
+                  <div class="rounded-md border p-3">
+                    <p class="text-muted-foreground">Runtime</p>
+                    <p class="mt-1 font-medium">{{ formatBytes(storageStats.bytes.runtimes) }}</p>
+                  </div>
+                  <div class="rounded-md border p-3">
+                    <p class="text-muted-foreground">Attachments</p>
+                    <p class="mt-1 font-medium">
+                      {{ formatBytes(storageStats.bytes.attachments) }}
+                    </p>
+                  </div>
+                  <div class="rounded-md border p-3">
+                    <p class="text-muted-foreground">Artifact</p>
+                    <p class="mt-1 font-medium">{{ formatBytes(storageStats.bytes.artifacts) }}</p>
+                  </div>
+                  <div class="rounded-md border p-3">
+                    <p class="text-muted-foreground">
+                      {{ t('workspace.settings.storage.reclaimable') }}
+                    </p>
+                    <p class="mt-1 font-medium">
+                      {{ formatBytes(storageStats.sqlite.reclaimableBytes) }}
+                    </p>
+                  </div>
+                </div>
+
+                <div v-if="!storageStats.managed" class="border-t pt-5">
+                  <p class="text-sm font-medium">
+                    {{ t('workspace.settings.storage.changeTitle') }}
+                  </p>
+                  <div class="mt-2 flex gap-2">
+                    <input
+                      v-model="storageTarget"
+                      class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                      :disabled="storageLoading || !!storageMigration"
+                    />
+                    <Button
+                      variant="outline"
+                      :disabled="storageLoading || !!storageMigration"
+                      @click="chooseStorageTarget"
+                      >{{ t('workspace.settings.storage.browse') }}</Button
+                    >
+                    <Button
+                      :disabled="storageLoading || !!storageMigration || !storageTarget.trim()"
+                      @click="migrateStorage"
+                      >{{ t('workspace.settings.storage.migrate') }}</Button
+                    >
+                  </div>
+                </div>
+                <p v-else class="rounded-md bg-muted p-3 text-sm text-muted-foreground">
+                  {{ t('workspace.settings.storage.managed') }}
+                </p>
+
+                <div v-if="storageMigration" class="rounded-md border p-4 text-sm">
+                  <p class="font-medium">
+                    {{ t('workspace.settings.storage.phase', { phase: storageMigration.phase }) }}
+                  </p>
+                  <p class="mt-1 text-muted-foreground">
+                    {{ formatBytes(storageMigration.copiedBytes) }} ·
+                    {{ storageMigration.copiedFiles }} files
+                  </p>
+                  <p v-if="storageMigration.error" class="mt-2 text-destructive">
+                    {{ storageMigration.error }}
+                  </p>
+                  <div v-if="storageMigration.phase === 'restart_required'" class="mt-3">
+                    <Button
+                      v-if="storageStats.dataDir !== storageMigration.targetDataDir"
+                      @click="restartApp"
+                      >{{ t('workspace.settings.storage.restart') }}</Button
+                    >
+                    <Button
+                      v-else
+                      class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      @click="deleteOldStorage"
+                      >{{ t('workspace.settings.storage.deleteOld') }}</Button
+                    >
+                  </div>
+                </div>
+              </template>
             </CardContent>
           </Card>
 

@@ -39,7 +39,24 @@ export default {
       'ユーザー名は 4〜32 文字、英字で始まり、英数字・アンダースコア・ハイフンのみ。admin/root などの予約名は不可。パスワードは 8 文字以上で、大文字・小文字・数字・記号を含めてください。',
     confirmPassword: 'パスワード確認',
     confirmPasswordPlaceholder: 'もう一度パスワードを入力',
-    passwordMismatch: 'パスワードが一致しません'
+    passwordMismatch: 'パスワードが一致しません',
+    storageTitle: 'データ保存先を選択',
+    storageDescription:
+      'CodeTask のデータベース、添付ファイル、分離された Provider ランタイムの保存先を選択します。',
+    storagePathLabel: 'データディレクトリ',
+    storageBrowse: '参照',
+    storageValidate: 'ディレクトリを検証',
+    storageValidating: '検証中…',
+    storageConfirm: '初期化して再起動',
+    storageInitializing: '初期化中…',
+    storageValidatedPath: '検証済みパス：{path}',
+    storageRestarting: 'ストレージを初期化しました。CodeTask を再起動しています…',
+    storageRecoveryTitle: 'ストレージの復旧が必要です',
+    storageRecoveryDescription:
+      '保存先が破損しているか見つかりません。既存の CodeTask データディレクトリを選択してください。有効なマーカーとデータベースが必要です。',
+    storageRecover: 'このディレクトリを使用して再起動',
+    storageRecovering: '復旧中…',
+    storageRecovered: '保存先を復旧しました。CodeTask を再起動しています…'
   },
   bootstrap: {
     connectionError: 'サービスに接続できません：{error}',
@@ -456,6 +473,7 @@ export default {
       saveSuccess: '設定を保存しました',
       sections: {
         language: '言語',
+        storage: 'データストレージ',
         sandbox: 'サンドボックス',
         controlPlane: 'Control Plane',
         mcp: 'MCP',
@@ -477,6 +495,26 @@ export default {
           unavailable: '利用不可',
           disabled: '無効'
         }
+      },
+      storage: {
+        title: 'データストレージ',
+        description:
+          '使用量を確認し、検証・移行・再起動を通じてデータルート全体を安全に移動します。',
+        loading: 'ストレージ情報を読み込み中…',
+        loadFailed: 'ストレージ情報の読み込みに失敗しました',
+        currentPath: '現在のデータルート',
+        source: 'ソース：{source}',
+        total: '合計',
+        reclaimable: 'DB 回収可能',
+        changeTitle: 'データルートを移動',
+        browse: '参照',
+        migrate: '検証して移行',
+        managed: 'このパスは CLI または環境設定で管理されているため、ここでは変更できません。',
+        phase: '移行フェーズ：{phase}',
+        restart: '新しいデータルートで再起動',
+        deleteOld: '古いデータルートを削除',
+        migrationFailed: 'ストレージ移行に失敗しました',
+        deleteOldFailed: '古いストレージの削除に失敗しました'
       },
       languageSection: {
         title: '言語',

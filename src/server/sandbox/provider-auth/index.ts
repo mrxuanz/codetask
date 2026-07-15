@@ -12,6 +12,13 @@ export {
   opencodeRuntimeLayout
 } from './materialize'
 export {
+  CREDENTIAL_SNAPSHOT_MANIFEST,
+  credentialSnapshotManifestPath,
+  scrubCredentialSnapshotManifest,
+  scrubCredentialSnapshotsInTree,
+  writeCredentialSnapshotManifest
+} from './snapshot-manifest'
+export {
   resolveCodexHostAuthPath,
   resolveCodexInstallDirs,
   resolveClaudeInstallDirs,
@@ -30,5 +37,7 @@ export type {
   ProviderAuthDiagnostics,
   ProviderAuthMode,
   ProviderAuthPrepared,
+  ProviderFilesystemProfile,
+  CredentialSnapshotSpec,
   ProviderAuthPreflightResult
 } from './types'

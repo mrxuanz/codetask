@@ -145,12 +145,24 @@ function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
         : [`Host Codex auth file not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`]
   }
 
+  const readRoots = uniqueRoots([...resolveCodexInstallDirs()])
   return {
     envPatch,
-    readRoots: uniqueRoots([...resolveCodexInstallDirs()]),
+    readRoots,
     writeRoots: [],
     cleanupPlan: () => materialized.cleanup(),
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'codex',
+      hostReadRoots: readRoots,
+      hostWriteRoots: [],
+      runtimeEnv: envPatch,
+      credentialSnapshots: [
+        { relativePath: '.codex/auth.json', required: false },
+        { relativePath: '.codex/config.toml', required: false }
+      ],
+      scrubPatterns: ['.codex/auth.json', '.codex/config.toml']
+    }
   }
 }
 
@@ -177,19 +189,29 @@ function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuth
     ]
   }
 
+  const readRoots = uniqueRoots([
+    profile.home,
+    cursorHome,
+    hostAuth.configDir,
+    profile.appData,
+    profile.localAppData,
+    ...resolveCursorAgentInstallDirs()
+  ])
+  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(workspaceRoot, '.cursor')])
   return {
     envPatch,
-    readRoots: uniqueRoots([
-      profile.home,
-      cursorHome,
-      hostAuth.configDir,
-      profile.appData,
-      profile.localAppData,
-      ...resolveCursorAgentInstallDirs()
-    ]),
-    writeRoots: uniqueRoots([cursorHome, hostAuth.configDir, join(workspaceRoot, '.cursor')]),
+    readRoots,
+    writeRoots,
     cleanupPlan: () => undefined,
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'cursorcli',
+      hostReadRoots: readRoots,
+      hostWriteRoots: writeRoots,
+      runtimeEnv: envPatch,
+      credentialSnapshots: [],
+      scrubPatterns: []
+    }
   }
 }
 
@@ -225,12 +247,21 @@ function prepareClaude(runtimeRoot: string): ProviderAuthPrepared {
     ]
   }
 
+  const readRoots = uniqueRoots([...resolveClaudeInstallDirs()])
   return {
     envPatch,
-    readRoots: uniqueRoots([...resolveClaudeInstallDirs()]),
+    readRoots,
     writeRoots: [],
     cleanupPlan: () => undefined,
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'claude-code',
+      hostReadRoots: readRoots,
+      hostWriteRoots: [],
+      runtimeEnv: envPatch,
+      credentialSnapshots: [],
+      scrubPatterns: []
+    }
   }
 }
 
@@ -260,12 +291,29 @@ function prepareOpencode(runtimeRoot: string): ProviderAuthPrepared {
       : ['OpenCode config directory is empty (will rely on environment variable API key)']
   }
 
+  const readRoots = uniqueRoots([...resolveOpencodeInstallDirs()])
   return {
     envPatch,
-    readRoots: uniqueRoots([...resolveOpencodeInstallDirs()]),
+    readRoots,
     writeRoots: [],
     cleanupPlan: () => materialized.cleanup(),
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'opencode',
+      hostReadRoots: readRoots,
+      hostWriteRoots: [],
+      runtimeEnv: envPatch,
+      credentialSnapshots: [
+        { relativePath: '.config/opencode/auth.json', required: false },
+        { relativePath: '.local/share/opencode/auth.json', required: false }
+      ],
+      scrubPatterns: [
+        '.config/opencode/auth.json',
+        '.config/opencode/credentials.json',
+        '.local/share/opencode/auth.json',
+        '.local/share/opencode/credentials.json'
+      ]
+    }
   }
 }
 
