@@ -19,7 +19,6 @@ import { SettingsStore } from '../../src/server/context/settings-store'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
 import {
   pruneCompletedTaskRuntimeTrees,
-  pruneOrphanDesignArtifactDirs,
   pruneStaleThreadAttachmentDirs
 } from '../../src/server/retention/janitor'
 import { estimateJobRuntimeBytes, jobTaskRuntimeDir } from '../../src/server/runtime/cleanup'
@@ -37,7 +36,6 @@ import { putJobArtifact } from '../../src/server/retention/artifacts'
 import {
   attachmentDir,
   dataPaths,
-  designArtifactDir,
   messageArtifactDir,
   threadAttachmentsDir
 } from '../../src/server/data-paths'
@@ -197,17 +195,15 @@ test('purgeJobFilesystem removes job artifacts and runtime tree', async () => {
   }
 })
 
-test('purgeThreadFilesystem removes attachments, design artifacts, and message artifacts', async () => {
+test('purgeThreadFilesystem removes attachments and message artifacts', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-thread-purge-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
-    const { threadId, designSessionId, messageId, attachmentId } = await seedThreadGraph(db)
+    const { threadId, messageId, attachmentId } = await seedThreadGraph(db)
     const targets = await collectThreadPurgeTargets(db, threadId)
 
     mkdirSync(attachmentDir(dataDir, threadId, attachmentId), { recursive: true })
     writeFileSync(join(attachmentDir(dataDir, threadId, attachmentId), 'ref.png'), 'png')
-    mkdirSync(designArtifactDir(dataDir, designSessionId), { recursive: true })
-    writeFileSync(join(designArtifactDir(dataDir, designSessionId), 'plan-v1.json.gz'), 'gz')
     mkdirSync(messageArtifactDir(dataDir, messageId), { recursive: true })
     writeFileSync(join(messageArtifactDir(dataDir, messageId), 'payload.json.gz'), 'gz')
     mkdirSync(join(dataPaths(dataDir).runtimes, threadId), { recursive: true })
@@ -215,7 +211,6 @@ test('purgeThreadFilesystem removes attachments, design artifacts, and message a
     await purgeThreadFilesystem(dataDir, threadId, targets)
 
     assert.equal(existsSync(threadAttachmentsDir(dataDir, threadId)), false)
-    assert.equal(existsSync(designArtifactDir(dataDir, designSessionId)), false)
     assert.equal(existsSync(messageArtifactDir(dataDir, messageId)), false)
     assert.equal(existsSync(join(dataPaths(dataDir).runtimes, threadId)), false)
   } finally {
@@ -224,28 +219,20 @@ test('purgeThreadFilesystem removes attachments, design artifacts, and message a
   }
 })
 
-test('janitor prunes orphan design artifacts and stale attachment dirs', async () => {
+test('janitor prunes stale attachment dirs', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-janitor-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
-    const { threadId, designSessionId, attachmentId } = await seedThreadGraph(db)
+    const { threadId, attachmentId } = await seedThreadGraph(db)
 
-    mkdirSync(designArtifactDir(dataDir, 'orphan-design'), { recursive: true })
-    mkdirSync(designArtifactDir(dataDir, designSessionId), { recursive: true })
     mkdirSync(attachmentDir(dataDir, threadId, attachmentId), { recursive: true })
     mkdirSync(attachmentDir(dataDir, threadId, 'att-stale'), { recursive: true })
 
-    const [designResult, attachmentResult] = await Promise.all([
-      pruneOrphanDesignArtifactDirs(dataDir, db),
-      pruneStaleThreadAttachmentDirs(dataDir, db)
-    ])
+    const attachmentResult = await pruneStaleThreadAttachmentDirs(dataDir, db)
 
-    assert.equal(designResult.removed, 1)
     assert.equal(attachmentResult.removed, 1)
-    assert.equal(existsSync(designArtifactDir(dataDir, 'orphan-design')), false)
     assert.equal(existsSync(attachmentDir(dataDir, threadId, 'att-stale')), false)
     assert.equal(existsSync(attachmentDir(dataDir, threadId, attachmentId)), true)
-    assert.equal(existsSync(designArtifactDir(dataDir, designSessionId)), true)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

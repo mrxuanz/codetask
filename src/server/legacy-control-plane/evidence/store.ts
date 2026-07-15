@@ -1,8 +1,11 @@
-import { gunzipSync } from 'zlib'
 import type { SliceVerificationRecordDto, TaskEvidenceDto } from '@shared/contracts/evidence'
 import type { TaskProgressDto, TaskProgressItemDto, TaskProgressSliceDto } from '../types'
 import type { JobArtifactKind, RetentionSettings } from '@shared/contracts/retention'
-import { deleteJobArtifact, getJobArtifactPayload } from '../../retention/artifacts'
+import {
+  deleteJobArtifact,
+  getJobArtifactPayload,
+  getJobArtifactPayloadSync
+} from '../../retention/artifacts'
 import {
   storeSliceVerdictArtifact,
   storeTaskEvidenceArtifact
@@ -308,31 +311,14 @@ export async function getTaskEvidenceDetail(input: {
 }
 
 export function hydrateTaskEvidenceSync(
-  _dataDir: string,
+  dataDir: string,
   evidence: TaskEvidenceDto | null | undefined,
   artifactId?: string | null,
   db: AppDatabase = getDb()
 ): TaskEvidenceDto | null {
   if (artifactId) {
-    const rows = db
-      .select()
-      .from(jobArtifacts)
-      .where(eq(jobArtifacts.id, artifactId))
-      .limit(1)
-      .all()
-    const row = rows[0]
-    if (row?.storage === 'inline' && row.contentInline) {
-      try {
-        const decompressed = gunzipSync(Buffer.from(row.contentInline, 'base64')).toString('utf8')
-        return JSON.parse(decompressed) as TaskEvidenceDto
-      } catch {
-        try {
-          return JSON.parse(row.contentInline) as TaskEvidenceDto
-        } catch {
-          return evidence ?? null
-        }
-      }
-    }
+    const full = getJobArtifactPayloadSync<TaskEvidenceDto>(db, dataDir, artifactId)
+    if (full) return full
   }
 
   if (!evidence) return null

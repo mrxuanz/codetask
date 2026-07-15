@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { JobEventBus, RuntimeRegistry, SettingsStore, type AppContext } from './context'
 import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
@@ -16,6 +16,18 @@ import {
 } from './application/application-runtime'
 import { getApplicationStartup } from './application/application-runtime'
 import type { StartupCoordinator } from './application/startup-coordinator'
+import {
+  startArtifactExpiryScheduler,
+  stopArtifactExpiryScheduler
+} from './retention/expiry-scheduler'
+import {
+  EncryptedFileMcpSecretProvider,
+  MemoryMcpSecretProvider
+} from './settings/mcp-secret-provider'
+import {
+  collectMcpSecretReferenceIds,
+  resolveProtectedMcpSensitiveValues
+} from './settings/mcp-secrets'
 
 export type { AppContext } from './context'
 
@@ -24,6 +36,14 @@ export type AppMode = 'desktop' | 'server'
 export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
+  authSecretPath?: string
+  authSecret?: string
+  mcpSecretPath?: string
+  storage?: {
+    bootstrapRoot: string
+    source: string
+    managed: boolean
+  }
 }
 
 let appContext: AppContext | null = null
@@ -74,8 +94,22 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     }
 
     const mode = options.mode ?? 'desktop'
-    const settings = new SettingsStore(options.dataDir)
-    const authSecret = getOrCreateAuthSecret(options.dataDir)
+    const settings = new SettingsStore(options.dataDir, db)
+    const authSecret =
+      options.authSecret ??
+      (options.authSecretPath
+        ? getOrCreateAuthSecret(options.authSecretPath)
+        : randomBytes(32).toString('hex'))
+    const mcpSecrets = options.mcpSecretPath
+      ? new EncryptedFileMcpSecretProvider(options.mcpSecretPath, authSecret)
+      : new MemoryMcpSecretProvider()
+    const persistedMcp = settings.readNamespace('user_mcp')
+    if (persistedMcp.value) {
+      resolveProtectedMcpSensitiveValues(persistedMcp.value, mcpSecrets)
+      mcpSecrets.pruneExcept(collectMcpSecretReferenceIds(persistedMcp.value))
+    } else {
+      mcpSecrets.pruneExcept(new Set())
+    }
     const bootId = randomUUID()
 
     const nextContext: AppContext = {
@@ -84,19 +118,22 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       settings,
       security: {
         mode,
-        authSecret
+        authSecret,
+        mcpSecrets
       },
       eventBus: new JobEventBus(),
       runtimeRegistry: new RuntimeRegistry(),
       executionRuntime: new JobExecutionRuntimeRegistry(),
       bootId,
-      applicationRuntime: null
+      applicationRuntime: null,
+      ...(options.storage ? { storage: options.storage } : {})
     }
     process.env.CODETASK_DATA_DIR = options.dataDir
 
     appContext = nextContext
 
     startRetentionJanitor()
+    startArtifactExpiryScheduler(nextContext)
     startAuthJanitor()
 
     void runRetentionJanitorPass()
@@ -106,7 +143,6 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
           result.orphanAttachments > 0 ||
           result.staleRuntimes > 0 ||
           result.completedTaskRuntimes > 0 ||
-          result.orphanDesignArtifacts > 0 ||
           result.staleAttachmentDirs > 0 ||
           result.orphanRuntimeTrees > 0 ||
           result.sqliteMaintenance.ran
@@ -136,7 +172,9 @@ export async function ensureRuntimeReady(ctx: AppContext = getAppContext()): Pro
   await startApplicationRuntime(ctx)
 }
 
-export async function shutdownRuntime(reason: 'app_shutdown' | 'user_quit' | 'signal' = 'app_shutdown'): Promise<void> {
+export async function shutdownRuntime(
+  reason: 'app_shutdown' | 'user_quit' | 'signal' = 'app_shutdown'
+): Promise<void> {
   const ctx = appContext
   if (!ctx) return
   await shutdownApplicationRuntime(ctx, reason)
@@ -145,6 +183,7 @@ export async function shutdownRuntime(reason: 'app_shutdown' | 'user_quit' | 'si
 export async function resetAppContextForTests(): Promise<void> {
   stopAuthJanitor()
   stopRetentionJanitor()
+  stopArtifactExpiryScheduler()
 
   const ctx = appContext
   if (ctx) {
@@ -158,6 +197,7 @@ export async function resetAppContextForTests(): Promise<void> {
 
   if (appContext) {
     await Promise.allSettled([runRetentionJanitorPass(), runAuthJanitorPass()])
+    appContext.settings.close()
   }
 
   appContext = null

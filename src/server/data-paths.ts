@@ -8,20 +8,16 @@ export function dataPaths(dataDir: string): {
   dbFile: string
   attachments: string
   artifactsMessages: string
-  artifactsDesigns: string
+  artifactsJobs: string
   runtimes: string
-  settingsFile: string
-  secretFile: string
   sandboxHome: string
 } {
   return {
     dbFile: join(dataDir, 'db', 'app.db'),
     attachments: join(dataDir, 'blobs', 'attachments'),
     artifactsMessages: join(dataDir, 'blobs', 'artifacts', 'messages'),
-    artifactsDesigns: join(dataDir, 'blobs', 'artifacts', 'designs'),
+    artifactsJobs: join(dataDir, 'blobs', 'artifacts', 'jobs'),
     runtimes: join(dataDir, 'runtimes'),
-    settingsFile: join(dataDir, 'config', 'settings.json'),
-    secretFile: join(dataDir, 'secrets', 'auth-secret'),
     sandboxHome: join(dataDir, 'sandbox-home')
   }
 }
@@ -31,8 +27,8 @@ export function messageArtifactRelPath(messageId: string, artifactId: string): s
   return posix.join('blobs', 'artifacts', 'messages', messageId, `${artifactId}.json.gz`)
 }
 
-export function designPlanArtifactRelPath(designSessionId: string, planRevision: number): string {
-  return posix.join('blobs', 'artifacts', 'designs', designSessionId, `plan-v${planRevision}.json.gz`)
+export function jobArtifactRelPath(contentHash: string): string {
+  return posix.join('blobs', 'artifacts', 'jobs', contentHash.slice(0, 2), `${contentHash}.json.gz`)
 }
 
 export function threadAttachmentsDir(dataDir: string, threadId: string): string {
@@ -45,10 +41,6 @@ export function attachmentDir(dataDir: string, threadId: string, attachmentId: s
 
 export function messageArtifactDir(dataDir: string, messageId: string): string {
   return join(dataPaths(dataDir).artifactsMessages, messageId)
-}
-
-export function designArtifactDir(dataDir: string, designSessionId: string): string {
-  return join(dataPaths(dataDir).artifactsDesigns, designSessionId)
 }
 
 export function threadRuntimeDirPath(dataDir: string, threadId: string): string {

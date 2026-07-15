@@ -24,6 +24,10 @@ import {
   runtimeCursorConfigDir,
   runtimeCursorHome
 } from './paths'
+import {
+  scrubCredentialSnapshotManifest,
+  writeCredentialSnapshotManifest
+} from './snapshot-manifest'
 
 const CODEX_TOP_LEVEL_ALLOW_KEYS = new Set([
   'model',
@@ -164,19 +168,15 @@ export function materializeCodexAuth(runtimeRoot: string): MaterializeCodexResul
     cleanupPaths.push(runtimeConfigPath)
   }
 
+  writeCredentialSnapshotManifest(runtimeRoot, 'codex', cleanupPaths)
+
   return {
     authCopied,
     configCopied,
     runtimeAuthPath,
     hostAuthPath,
     cleanup: () => {
-      for (const path of cleanupPaths) {
-        try {
-          if (existsSync(path)) unlinkSync(path)
-        } catch {
-          // ignore
-        }
-      }
+      scrubCredentialSnapshotManifest(runtimeRoot)
     }
   }
 }
@@ -324,19 +324,15 @@ export function materializeOpencodeAuth(runtimeRoot: string): MaterializeOpencod
     copied.push(dest)
   }
 
+  writeCredentialSnapshotManifest(runtimeRoot, 'opencode', copied)
+
   return {
     configCopied: copied.length > 0,
     runtimeConfigDir,
     runtimeDataDir,
     hostConfigDir,
     cleanup: () => {
-      for (const path of copied) {
-        try {
-          if (existsSync(path)) unlinkSync(path)
-        } catch {
-          // ignore
-        }
-      }
+      scrubCredentialSnapshotManifest(runtimeRoot)
     }
   }
 }

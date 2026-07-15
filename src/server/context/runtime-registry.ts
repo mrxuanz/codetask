@@ -9,6 +9,10 @@ export class RuntimeRegistry {
     return this.inflightThreads.has(threadId)
   }
 
+  hasInflightThreads(): boolean {
+    return this.inflightThreads.size > 0
+  }
+
   addInflightThread(threadId: string, username?: string): void {
     this.inflightThreads.add(threadId)
     if (username) {

@@ -26,6 +26,7 @@ import {
   type ExternalizedEvidenceArtifact
 } from './evidence/store'
 import { slimTaskProgressForSse } from './progress-sse'
+import { putDesignPlanRevisionInTx } from '../retention/design-plan-artifacts'
 
 export const EXECUTION_OCCUPYING_STATUSES = ['running'] as const
 export const EXECUTION_LEASE_TTL_SEC = 30 * 60
@@ -475,6 +476,21 @@ export async function updateJobRow(
 
     if (plan !== undefined) {
       saveJobPlanInTx(db, jobId, plan)
+      if (plan && patch.planRevision && patch.planRevision > 0) {
+        const artifact = putDesignPlanRevisionInTx(db, {
+          jobId,
+          planRevision: patch.planRevision,
+          plan
+        })
+        db.update(threadJobs)
+          .set({
+            planArtifactId: artifact.artifactId,
+            planArtifactPath: artifact.contentPath,
+            planSummaryJson: artifact.summaryJson
+          })
+          .where(eq(threadJobs.id, jobId))
+          .run()
+      }
       db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, jobId)).run()
     }
 
@@ -599,6 +615,21 @@ function applyFencedJobPatchInTx(
 
   if (plan !== undefined) {
     saveJobPlanInTx(tx, jobId, plan)
+    if (plan && patch.planRevision && patch.planRevision > 0) {
+      const artifact = putDesignPlanRevisionInTx(tx, {
+        jobId,
+        planRevision: patch.planRevision,
+        plan
+      })
+      tx.update(threadJobs)
+        .set({
+          planArtifactId: artifact.artifactId,
+          planArtifactPath: artifact.contentPath,
+          planSummaryJson: artifact.summaryJson
+        })
+        .where(fence)
+        .run()
+    }
     tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
   }
 

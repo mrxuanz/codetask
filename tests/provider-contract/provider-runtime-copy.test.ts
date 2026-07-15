@@ -10,6 +10,10 @@ import {
   opencodeRuntimeLayout
 } from '../../src/server/sandbox/provider-auth/materialize'
 import {
+  credentialSnapshotManifestPath,
+  scrubCredentialSnapshotsInTree
+} from '../../src/server/sandbox/provider-auth/snapshot-manifest'
+import {
   resolveClaudeHostConfigDir,
   resolveHostProfilePaths,
   runtimeCodexHome
@@ -27,6 +31,13 @@ test('prepareProviderAuth defaults to runtime-copy with no host write roots', ()
       assert.deepEqual(prepared.writeRoots ?? [], [], provider)
       assert.equal(prepared.envPatch.CODETASK_PROVIDER_AUTH_MODE, 'runtime-copy', provider)
       assert.equal(prepared.envPatch.HOME, runtimeRoot, provider)
+      assert.equal(prepared.envPatch.CODETASK_DATA_DIR, undefined, provider)
+      assert.equal(prepared.filesystemProfile.provider, provider)
+      assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
+      assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, [])
+      assert.deepEqual(prepared.filesystemProfile.runtimeEnv, prepared.envPatch)
+      assert.ok(Array.isArray(prepared.filesystemProfile.credentialSnapshots))
+      assert.ok(Array.isArray(prepared.filesystemProfile.scrubPatterns))
 
       const host = resolveHostProfilePaths()
       for (const writeRoot of prepared.writeRoots ?? []) {
@@ -52,6 +63,11 @@ test('cursor sandbox uses host-identity with host profile read/write roots', () 
     assert.equal(prepared.envPatch.CODETASK_PROVIDER_AUTH_MODE, 'host-identity')
     assert.equal(prepared.envPatch.HOME, host.home)
     assert.equal(prepared.envPatch.CODETASK_RUNTIME_ROOT, runtimeRoot)
+    assert.equal(prepared.envPatch.CODETASK_DATA_DIR, undefined)
+    assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
+    assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, prepared.writeRoots)
+    assert.deepEqual(prepared.filesystemProfile.credentialSnapshots, [])
+    assert.deepEqual(prepared.filesystemProfile.scrubPatterns, [])
     assert.ok((prepared.writeRoots ?? []).length > 0)
     assert.ok(
       (prepared.writeRoots ?? []).some((root) =>
@@ -141,6 +157,40 @@ test('materializeCodexAuth preserves existing session rollouts across turns', ()
     else process.env.CODETASK_CODEX_HOME = prevHome
     rmSync(hostCodexHome, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('credential snapshots are manifested and startup scrub removes only recorded runtime files', () => {
+  const hostCodexHome = mkdtempSync(join(tmpdir(), 'codetask-codex-host-'))
+  const runtimeTree = mkdtempSync(join(tmpdir(), 'codetask-runtime-tree-'))
+  const runtimeRoot = join(runtimeTree, 'thread-1', 'jobs', 'job-1', 'codex')
+  const prevHome = process.env.CODETASK_CODEX_HOME
+  process.env.CODETASK_CODEX_HOME = hostCodexHome
+
+  try {
+    mkdirSync(runtimeRoot, { recursive: true })
+    writeFileSync(join(hostCodexHome, 'auth.json'), '{"token":"host"}', 'utf8')
+    writeFileSync(join(hostCodexHome, 'config.toml'), 'model = "gpt-test"\n', 'utf8')
+
+    const materialized = materializeCodexAuth(runtimeRoot)
+    const sessionPath = join(runtimeRoot, '.codex', 'sessions', 'keep.json')
+    mkdirSync(join(runtimeRoot, '.codex', 'sessions'), { recursive: true })
+    writeFileSync(sessionPath, '{"session":true}', 'utf8')
+
+    assert.equal(materialized.authCopied, true)
+    assert.ok(existsSync(credentialSnapshotManifestPath(runtimeRoot)))
+
+    const scrubbed = scrubCredentialSnapshotsInTree(runtimeTree)
+    assert.equal(scrubbed.manifests, 1)
+    assert.equal(scrubbed.files, 2)
+    assert.equal(existsSync(join(runtimeRoot, '.codex', 'auth.json')), false)
+    assert.equal(existsSync(join(runtimeRoot, '.codex', 'config.toml')), false)
+    assert.equal(readFileSync(sessionPath, 'utf8'), '{"session":true}')
+  } finally {
+    if (prevHome === undefined) delete process.env.CODETASK_CODEX_HOME
+    else process.env.CODETASK_CODEX_HOME = prevHome
+    rmSync(hostCodexHome, { recursive: true, force: true })
+    rmSync(runtimeTree, { recursive: true, force: true })
   }
 })
 

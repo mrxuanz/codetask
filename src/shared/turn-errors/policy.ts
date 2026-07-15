@@ -35,6 +35,7 @@ const NON_RETRYABLE_TURN_CODES = new Set<TurnErrorCode>([
   'turn.cancelled',
   'job.paused',
   'job.cancelled',
+  'runtime.quota_exceeded',
   'sandbox.turn.cancelled',
   'sandbox.required',
   'sandbox.worker.busy',
