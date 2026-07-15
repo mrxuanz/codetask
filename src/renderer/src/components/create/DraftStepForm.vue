@@ -14,6 +14,7 @@ import Spinner from '@renderer/components/ui/Spinner.vue'
 import { useDraftPlanWorkspace } from '@renderer/composables/useDraftPlanWorkspace'
 import { getPlanProgressSnapshot } from '@renderer/lib/jobProgress'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
+import { toastError } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
 
 const props = defineProps<{
@@ -122,7 +123,7 @@ async function handlePlanNodeFieldSave(payload: {
     const idx = ws.plans.value.findIndex((item) => item.id === plan.id)
     if (idx >= 0) ws.plans.value[idx] = res.data.job
   } catch (err) {
-    ws.error.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     savingPlanFields.value = false
   }
@@ -150,7 +151,7 @@ async function handleTaskReferencesSave(payload: {
     const idx = ws.plans.value.findIndex((item) => item.id === plan.id)
     if (idx >= 0) ws.plans.value[idx] = res.data.job
   } catch (err) {
-    ws.error.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     savingPlanFields.value = false
   }
@@ -172,7 +173,7 @@ async function handleTaskCliChange(payload: { taskId: string; coreCode: string }
     const idx = ws.plans.value.findIndex((item) => item.id === plan.id)
     if (idx >= 0) ws.plans.value[idx] = res.data.job
   } catch (err) {
-    ws.error.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     savingTaskCli.value = false
     savingTaskId.value = null
@@ -202,13 +203,6 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
   <div class="flex h-full min-h-0 flex-col">
     <div v-if="ws.error.value" class="shrink-0 px-4 pt-3">
       <ErrorAlert :message="ws.error.value" />
-    </div>
-    <div v-if="ws.successMessage.value" class="shrink-0 px-4 pt-2">
-      <p
-        class="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800"
-      >
-        {{ ws.successMessage.value }}
-      </p>
     </div>
 
     <div class="shrink-0 border-b border-border px-2 py-2 sm:px-4 sm:py-3">

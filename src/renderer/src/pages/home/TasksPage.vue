@@ -42,7 +42,6 @@ const {
   loadingList,
   loadingDetail,
   error,
-  actionError,
   runningAction,
   selectedJob,
   canPause,
@@ -218,9 +217,8 @@ onUnmounted(() => {
       class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       :class="!selectedJobId ? 'max-lg:hidden' : ''"
     >
-      <div v-if="error || actionError" class="shrink-0 space-y-2 px-4 pt-4 sm:px-6">
-        <ErrorAlert v-if="error" :message="error" />
-        <ErrorAlert v-if="actionError" :message="actionError" />
+      <div v-if="error" class="shrink-0 space-y-2 px-4 pt-4 sm:px-6">
+        <ErrorAlert :message="error" />
       </div>
 
       <div

@@ -29,6 +29,7 @@ import {
   filterActions,
   getPauseButtonText
 } from '@renderer/stores/ui-actions'
+import { toast, toastError } from '@renderer/lib/toast'
 
 export interface UseControlPlaneJobsStoreOptions {
   selectedJobId: Ref<string | null>
@@ -412,10 +413,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     } catch (err) {
       if (isRevisionConflict(err)) {
         await loadDetail(job.id)
-        actionError.value = '任务状态已变化，请确认后重试'
+        toast.warning('任务状态已变化，请确认后重试')
         return
       }
-      actionError.value = err instanceof Error ? err.message : 'Action failed'
+      toastError(err, 'Action failed')
     } finally {
       runningAction.value = null
     }
@@ -447,7 +448,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   async function handleDelete(): Promise<void> {
     if (!jobsApi.delete) {
-      actionError.value = 'Deleting V3 jobs is not supported by the control-plane API'
+      toast.error('Deleting V3 jobs is not supported by the control-plane API')
       return
     }
     await runAction('delete', async (job) => {
