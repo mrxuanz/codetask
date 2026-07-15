@@ -11,8 +11,9 @@ import {
   shutdownSandboxSupervisor
 } from '../server/sandbox/supervisor-manager'
 import { ensureWindowsSandboxReady } from '../server/sandbox/windows-bootstrap'
+import { mkdirSync } from 'fs'
 import { resolveDataDirSelection } from './data-dir'
-import { ensureResolvedDataRoot } from './storage-locator'
+import { ensureResolvedDataRoot, type DataDirResolution } from './storage-locator'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
@@ -30,10 +31,25 @@ export interface ServerInfo {
 
 let activeServer: ServerType | null = null
 let shutdownPromise: Promise<void> | null = null
+let setupTokenAnnounced = false
 
 function formatUrl(host: string, port: number): string {
   const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
   return `http://${displayHost}:${port}`
+}
+
+/** Print setup token once for headless server first-run (desktop never needs it). */
+function announceSetupToken(authSecret: string): void {
+  if (setupTokenAnnounced) return
+  setupTokenAnnounced = true
+  const { token } = generateSetupToken(authSecret)
+  console.log('')
+  console.log('========================================')
+  console.log('  Account not initialized.')
+  console.log('  Setup token (valid 15 min):')
+  console.log(`  ${token}`)
+  console.log('========================================')
+  console.log('')
 }
 
 /**
@@ -75,10 +91,14 @@ function isAddressInUse(error: unknown): boolean {
   )
 }
 
-function listen(app: Hono, host: string, port: number): Promise<ServerType> {
+function listen(
+  fetch: (request: Request) => Response | Promise<Response>,
+  host: string,
+  port: number
+): Promise<ServerType> {
   return new Promise((resolve, reject) => {
     const server = serve({
-      fetch: app.fetch,
+      fetch,
       hostname: host,
       port
     })
@@ -88,72 +108,11 @@ function listen(app: Hono, host: string, port: number): Promise<ServerType> {
   })
 }
 
-export function getShutdownPromise(): Promise<void> | null {
-  return shutdownPromise
-}
-
-export async function gracefulShutdown(): Promise<void> {
-  shutdownPromise ??= stopAppServer()
-  return shutdownPromise
-}
-
-export async function startAppServer(
+async function createReadyApp(
   cli: CliOptions,
-  options: { onStorageInitialized?: (dataDir: string) => void | Promise<void> } = {}
-): Promise<ServerInfo> {
-  const rendererDevUrl = process.env['ELECTRON_RENDERER_URL']
-  const staticDir = join(__dirname, '../renderer')
-
-  const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
-  if (storage.phase !== 'ready') {
-    if (cli.mode === 'server') {
-      throw new Error(
-        `Headless server storage is not configured (${storage.issue ?? storage.phase}); use --data-dir or CODETASK_DATA_DIR`
-      )
-    }
-
-    const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
-      cli.host,
-      cli.port
-    )
-    let boundPort = startPort
-    let bindChanged = preflightChanged
-    for (let offset = 0; offset < 100; offset++) {
-      const port = startPort + offset
-      const setupApp = createSetupShell({
-        storage,
-        isDev: is.dev,
-        rendererDevUrl,
-        staticDir: is.dev ? undefined : staticDir,
-        forbiddenRoots: [electronApp.getAppPath(), process.cwd()],
-        onInitialized: options.onStorageInitialized
-      })
-      try {
-        activeServer = await listen(setupApp, cli.host, port)
-        boundPort = port
-        bindChanged = cli.port !== port
-        break
-      } catch (error) {
-        if (!isAddressInUse(error)) throw error
-      }
-    }
-    if (!activeServer) {
-      throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
-    }
-    const info: ServerInfo = {
-      host: cli.host,
-      port: boundPort,
-      url: formatUrl(cli.host, boundPort),
-      requestedPort: cli.port,
-      portChanged: bindChanged,
-      mode: cli.mode
-    }
-    console.log(`[server] desktop storage setup listening on ${info.url}`)
-    console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
-    console.log(`[storage] default candidate: ${storage.dataDir}`)
-    return info
-  }
-
+  storage: DataDirResolution,
+  http: { rendererDevUrl?: string; staticDir?: string }
+): Promise<{ app: Hono; dataDir: string }> {
   const dataDir = ensureResolvedDataRoot(storage)
   process.env.CODETASK_DATA_DIR = dataDir
 
@@ -212,36 +171,146 @@ export async function startAppServer(
     const { getBootstrap } = await import('../server/auth/service')
     const state = await getBootstrap()
     if (!state.initialized) {
-      const { token } = generateSetupToken(ctx.security.authSecret)
-      ctx.security.setupToken = token
-      console.log('')
-      console.log('========================================')
-      console.log('  Account not initialized.')
-      console.log('  Setup token (valid 15 min):')
-      console.log(`  ${token}`)
-      console.log('========================================')
-      console.log('')
+      announceSetupToken(ctx.security.authSecret)
     }
   }
+
+  const app = createApp(ctx, {
+    isDev: is.dev,
+    rendererDevUrl: http.rendererDevUrl,
+    staticDir: http.staticDir
+  })
+  return { app, dataDir }
+}
+
+export function getShutdownPromise(): Promise<void> | null {
+  return shutdownPromise
+}
+
+export async function gracefulShutdown(): Promise<void> {
+  shutdownPromise ??= stopAppServer()
+  return shutdownPromise
+}
+
+export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
+  const rendererDevUrl = process.env['ELECTRON_RENDERER_URL']
+  const staticDir = join(__dirname, '../renderer')
+  const http = {
+    rendererDevUrl,
+    staticDir: is.dev ? undefined : staticDir
+  }
+
+  const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
+  let activeApp: Hono
+  let boundPort = cli.port
+  let bindChanged = false
+
+  if (storage.phase !== 'ready') {
+    // Ensure the default candidate exists so browse/select works out of the box.
+    if (storage.phase === 'selection_required' && storage.dataDir) {
+      try {
+        mkdirSync(storage.dataDir, { recursive: true })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[storage] failed to create default candidate ${storage.dataDir}: ${message}`)
+      }
+    }
+
+    const setupTokenRequired = cli.mode === 'server'
+    if (setupTokenRequired) {
+      const earlySecret = await loadMainProcessAuthSecret({
+        mode: cli.mode,
+        bootstrapSecretPath: storage.bootstrap.authSecretFile
+      })
+      announceSetupToken(earlySecret.value)
+    }
+
+    let promoteInflight: Promise<void> | null = null
+    const setupApp = createSetupShell({
+      storage,
+      isDev: is.dev,
+      rendererDevUrl,
+      staticDir: http.staticDir,
+      forbiddenRoots: [electronApp.getAppPath(), process.cwd()],
+      setupTokenRequired,
+      activateStorage: async () => {
+        if (promoteInflight) {
+          await promoteInflight
+          return
+        }
+        promoteInflight = (async () => {
+          const resolved = resolveDataDirSelection({ mode: cli.mode })
+          if (resolved.phase !== 'ready') {
+            throw new Error(resolved.issue ?? 'Storage locator is not ready after initialization')
+          }
+          const { app, dataDir } = await createReadyApp(cli, resolved, http)
+          activeApp = app
+          initConversationMcpBackend(boundPort)
+          console.log(`[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`)
+          console.log(`[storage] data root: ${dataDir} (source=${resolved.source})`)
+        })()
+        try {
+          await promoteInflight
+        } catch (error) {
+          promoteInflight = null
+          throw error
+        }
+      }
+    })
+    activeApp = setupApp
+
+    const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
+      cli.host,
+      cli.port
+    )
+    boundPort = startPort
+    bindChanged = preflightChanged
+    for (let offset = 0; offset < 100; offset++) {
+      const port = startPort + offset
+      try {
+        activeServer = await listen((request) => activeApp.fetch(request), cli.host, port)
+        boundPort = port
+        bindChanged = cli.port !== port
+        break
+      } catch (error) {
+        if (!isAddressInUse(error)) throw error
+      }
+    }
+    if (!activeServer) {
+      throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
+    }
+    const info: ServerInfo = {
+      host: cli.host,
+      port: boundPort,
+      url: formatUrl(cli.host, boundPort),
+      requestedPort: cli.port,
+      portChanged: bindChanged,
+      mode: cli.mode
+    }
+    console.log(`[server] ${cli.mode} storage setup listening on ${info.url}`)
+    console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
+    console.log(`[storage] default candidate: ${storage.dataDir}`)
+    if (cli.mode === 'server') {
+      console.log(`[server] open in browser to choose data directory: ${info.url}`)
+    }
+    return info
+  }
+
+  const { app, dataDir } = await createReadyApp(cli, storage, http)
+  activeApp = app
 
   const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
     cli.host,
     cli.port
   )
 
-  let boundPort = startPort
-  let bindChanged = preflightChanged
-  let app: ReturnType<typeof createApp> | null = null
+  boundPort = startPort
+  bindChanged = preflightChanged
 
   for (let offset = 0; offset < 100; offset++) {
     const port = startPort + offset
-    app = createApp(ctx, {
-      isDev: is.dev,
-      rendererDevUrl,
-      staticDir: is.dev ? undefined : staticDir
-    })
     try {
-      activeServer = await listen(app, cli.host, port)
+      activeServer = await listen((request) => activeApp.fetch(request), cli.host, port)
       boundPort = port
       bindChanged = cli.port !== port
       initConversationMcpBackend(port)
@@ -251,7 +320,7 @@ export async function startAppServer(
     }
   }
 
-  if (!activeServer || !app) {
+  if (!activeServer) {
     throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
   }
 

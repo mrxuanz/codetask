@@ -15,6 +15,7 @@ export interface StorageValidationData {
   availableBytes: number | null
   warnings: string[]
   nonce: string
+  action?: 'initialize' | 'recover'
 }
 
 export function fetchStorageBootstrap(): Promise<ApiResponse<StorageBootstrapData>> {
@@ -31,8 +32,8 @@ export function validateStorageTarget(path: string): Promise<ApiResponse<Storage
 export function initializeStorageTarget(
   path: string,
   validationNonce: string
-): Promise<ApiResponse<{ phase: 'restart_required'; dataDir: string }>> {
-  return api<{ phase: 'restart_required'; dataDir: string }>('/api/system/storage/initialize', {
+): Promise<ApiResponse<{ phase: 'ready'; dataDir: string }>> {
+  return api<{ phase: 'ready'; dataDir: string }>('/api/system/storage/initialize', {
     method: 'POST',
     body: JSON.stringify({ path, validationNonce })
   })
@@ -41,8 +42,8 @@ export function initializeStorageTarget(
 export function recoverStorageTarget(
   path: string,
   validationNonce: string
-): Promise<ApiResponse<{ phase: 'restart_required'; dataDir: string }>> {
-  return api<{ phase: 'restart_required'; dataDir: string }>('/api/system/storage/recover', {
+): Promise<ApiResponse<{ phase: 'ready'; dataDir: string }>> {
+  return api<{ phase: 'ready'; dataDir: string }>('/api/system/storage/recover', {
     method: 'POST',
     body: JSON.stringify({ path, validationNonce })
   })
