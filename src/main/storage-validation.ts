@@ -98,7 +98,8 @@ function testAtomicWrites(target: string): void {
   let fd: number | null = null
   try {
     writeFileSync(source, 'probe', { mode: 0o600 })
-    fd = openSync(source, 'r')
+    // Windows FlushFileBuffers requires write access; 'r' fails with EPERM.
+    fd = openSync(source, 'r+')
     fsyncSync(fd)
     closeSync(fd)
     fd = null

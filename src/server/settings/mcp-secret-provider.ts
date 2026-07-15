@@ -192,7 +192,8 @@ export class EncryptedFileMcpSecretProvider implements McpSecretProvider {
         mode: 0o600
       })
       if (process.platform !== 'win32') chmodSync(tmp, 0o600)
-      fd = openSync(tmp, 'r')
+      // Windows FlushFileBuffers requires write access; 'r' fails with EPERM.
+      fd = openSync(tmp, 'r+')
       fsyncSync(fd)
       closeSync(fd)
       fd = null

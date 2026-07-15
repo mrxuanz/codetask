@@ -94,7 +94,8 @@ function atomicWriteJson(path: string, value: unknown, mode = 0o600): void {
   let fd: number | null = null
   try {
     writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode })
-    fd = openSync(tmp, 'r')
+    // Windows FlushFileBuffers requires write access; 'r' fails with EPERM.
+    fd = openSync(tmp, 'r+')
     fsyncSync(fd)
     closeSync(fd)
     fd = null
@@ -265,6 +266,23 @@ export function validateLocatorMarker(locator: StorageLocator): string | null {
   return null
 }
 
+/** True when a broken locator target can be safely re-initialized (missing or empty). */
+export function canReinitializeBrokenDataRoot(dataDir: string): boolean {
+  const absolute = resolve(dataDir)
+  if (!existsSync(absolute)) return true
+  try {
+    if (!statSync(absolute).isDirectory()) return false
+  } catch {
+    return false
+  }
+  if (readDataRootMarker(absolute)) return false
+  try {
+    return readdirSync(absolute).length === 0
+  } catch {
+    return false
+  }
+}
+
 export function createStorageLocator(input: {
   dataDir: string
   source: StorageLocationSource
@@ -325,24 +343,49 @@ export function resolveStorageLocation(input: {
   }
   if (locatorRead.status === 'valid') {
     const issue = validateLocatorMarker(locatorRead.locator)
+    if (!issue) {
+      return {
+        phase: 'ready',
+        dataDir: locatorRead.locator.dataDir,
+        source: 'locator',
+        managed: false,
+        bootstrap
+      }
+    }
+
+    // Stale locator after a wiped/empty data root: let the user initialize again
+    // instead of forcing "recover an existing CodeTask directory".
+    if (
+      (issue === 'storage_data_root_missing' ||
+        issue === 'storage_data_root_marker_missing_or_invalid') &&
+      canReinitializeBrokenDataRoot(locatorRead.locator.dataDir)
+    ) {
+      return {
+        phase: 'selection_required',
+        dataDir: locatorRead.locator.dataDir,
+        source: 'candidate',
+        managed: false,
+        bootstrap
+      }
+    }
+
     return {
-      phase: issue ? 'recovery_required' : 'ready',
+      phase: 'recovery_required',
       dataDir: locatorRead.locator.dataDir,
       source: 'locator',
       managed: false,
       bootstrap,
-      ...(issue ? { issue } : {})
+      issue
     }
   }
 
   const candidate = resolve(input.defaultDataDir)
   return {
-    phase: input.mode === 'server' ? 'recovery_required' : 'selection_required',
+    phase: 'selection_required',
     dataDir: candidate,
     source: 'candidate',
-    managed: input.mode === 'server',
-    bootstrap,
-    ...(input.mode === 'server' ? { issue: 'server_data_dir_required' } : {})
+    managed: false,
+    bootstrap
   }
 }
 

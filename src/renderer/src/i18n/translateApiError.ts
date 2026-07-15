@@ -9,7 +9,19 @@ const SERVER_MESSAGE_KEYS: Record<string, string> = {
   未登录: 'errors.unauthorized',
   会话已过期: 'errors.sessionExpired',
   'workspaceRoot 不能为空': 'folderPicker.selectRequired',
-  项目不存在: 'errors.projectNotFound'
+  项目不存在: 'errors.projectNotFound',
+  path_not_absolute: 'setup.errors.pathNotAbsolute',
+  path_not_writable: 'setup.errors.pathNotWritable',
+  path_not_empty: 'setup.errors.pathNotEmpty',
+  path_forbidden_root: 'setup.errors.pathForbiddenRoot',
+  path_owned_by_other_installation: 'setup.errors.pathOwnedByOther',
+  storage_data_root_marker_missing_or_invalid: 'setup.errors.markerMissing',
+  storage_database_missing: 'setup.errors.databaseMissing',
+  storage_locator_unreadable: 'setup.errors.locatorUnreadable',
+  storage_locator_invalid: 'setup.errors.locatorInvalid',
+  storage_installation_id_mismatch: 'setup.errors.installationMismatch',
+  storage_validation_expired: 'setup.errors.validationExpired',
+  insufficient_space: 'setup.errors.insufficientSpace'
 }
 
 export function translateApiError(message: string, t: Composer['t']): string {
