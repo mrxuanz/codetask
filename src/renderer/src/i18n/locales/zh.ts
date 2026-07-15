@@ -493,6 +493,7 @@ export default {
       save: '保存',
       loadFailed: '加载设置失败',
       saveFailed: '保存设置失败',
+      saveSuccess: '设置已保存',
       sections: {
         language: '语言',
         sandbox: '沙箱',

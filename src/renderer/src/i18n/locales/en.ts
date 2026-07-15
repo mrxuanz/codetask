@@ -508,6 +508,7 @@ export default {
       save: 'Save',
       loadFailed: 'Failed to load settings',
       saveFailed: 'Failed to save settings',
+      saveSuccess: 'Settings saved',
       sections: {
         language: 'Language',
         sandbox: 'Sandbox',
