@@ -3,6 +3,7 @@
  * Commands require If-Match (revision) and Idempotency-Key.
  */
 import { authHeaders } from '@renderer/auth/token'
+import { randomUUID } from '@renderer/lib/id'
 import { api } from './client'
 import type { ApiResponse } from './types'
 import type { ThreadJob } from './jobs'
@@ -42,7 +43,7 @@ function commandHeaders(expectedRevision: number, idempotencyKey: string): Heade
 }
 
 export function newIdempotencyKey(): string {
-  return crypto.randomUUID()
+  return randomUUID()
 }
 
 export function fetchV3Jobs(
