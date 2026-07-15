@@ -58,3 +58,12 @@ export function threadRuntimeDirPath(dataDir: string, threadId: string): string 
 export function jobRuntimeDirPath(dataDir: string, threadId: string, jobId: string): string {
   return join(dataPaths(dataDir).runtimes, threadId, 'jobs', jobId)
 }
+
+export function jobTaskRuntimeDirPath(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): string {
+  return join(jobRuntimeDirPath(dataDir, threadId, jobId), 'tasks', taskId)
+}

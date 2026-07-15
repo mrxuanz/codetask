@@ -2,7 +2,7 @@ import { join } from 'path'
 import { isOuterSandboxEnabled, streamSandboxedConversationTurn } from '../sandbox'
 import { SandboxError } from '../sandbox/types'
 import type { SupportedCoreCode } from '../conversation/cores'
-import { dataPaths } from '../data-paths'
+import { dataPaths, jobTaskRuntimeDirPath } from '../data-paths'
 import { ensureIsolatedProviderDirs } from './env'
 import { getAgentTurnProvider } from './providers'
 import { isTestFakeProvider } from './providers/test-overrides'
@@ -19,7 +19,7 @@ export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: s
   return runtimeRoot
 }
 
-export function ensureJobCursorRuntimeRoot(
+export function ensureJobRuntimeRoot(
   dataDir: string,
   threadId: string,
   jobId: string,
@@ -37,15 +37,7 @@ export function ensureJobTaskRuntimeRoot(
   taskId: string,
   coreCode: string
 ): string {
-  const runtimeRoot = join(
-    dataPaths(dataDir).runtimes,
-    threadId,
-    'jobs',
-    jobId,
-    'tasks',
-    taskId,
-    coreCode
-  )
+  const runtimeRoot = join(jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId), coreCode)
   ensureIsolatedProviderDirs(runtimeRoot)
   return runtimeRoot
 }

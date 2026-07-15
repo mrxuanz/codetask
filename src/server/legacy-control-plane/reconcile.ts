@@ -40,9 +40,14 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+interface ReconcileStaleJobOptions {
+  readonly deferQueueAdvance?: boolean
+}
+
 export async function reconcileStaleJobIfNeeded(
   username: string,
-  job: ThreadJobDto
+  job: ThreadJobDto,
+  options: ReconcileStaleJobOptions = {}
 ): Promise<ThreadJobDto> {
   const action = resolveStaleExecutionJobAction(job)
   if (action === 'noop') return job
@@ -106,9 +111,11 @@ export async function reconcileStaleJobIfNeeded(
 
   emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
 
-  // Auto-resume via the single execution-queue entry (does not re-enter reconcile).
-  const { advanceExecutionQueue } = await import('./queue-coordinator')
-  await advanceExecutionQueue(username)
+  if (!options.deferQueueAdvance) {
+    // Runtime reconcile can advance immediately because the startup gate is already open.
+    const { advanceExecutionQueue } = await import('./queue-coordinator')
+    await advanceExecutionQueue(username)
+  }
 
   return updated
 }
@@ -149,7 +156,9 @@ export async function reconcileOrphanRunningJobsForUser(username: string): Promi
   if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile running jobs')
 }
 
-export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
+export async function reconcileOrphanRunningJobsOnStartup(
+  options: ReconcileStaleJobOptions = {}
+): Promise<void> {
   const db = getDb()
   const rows = await db
     .select()
@@ -162,7 +171,7 @@ export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
   for (const row of rows) {
     try {
       const job = await mapJob(row, { includePlan: true })
-      await reconcileStaleJobIfNeeded(row.username, job)
+      await reconcileStaleJobIfNeeded(row.username, job, options)
     } catch (error) {
       console.warn('[jobs] failed to reconcile orphan running job', row.id, error)
       errors.push(new Error(`running job ${row.id}`, { cause: error }))
@@ -174,11 +183,13 @@ export async function reconcileOrphanRunningJobsOnStartup(): Promise<void> {
 let startupReconciled = false
 let startupReconcilePromise: Promise<void> | null = null
 
-export async function reconcileOrphanRunningJobsOnStartupOnce(): Promise<void> {
+export async function reconcileOrphanRunningJobsOnStartupOnce(
+  options: ReconcileStaleJobOptions = {}
+): Promise<void> {
   if (startupReconciled) return
   if (startupReconcilePromise) return startupReconcilePromise
 
-  startupReconcilePromise = reconcileOrphanRunningJobsOnStartup()
+  startupReconcilePromise = reconcileOrphanRunningJobsOnStartup(options)
     .then(() => {
       startupReconciled = true
     })
