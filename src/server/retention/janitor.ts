@@ -5,6 +5,7 @@ import { asc, eq, or } from 'drizzle-orm'
 import type { getDb } from '../db'
 import {
   draftReferences,
+  jobArtifacts,
   jobTasks,
   messageArtifacts,
   threadJobs,
@@ -120,24 +121,35 @@ export async function pruneOrphanMessageArtifactDirs(
   return { removed }
 }
 
-export async function pruneOrphanDesignArtifactDirs(
+export async function pruneOrphanJobArtifactFiles(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removed: number }> {
-  const root = dataPaths(dataDir).artifactsDesigns
+  const root = dataPaths(dataDir).artifactsJobs
   if (!existsSync(root)) return { removed: 0 }
-
-  const rows = await db.select({ id: threadJobs.id }).from(threadJobs)
-  const valid = new Set(rows.map((row) => row.id))
+  const rows = await db
+    .select({ contentPath: jobArtifacts.contentPath })
+    .from(jobArtifacts)
+    .where(eq(jobArtifacts.storage, 'file'))
+  const valid = new Set(
+    rows.flatMap((row) => (row.contentPath ? [join(dataDir, row.contentPath)] : []))
+  )
   let removed = 0
 
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    if (valid.has(entry.name)) continue
-    await rm(join(root, entry.name), { recursive: true, force: true })
-    removed += 1
+  const visit = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      const path = join(dir, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        await visit(path)
+        await rm(path, { recursive: false }).catch(() => {})
+      } else if (entry.isFile() && !valid.has(path)) {
+        await rm(path, { force: true })
+        removed += 1
+      }
+    }
   }
-
+  await visit(root)
   return { removed }
 }
 
@@ -199,7 +211,7 @@ export async function pruneStaleThreadAttachmentDirs(
   return { removed }
 }
 
-async function estimateDirSize(dirPath: string): Promise<number> {
+export async function estimateDirSize(dirPath: string): Promise<number> {
   if (!existsSync(dirPath)) return 0
   let total = 0
   try {
@@ -221,6 +233,11 @@ async function estimateDirSize(dirPath: string): Promise<number> {
     // skip inaccessible
   }
   return total
+}
+
+export async function isDataDirOverLimit(dataDir: string, maxBytes: number): Promise<boolean> {
+  if (maxBytes <= 0) return false
+  return (await estimateDirSize(dataDir)) > maxBytes
 }
 
 export async function enforceDataDirWatermark(

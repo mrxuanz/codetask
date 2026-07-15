@@ -11,6 +11,17 @@ export async function startPendingExecutionJob(username: string, jobId: string):
   const { isEntityDeletionBlocked } = await import('./deletion-coordinator')
   if (isEntityDeletionBlocked('thread_job', jobId)) return
 
+  const { getAppContext } = await import('../bootstrap')
+  const { readRetentionSettings } = await import('../retention/settings')
+  const { enforceDataDirWatermark, isDataDirOverLimit } = await import('../retention/janitor')
+  const ctx = getAppContext()
+  const retention = readRetentionSettings(ctx.settings)
+  await enforceDataDirWatermark(ctx.dataDir, ctx.db, retention.dataDirMaxBytes)
+  if (await isDataDirOverLimit(ctx.dataDir, retention.dataDirMaxBytes)) {
+    console.warn('[runtime] storage pressure blocks new Job admission', { jobId })
+    return
+  }
+
   const job = await getUserJob(username, jobId)
   if (!job || job.status !== 'pending') return
   if (!job.plan?.tasks?.length) {

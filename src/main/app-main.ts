@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -104,8 +104,31 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
-    serverInfo = await startAppServer(cli)
+    serverInfo = await startAppServer(cli, {
+      onStorageInitialized: async () => {
+        app.relaunch()
+        app.exit(0)
+      }
+    })
     ipcMain.handle('get-server-info', () => serverInfo)
+    ipcMain.handle('select-data-directory', async () => {
+      const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const result = owner
+        ? await dialog.showOpenDialog(owner, {
+            title: 'Choose CodeTask data directory',
+            properties: ['openDirectory', 'createDirectory']
+          })
+        : await dialog.showOpenDialog({
+            title: 'Choose CodeTask data directory',
+            properties: ['openDirectory', 'createDirectory']
+          })
+      return result.canceled ? null : (result.filePaths[0] ?? null)
+    })
+    ipcMain.handle('relaunch-app', async () => {
+      await gracefulShutdownFromApp()
+      app.relaunch()
+      app.exit(0)
+    })
     if (cli.smokeTest) {
       await runPackagedSmoke(serverInfo)
       return

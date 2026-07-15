@@ -4,10 +4,12 @@ import type { JobExecutionRuntimeRegistry } from './job-execution-runtime'
 import type { RuntimeRegistry } from './runtime-registry'
 import type { SettingsStore } from './settings-store'
 import type { ApplicationRuntime } from '../application/application-runtime'
+import type { McpSecretProvider } from '../settings/mcp-secret-provider'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
   authSecret: string
+  mcpSecrets: McpSecretProvider
   setupToken?: string
 }
 
@@ -21,4 +23,9 @@ export interface AppContext {
   security: SecurityContext
   bootId: string
   applicationRuntime: ApplicationRuntime | null
+  storage?: {
+    bootstrapRoot: string
+    source: string
+    managed: boolean
+  }
 }

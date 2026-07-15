@@ -1,6 +1,7 @@
 import { existsSync } from 'fs'
 import { readdir, readFile, rm, stat } from 'fs/promises'
-import { isAbsolute, join, relative, sep } from 'path'
+import { isAbsolute, join, relative, resolve, sep } from 'path'
+import { TurnError } from '../../shared/turn-errors.ts'
 import type { getDb } from '../db'
 import { threadJobs, threads } from '../db/schema'
 import {
@@ -59,6 +60,73 @@ export async function estimateJobRuntimeBytes(
   return estimateDirectoryBytes(jobRuntimeDir(dataDir, threadId, jobId))
 }
 
+export interface JobRuntimeScope {
+  threadId: string
+  jobId: string
+  jobRoot: string
+}
+
+export class JobRuntimeQuotaExceededError extends TurnError {
+  constructor(
+    readonly jobId: string,
+    readonly actualBytes: number,
+    readonly maxBytes: number
+  ) {
+    super('runtime.quota_exceeded', {
+      params: { jobId, actualBytes, maxBytes },
+      detail: `Job ${jobId} runtime quota exceeded: ${actualBytes} bytes >= ${maxBytes} bytes`
+    })
+    this.name = 'JobRuntimeQuotaExceededError'
+  }
+}
+
+export function resolveJobRuntimeScope(
+  dataDir: string,
+  runtimeRoot: string
+): JobRuntimeScope | null {
+  const runtimesRoot = resolve(dataPaths(dataDir).runtimes)
+  const absolute = resolve(runtimeRoot)
+  const rel = relative(runtimesRoot, absolute)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null
+  const segments = rel.split(sep)
+  if (segments.length < 4 || segments[1] !== 'jobs') return null
+  const [threadId, , jobId] = segments
+  if (!threadId || !jobId) return null
+  return {
+    threadId,
+    jobId,
+    jobRoot: jobRuntimeDir(dataDir, threadId, jobId)
+  }
+}
+
+const warnedSoftQuotaJobs = new Set<string>()
+
+export async function inspectJobRuntimeQuota(input: {
+  dataDir: string
+  runtimeRoot: string
+  maxBytes: number
+}): Promise<{
+  scope: JobRuntimeScope | null
+  bytes: number
+  softExceeded: boolean
+  hardExceeded: boolean
+}> {
+  const scope = resolveJobRuntimeScope(input.dataDir, input.runtimeRoot)
+  if (!scope || input.maxBytes <= 0) {
+    return { scope, bytes: 0, softExceeded: false, hardExceeded: false }
+  }
+  const bytes = await estimateDirectoryBytes(scope.jobRoot)
+  const softExceeded = bytes >= Math.floor(input.maxBytes * 0.8)
+  const hardExceeded = bytes >= input.maxBytes
+  if (softExceeded && !warnedSoftQuotaJobs.has(scope.jobId)) {
+    warnedSoftQuotaJobs.add(scope.jobId)
+    console.warn(
+      `[runtime] job ${scope.jobId} runtime soft quota exceeded: ${bytes} bytes / ${input.maxBytes} bytes`
+    )
+  }
+  return { scope, bytes, softExceeded, hardExceeded }
+}
+
 export async function checkJobRuntimeQuota(
   dataDir: string,
   threadId: string,
@@ -83,8 +151,27 @@ export async function removeDirectoryIfExists(path: string): Promise<boolean> {
 export async function cleanupJobRuntimeTree(
   dataDir: string,
   threadId: string,
-  jobId: string
+  jobId: string,
+  options: { deletionDrained?: boolean } = {}
 ): Promise<void> {
+  try {
+    if (options.deletionDrained) {
+      await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+      return
+    }
+    const { getAppContext } = await import('../bootstrap')
+    const ctx = getAppContext()
+    if (ctx.executionRuntime.isLoopActive(jobId)) {
+      throw new Error(`Refusing to delete active Job runtime: ${jobId}`)
+    }
+    const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
+    if ((await listActiveWorkloadSlots()).some((slot) => slot.ownerId === jobId)) {
+      throw new Error(`Refusing to delete Job runtime with active workload slot: ${jobId}`)
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Refusing to delete')) throw error
+    // Standalone retention tests may not have a bootstrapped application context.
+  }
   await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
 }
 
@@ -113,7 +200,23 @@ export async function cleanupJobTaskRuntimeTree(
   return removeDirectoryIfExists(taskRuntime)
 }
 
-export async function cleanupThreadRuntimeTree(dataDir: string, threadId: string): Promise<void> {
+export async function cleanupThreadRuntimeTree(
+  dataDir: string,
+  threadId: string,
+  options: { deletionDrained?: boolean } = {}
+): Promise<void> {
+  try {
+    if (options.deletionDrained) {
+      await removeDirectoryIfExists(threadRuntimeDir(dataDir, threadId))
+      return
+    }
+    const { getAppContext } = await import('../bootstrap')
+    if (getAppContext().runtimeRegistry.isThreadInflight(threadId)) {
+      throw new Error(`Refusing to delete active thread runtime: ${threadId}`)
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Refusing to delete')) throw error
+  }
   await removeDirectoryIfExists(threadRuntimeDir(dataDir, threadId))
 }
 
@@ -209,11 +312,7 @@ export async function extractRuntimeSummary(
       }
     }
 
-    const logPaths = [
-      join(dir, 'stderr.log'),
-      join(dir, 'stdout.log'),
-      join(dir, 'agent.log')
-    ]
+    const logPaths = [join(dir, 'stderr.log'), join(dir, 'stdout.log'), join(dir, 'agent.log')]
     for (const logPath of logPaths) {
       if (existsSync(logPath)) {
         try {

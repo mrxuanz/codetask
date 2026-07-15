@@ -41,7 +41,23 @@ export default {
       '用户名 4-32 位，字母开头，仅含字母/数字/下划线/连字符；不可使用 admin、root 等保留名。密码至少 8 位，须含大小写字母、数字和符号。',
     confirmPassword: '确认密码',
     confirmPasswordPlaceholder: '请再次输入密码',
-    passwordMismatch: '两次输入的密码不一致'
+    passwordMismatch: '两次输入的密码不一致',
+    storageTitle: '选择数据存储目录',
+    storageDescription: '选择 CodeTask 存放数据库、附件和隔离 Provider 运行时的位置。',
+    storagePathLabel: '数据目录',
+    storageBrowse: '浏览',
+    storageValidate: '校验目录',
+    storageValidating: '正在校验…',
+    storageConfirm: '初始化并重启',
+    storageInitializing: '正在初始化…',
+    storageValidatedPath: '已校验路径：{path}',
+    storageRestarting: '存储已初始化，CodeTask 正在重启…',
+    storageRecoveryTitle: '需要恢复数据存储',
+    storageRecoveryDescription:
+      '已保存的数据位置损坏或丢失。请选择已有的 CodeTask 数据目录；目录必须包含有效标记和数据库。',
+    storageRecover: '使用此目录并重启',
+    storageRecovering: '正在恢复…',
+    storageRecovered: '数据位置已恢复，CodeTask 正在重启…'
   },
   bootstrap: {
     connectionError: '无法连接服务：{error}',
@@ -496,6 +512,7 @@ export default {
       saveSuccess: '设置已保存',
       sections: {
         language: '语言',
+        storage: '数据存储',
         sandbox: '沙箱',
         controlPlane: '控制平面',
         mcp: 'MCP',
@@ -517,6 +534,25 @@ export default {
           unavailable: '不可用',
           disabled: '已禁用'
         }
+      },
+      storage: {
+        title: '数据存储',
+        description: '查看存储占用，并通过校验、迁移和重启安全搬移完整数据根目录。',
+        loading: '正在加载存储信息…',
+        loadFailed: '加载存储信息失败',
+        currentPath: '当前数据根目录',
+        source: '来源：{source}',
+        total: '总量',
+        reclaimable: 'DB 可回收',
+        changeTitle: '搬移数据根目录',
+        browse: '浏览',
+        migrate: '校验并迁移',
+        managed: '该路径由 CLI 或环境变量管理，不能在此处更改。',
+        phase: '迁移阶段：{phase}',
+        restart: '重启并切换到新目录',
+        deleteOld: '删除旧数据目录',
+        migrationFailed: '数据存储迁移失败',
+        deleteOldFailed: '删除旧数据目录失败'
       },
       languageSection: {
         title: '语言',

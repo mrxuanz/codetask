@@ -3,7 +3,6 @@ import type { ConversationRole } from '../agent-runtime/roles'
 import type { AgentTurnInput, AgentTurnChunk } from '../agent-runtime/types'
 import { formatSdkTurnError } from '../agent-runtime/errors'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
-import { resolveSandboxDataDir } from './data-dir'
 import { buildSandboxEnv } from './env'
 import {
   awaitSandboxWorkerAttestation,
@@ -189,10 +188,8 @@ export async function* streamSandboxedConversationTurnLocal(
   runProviderAuthPreflight(input.coreCode, authPrepared)
   throwIfSandboxTurnAborted(input.signal)
 
-  const dataDir = resolveSandboxDataDir()
   const providerReadRoots = mergeProviderReadRoots(resolveProviderReadRoots(input.coreCode), [
     ...authPrepared.readRoots,
-    dataDir,
     ...resolveRuntimeReadRoots(),
     ...(input.readRoots ?? [])
   ])
@@ -218,7 +215,6 @@ export async function* streamSandboxedConversationTurnLocal(
 
   const env = buildSandboxEnv({
     runtimeRoot: input.runtimeRoot,
-    dataDir,
     providerEnv: authPrepared.envPatch,
     mcpToken: input.mcpToken
   })
@@ -265,7 +261,10 @@ export async function* streamSandboxedConversationTurnLocal(
 }
 
 export function isOuterSandboxEnabled(): boolean {
-  if (process.env.CODETASK_MODE === 'server' && process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
+  if (
+    process.env.CODETASK_MODE === 'server' &&
+    process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1'
+  ) {
     console.warn(
       '[sandbox] CODETASK_DISABLE_OUTER_SANDBOX is ignored in server mode; outer sandbox stays enabled'
     )

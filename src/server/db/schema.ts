@@ -1,4 +1,12 @@
-import { integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
+import { blob, integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
+
+export const appSettings = sqliteTable('app_settings', {
+  namespace: text('namespace').primaryKey(),
+  valueJson: text('value_json').notNull(),
+  schemaVersion: integer('schema_version').notNull(),
+  revision: integer('revision').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
 
 export const authState = sqliteTable('auth_state', {
   id: integer('id').primaryKey(),
@@ -151,6 +159,23 @@ export const threadJobs = sqliteTable(
   (table) => [uniqueIndex('idx_thread_jobs_thread_draft').on(table.threadId, table.draftMessageId)]
 )
 
+export const designPlanRevisions = sqliteTable(
+  'design_plan_revisions',
+  {
+    jobId: text('job_id')
+      .notNull()
+      .references(() => threadJobs.id, { onDelete: 'cascade' }),
+    planRevision: integer('plan_revision').notNull(),
+    contentGzip: blob('content_gzip', { mode: 'buffer' }).notNull(),
+    contentHash: text('content_hash').notNull(),
+    rawByteSize: integer('raw_byte_size').notNull(),
+    gzipByteSize: integer('gzip_byte_size').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at')
+  },
+  (table) => [primaryKey({ columns: [table.jobId, table.planRevision] })]
+)
+
 export const jobTasks = sqliteTable(
   'job_tasks',
   {
@@ -220,6 +245,7 @@ export const jobArtifacts = sqliteTable('job_artifacts', {
   byteSize: integer('byte_size').notNull(),
   storage: text('storage').notNull(),
   contentInline: text('content_inline'),
+  contentBlob: blob('content_blob', { mode: 'buffer' }),
   contentPath: text('content_path'),
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at')

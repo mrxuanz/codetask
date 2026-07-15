@@ -41,7 +41,24 @@ export default {
       'Username: 4-32 chars, starts with a letter, letters/numbers/_/- only; reserved names like admin/root are blocked. Password: 8+ chars with upper, lower, digit, and symbol.',
     confirmPassword: 'Confirm password',
     confirmPasswordPlaceholder: 'Enter password again',
-    passwordMismatch: 'Passwords do not match'
+    passwordMismatch: 'Passwords do not match',
+    storageTitle: 'Choose data storage',
+    storageDescription:
+      'Choose where CodeTask stores its database, attachments, and isolated Provider runtimes.',
+    storagePathLabel: 'Data directory',
+    storageBrowse: 'Browse',
+    storageValidate: 'Validate directory',
+    storageValidating: 'Validating…',
+    storageConfirm: 'Initialize and restart',
+    storageInitializing: 'Initializing…',
+    storageValidatedPath: 'Validated path: {path}',
+    storageRestarting: 'Storage initialized. CodeTask is restarting…',
+    storageRecoveryTitle: 'Storage recovery required',
+    storageRecoveryDescription:
+      'The saved storage location is damaged or missing. Select the existing CodeTask data directory; it must contain a valid marker and database.',
+    storageRecover: 'Use directory and restart',
+    storageRecovering: 'Recovering…',
+    storageRecovered: 'Storage location recovered. CodeTask is restarting…'
   },
   bootstrap: {
     connectionError: 'Cannot connect to service: {error}',
@@ -511,6 +528,7 @@ export default {
       saveSuccess: 'Settings saved',
       sections: {
         language: 'Language',
+        storage: 'Data Storage',
         sandbox: 'Sandbox',
         controlPlane: 'Control Plane',
         mcp: 'MCP',
@@ -532,6 +550,27 @@ export default {
           unavailable: 'Unavailable',
           disabled: 'Disabled'
         }
+      },
+      storage: {
+        title: 'Data Storage',
+        description:
+          'Inspect storage usage and move the complete data root through a checked, restart-based migration.',
+        loading: 'Loading storage information…',
+        loadFailed: 'Failed to load storage information',
+        currentPath: 'Current data root',
+        source: 'Source: {source}',
+        total: 'Total',
+        reclaimable: 'DB reclaimable',
+        changeTitle: 'Move data root',
+        browse: 'Browse',
+        migrate: 'Validate and migrate',
+        managed:
+          'This path is managed by CLI or environment configuration and cannot be changed here.',
+        phase: 'Migration phase: {phase}',
+        restart: 'Restart into new data root',
+        deleteOld: 'Delete old data root',
+        migrationFailed: 'Storage migration failed',
+        deleteOldFailed: 'Failed to delete old storage'
       },
       languageSection: {
         title: 'Language',

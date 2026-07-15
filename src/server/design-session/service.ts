@@ -23,6 +23,7 @@ import {
 } from './launch'
 import { advanceWorkloadQueue } from '../legacy-control-plane/workload-slot-store'
 import { emitJobEvent } from '../legacy-control-plane/service'
+import { putDesignPlanRevisionInTx } from '../retention/design-plan-artifacts'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -127,6 +128,21 @@ export async function updateDesignSessionRow(
 
     if (plan !== undefined) {
       saveJobPlanInTx(db, designSessionId, plan)
+      if (plan && patch.planRevision && patch.planRevision > 0) {
+        const artifact = putDesignPlanRevisionInTx(db, {
+          jobId: designSessionId,
+          planRevision: patch.planRevision,
+          plan
+        })
+        db.update(threadJobs)
+          .set({
+            planArtifactId: artifact.artifactId,
+            planArtifactPath: artifact.contentPath,
+            planSummaryJson: artifact.summaryJson
+          })
+          .where(eq(threadJobs.id, designSessionId))
+          .run()
+      }
       db.update(threadJobs).set({ updatedAt: now }).where(eq(threadJobs.id, designSessionId)).run()
     }
 
@@ -191,6 +207,21 @@ export async function updateDesignSessionRowFenced(
 
     if (plan !== undefined) {
       saveJobPlanInTx(tx, designSessionId, plan)
+      if (plan && patch.planRevision && patch.planRevision > 0) {
+        const artifact = putDesignPlanRevisionInTx(tx, {
+          jobId: designSessionId,
+          planRevision: patch.planRevision,
+          plan
+        })
+        tx.update(threadJobs)
+          .set({
+            planArtifactId: artifact.artifactId,
+            planArtifactPath: artifact.contentPath,
+            planSummaryJson: artifact.summaryJson
+          })
+          .where(fence)
+          .run()
+      }
       tx.update(threadJobs).set({ updatedAt: now }).where(fence).run()
     }
 

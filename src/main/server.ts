@@ -1,5 +1,7 @@
 import { join } from 'path'
 import { serve, type ServerType } from '@hono/node-server'
+import type { Hono } from 'hono'
+import { app as electronApp } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { readSchemaGeneration } from '../server/application/cutover-state'
@@ -9,10 +11,13 @@ import {
   shutdownSandboxSupervisor
 } from '../server/sandbox/supervisor-manager'
 import { ensureWindowsSandboxReady } from '../server/sandbox/windows-bootstrap'
-import { ensureDataDir } from './data-dir'
+import { resolveDataDirSelection } from './data-dir'
+import { ensureResolvedDataRoot } from './storage-locator'
+import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
 import { generateSetupToken } from '../server/auth/setup-token'
+import { loadMainProcessAuthSecret } from './app-secret'
 
 export interface ServerInfo {
   host: string
@@ -70,11 +75,7 @@ function isAddressInUse(error: unknown): boolean {
   )
 }
 
-function listen(
-  app: ReturnType<typeof createApp>,
-  host: string,
-  port: number
-): Promise<ServerType> {
+function listen(app: Hono, host: string, port: number): Promise<ServerType> {
   return new Promise((resolve, reject) => {
     const server = serve({
       fetch: app.fetch,
@@ -96,11 +97,64 @@ export async function gracefulShutdown(): Promise<void> {
   return shutdownPromise
 }
 
-export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
+export async function startAppServer(
+  cli: CliOptions,
+  options: { onStorageInitialized?: (dataDir: string) => void | Promise<void> } = {}
+): Promise<ServerInfo> {
   const rendererDevUrl = process.env['ELECTRON_RENDERER_URL']
   const staticDir = join(__dirname, '../renderer')
 
-  const dataDir = ensureDataDir(cli.dataDir)
+  const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
+  if (storage.phase !== 'ready') {
+    if (cli.mode === 'server') {
+      throw new Error(
+        `Headless server storage is not configured (${storage.issue ?? storage.phase}); use --data-dir or CODETASK_DATA_DIR`
+      )
+    }
+
+    const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
+      cli.host,
+      cli.port
+    )
+    let boundPort = startPort
+    let bindChanged = preflightChanged
+    for (let offset = 0; offset < 100; offset++) {
+      const port = startPort + offset
+      const setupApp = createSetupShell({
+        storage,
+        isDev: is.dev,
+        rendererDevUrl,
+        staticDir: is.dev ? undefined : staticDir,
+        forbiddenRoots: [electronApp.getAppPath(), process.cwd()],
+        onInitialized: options.onStorageInitialized
+      })
+      try {
+        activeServer = await listen(setupApp, cli.host, port)
+        boundPort = port
+        bindChanged = cli.port !== port
+        break
+      } catch (error) {
+        if (!isAddressInUse(error)) throw error
+      }
+    }
+    if (!activeServer) {
+      throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
+    }
+    const info: ServerInfo = {
+      host: cli.host,
+      port: boundPort,
+      url: formatUrl(cli.host, boundPort),
+      requestedPort: cli.port,
+      portChanged: bindChanged,
+      mode: cli.mode
+    }
+    console.log(`[server] desktop storage setup listening on ${info.url}`)
+    console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
+    console.log(`[storage] default candidate: ${storage.dataDir}`)
+    return info
+  }
+
+  const dataDir = ensureResolvedDataRoot(storage)
   process.env.CODETASK_DATA_DIR = dataDir
 
   if (process.platform === 'win32') {
@@ -116,7 +170,23 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     console.error(`[sandbox] supervisor restart failed permanently: ${message}`)
   })
 
-  const ctx = bootstrapRuntime({ dataDir, mode: cli.mode })
+  const authSecret = await loadMainProcessAuthSecret({
+    mode: cli.mode,
+    bootstrapSecretPath: storage.bootstrap.authSecretFile
+  })
+  console.log(`[security] auth secret provider: ${authSecret.provider.describeStorage().kind}`)
+
+  const ctx = bootstrapRuntime({
+    dataDir,
+    mode: cli.mode,
+    authSecret: authSecret.value,
+    mcpSecretPath: storage.bootstrap.mcpSecretFile,
+    storage: {
+      bootstrapRoot: storage.bootstrap.root,
+      source: storage.source,
+      managed: storage.managed
+    }
+  })
   process.env.CODETASK_MODE = cli.mode
 
   const schemaRead = readSchemaGeneration(ctx.db)
@@ -199,7 +269,8 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   }
 
   console.log(`[server] ${cli.mode} mode listening on ${info.url}`)
-  console.log(`[server] data dir: ${dataDir}`)
+  console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
+  console.log(`[storage] data root: ${dataDir} (source=${storage.source})`)
   if (cli.mode === 'server' && cli.host === '0.0.0.0') {
     console.log(`[server] External access: http://<your-ip>:${boundPort}`)
   }
@@ -216,6 +287,8 @@ export async function stopAppServer(): Promise<void> {
   try {
     const { stopRetentionJanitor } = await import('../server/retention/lifecycle')
     stopRetentionJanitor()
+    const { stopArtifactExpiryScheduler } = await import('../server/retention/expiry-scheduler')
+    stopArtifactExpiryScheduler()
   } catch (error) {
     console.warn('[server] failed to stop retention janitor', error)
   }
