@@ -15,6 +15,7 @@ import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cor
 import { ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { ensureCursorAcpRuntimeDirs } from '../agent-runtime/env'
 import { memoryDebug } from '../debug/memory'
+import { cleanupJobTaskRuntimeTree } from '../runtime/cleanup'
 import { slimTaskProgressItemsForRuntime } from './evidence/store'
 import { finalizeJobExecution } from './finalize-execution'
 import { getExecutionRunContext, runWithExecutionRunContext } from './execution-run-context'
@@ -298,6 +299,17 @@ async function persistTaskProgress(
     status: patch?.status ?? null
   })
   return job
+}
+
+async function cleanupDurableTaskRuntime(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): Promise<void> {
+  await cleanupJobTaskRuntimeTree(dataDir, threadId, jobId, taskId).catch((error) => {
+    console.warn('[retention] completed task runtime cleanup failed', jobId, taskId, error)
+  })
 }
 
 function updateTaskItem(
@@ -2080,6 +2092,7 @@ async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<
     tasks: items
   }
   await persistTaskProgress(jobId, taskProgress, undefined, gate)
+  await cleanupDurableTaskRuntime(dataDir, job.threadId, jobId, `verify-${sliceToVerify.id}`)
   syncLoopState(ctx, { plan, items, taskProgress, gate, job })
   return 'continue'
 }
@@ -2308,6 +2321,7 @@ async function processMilestoneVerificationStep(
     tasks: items
   }
   await persistTaskProgress(jobId, taskProgress, undefined, gate)
+  await cleanupDurableTaskRuntime(dataDir, job.threadId, jobId, `verify-${milestoneToVerify.id}`)
   syncLoopState(ctx, { plan, items, taskProgress, gate, job })
   return 'continue'
 }
@@ -2387,6 +2401,7 @@ async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepA
       }
       taskProgress = skipProgress
       await persistTaskProgress(jobId, skipProgress, undefined, gate)
+      await cleanupDurableTaskRuntime(ctx.dataDir, job.threadId, jobId, next.id)
       syncLoopState(ctx, { plan, items, taskProgress, gate, job })
       return 'continue'
     }
@@ -2591,6 +2606,7 @@ async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepA
     }
     items = slimTaskProgressItemsForRuntime(fullItems)
     await finalizeExecutionPause(jobId, taskProgress, items, gate)
+    await cleanupDurableTaskRuntime(ctx.dataDir, job.threadId, jobId, next.id)
     syncLoopState(ctx, { plan, items, taskProgress, gate, job })
     return 'return'
   }
@@ -2637,6 +2653,10 @@ async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepA
     gate,
     failed ? 'terminal' : 'delta'
   )
+
+  if (result.kind === 'completed') {
+    await cleanupDurableTaskRuntime(ctx.dataDir, job.threadId, jobId, next.id)
+  }
 
   items = slimTaskProgressItemsForRuntime(fullItems)
   if (failed) {

@@ -105,6 +105,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
           result.expiredArtifacts > 0 ||
           result.orphanAttachments > 0 ||
           result.staleRuntimes > 0 ||
+          result.completedTaskRuntimes > 0 ||
           result.orphanDesignArtifacts > 0 ||
           result.staleAttachmentDirs > 0 ||
           result.orphanRuntimeTrees > 0 ||
@@ -112,7 +113,8 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
         ) {
           bootstrapLogger.info('retention startup janitor pass', {
             expiredArtifacts: result.expiredArtifacts,
-            orphanAttachments: result.orphanAttachments
+            orphanAttachments: result.orphanAttachments,
+            completedTaskRuntimes: result.completedTaskRuntimes
           })
         }
       })
