@@ -22,6 +22,7 @@ import {
   isCreateTaskThread,
   useHomeWorkspace
 } from '@renderer/composables/useHomeWorkspace'
+import { toastError } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
 
 const { t } = useI18n()
@@ -82,7 +83,6 @@ const contextMenu = ref<{ x: number; y: number; target: ContextTarget } | null>(
 const confirmDelete = ref<ContextTarget | null>(null)
 const renameTarget = ref<{ id: string; title: string } | null>(null)
 const actionLoading = ref(false)
-const actionError = ref<string | null>(null)
 
 const contextMenuItems = computed(() => {
   if (!contextMenu.value) return []
@@ -145,7 +145,6 @@ async function handleConfirmDelete(): Promise<void> {
   const target = confirmDelete.value
   if (!target) return
   actionLoading.value = true
-  actionError.value = null
   try {
     if (target.kind === 'project') {
       await workspace.removeProject(target.id)
@@ -160,7 +159,7 @@ async function handleConfirmDelete(): Promise<void> {
     }
     confirmDelete.value = null
   } catch (err) {
-    actionError.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     actionLoading.value = false
   }
@@ -170,12 +169,11 @@ async function handleRenameConfirm(title: string): Promise<void> {
   const target = renameTarget.value
   if (!target) return
   actionLoading.value = true
-  actionError.value = null
   try {
     await workspace.renameThreadTitle(target.id, title)
     renameTarget.value = null
   } catch (err) {
-    actionError.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     actionLoading.value = false
   }
@@ -400,7 +398,5 @@ const confirmDeleteMessage = computed(() => {
       @close="renameTarget = null"
       @confirm="handleRenameConfirm"
     />
-
-    <p v-if="actionError" class="px-3 pb-2 text-xs text-destructive">{{ actionError }}</p>
   </aside>
 </template>

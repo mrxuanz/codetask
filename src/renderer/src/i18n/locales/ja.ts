@@ -453,6 +453,7 @@ export default {
       save: '保存',
       loadFailed: '設定の読み込みに失敗しました',
       saveFailed: '設定の保存に失敗しました',
+      saveSuccess: '設定を保存しました',
       sections: {
         language: '言語',
         sandbox: 'サンドボックス',

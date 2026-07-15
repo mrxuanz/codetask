@@ -27,6 +27,7 @@ import CardHeader from '@renderer/components/ui/CardHeader.vue'
 import CardTitle from '@renderer/components/ui/CardTitle.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
+import { toast, toastError } from '@renderer/lib/toast'
 
 type SettingsSection = 'language' | 'sandbox' | 'control-plane' | 'mcp' | 'prompts'
 
@@ -36,7 +37,6 @@ const section = ref<SettingsSection>('language')
 const loading = ref(true)
 const saving = ref(false)
 const error = ref<string | null>(null)
-const saveError = ref<string | null>(null)
 
 const controlPlane = ref<ControlPlaneSettingsPayload | null>(null)
 const controlPlaneDraft = ref<ControlPlanePolicies | null>(null)
@@ -114,7 +114,6 @@ function updatePromptEntry<K extends keyof PromptSettings>(
 async function saveControlPlane(): Promise<void> {
   if (!controlPlaneDraft.value) return
   saving.value = true
-  saveError.value = null
   try {
     const res = await updateControlPlanePolicies({
       plannerCoreCode: controlPlaneDraft.value.plannerCoreCode,
@@ -125,8 +124,9 @@ async function saveControlPlane(): Promise<void> {
     if (controlPlane.value) {
       controlPlane.value = { ...controlPlane.value, policies: res.data.policies }
     }
+    toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
-    saveError.value = err instanceof Error ? err.message : t('workspace.settings.saveFailed')
+    toastError(err, t('workspace.settings.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -135,12 +135,12 @@ async function saveControlPlane(): Promise<void> {
 async function savePrompts(): Promise<void> {
   if (!promptDraft.value) return
   saving.value = true
-  saveError.value = null
   try {
     const res = await updatePromptSettings(promptDraft.value)
     promptDraft.value = structuredClone(res.data.settings)
+    toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
-    saveError.value = err instanceof Error ? err.message : t('workspace.settings.saveFailed')
+    toastError(err, t('workspace.settings.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -149,12 +149,12 @@ async function savePrompts(): Promise<void> {
 async function saveMcp(): Promise<void> {
   if (!mcpDraft.value) return
   saving.value = true
-  saveError.value = null
   try {
     const res = await updateMcpSettings(mcpDraft.value)
     mcpDraft.value = structuredClone(res.data.settings)
+    toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
-    saveError.value = err instanceof Error ? err.message : t('workspace.settings.saveFailed')
+    toastError(err, t('workspace.settings.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -215,7 +215,6 @@ onMounted(() => {
           </div>
 
           <ErrorAlert v-if="error" :message="error" />
-          <ErrorAlert v-if="saveError" :message="saveError" />
 
           <Card v-if="!loading && section === 'language'">
             <CardHeader class="pb-3">

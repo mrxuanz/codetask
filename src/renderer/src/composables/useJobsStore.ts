@@ -18,6 +18,7 @@ import {
 import type { JobSseEvent } from '@shared/contracts/sse'
 import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import { toastError } from '@renderer/lib/toast'
 
 export interface UseJobsStoreOptions {
   selectedJobId: Ref<string | null>
@@ -221,7 +222,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       await fn(job.id)
       await loadDetail(job.id)
     } catch (err) {
-      actionError.value = err instanceof Error ? err.message : 'Action failed'
+      toastError(err, 'Action failed')
     } finally {
       runningAction.value = null
     }
@@ -236,7 +237,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       await pauseJob(job.id)
       await loadDetail(job.id)
     } catch (err) {
-      actionError.value = err instanceof Error ? err.message : 'Failed to pause'
+      toastError(err, 'Failed to pause')
     } finally {
       runningAction.value = null
     }
@@ -267,7 +268,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       await router.replace({ name: 'tasks' })
       await loadJobs()
     } catch (err) {
-      actionError.value = err instanceof Error ? err.message : 'Failed to delete'
+      toastError(err, 'Failed to delete')
     } finally {
       runningAction.value = null
     }
