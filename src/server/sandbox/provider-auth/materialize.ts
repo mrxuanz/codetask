@@ -138,13 +138,9 @@ export function materializeCodexAuth(runtimeRoot: string): MaterializeCodexResul
   const codexHome = runtimeCodexHome(runtimeRoot)
   const runtimeAuthPath = join(codexHome, 'auth.json')
 
-  if (existsSync(codexHome)) {
-    try {
-      rmSync(codexHome, { recursive: true, force: true })
-    } catch {
-      // ignore
-    }
-  }
+  // Preserve existing CODEX_HOME contents across turns. Codex stores thread
+  // rollouts under this directory; wiping it makes resumeThread fail with
+  // "no rollout found for thread id" on the second message.
   mkdirSync(codexHome, { recursive: true })
 
   const cleanupPaths: string[] = []

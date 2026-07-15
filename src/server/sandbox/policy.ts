@@ -59,8 +59,12 @@ export function policyForRole(input: {
       protectedNames: [...PROTECTED_NAMES],
       allowSystemRuntime: true
     },
+    // Agent providers need outbound HTTPS (LLM APIs). OpenCode also binds a
+    // local 127.0.0.1 serve port; Linux restricted seccomp denies bind/listen
+    // (listen EPERM). mode "none"/"restricted" collapses to Restricted in the
+    // native adapter and ignores allowLoopback on Linux.
     network: {
-      mode: 'none',
+      mode: 'full',
       allowLoopback: true,
       allowUnixSockets: []
     },
@@ -220,7 +224,7 @@ export function policyForRoleV2(input: {
       allowSystemRuntime: true
     },
     network: {
-      mode: 'none',
+      mode: 'full',
       allowLoopback: true,
       allowUnixSockets: []
     },

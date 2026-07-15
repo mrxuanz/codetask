@@ -312,6 +312,24 @@ function handlePlanConfirmed(payload: {
         >
           {{ activeProject.title }}
         </span>
+        <span
+          v-if="phase === 'workspace' && coreSwitching"
+          class="text-xs text-muted-foreground"
+        >
+          {{ t('workspace.switchingCore') }}
+        </span>
+        <span
+          v-else-if="phase === 'workspace' && busy"
+          class="text-xs text-muted-foreground"
+        >
+          {{ t('workspace.running') }}
+        </span>
+        <span
+          v-else-if="phase === 'workspace' && runtimeStatus === 'error' && !busy"
+          class="text-xs text-destructive"
+        >
+          {{ t('workspace.lastRunFailed') }}
+        </span>
       </div>
       <div
         v-if="phase === 'workspace' || phase === 'completed'"

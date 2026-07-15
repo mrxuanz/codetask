@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -105,6 +105,37 @@ enabled = true
     assert.match(raw, /model = "gpt-test"/)
     assert.doesNotMatch(raw, /mcp_servers/)
     assert.doesNotMatch(raw, /\[plugins\]/)
+  } finally {
+    if (prevHome === undefined) delete process.env.CODETASK_CODEX_HOME
+    else process.env.CODETASK_CODEX_HOME = prevHome
+    rmSync(hostCodexHome, { recursive: true, force: true })
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeCodexAuth preserves existing session rollouts across turns', () => {
+  const hostCodexHome = mkdtempSync(join(tmpdir(), 'codetask-codex-host-'))
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-runtime-'))
+  const prevHome = process.env.CODETASK_CODEX_HOME
+  process.env.CODETASK_CODEX_HOME = hostCodexHome
+
+  try {
+    writeFileSync(join(hostCodexHome, 'auth.json'), '{"token":"host"}', 'utf8')
+    writeFileSync(join(hostCodexHome, 'config.toml'), 'model = "gpt-test"\n', 'utf8')
+
+    materializeCodexAuth(runtimeRoot)
+
+    const codexHome = runtimeCodexHome(runtimeRoot)
+    const rolloutDir = join(codexHome, 'sessions', '019f6434-ebb9-7e10-b5e8-c97e50d202ee')
+    const rolloutPath = join(rolloutDir, 'rollout.json')
+    mkdirSync(rolloutDir, { recursive: true })
+    writeFileSync(rolloutPath, '{"thread":"preserved"}', 'utf8')
+
+    materializeCodexAuth(runtimeRoot)
+
+    assert.equal(readFileSync(rolloutPath, 'utf8'), '{"thread":"preserved"}')
+    assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), '{"token":"host"}')
+    assert.match(readFileSync(join(codexHome, 'config.toml'), 'utf8'), /model = "gpt-test"/)
   } finally {
     if (prevHome === undefined) delete process.env.CODETASK_CODEX_HOME
     else process.env.CODETASK_CODEX_HOME = prevHome
