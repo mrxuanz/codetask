@@ -6,7 +6,7 @@ import { saveDesignPlan, saveDesignPlanProgress, saveDesignAbilities } from '../
 import { threadJobs } from '../db/schema'
 import { mapJob } from '../legacy-control-plane/repository'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { ensureJobRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
 import { buildPlannerUserMessage } from '../planner/prompts'
 import {
@@ -436,9 +436,10 @@ async function runDesignPlanner(
   try {
     const plannerCoreCode = await resolvePlannerCoreCode(coreCode)
     const core = await ensureCoreAvailable(plannerCoreCode)
-    const runtimeRoot = ensureRuntimeRoot(
+    const runtimeRoot = ensureJobRuntimeRoot(
       getAppContext().dataDir,
       threadId,
+      designSessionId,
       core.code as SupportedCoreCode
     )
     const model = resolveCoreModel(core.code as SupportedCoreCode)

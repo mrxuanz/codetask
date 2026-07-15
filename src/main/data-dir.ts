@@ -1,22 +1,11 @@
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { app } from 'electron'
-import { dirname, join } from 'path'
+import { dirname, join, resolve } from 'path'
 
 /**
- * Resolve the application root that should own the `data/` directory.
- *
- * - Dev: project root (walk up from the compiled main entry until package.json).
- * - Packaged: install/program root (parent of `resources/`), not Electron userData.
+ * Resolve the project root that should own the development `data/` directory.
  */
-function resolveAppRoot(): string {
-  if (app.isPackaged) {
-    const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
-    if (resourcesPath) {
-      return dirname(resourcesPath)
-    }
-    return dirname(app.getPath('exe'))
-  }
-
+function resolveDevAppRoot(): string {
   // electron-vite may place the main entry under out/main/ or out/main/chunks/.
   // Walk upward until we find this repo's package.json.
   let dir = __dirname
@@ -44,14 +33,19 @@ function isAppPackageJson(packageJsonPath: string): boolean {
   }
 }
 
-export function resolveDataDir(): string {
-  const fromEnv = process.env.CODETASK_DATA_DIR?.trim()
-  if (fromEnv) return fromEnv
-  return join(resolveAppRoot(), 'data')
+export function resolveDataDir(explicitDataDir?: string): string {
+  const configured = explicitDataDir?.trim() || process.env.CODETASK_DATA_DIR?.trim()
+  if (configured) return resolve(configured)
+
+  // Packaged applications may live in read-only AppImage mounts, /opt, Program Files, or a signed
+  // macOS bundle. Electron userData is writable, stable across upgrades, and scoped per OS user.
+  if (app.isPackaged) return join(app.getPath('userData'), 'data')
+
+  return join(resolveDevAppRoot(), 'data')
 }
 
-export function ensureDataDir(): string {
-  const dir = resolveDataDir()
+export function ensureDataDir(explicitDataDir?: string): string {
+  const dir = resolveDataDir(explicitDataDir)
   mkdirSync(dir, { recursive: true })
   return dir
 }

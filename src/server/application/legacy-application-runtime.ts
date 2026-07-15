@@ -69,7 +69,9 @@ export function createLegacyApplicationRuntime(
           const { reconcileOrphanRunningJobsOnStartupOnce } = await import(
             '../legacy-control-plane/reconcile'
           )
-          await reconcileOrphanRunningJobsOnStartupOnce()
+          // Startup owns the workload gate. Advancing the queue from inside this stage would wait
+          // on that same gate and deadlock, so defer it until startup and executor init complete.
+          await reconcileOrphanRunningJobsOnStartupOnce({ deferQueueAdvance: true })
         }
       },
       {
@@ -117,6 +119,7 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
       result.expiredArtifacts > 0 ||
       result.orphanAttachments > 0 ||
       result.staleRuntimes > 0 ||
+      result.completedTaskRuntimes > 0 ||
       result.orphanDesignArtifacts > 0 ||
       result.staleAttachmentDirs > 0 ||
       result.orphanRuntimeTrees > 0 ||
@@ -124,7 +127,8 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
     ) {
       logger.info('retention startup janitor pass', {
         expiredArtifacts: result.expiredArtifacts,
-        orphanAttachments: result.orphanAttachments
+        orphanAttachments: result.orphanAttachments,
+        completedTaskRuntimes: result.completedTaskRuntimes
       })
     }
   } catch (error: unknown) {
@@ -177,6 +181,11 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
 
     const executorModule = await import('../legacy-control-plane/executor')
     await executorModule.initJobExecutor(runtime.ctx)
+
+    // Startup reconcile repaired durable state without entering the gated queue. Once every stage
+    // is complete and the executor is initialized, resume an interrupted running job (or FIFO work).
+    const { advanceExecutionQueue } = await import('../legacy-control-plane/queue-coordinator')
+    await advanceExecutionQueue()
 
     await Promise.all([
       runRetentionStartupPass(logger),

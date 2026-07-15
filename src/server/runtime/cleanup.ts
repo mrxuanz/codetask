@@ -1,11 +1,12 @@
 import { existsSync } from 'fs'
 import { readdir, readFile, rm, stat } from 'fs/promises'
-import { join } from 'path'
+import { isAbsolute, join, relative, sep } from 'path'
 import type { getDb } from '../db'
 import { threadJobs, threads } from '../db/schema'
 import {
   dataPaths,
   jobRuntimeDirPath,
+  jobTaskRuntimeDirPath,
   threadRuntimeDirPath
 } from '../data-paths'
 
@@ -19,41 +20,43 @@ export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string):
   return jobRuntimeDirPath(dataDir, threadId, jobId)
 }
 
+export function jobTaskRuntimeDir(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): string {
+  return jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId)
+}
+
+async function estimateDirectoryBytes(dir: string): Promise<number> {
+  if (!existsSync(dir)) return 0
+  let total = 0
+  try {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        total += await estimateDirectoryBytes(full)
+      } else if (entry.isFile()) {
+        try {
+          total += (await stat(full)).size
+        } catch {
+          // skip files that disappear during measurement
+        }
+      }
+    }
+  } catch {
+    // skip inaccessible directories
+  }
+  return total
+}
+
 export async function estimateJobRuntimeBytes(
   dataDir: string,
   threadId: string,
   jobId: string
 ): Promise<number> {
-  const dir = jobRuntimeDir(dataDir, threadId, jobId)
-  if (!existsSync(dir)) return 0
-  let total = 0
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const entry of entries) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        const subEntries = await readdir(full, { withFileTypes: true })
-        for (const sub of subEntries) {
-          try {
-            const s = await stat(join(full, sub.name))
-            total += s.size
-          } catch {
-            // skip
-          }
-        }
-      } else {
-        try {
-          const s = await stat(full)
-          total += s.size
-        } catch {
-          // skip
-        }
-      }
-    }
-  } catch {
-    // skip
-  }
-  return total
+  return estimateDirectoryBytes(jobRuntimeDir(dataDir, threadId, jobId))
 }
 
 export async function checkJobRuntimeQuota(
@@ -83,6 +86,31 @@ export async function cleanupJobRuntimeTree(
   jobId: string
 ): Promise<void> {
   await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+}
+
+/**
+ * Completed task checkpoints and evidence are durable in SQLite/blob artifacts. Their Provider
+ * runtime is disposable even while later tasks in the same Job are still running.
+ */
+export async function cleanupJobTaskRuntimeTree(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): Promise<boolean> {
+  const tasksRoot = join(jobRuntimeDir(dataDir, threadId, jobId), 'tasks')
+  const taskRuntime = jobTaskRuntimeDir(dataDir, threadId, jobId, taskId)
+  const relativeTaskPath = relative(tasksRoot, taskRuntime)
+  if (
+    !relativeTaskPath ||
+    relativeTaskPath === '..' ||
+    relativeTaskPath.startsWith(`..${sep}`) ||
+    isAbsolute(relativeTaskPath)
+  ) {
+    console.warn('[retention] refused task runtime path outside task root', jobId, taskId)
+    return false
+  }
+  return removeDirectoryIfExists(taskRuntime)
 }
 
 export async function cleanupThreadRuntimeTree(dataDir: string, threadId: string): Promise<void> {

@@ -100,7 +100,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   const rendererDevUrl = process.env['ELECTRON_RENDERER_URL']
   const staticDir = join(__dirname, '../renderer')
 
-  const dataDir = ensureDataDir()
+  const dataDir = ensureDataDir(cli.dataDir)
   process.env.CODETASK_DATA_DIR = dataDir
 
   if (process.platform === 'win32') {

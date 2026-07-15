@@ -18,6 +18,7 @@ import { readRetentionSettings, artifactExpirySec } from './settings'
 import { runSqliteMaintenanceIfDue } from './maintenance'
 import {
   enforceDataDirWatermark,
+  pruneCompletedTaskRuntimeTrees,
   pruneOrphanAttachments,
   pruneOrphanDesignArtifactDirs,
   pruneOrphanMessageArtifactDirs,
@@ -147,6 +148,7 @@ export async function runRetentionJanitorPass(): Promise<{
   expiredArtifacts: number
   orphanAttachments: number
   staleRuntimes: number
+  completedTaskRuntimes: number
   orphanMessageArtifacts: number
   orphanDesignArtifacts: number
   staleAttachmentDirs: number
@@ -164,6 +166,7 @@ export async function runRetentionJanitorPass(): Promise<{
     artifacts,
     attachments,
     runtimes,
+    completedTaskRuntimes,
     messageArtifacts,
     designArtifacts,
     staleAttachmentDirs,
@@ -173,6 +176,7 @@ export async function runRetentionJanitorPass(): Promise<{
     deleteExpiredArtifacts(db, ctx.dataDir),
     pruneOrphanAttachments(ctx.dataDir, db),
     pruneStalePausedRuntimeTrees(ctx.dataDir, db, settings.runtimePausedDays),
+    pruneCompletedTaskRuntimeTrees(ctx.dataDir, db),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
     pruneOrphanDesignArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
@@ -192,6 +196,7 @@ export async function runRetentionJanitorPass(): Promise<{
     expiredArtifacts: artifacts.deleted,
     orphanAttachments: attachments.removed,
     staleRuntimes: runtimes.removed,
+    completedTaskRuntimes: completedTaskRuntimes.removed,
     orphanMessageArtifacts: messageArtifacts.removed,
     orphanDesignArtifacts: designArtifacts.removed,
     staleAttachmentDirs: staleAttachmentDirs.removed,
