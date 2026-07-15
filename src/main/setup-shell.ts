@@ -1,8 +1,9 @@
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { mkdirSync, readFileSync } from 'fs'
+import { join, resolve } from 'path'
 import { Hono } from 'hono'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { proxy } from 'hono/proxy'
+import { browse, parentBrowsePath } from '../server/fs'
 import { fail, ok } from '../server/response'
 import { StorageLocatorRepository, type DataDirResolution } from './storage-locator'
 import { initializeStorageRoot } from './storage-initializer'
@@ -18,7 +19,10 @@ export interface SetupShellOptions {
   rendererDevUrl?: string
   staticDir?: string
   forbiddenRoots?: readonly string[]
-  onInitialized?: (dataDir: string) => void | Promise<void>
+  /** Server mode requires a console setup token; desktop does not. */
+  setupTokenRequired?: boolean
+  /** Boot the full runtime in-process after storage is ready (no process restart). */
+  activateStorage?: (dataDir: string) => void | Promise<void>
 }
 
 export function createSetupShell(options: SetupShellOptions): Hono {
@@ -33,7 +37,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
       ok({
         initialized: false,
         authenticated: false,
-        setupTokenRequired: false,
+        setupTokenRequired: options.setupTokenRequired === true,
         storagePhase: options.storage.phase
       })
     )
@@ -50,30 +54,90 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     )
   })
 
+  // Same browse surface as create-project; unauthenticated during storage setup only.
+  app.post('/api/fs/browse', async (c) => {
+    try {
+      const body = await c.req.json<{ partialPath?: string }>()
+      return c.json(ok(browse(body.partialPath ?? '')))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json(fail(400, message, { error: message }), 400)
+    }
+  })
+  app.get('/api/fs/parent', async (c) => {
+    try {
+      const path = c.req.query('path') ?? ''
+      return c.json(ok({ parentPath: parentBrowsePath(path) }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json(fail(400, message, { error: message }), 400)
+    }
+  })
+  app.post('/api/fs/mkdir', async (c) => {
+    try {
+      const body = await c.req.json<{ path?: string }>()
+      const target = body.path?.trim()
+      if (!target) {
+        return c.json(fail(400, 'folderPicker.folderNameRequired', {}), 400)
+      }
+      const absolute = resolve(target)
+      mkdirSync(absolute, { recursive: true })
+      return c.json(ok({ path: absolute }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json(fail(400, message, { error: message }), 400)
+    }
+  })
+
   app.post('/api/system/storage/validate', async (c) => {
     const body = await c.req.json<{ path?: string; allowLowSpace?: boolean }>()
     const forbiddenRoots = [options.storage.bootstrap.root, ...(options.forbiddenRoots ?? [])]
-    const result =
-      options.storage.phase === 'recovery_required'
-        ? validateExistingStorageRoot({
-            path: body.path ?? '',
-            forbiddenRoots,
-            nonceRepository: recoveryNonces
-          })
-        : validateStorageTarget({
-            path: body.path ?? '',
-            forbiddenRoots,
-            allowLowSpace: body.allowLowSpace === true,
-            nonceRepository: initializationNonces
-          })
+    const path = body.path ?? ''
+    const allowLowSpace = body.allowLowSpace === true
+
+    // Prefer recovering a valid existing root; otherwise allow a fresh initialize target.
+    // This keeps recovery UIs from getting stuck when the user picks a new empty folder.
+    if (options.storage.phase === 'recovery_required') {
+      const existing = validateExistingStorageRoot({
+        path,
+        forbiddenRoots,
+        nonceRepository: recoveryNonces
+      })
+      if (existing.ok) {
+        return c.json(ok({ ...existing, action: 'recover' as const }))
+      }
+      const fresh = validateStorageTarget({
+        path,
+        forbiddenRoots,
+        allowLowSpace,
+        nonceRepository: initializationNonces
+      })
+      if (fresh.ok) {
+        return c.json(ok({ ...fresh, action: 'initialize' as const }))
+      }
+      return c.json(
+        fail(400, fresh.issue ?? existing.issue ?? 'storage_target_invalid', fresh),
+        400
+      )
+    }
+
+    const result = validateStorageTarget({
+      path,
+      forbiddenRoots,
+      allowLowSpace,
+      nonceRepository: initializationNonces
+    })
     if (!result.ok) {
       return c.json(fail(400, result.issue ?? 'storage_target_invalid', result), 400)
     }
-    return c.json(ok(result))
+    return c.json(ok({ ...result, action: 'initialize' as const }))
   })
 
   app.post('/api/system/storage/initialize', async (c) => {
-    if (options.storage.phase !== 'selection_required') {
+    if (
+      options.storage.phase !== 'selection_required' &&
+      options.storage.phase !== 'recovery_required'
+    ) {
       return c.json(fail(409, 'storage_initialization_not_allowed', {}), 409)
     }
     const body = await c.req.json<{
@@ -105,10 +169,10 @@ export function createSetupShell(options: SetupShellOptions): Hono {
         locatorRepository: repository,
         source: 'desktop_setup'
       })
-      if (options.onInitialized) {
-        setTimeout(() => void options.onInitialized?.(initialized.dataDir), 100).unref?.()
+      if (options.activateStorage) {
+        await options.activateStorage(initialized.dataDir)
       }
-      return c.json(ok({ phase: 'restart_required', dataDir: initialized.dataDir }))
+      return c.json(ok({ phase: 'ready', dataDir: initialized.dataDir }))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return c.json(fail(500, 'storage_initialize_failed', { issue: message }), 500)
@@ -137,17 +201,22 @@ export function createSetupShell(options: SetupShellOptions): Hono {
       )
     }
 
-    repository.write({
-      schemaVersion: 1,
-      dataDir: validation.canonicalPath,
-      selectedAt: new Date().toISOString(),
-      source: 'recovered',
-      installationId: validation.installationId
-    })
-    if (options.onInitialized) {
-      setTimeout(() => void options.onInitialized?.(validation.canonicalPath), 100).unref?.()
+    try {
+      repository.write({
+        schemaVersion: 1,
+        dataDir: validation.canonicalPath,
+        selectedAt: new Date().toISOString(),
+        source: 'recovered',
+        installationId: validation.installationId
+      })
+      if (options.activateStorage) {
+        await options.activateStorage(validation.canonicalPath)
+      }
+      return c.json(ok({ phase: 'ready', dataDir: validation.canonicalPath }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return c.json(fail(500, 'storage_recovery_failed', { issue: message }), 500)
     }
-    return c.json(ok({ phase: 'restart_required', dataDir: validation.canonicalPath }))
   })
 
   if (options.isDev && options.rendererDevUrl) {

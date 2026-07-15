@@ -14,19 +14,24 @@ import {
   type McpSettingsConstraints,
   type UserMcpSettings
 } from '@renderer/api/settings'
+import { api } from '@renderer/api/client'
 import { fetchSandboxHealth, type SandboxHealthReport } from '@renderer/api/system'
 import ControlPlaneCoresCard from '@renderer/components/settings/ControlPlaneCoresCard.vue'
 import McpSettingsCard from '@renderer/components/settings/McpSettingsCard.vue'
 import SandboxHealthCard from '@renderer/components/settings/SandboxHealthCard.vue'
 import LanguageSwitcher from '@renderer/components/LanguageSwitcher.vue'
 import PromptEditor from '@renderer/components/settings/PromptEditor.vue'
+import FolderBrowsePanel from '@renderer/components/shared/FolderBrowsePanel.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Card from '@renderer/components/ui/Card.vue'
 import CardContent from '@renderer/components/ui/CardContent.vue'
 import CardHeader from '@renderer/components/ui/CardHeader.vue'
 import CardTitle from '@renderer/components/ui/CardTitle.vue'
+import Dialog from '@renderer/components/ui/Dialog.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
+import { useFolderBrowse } from '@renderer/composables/useFolderBrowse'
+import { withTrailingSeparator } from '@renderer/lib/workspace'
 import { toast, toastError } from '@renderer/lib/toast'
 import {
   confirmOldStorageDelete,
@@ -58,7 +63,24 @@ const storageStats = ref<StorageStatsData | null>(null)
 const storageTarget = ref('')
 const storageMigration = ref<StorageMigrationData | null>(null)
 const storageLoading = ref(false)
+const storagePickerOpen = ref(false)
+const creatingStorageFolder = ref(false)
 let migrationPoll: ReturnType<typeof setTimeout> | null = null
+
+const {
+  query: storageBrowseQuery,
+  parentPath: storageBrowseParentPath,
+  entries: storageBrowseEntries,
+  newFolderName: storageNewFolderName,
+  loading: storageBrowsing,
+  error: storageBrowseError,
+  loadBrowse: loadStorageBrowse,
+  currentDirectoryPath: storageCurrentDirectoryPath,
+  openEntry: openStorageBrowseEntry,
+  goParent: goStorageBrowseParent,
+  joinNewFolderPath: joinStorageNewFolderPath,
+  start: startStorageBrowse
+} = useFolderBrowse({ active: storagePickerOpen })
 
 const sections = [
   { key: 'language' as const, labelKey: 'workspace.settings.sections.language' },
@@ -108,8 +130,55 @@ async function loadStorage(): Promise<void> {
 }
 
 async function chooseStorageTarget(): Promise<void> {
-  const selected = await window.api?.selectDataDirectory?.()
-  if (selected) storageTarget.value = selected
+  // Always use the in-app picker so "create folder" works in desktop and server modes.
+  storagePickerOpen.value = true
+  startStorageBrowse()
+  const initial = storageTarget.value.trim() || storageStats.value?.dataDir || ''
+  if (initial) {
+    storageBrowseQuery.value = withTrailingSeparator(initial)
+    void loadStorageBrowse(storageBrowseQuery.value)
+  }
+}
+
+function closeStoragePicker(): void {
+  storagePickerOpen.value = false
+}
+
+function selectStorageTargetPath(path: string): void {
+  const target = path.trim()
+  if (!target) {
+    storageBrowseError.value = t('folderPicker.selectRequired')
+    return
+  }
+  storageTarget.value = target
+  storagePickerOpen.value = false
+}
+
+async function createAndSelectStorageFolder(): Promise<void> {
+  const target = joinStorageNewFolderPath()
+  if (!target) {
+    storageBrowseError.value = t('folderPicker.folderNameRequired')
+    return
+  }
+  creatingStorageFolder.value = true
+  storageBrowseError.value = null
+  try {
+    const created = await api<{ path: string }>('/api/fs/mkdir', {
+      method: 'POST',
+      body: JSON.stringify({ path: target })
+    })
+    const path = created.data.path || target
+    storageTarget.value = path
+    storageNewFolderName.value = ''
+    storageBrowseQuery.value = withTrailingSeparator(path)
+    await loadStorageBrowse(storageBrowseQuery.value)
+    storagePickerOpen.value = false
+  } catch (err) {
+    storageBrowseError.value =
+      err instanceof Error ? err.message : t('folderPicker.browseFailed')
+  } finally {
+    creatingStorageFolder.value = false
+  }
 }
 
 async function migrateStorage(): Promise<void> {
@@ -391,23 +460,29 @@ onUnmounted(() => {
                   <p class="text-sm font-medium">
                     {{ t('workspace.settings.storage.changeTitle') }}
                   </p>
-                  <div class="mt-2 flex gap-2">
+                  <div class="mt-2 flex flex-col gap-2 sm:flex-row">
                     <input
                       v-model="storageTarget"
                       class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
                       :disabled="storageLoading || !!storageMigration"
                     />
-                    <Button
-                      variant="outline"
-                      :disabled="storageLoading || !!storageMigration"
-                      @click="chooseStorageTarget"
-                      >{{ t('workspace.settings.storage.browse') }}</Button
-                    >
-                    <Button
-                      :disabled="storageLoading || !!storageMigration || !storageTarget.trim()"
-                      @click="migrateStorage"
-                      >{{ t('workspace.settings.storage.migrate') }}</Button
-                    >
+                    <div class="flex gap-2">
+                      <Button
+                        variant="outline"
+                        class="flex-1 sm:flex-none"
+                        :disabled="storageLoading || !!storageMigration"
+                        @click="chooseStorageTarget"
+                      >
+                        {{ t('workspace.settings.storage.browse') }}
+                      </Button>
+                      <Button
+                        class="flex-1 sm:flex-none"
+                        :disabled="storageLoading || !!storageMigration || !storageTarget.trim()"
+                        @click="migrateStorage"
+                      >
+                        {{ t('workspace.settings.storage.migrate') }}
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 <p v-else class="rounded-md bg-muted p-3 text-sm text-muted-foreground">
@@ -555,5 +630,39 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <Dialog
+      :open="storagePickerOpen"
+      class="flex h-[min(90dvh,720px)] min-h-0 max-h-[min(90dvh,720px)] max-w-2xl flex-col"
+      @close="closeStoragePicker"
+    >
+      <div class="shrink-0 border-b border-border px-3 py-3 sm:px-4 sm:py-4">
+        <h2 class="text-base font-semibold">
+          {{ t('workspace.settings.storage.browseTitle') }}
+        </h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {{ t('workspace.settings.storage.browseHint') }}
+        </p>
+      </div>
+      <FolderBrowsePanel
+        fill-height
+        :query="storageBrowseQuery"
+        :parent-path="storageBrowseParentPath"
+        :current-path="storageCurrentDirectoryPath()"
+        :entries="storageBrowseEntries"
+        :new-folder-name="storageNewFolderName"
+        :loading="storageBrowsing"
+        :submitting="creatingStorageFolder"
+        :error="storageBrowseError"
+        :select-current-label="t('workspace.settings.storage.selectDirectory')"
+        :create-folder-label="t('workspace.settings.storage.createFolder')"
+        @update:query="storageBrowseQuery = $event"
+        @update:new-folder-name="storageNewFolderName = $event"
+        @go-parent="goStorageBrowseParent"
+        @open-entry="openStorageBrowseEntry"
+        @select="selectStorageTargetPath"
+        @create-folder="createAndSelectStorageFolder"
+      />
+    </Dialog>
   </div>
 </template>

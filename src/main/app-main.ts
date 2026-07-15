@@ -104,12 +104,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
-    serverInfo = await startAppServer(cli, {
-      onStorageInitialized: async () => {
-        app.relaunch()
-        app.exit(0)
-      }
-    })
+    serverInfo = await startAppServer(cli)
     ipcMain.handle('get-server-info', () => serverInfo)
     ipcMain.handle('select-data-directory', async () => {
       const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

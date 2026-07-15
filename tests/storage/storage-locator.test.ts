@@ -145,13 +145,38 @@ test('first desktop run returns a candidate without creating it', (t) => {
   assert.equal(readDataRootMarker(f.candidate), null)
 })
 
-test('headless server requires an operator-managed data directory', (t) => {
+test('headless server first run returns selection_required like desktop', (t) => {
   const f = fixture(t)
   const result = resolveStorageLocation({
     mode: 'server',
     bootstrapRoot: f.bootstrapRoot,
     defaultDataDir: f.candidate
   })
-  assert.equal(result.phase, 'recovery_required')
-  assert.equal(result.issue, 'server_data_dir_required')
+  assert.equal(result.phase, 'selection_required')
+  assert.equal(result.source, 'candidate')
+  assert.equal(result.managed, false)
+  assert.equal(result.issue, undefined)
+})
+
+test('stale locator with empty data root soft-downgrades to selection_required', (t) => {
+  const f = fixture(t)
+  const dataDir = join(f.root, 'data')
+  mkdirSync(dataDir, { recursive: true })
+  new StorageLocatorRepository(bootstrapPaths(f.bootstrapRoot)).write(
+    createStorageLocator({
+      dataDir,
+      source: 'desktop_setup',
+      installationId: 'stale-install'
+    })
+  )
+
+  const result = resolveStorageLocation({
+    mode: 'desktop',
+    bootstrapRoot: f.bootstrapRoot,
+    defaultDataDir: f.candidate
+  })
+  assert.equal(result.phase, 'selection_required')
+  assert.equal(result.source, 'candidate')
+  assert.equal(result.dataDir, dataDir)
+  assert.equal(result.issue, undefined)
 })
