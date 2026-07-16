@@ -84,6 +84,16 @@ export function fetchUserDrafts(options?: {
   return api<{ drafts: UserDraftListItemDto[] }>(`/api/drafts${query ? `?${query}` : ''}`)
 }
 
+export function deleteUserDraft(
+  threadId: string,
+  messageId: string
+): Promise<ApiResponse<{ mode: 'removed' | 'archived'; keptJobId: string | null }>> {
+  return api<{ mode: 'removed' | 'archived'; keptJobId: string | null }>(
+    `/api/drafts/${encodeURIComponent(threadId)}/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' }
+  )
+}
+
 export function fetchJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
   return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}`)
 }

@@ -9,6 +9,13 @@ export interface JobReferenceEntry {
 
   resolvedPath?: string | undefined
   source?: 'attachment' | 'local_corpus' | undefined
+  /**
+   * Physical asset ownership. Draft attachments are copied to a Job-owned attachment
+   * at the execution-confirm boundary; local corpus paths always remain external.
+   */
+  storageOwner?: 'draft' | 'job' | 'external' | undefined
+  /** Physical attachment id. Kept internal and omitted from the public DTO. */
+  attachmentId?: string | undefined
   readonly: true
   requiresDescription: boolean
   inWorkspace?: boolean | undefined
@@ -83,6 +90,8 @@ export function buildReferenceEntryFromDraft(ref: {
   relativePath?: string | undefined
   resolvedPath?: string | undefined
   source?: 'attachment' | 'local_corpus' | undefined
+  storageOwner?: 'draft' | 'job' | 'external' | undefined
+  attachmentId?: string | undefined
   inWorkspace?: boolean | undefined
   description?: string | undefined
   requiresDescription: boolean
@@ -96,6 +105,10 @@ export function buildReferenceEntryFromDraft(ref: {
     relativePath: ref.relativePath,
     resolvedPath: ref.resolvedPath,
     source: ref.source,
+    storageOwner:
+      ref.storageOwner ??
+      (ref.source === 'local_corpus' ? ('external' as const) : ('draft' as const)),
+    attachmentId: ref.attachmentId,
     inWorkspace: ref.inWorkspace,
     readonly: true,
     requiresDescription: ref.requiresDescription,
@@ -116,6 +129,8 @@ export function buildJobReferenceManifest(input: {
     relativePath?: string | undefined
     resolvedPath?: string | undefined
     source?: 'attachment' | 'local_corpus' | undefined
+    storageOwner?: 'draft' | 'job' | 'external' | undefined
+    attachmentId?: string | undefined
     inWorkspace?: boolean | undefined
     description?: string | undefined
     requiresDescription: boolean
@@ -154,6 +169,10 @@ export function parseJobReferenceManifest(
         ...entry,
         kind: entry.kind ?? (entry.mimeType?.startsWith('image/') ? 'image' : 'file'),
         source: entry.source ?? 'attachment',
+        storageOwner:
+          entry.storageOwner ??
+          ((entry.source ?? 'attachment') === 'local_corpus' ? 'external' : 'draft'),
+        attachmentId: entry.attachmentId,
         readonly: true as const,
         requiresDescription: entry.requiresDescription ?? false,
         assetUrl: entry.assetUrl ?? '',

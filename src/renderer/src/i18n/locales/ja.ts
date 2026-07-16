@@ -436,11 +436,17 @@ export default {
       newDraftThread: '新しいタスク会話',
       draftListTitle: '草案リスト',
       draftListHint:
-        '未完了の草案はここに保存されます。クリックして続行できます。新規作成は「新規タスク」を押してください。',
+        '作成中の草案はここに保存されます。進捗に関係なく削除できます。起動済みタスクはタスクリストに残ります。',
       startNew: '新規タスク',
       backToDraftList: '草案リストに戻る',
       draftListEmpty: '未完了の草案はありません',
       draftIncompleteEmpty: '進行中の草案はありません',
+      confirmDeleteDraftTitle: '草案を削除',
+      confirmDeleteDraftMessage:
+        '草案「{name}」と生成済みファイルデータを削除しますか？この操作は取り消せません。',
+      confirmDeleteDraftLaunchedMessage:
+        '草案リストから「{name}」を削除しますか？起動済みタスクはタスクリストに残り、削除されません。',
+      deleteDraftFailed: '草案の削除に失敗しました',
       draftStatusLaunched: '完了',
       draftStatusInProgress: '進行中',
       draftStatusPlanningFailed: '計画失敗',
