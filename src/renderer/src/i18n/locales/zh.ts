@@ -448,7 +448,8 @@ export default {
       addFolder: '添加本地文件夹',
       newDraftThread: '新建任务对话',
       draftListTitle: '草案列表',
-      draftListHint: '所有创建任务草案保存在这里。未完成可继续编辑，已完成可查看只读归档。',
+      draftListHint:
+        '所有创建任务草案保存在这里。可随时删除任意进度的草案；已启动的任务仍保留在任务列表中。',
       startNew: '新建任务',
       backToDraftList: '返回草案列表',
       draftListEmpty: '暂无草案',
@@ -458,6 +459,11 @@ export default {
       draftFilterAll: '全部',
       draftFilterIncomplete: '未完成',
       draftFilterComplete: '已完成',
+      confirmDeleteDraftTitle: '删除草案',
+      confirmDeleteDraftMessage: '确定删除草案「{name}」及其生成的文件数据吗？此操作不可恢复。',
+      confirmDeleteDraftLaunchedMessage:
+        '确定从草案列表删除「{name}」吗？已启动的任务会保留在任务列表中，不会被删除。',
+      deleteDraftFailed: '删除草案失败',
       draftStatusLaunched: '已完成',
       draftStatusInProgress: '进行中',
       draftStatusCollecting: '需求收集中',

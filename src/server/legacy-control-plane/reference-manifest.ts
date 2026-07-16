@@ -185,6 +185,15 @@ export async function loadJobReferenceManifestForJob(input: {
   const fromDb = await loadJobReferenceManifest(input.jobId)
   if (fromDb) return fromDb
 
+  // A launched Job must be self-contained. Never reconstruct execution inputs from
+  // a draft message after the ownership handoff boundary.
+  const job = await getDb()
+    .select({ planConfirmedAt: threadJobs.planConfirmedAt })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, input.jobId))
+    .limit(1)
+  if (job[0]?.planConfirmedAt != null) return null
+
   const draftRefs = await loadJobDraftReferences(input.username, {
     threadId: input.threadId,
     draftMessageId: input.draftMessageId
