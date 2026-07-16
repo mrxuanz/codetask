@@ -70,7 +70,9 @@ function jobState(job: ThreadJob): string {
 }
 
 function isRevisionConflict(error: unknown): boolean {
-  return error instanceof ApiError && error.httpStatus === 409 && error.code === 'job.revision_conflict'
+  return (
+    error instanceof ApiError && error.httpStatus === 409 && error.code === 'job.revision_conflict'
+  )
 }
 
 export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOptions): {
@@ -143,7 +145,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let hubRelease: (() => void) | null = null
-  let hubListRelease: (() => void) | null = null
+  const hubListReleases = new Map<string, () => void>()
   let loadDetailToken = 0
   let loadJobsToken = 0
 
@@ -162,7 +164,9 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   const canDeleteAction = computed(() => {
     const job = selectedJob.value
     if (!job) return false
-    return canDelete(selectedActions.value) && !['running', 'planning', 'pausing'].includes(job.status)
+    return (
+      canDelete(selectedActions.value) && !['running', 'planning', 'pausing'].includes(job.status)
+    )
   })
   const pauseButtonText = computed(() =>
     selectedJob.value
@@ -179,9 +183,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       abilities: has('abilities') ? job.abilities : (existing?.abilities ?? []),
       planProgress: has('planProgress') ? job.planProgress : existing?.planProgress,
       taskProgress: has('taskProgress') ? job.taskProgress : existing?.taskProgress,
-      availableActions: has('availableActions')
-        ? job.availableActions
-        : existing?.availableActions,
+      availableActions: has('availableActions') ? job.availableActions : existing?.availableActions,
       stateRevision: has('stateRevision') ? job.stateRevision : existing?.stateRevision
     } as ThreadJob
   }
@@ -233,10 +235,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   function applyJobPatch(job: ThreadJob): void {
     const idx = jobs.value.findIndex((item) => item.id === job.id)
-    const existing =
-      detail.value?.id === job.id
-        ? detail.value
-        : (idx >= 0 ? jobs.value[idx] : null)
+    const existing = detail.value?.id === job.id ? detail.value : idx >= 0 ? jobs.value[idx] : null
     const merged = mergeIncomingJob(existing, job)
     if (!merged) return
 
@@ -262,6 +261,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
         .map((job) => mergeIncomingJob(currentById.get(job.id), job))
         .filter((job): job is ThreadJob => job !== null)
       total.value = res.data.total
+      syncListHubWatches()
       const currentId = selectedJobId.value
       const stillExists = currentId ? res.data.jobs.some((job) => job.id === currentId) : false
       if (currentId && !stillExists) {
@@ -329,17 +329,32 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
+  function syncListHubWatches(): void {
+    const desired = new Set(
+      jobs.value.filter((job) => jobNeedsRealtimeWatch(job.status)).map((job) => job.id)
+    )
+    for (const [jobId, release] of hubListReleases) {
+      if (desired.has(jobId)) continue
+      release()
+      hubListReleases.delete(jobId)
+    }
+    for (const jobId of desired) {
+      if (hubListReleases.has(jobId)) continue
+      hubListReleases.set(
+        jobId,
+        hub.watchJob(jobId, () => {
+          debouncedRefreshJobs()
+          if (selectedJobId.value === jobId) {
+            debouncedRefreshSelectedDetail(jobId)
+          }
+        })
+      )
+    }
+  }
+
   function startHubPolling(): void {
     void apiReady.then(() => {
-      hubListRelease?.()
-      hubListRelease = hub.onAnyJobEvent((envelope) => {
-        if (!envelope.topic.startsWith('job:')) return
-        debouncedRefreshJobs()
-        const jobId = selectedJobId.value
-        if (jobId && envelope.topic === `job:${jobId}`) {
-          debouncedRefreshSelectedDetail(jobId)
-        }
-      })
+      syncListHubWatches()
       pollTimer = setInterval(() => {
         if (!hub.connected.value) {
           void loadJobs({ silent: true })
@@ -351,9 +366,9 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }
 
   function stopHubPolling(): void {
-    hubListRelease?.()
+    for (const release of hubListReleases.values()) release()
+    hubListReleases.clear()
     hubRelease?.()
-    hubListRelease = null
     hubRelease = null
     if (pollTimer) {
       clearInterval(pollTimer)

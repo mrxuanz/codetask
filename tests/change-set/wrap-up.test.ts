@@ -133,6 +133,45 @@ test('rebase re-applies patch onto new git HEAD', async (t) => {
   }
 })
 
+test('non-git rebase preserves unready worktree edits', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-cs-cow-rebase-'))
+  const workspace = join(dataDir, 'ws')
+  mkdirSync(workspace, { recursive: true })
+  writeFileSync(join(workspace, 'a.txt'), 'base\n', 'utf8')
+  writeFileSync(join(workspace, 'other.txt'), 'one\n', 'utf8')
+
+  bootstrapRuntime({ dataDir })
+  t.after(async () => {
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const now = Math.floor(Date.now() / 1000)
+  const username = 'cow-rebase-user'
+  const projectId = 'proj-cow-rebase'
+  getDb()
+    .insert(projects)
+    .values({
+      id: projectId,
+      username,
+      title: 'COW rebase',
+      workspaceRoot: workspace,
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
+
+  const accepted = await createChangeSet(username, { projectId })
+  const created = await getChangeSet(username, accepted.changeSetId)
+  writeFileSync(join(created.worktreePath!, 'a.txt'), 'user-edit\n', 'utf8')
+  writeFileSync(join(workspace, 'other.txt'), 'two\n', 'utf8')
+
+  const rebased = await rebaseChangeSet(username, accepted.changeSetId, created.stateRevision)
+  assert.equal(rebased.status, 'editing')
+  assert.equal(readFileSync(join(rebased.worktreePath!, 'a.txt'), 'utf8'), 'user-edit\n')
+  assert.equal(readFileSync(join(rebased.worktreePath!, 'other.txt'), 'utf8'), 'two\n')
+})
+
 test('pruneTerminalChangeSetTrees removes cancelled worktree dirs', async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-cs-prune-'))
   const workspace = join(dataDir, 'ws')

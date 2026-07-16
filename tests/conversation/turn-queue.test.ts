@@ -1,24 +1,31 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import test from 'node:test'
-import {
-  parseHubTopic,
-  turnIdFromTopic,
-  turnTopic
-} from '../../src/shared/contracts/job-event-hub'
-import {
-  bootstrapRuntime,
-  resetAppContextForTests
-} from '../../src/server/bootstrap'
+import { parseHubTopic, turnIdFromTopic, turnTopic } from '../../src/shared/contracts/job-event-hub'
+import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import { conversationTurns, projects, threads } from '../../src/server/db/schema'
 import {
   cancelConversationTurn,
   enqueueConversationTurn,
-  getTurn
+  getTurn,
+  reconcileConversationTurnsOnStartup
 } from '../../src/server/conversation/turn-queue'
+import { getChangeSet, markChangeSetReady } from '../../src/server/change-set/service'
+import {
+  acquireWorkspaceLease,
+  releaseWorkspaceLease
+} from '../../src/server/legacy-control-plane/workspace-lease-store'
+import {
+  resetCoreAvailabilityStubForTests,
+  setCoreAvailabilityStubForTests
+} from '../../src/server/conversation/cores'
+import {
+  resetTestAgentTurnProviders,
+  setTestAgentTurnProviders
+} from '../../src/server/agent-runtime/providers/test-overrides'
 
 test('parseHubTopic accepts turn topics', () => {
   assert.equal(parseHubTopic('turn:abc'), 'turn:abc')
@@ -123,4 +130,276 @@ test('same-thread turns stay queued while another turn is active; cancel clears 
     idempotencyKey: 'idem-1'
   })
   assert.equal(replay.turnId, again.turnId)
+
+  const reconciled = reconcileConversationTurnsOnStartup()
+  assert.equal(reconciled.failed, 1)
+  assert.equal((await getTurn(username, 'turn-active'))?.status, 'failed')
+})
+
+test('same-second queued turns preserve insertion order', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-turn-order-'))
+  bootstrapRuntime({ dataDir })
+  t.after(async () => {
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const now = Math.floor(Date.now() / 1000)
+  const username = 'order-user'
+  const projectId = 'proj-order'
+  const threadId = 'thread-order'
+  getDb()
+    .insert(projects)
+    .values({
+      id: projectId,
+      username,
+      title: 'Order',
+      workspaceRoot: join(dataDir, 'ws'),
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
+  getDb()
+    .insert(threads)
+    .values({
+      id: threadId,
+      projectId,
+      username,
+      title: 'Order',
+      status: 'draft',
+      conversationId: `conv-${threadId}`,
+      coreCode: 'codex',
+      threadKind: 'chat',
+      runtimeStatus: 'idle',
+      coreRuntimeJson: '{}',
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: now
+    })
+    .run()
+  getDb()
+    .insert(conversationTurns)
+    .values({
+      id: 'turn-blocker',
+      threadId,
+      username,
+      kind: 'chat',
+      status: 'running',
+      workspaceAccess: 'live-read',
+      provider: null,
+      messageText: 'blocker',
+      generateDraft: 0,
+      createTaskMode: 0,
+      attachmentIdsJson: '[]',
+      selectedDraftSection: null,
+      selectedPlanNodeRef: null,
+      idempotencyKey: null,
+      stateRevision: 1,
+      lastErrorJson: null,
+      createdAt: now - 1,
+      startedAt: now - 1,
+      completedAt: null
+    })
+    .run()
+
+  const first = await enqueueConversationTurn({ username, threadId, message: 'first' })
+  const second = await enqueueConversationTurn({ username, threadId, message: 'second' })
+  assert.equal(first.queuePosition, 1)
+  assert.equal(second.queuePosition, 2)
+})
+
+test('code-change turns use an isolated worktree and cancellation removes it', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-turn-change-set-'))
+  bootstrapRuntime({ dataDir })
+  t.after(async () => {
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const now = Math.floor(Date.now() / 1000)
+  const username = 'change-turn-user'
+  const projectId = 'proj-change-turn'
+  const threadId = 'thread-change-turn'
+  const workspaceRoot = join(dataDir, 'workspace')
+  mkdirSync(workspaceRoot, { recursive: true })
+  writeFileSync(join(workspaceRoot, 'main.txt'), 'main checkout\n')
+
+  getDb()
+    .insert(projects)
+    .values({
+      id: projectId,
+      username,
+      title: 'Change Turn',
+      workspaceRoot,
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
+  getDb()
+    .insert(threads)
+    .values({
+      id: threadId,
+      projectId,
+      username,
+      title: 'Change Turn',
+      status: 'draft',
+      conversationId: `conv-${threadId}`,
+      coreCode: 'codex',
+      threadKind: 'chat',
+      runtimeStatus: 'idle',
+      coreRuntimeJson: '{}',
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: now
+    })
+    .run()
+  getDb()
+    .insert(conversationTurns)
+    .values({
+      id: 'turn-change-blocker',
+      threadId,
+      username,
+      kind: 'chat',
+      status: 'running',
+      workspaceAccess: 'live-read',
+      provider: null,
+      messageText: 'blocker',
+      generateDraft: 0,
+      createTaskMode: 0,
+      attachmentIdsJson: '[]',
+      selectedDraftSection: null,
+      selectedPlanNodeRef: null,
+      idempotencyKey: null,
+      stateRevision: 1,
+      lastErrorJson: null,
+      createdAt: now - 1,
+      startedAt: now - 1,
+      completedAt: null
+    })
+    .run()
+
+  const jobLease = acquireWorkspaceLease({
+    workspacePath: workspaceRoot,
+    ownerKind: 'thread_job',
+    ownerId: 'job-writing-main'
+  })
+  assert.ok(jobLease)
+
+  const ordinary = await enqueueConversationTurn({
+    username,
+    threadId,
+    message: 'explain the current code'
+  })
+  assert.equal(ordinary.changeSetId, null)
+  assert.equal((await getTurn(username, ordinary.turnId))?.workspaceAccess, 'live-read')
+  await cancelConversationTurn(username, ordinary.turnId)
+
+  const accepted = await enqueueConversationTurn({
+    username,
+    threadId,
+    message: 'edit main.txt',
+    allowCodeChanges: true
+  })
+  releaseWorkspaceLease(jobLease.leaseId)
+  assert.ok(accepted.changeSetId)
+  const turn = await getTurn(username, accepted.turnId)
+  assert.equal(turn?.workspaceAccess, 'isolated-write')
+  assert.equal(turn?.changeSetId, accepted.changeSetId)
+
+  const editing = await getChangeSet(username, accepted.changeSetId)
+  assert.equal(editing.status, 'editing')
+  assert.ok(editing.worktreePath)
+  assert.equal(existsSync(editing.worktreePath), true)
+  await assert.rejects(
+    () => markChangeSetReady(username, accepted.changeSetId!, editing.stateRevision),
+    /still being edited/
+  )
+
+  await cancelConversationTurn(username, accepted.turnId)
+  const cancelled = await getChangeSet(username, accepted.changeSetId)
+  assert.equal(cancelled.status, 'cancelled')
+  assert.equal(cancelled.worktreePath, null)
+  assert.equal(existsSync(editing.worktreePath), false)
+})
+
+test('provider error events settle the durable turn as failed', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-turn-provider-error-'))
+  bootstrapRuntime({ dataDir })
+  setCoreAvailabilityStubForTests((code) => ({
+    code,
+    label: code,
+    description: 'test provider',
+    available: true,
+    detectedCommand: code,
+    launchCommand: code,
+    executablePath: join(dataDir, 'bin', code)
+  }))
+  setTestAgentTurnProviders({
+    codex: {
+      code: 'codex',
+      protocol: 'fake',
+      async *streamTurn() {
+        yield { type: 'error', message: 'provider boom' }
+      }
+    }
+  })
+  t.after(async () => {
+    resetTestAgentTurnProviders()
+    resetCoreAvailabilityStubForTests()
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const now = Math.floor(Date.now() / 1000)
+  const username = 'provider-error-user'
+  const projectId = 'proj-provider-error'
+  const threadId = 'thread-provider-error'
+  const workspaceRoot = join(dataDir, 'workspace')
+  mkdirSync(workspaceRoot, { recursive: true })
+  getDb()
+    .insert(projects)
+    .values({
+      id: projectId,
+      username,
+      title: 'Provider Error',
+      workspaceRoot,
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
+  getDb()
+    .insert(threads)
+    .values({
+      id: threadId,
+      projectId,
+      username,
+      title: 'Provider Error',
+      status: 'draft',
+      conversationId: `conv-${threadId}`,
+      coreCode: 'codex',
+      threadKind: 'chat',
+      runtimeStatus: 'idle',
+      coreRuntimeJson: '{}',
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: now
+    })
+    .run()
+
+  const accepted = await enqueueConversationTurn({
+    username,
+    threadId,
+    message: 'fail this turn',
+    provider: 'codex'
+  })
+  let settled = await getTurn(username, accepted.turnId)
+  const deadline = Date.now() + 3_000
+  while (settled && !['completed', 'failed', 'cancelled'].includes(settled.status)) {
+    if (Date.now() >= deadline) break
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    settled = await getTurn(username, accepted.turnId)
+  }
+
+  assert.equal(settled?.status, 'failed')
+  assert.match(settled?.lastError?.message ?? '', /provider boom/)
 })

@@ -14,7 +14,11 @@ import {
   getChangeSet,
   markChangeSetReady
 } from '../../src/server/change-set/service'
-import { acquireWorkspaceLease, releaseWorkspaceLease } from '../../src/server/legacy-control-plane/workspace-lease-store'
+import {
+  acquireWorkspaceLease,
+  releaseWorkspaceLease
+} from '../../src/server/legacy-control-plane/workspace-lease-store'
+import { changeSetPatchPath } from '../../src/server/change-set/patch'
 
 function initGitRepo(dir: string): void {
   mkdirSync(dir, { recursive: true })
@@ -70,8 +74,14 @@ test('mark ready + apply succeeds when base HEAD unchanged', async (t) => {
   const applied = await applyChangeSet(username, accepted.changeSetId, ready.stateRevision)
   assert.equal(applied.status, 'applied')
   assert.equal(applied.worktreePath, null)
-  assert.equal(readFileSync(join(workspace, 'README.md'), 'utf8').replace(/\r\n/g, '\n'), '# changed\n')
-  assert.equal(readFileSync(join(workspace, 'new-file.txt'), 'utf8').replace(/\r\n/g, '\n'), 'hello\n')
+  assert.equal(
+    readFileSync(join(workspace, 'README.md'), 'utf8').replace(/\r\n/g, '\n'),
+    '# changed\n'
+  )
+  assert.equal(
+    readFileSync(join(workspace, 'new-file.txt'), 'utf8').replace(/\r\n/g, '\n'),
+    'hello\n'
+  )
 })
 
 test('apply enters needs_resolution when base HEAD changed', async (t) => {
@@ -117,6 +127,48 @@ test('apply enters needs_resolution when base HEAD changed', async (t) => {
   assert.equal(result.status, 'needs_resolution')
   assert.equal(result.lastError?.code, 'change_set.base_changed')
   assert.equal(existsSync(join(workspace, 'only-in-cs.txt')), false)
+})
+
+test('apply refuses a patch artifact whose hash no longer matches', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-cs-integrity-'))
+  const workspace = join(dataDir, 'ws')
+  initGitRepo(workspace)
+
+  bootstrapRuntime({ dataDir })
+  t.after(async () => {
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const now = Math.floor(Date.now() / 1000)
+  const username = 'cs-integrity-user'
+  const projectId = 'proj-cs-integrity'
+  getDb()
+    .insert(projects)
+    .values({
+      id: projectId,
+      username,
+      title: 'Integrity Project',
+      workspaceRoot: workspace,
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
+
+  const accepted = await createChangeSet(username, { projectId })
+  const created = await getChangeSet(username, accepted.changeSetId)
+  writeFileSync(join(created.worktreePath!, 'README.md'), '# intended\n', 'utf8')
+  const ready = await markChangeSetReady(username, accepted.changeSetId, created.stateRevision)
+  writeFileSync(
+    changeSetPatchPath(dataDir, accepted.changeSetId),
+    'malicious or corrupted patch\n',
+    'utf8'
+  )
+
+  const result = await applyChangeSet(username, accepted.changeSetId, ready.stateRevision)
+  assert.equal(result.status, 'needs_resolution')
+  assert.equal(result.lastError?.code, 'change_set.patch_integrity_failed')
+  assert.equal(readFileSync(join(workspace, 'README.md'), 'utf8'), '# test\n')
 })
 
 test('apply rejects when exclusive workspace lease is held', async (t) => {

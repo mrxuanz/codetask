@@ -194,9 +194,16 @@ export async function finishExecutionRunLifecycle(
   })
 
   if (active) {
-    await releaseWorkloadSlot(runId, { reason: input.reason })
+    // Do not advance the queue between releasing the old slot and consuming a Continue intent.
+    await releaseWorkloadSlot(runId, { reason: input.reason, skipQueueAdvance: true })
   }
   clearExecutionRunId(input.jobId)
+
+  const { settleContinueAfterPause } = await import('./controls')
+  await settleContinueAfterPause(input.username, input.jobId)
+
+  const { advanceWorkloadQueue } = await import('./workload-slot-store')
+  await advanceWorkloadQueue(input.username)
 
   // finalize often runs while the slot is still held and defers runtime cleanup; retry now.
   await retryTerminalJobRuntimeCleanup(input.username, input.jobId)

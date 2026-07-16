@@ -176,12 +176,33 @@ export default {
       placeholder: 'Ask for follow-up changes',
       attachment: 'Attachment',
       addAttachment: 'Add attachment (image or file)',
+      codeChanges: 'Edit code',
+      codeChangesHint: 'Edit in an isolated Change Set without writing the running task workspace',
       send: 'Send',
       thinking: 'Thinking',
       thinkingStreaming: 'Thinking…',
       thinkingDone: 'Thought',
       thinkingDoneWithDuration: 'Thought ({duration})',
       thinkingDurationSeconds: '{n}s'
+    },
+    changeSet: {
+      label: 'Isolated code changes',
+      apply: 'Apply to project',
+      ready: 'Build patch',
+      rebase: 'Rebase on latest',
+      cancel: 'Discard',
+      status: {
+        queued: 'Queued',
+        preparing_worktree: 'Preparing worktree',
+        editing: 'Editing',
+        validating: 'Validating',
+        ready_to_apply: 'Ready to apply',
+        applying: 'Applying',
+        applied: 'Applied',
+        needs_resolution: 'Needs conflict resolution',
+        failed: 'Failed',
+        cancelled: 'Discarded'
+      }
     },
     core: {
       claude: 'Claude',

@@ -19,11 +19,12 @@ const props = defineProps<{
   coreCode: string
   disabled?: boolean
   sending?: boolean
+  allowCodeChanges?: boolean
 }>()
 
 const emit = defineEmits<{
   coreChange: [code: string]
-  send: [payload: { message: string; files: File[] }]
+  send: [payload: { message: string; files: File[]; allowCodeChanges?: boolean }]
 }>()
 
 const { t } = useI18n()
@@ -31,6 +32,7 @@ const value = ref('')
 const open = ref(false)
 const pending = ref<PendingAttachment[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
+const codeChanges = ref(false)
 
 const options = computed(() => props.cores)
 
@@ -75,13 +77,15 @@ function submit(): void {
   if (!text && pending.value.length === 0) return
   emit('send', {
     message: text,
-    files: pending.value.map((item) => item.file)
+    files: pending.value.map((item) => item.file),
+    ...(props.allowCodeChanges ? { allowCodeChanges: codeChanges.value } : {})
   })
   value.value = ''
   for (const item of pending.value) {
     if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
   }
   pending.value = []
+  codeChanges.value = false
 }
 </script>
 
@@ -142,6 +146,19 @@ function submit(): void {
               :title="t('workspace.composer.addAttachment')"
               @click="openFilePicker"
             />
+
+            <Button
+              v-if="allowCodeChanges"
+              type="button"
+              variant="ghost"
+              size="sm"
+              :disabled="disabled || sending"
+              :class="cn('h-8 px-2 text-xs', codeChanges && 'bg-primary/10 text-primary')"
+              :title="t('workspace.composer.codeChangesHint')"
+              @click="codeChanges = !codeChanges"
+            >
+              {{ t('workspace.composer.codeChanges') }}
+            </Button>
 
             <Button
               type="button"

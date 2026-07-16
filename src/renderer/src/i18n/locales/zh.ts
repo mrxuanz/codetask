@@ -172,12 +172,33 @@ export default {
       placeholder: '输入后续修改或补充…',
       attachment: '附件',
       addAttachment: '添加附件（图片或文件）',
+      codeChanges: '改代码',
+      codeChangesHint: '在隔离的 Change Set 中修改代码，不会与运行中的任务同时写主目录',
       send: '发送',
       thinking: '思考中',
       thinkingStreaming: '思考中…',
       thinkingDone: '已思考',
       thinkingDoneWithDuration: '已思考（用时 {duration}）',
       thinkingDurationSeconds: '{n} 秒'
+    },
+    changeSet: {
+      label: '隔离代码改动',
+      apply: '应用到项目',
+      ready: '生成补丁',
+      rebase: '基于最新项目重建',
+      cancel: '放弃',
+      status: {
+        queued: '排队中',
+        preparing_worktree: '准备隔离目录',
+        editing: '修改中',
+        validating: '校验中',
+        ready_to_apply: '可应用',
+        applying: '应用中',
+        applied: '已应用',
+        needs_resolution: '需要处理冲突',
+        failed: '失败',
+        cancelled: '已放弃'
+      }
     },
     core: {
       claude: 'Claude',

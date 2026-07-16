@@ -1,8 +1,12 @@
 import { randomUUID } from 'crypto'
+import { eq } from 'drizzle-orm'
 import type Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import type { AppContext } from '../context'
-import { SqliteJobRepository, type ControlPlaneDatabase } from '../infra/sqlite/control-plane/job-repository'
+import {
+  SqliteJobRepository,
+  type ControlPlaneDatabase
+} from '../infra/sqlite/control-plane/job-repository'
 import { createControlPlaneTransaction } from '../infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import type { SqliteTaskRepository } from '../infra/sqlite/control-plane/task-repository'
 import { controlPlaneSchema } from '../infra/sqlite/control-plane/schema'
@@ -21,7 +25,11 @@ import {
 } from './task-execution-registry'
 import type { ActorContext } from './ports/job-repository'
 import type { OutboxEvent } from './ports/outbox-repository'
-import type { JobCommandService, InternalExecutionCommandService, RuntimeExitedPayload } from '@shared/contracts/control-plane'
+import type {
+  JobCommandService,
+  InternalExecutionCommandService,
+  RuntimeExitedPayload
+} from '@shared/contracts/control-plane'
 import { RuntimeSupervisor, type RuntimeExit, type RuntimeHandle } from './runtime-supervisor'
 import type { RuntimeProvider, WorkIdentity } from './runtime-provider'
 import { SafeLoggerImpl } from './safe-logger'
@@ -31,6 +39,8 @@ import { StartupCoordinator } from './startup-coordinator'
 import { StartupReconciler } from './startup-reconciler-impl'
 import type { SseEnvelope } from '../http/v3/sse-envelope'
 import type { RuntimeController } from './ports/runtime-controller'
+import { threads } from '../db/schema'
+import { jobTopic } from '../../shared/contracts/job-event-hub'
 
 interface RuntimeBinding {
   readonly jobId: string
@@ -119,7 +129,11 @@ function toEnvelope(event: OutboxEvent): SseEnvelope {
   }
 }
 
-function settleBinding(runtime: ControlPlaneRuntime, binding: RuntimeBinding, exit: RuntimeExit): void {
+function settleBinding(
+  runtime: ControlPlaneRuntime,
+  binding: RuntimeBinding,
+  exit: RuntimeExit
+): void {
   if (runtime.bindingsByRunId.get(binding.runId) !== binding) {
     return
   }
@@ -161,7 +175,11 @@ async function settleRuntimeExited(
       runtimeInstanceId,
       exitKind: exitKindFromReason(reason, exit),
       ...(exit.exitCode !== undefined ? { exitCode: exit.exitCode } : {}),
-      ...(exit.signal !== undefined ? { signal: exit.signal } : reason !== 'normal' ? { signal: reason } : {})
+      ...(exit.signal !== undefined
+        ? { signal: exit.signal }
+        : reason !== 'normal'
+          ? { signal: reason }
+          : {})
     }
   })
 }
@@ -289,7 +307,11 @@ async function startV3ExecutorRuntime(
   kind: 'planning' | 'execution'
 ): Promise<void> {
   if (kind !== 'execution') {
-    runtime.logger.error('V3 scheduler rejected unsupported non-execution run', { jobId, runId, kind })
+    runtime.logger.error('V3 scheduler rejected unsupported non-execution run', {
+      jobId,
+      runId,
+      kind
+    })
     return
   }
 
@@ -384,6 +406,34 @@ async function startV3ExecutorRuntime(
 
 function publishOutboxEvent(runtime: ControlPlaneRuntime, event: OutboxEvent): void {
   runtime.eventHub.publish(toEnvelope(event))
+
+  // Bridge V3 durable Outbox events into the canonical Renderer realtime hub. The old V3 SSE
+  // remains a compatibility endpoint, but the desktop only needs one long-lived connection.
+  const aggregate = runtime.jobRepository.getAggregate(event.entityId)
+  if (!aggregate) return
+  const owner = runtime.ctx.db
+    .select({ username: threads.username })
+    .from(threads)
+    .where(eq(threads.id, aggregate.threadId))
+    .limit(1)
+    .all()[0]
+  if (!owner) return
+
+  void runtime.queryService
+    .getTaskJob(event.entityId, { username: owner.username })
+    .then((job) => {
+      if (!job) return
+      runtime.ctx.eventBus.emit(jobTopic(job.id), {
+        event: 'job_snapshot',
+        data: { job }
+      })
+    })
+    .catch((error: unknown) => {
+      runtime.logger.warn('failed to bridge V3 job snapshot to realtime hub', {
+        jobId: event.entityId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    })
 }
 
 function buildRuntimeController(runtime: ControlPlaneRuntime): RuntimeController {
@@ -416,10 +466,7 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
   const cpDb = createControlPlaneDb(ctx.db)
   const baseControlPlane = createControlPlaneTransaction(cpDb)
   const jobRepository = baseControlPlane.jobs
-  const eventHub = new EventHub(
-    { maxQueueSize: 512, maxQueueBytes: 1024 * 1024 },
-    logger
-  )
+  const eventHub = new EventHub({ maxQueueSize: 512, maxQueueBytes: 1024 * 1024 }, logger)
   const taskExecutionRegistry = new TaskExecutionRegistry()
   const runtimeSupervisor = new RuntimeSupervisor(logger, taskExecutionRegistry)
   // Closures below capture `runtime` by reference; they are only invoked
@@ -581,12 +628,10 @@ export async function bootstrapControlPlaneRuntime(ctx: AppContext): Promise<voi
     return
   }
 
-  runtime.startPromise = runtime.startup
-    .ensureReady()
-    .catch((error: unknown) => {
-      runtime.startPromise = null
-      throw error
-    })
+  runtime.startPromise = runtime.startup.ensureReady().catch((error: unknown) => {
+    runtime.startPromise = null
+    throw error
+  })
 
   await runtime.startPromise
 }
@@ -642,7 +687,10 @@ export function subscribeControlPlaneEvents(
   actor: ActorContext,
   connectionId: string,
   callback: (event: SseEnvelope) => void,
-  onOverflow?: (info: { readonly lastDeliveredEventId: number; readonly latestEventId: number }) => void
+  onOverflow?: (info: {
+    readonly lastDeliveredEventId: number
+    readonly latestEventId: number
+  }) => void
 ): () => void {
   const runtime = ensureControlPlaneRuntime(ctx)
   if (runtime === null) {
