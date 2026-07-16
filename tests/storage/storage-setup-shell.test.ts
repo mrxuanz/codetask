@@ -196,3 +196,50 @@ test('recovery rewrites only the locator after marker and SQLite integrity valid
   }
   assert.equal(existsSync(join(existingData, 'db', 'app.db')), true)
 })
+
+test('first-run selection adopts an already initialized CodeTask data directory', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-setup-adopt-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const existingData = join(root, 'existing-data')
+  const marker = writeDataRootMarker(existingData, 'existing-installation')
+  const db = createIsolatedTestDatabase(existingData)
+  closeIsolatedTestDatabase(db)
+  const bootstrap = bootstrapPaths(join(root, 'shared-bootstrap'))
+  const app = createSetupShell({
+    storage: {
+      phase: 'selection_required',
+      dataDir: join(root, 'new-data'),
+      source: 'candidate',
+      managed: false,
+      bootstrap
+    },
+    isDev: false
+  })
+
+  const validationResponse = await app.request('/api/system/storage/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: existingData })
+  })
+  assert.equal(validationResponse.status, 200)
+  const validation = (await validationResponse.json()) as {
+    data: { action: string; canonicalPath: string; nonce: string }
+  }
+  assert.equal(validation.data.action, 'recover')
+
+  const recoveryResponse = await app.request('/api/system/storage/recover', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      path: validation.data.canonicalPath,
+      validationNonce: validation.data.nonce
+    })
+  })
+  assert.equal(recoveryResponse.status, 200)
+  const locator = new StorageLocatorRepository(bootstrap).read()
+  assert.equal(locator.status, 'valid')
+  if (locator.status === 'valid') {
+    assert.equal(locator.locator.dataDir, validation.data.canonicalPath)
+    assert.equal(locator.locator.installationId, marker.installationId)
+  }
+})

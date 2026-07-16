@@ -11,15 +11,28 @@ const SENSITIVE_MCP_KEYS = new Set([
   'accesstoken',
   'refreshtoken',
   'secret',
-  'password'
+  'password',
+  'client_secret',
+  'private_key',
+  'access_key',
+  'x_api_key',
+  'proxy_authorization',
+  'cookie'
 ])
+const SENSITIVE_MCP_COMPACT_KEYS = new Set(
+  [...SENSITIVE_MCP_KEYS].map((key) => key.replace(/_/g, ''))
+)
+
+const SENSITIVE_ENV_CONTAINERS = new Set(['env', 'environment'])
 
 export function isSensitiveMcpKey(key: string, parentKey?: string): boolean {
   const normalized = key.replace(/[-.]/g, '_').toLowerCase()
   const compact = normalized.replace(/_/g, '')
-  if (SENSITIVE_MCP_KEYS.has(normalized) || SENSITIVE_MCP_KEYS.has(compact)) return true
+  if (SENSITIVE_MCP_KEYS.has(normalized) || SENSITIVE_MCP_COMPACT_KEYS.has(compact)) return true
+  const normalizedParent = parentKey?.replace(/[-.]/g, '_').toLowerCase()
   return (
-    parentKey?.toLowerCase() === 'env' &&
+    normalizedParent !== undefined &&
+    SENSITIVE_ENV_CONTAINERS.has(normalizedParent) &&
     (normalized.endsWith('_key') ||
       normalized.endsWith('_token') ||
       normalized.endsWith('_secret') ||

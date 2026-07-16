@@ -15,6 +15,9 @@ export interface AppSecretCipher {
   decrypt(ciphertext: Uint8Array): string
 }
 
+export type StoredAppSecretFormat = 'missing' | 'plaintext' | 'encrypted' | 'invalid'
+export type AppSecretStorageKind = 'os_store' | 'fallback_file'
+
 function generateSecretBytes(): Uint8Array {
   return randomBytes(SECRET_LENGTH)
 }
@@ -89,6 +92,35 @@ function parseEncryptedEnvelope(raw: string): EncryptedSecretEnvelope | null {
   } catch {
     return null
   }
+}
+
+/** Inspect the persisted format without trying the wrong provider and misreporting corruption. */
+export function inspectStoredAppSecret(path: string): StoredAppSecretFormat {
+  if (!existsSync(path)) return 'missing'
+  try {
+    const raw = readFileSync(path, 'utf8')
+    if (parseSecret(raw)) return 'plaintext'
+    if (parseEncryptedEnvelope(raw)) return 'encrypted'
+    return 'invalid'
+  } catch {
+    return 'invalid'
+  }
+}
+
+/** Existing format wins so desktop and server mode can read the same shared bootstrap secret. */
+export function resolveAppSecretStorageKind(
+  format: StoredAppSecretFormat,
+  osEncryptionAvailable: boolean
+): AppSecretStorageKind {
+  if (format === 'invalid') throw new Error('Auth secret file format is invalid')
+  if (format === 'plaintext') return 'fallback_file'
+  if (format === 'encrypted') {
+    if (!osEncryptionAvailable) {
+      throw new Error('Auth secret requires OS secret storage, but it is unavailable')
+    }
+    return 'os_store'
+  }
+  return osEncryptionAvailable ? 'os_store' : 'fallback_file'
 }
 
 export class EncryptedFileAppSecretProvider implements AppSecretProvider {

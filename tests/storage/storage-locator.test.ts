@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -156,6 +156,70 @@ test('headless server first run returns selection_required like desktop', (t) =>
   assert.equal(result.source, 'candidate')
   assert.equal(result.managed, false)
   assert.equal(result.issue, undefined)
+})
+
+test('shared bootstrap adopts a valid legacy desktop locator and secrets', (t) => {
+  const f = fixture(t)
+  const sharedBootstrapRoot = join(f.root, 'shared-bootstrap')
+  const legacyBootstrapRoot = join(f.root, 'legacy-desktop-bootstrap')
+  const legacyPaths = bootstrapPaths(legacyBootstrapRoot)
+  const dataDir = join(f.root, 'existing-data')
+  const marker = writeDataRootMarker(dataDir, 'shared-installation')
+  new StorageLocatorRepository(legacyPaths).write(
+    createStorageLocator({
+      dataDir,
+      source: 'desktop_setup',
+      installationId: marker.installationId
+    })
+  )
+  mkdirSync(legacyPaths.secretsDir, { recursive: true })
+  writeFileSync(legacyPaths.authSecretFile, 'legacy-auth-secret', { mode: 0o600 })
+  writeFileSync(legacyPaths.mcpSecretFile, '{"legacy":true}\n', { mode: 0o600 })
+
+  const result = resolveStorageLocation({
+    mode: 'server',
+    bootstrapRoot: sharedBootstrapRoot,
+    legacyBootstrapRoots: [legacyBootstrapRoot],
+    defaultDataDir: f.candidate
+  })
+
+  assert.equal(result.phase, 'ready')
+  assert.equal(result.dataDir, dataDir)
+  const sharedPaths = bootstrapPaths(sharedBootstrapRoot)
+  const locator = new StorageLocatorRepository(sharedPaths).read()
+  assert.equal(locator.status, 'valid')
+  if (locator.status === 'valid') {
+    assert.equal(locator.locator.source, 'migration')
+    assert.equal(locator.locator.installationId, marker.installationId)
+  }
+  assert.equal(readFileSync(sharedPaths.authSecretFile, 'utf8'), 'legacy-auth-secret')
+  assert.equal(readFileSync(sharedPaths.mcpSecretFile, 'utf8'), '{"legacy":true}\n')
+})
+
+test('conflicting legacy bootstrap locators require deliberate recovery', (t) => {
+  const f = fixture(t)
+  const legacyRoots = [join(f.root, 'legacy-a'), join(f.root, 'legacy-b')]
+  for (const [index, legacyRoot] of legacyRoots.entries()) {
+    const dataDir = join(f.root, `data-${index}`)
+    const marker = writeDataRootMarker(dataDir, `installation-${index}`)
+    new StorageLocatorRepository(bootstrapPaths(legacyRoot)).write(
+      createStorageLocator({
+        dataDir,
+        source: 'desktop_setup',
+        installationId: marker.installationId
+      })
+    )
+  }
+
+  const result = resolveStorageLocation({
+    mode: 'desktop',
+    bootstrapRoot: join(f.root, 'shared-bootstrap'),
+    legacyBootstrapRoots: legacyRoots,
+    defaultDataDir: f.candidate
+  })
+
+  assert.equal(result.phase, 'recovery_required')
+  assert.equal(result.issue, 'storage_legacy_locator_conflict')
 })
 
 test('stale locator with empty data root soft-downgrades to selection_required', (t) => {

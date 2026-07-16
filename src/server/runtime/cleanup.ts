@@ -1,7 +1,6 @@
 import { existsSync } from 'fs'
 import { readdir, readFile, rm, stat } from 'fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'path'
-import { TurnError } from '../../shared/turn-errors.ts'
+import { isAbsolute, join, relative, sep } from 'path'
 import type { getDb } from '../db'
 import { threadJobs, threads } from '../db/schema'
 import {
@@ -58,88 +57,6 @@ export async function estimateJobRuntimeBytes(
   jobId: string
 ): Promise<number> {
   return estimateDirectoryBytes(jobRuntimeDir(dataDir, threadId, jobId))
-}
-
-export interface JobRuntimeScope {
-  threadId: string
-  jobId: string
-  jobRoot: string
-}
-
-export class JobRuntimeQuotaExceededError extends TurnError {
-  constructor(
-    readonly jobId: string,
-    readonly actualBytes: number,
-    readonly maxBytes: number
-  ) {
-    super('runtime.quota_exceeded', {
-      params: { jobId, actualBytes, maxBytes },
-      detail: `Job ${jobId} runtime quota exceeded: ${actualBytes} bytes >= ${maxBytes} bytes`
-    })
-    this.name = 'JobRuntimeQuotaExceededError'
-  }
-}
-
-export function resolveJobRuntimeScope(
-  dataDir: string,
-  runtimeRoot: string
-): JobRuntimeScope | null {
-  const runtimesRoot = resolve(dataPaths(dataDir).runtimes)
-  const absolute = resolve(runtimeRoot)
-  const rel = relative(runtimesRoot, absolute)
-  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null
-  const segments = rel.split(sep)
-  if (segments.length < 4 || segments[1] !== 'jobs') return null
-  const [threadId, , jobId] = segments
-  if (!threadId || !jobId) return null
-  return {
-    threadId,
-    jobId,
-    jobRoot: jobRuntimeDir(dataDir, threadId, jobId)
-  }
-}
-
-const warnedSoftQuotaJobs = new Set<string>()
-
-export async function inspectJobRuntimeQuota(input: {
-  dataDir: string
-  runtimeRoot: string
-  maxBytes: number
-}): Promise<{
-  scope: JobRuntimeScope | null
-  bytes: number
-  softExceeded: boolean
-  hardExceeded: boolean
-}> {
-  const scope = resolveJobRuntimeScope(input.dataDir, input.runtimeRoot)
-  if (!scope || input.maxBytes <= 0) {
-    return { scope, bytes: 0, softExceeded: false, hardExceeded: false }
-  }
-  const bytes = await estimateDirectoryBytes(scope.jobRoot)
-  const softExceeded = bytes >= Math.floor(input.maxBytes * 0.8)
-  const hardExceeded = bytes >= input.maxBytes
-  if (softExceeded && !warnedSoftQuotaJobs.has(scope.jobId)) {
-    warnedSoftQuotaJobs.add(scope.jobId)
-    console.warn(
-      `[runtime] job ${scope.jobId} runtime soft quota exceeded: ${bytes} bytes / ${input.maxBytes} bytes`
-    )
-  }
-  return { scope, bytes, softExceeded, hardExceeded }
-}
-
-export async function checkJobRuntimeQuota(
-  dataDir: string,
-  threadId: string,
-  jobId: string,
-  maxBytes: number
-): Promise<void> {
-  if (maxBytes <= 0) return
-  const size = await estimateJobRuntimeBytes(dataDir, threadId, jobId)
-  if (size > maxBytes) {
-    console.warn(
-      `[runtime] job ${jobId} runtime exceeds quota: ${Math.round(size / (1024 * 1024))}MB > ${Math.round(maxBytes / (1024 * 1024))}MB`
-    )
-  }
 }
 
 export async function removeDirectoryIfExists(path: string): Promise<boolean> {

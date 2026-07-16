@@ -29,7 +29,7 @@ export function createApiRoutes(ctx: AppContext): Hono {
 
   api.use('*', requireAuth())
   api.use('*', requestGuard(ctx.security))
-  api.use('*', requestTimeout())
+  api.use('*', requestTimeout(ctx.config.http.requestTimeoutMs))
   api.use('*', bodySizeLimit())
   api.use('*', async (c, next) => {
     if (

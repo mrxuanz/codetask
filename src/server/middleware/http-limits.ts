@@ -3,6 +3,7 @@ import type { SecurityContext } from '../context/types'
 import { AppError } from '../error'
 import { runWithRequestAbortSignal } from '../context/request-abort'
 import { normalizedApiPath } from './require-auth'
+import { DEFAULT_APP_CONFIG } from '../config/app-config'
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -10,9 +11,9 @@ declare module 'hono' {
   }
 }
 
-export const REQUEST_TIMEOUT_MS = Number(process.env.CODETASK_REQUEST_TIMEOUT_MS ?? 300_000)
-export const MAX_SSE_CLIENTS_PER_USER = Number(process.env.CODETASK_MAX_SSE_CLIENTS ?? 8)
-export const MAX_CONCURRENT_TURNS_PER_USER = Number(process.env.CODETASK_MAX_CONCURRENT_TURNS ?? 2)
+export const REQUEST_TIMEOUT_MS = DEFAULT_APP_CONFIG.http.requestTimeoutMs
+export const MAX_SSE_CLIENTS_PER_USER = DEFAULT_APP_CONFIG.http.maxSseClientsPerUser
+export const MAX_CONCURRENT_TURNS_PER_USER = DEFAULT_APP_CONFIG.http.maxConcurrentTurnsPerUser
 
 const SSE_STREAM_PATHS = new Set(['/events/stream', '/events/jobs/stream'])
 
@@ -38,7 +39,7 @@ function isLongLivedSsePath(path: string): boolean {
   return /^\/threads\/[^/]+\/messages$/.test(p)
 }
 
-export function requestTimeout(): MiddlewareHandler {
+export function requestTimeout(timeoutMs = REQUEST_TIMEOUT_MS): MiddlewareHandler {
   return async (c, next) => {
     if (isLongLivedSsePath(c.req.path)) {
       return next()
@@ -53,7 +54,7 @@ export function requestTimeout(): MiddlewareHandler {
         // Resolve the outer race first so a cooperative handler that observes
         // this abort cannot win the response race with a late 200 response.
         queueMicrotask(() => controller.abort(new Error('request.timeout')))
-      }, REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       timer.unref?.()
     })
 

@@ -5,6 +5,7 @@ import type { RuntimeRegistry } from './runtime-registry'
 import type { SettingsStore } from './settings-store'
 import type { ApplicationRuntime } from '../application/application-runtime'
 import type { McpSecretProvider } from '../settings/mcp-secret-provider'
+import type { AppConfig } from '../config/app-config'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
@@ -14,6 +15,7 @@ export interface SecurityContext {
 }
 
 export interface AppContext {
+  config: AppConfig
   dataDir: string
   db: AppDatabase
   settings: SettingsStore

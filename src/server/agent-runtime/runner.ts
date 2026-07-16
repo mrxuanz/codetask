@@ -8,13 +8,11 @@ import { getAgentTurnProvider } from './providers'
 import { isTestFakeProvider } from './providers/test-overrides'
 import { roleRequiresOuterSandbox, resolveRoleMcpToolNames, type ConversationRole } from './roles'
 import { compactTurnChunkForIpc } from './chunk-ipc'
-import { streamWithTurnRetry } from './retry'
+import { resolveTurnMaxRetries, streamWithTurnRetry } from './retry'
 import { resolveUserMcpServersMap } from '../settings/mcp'
 import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './types'
 import { resolveDownstreamAbortSignal } from '../context/request-abort'
-import { inspectJobRuntimeQuota, JobRuntimeQuotaExceededError } from '../runtime/cleanup'
-import { getAppContext } from '../bootstrap'
-import { readRetentionSettings } from '../retention/settings'
+import { getAppConfig } from '../bootstrap'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
   const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
@@ -86,95 +84,12 @@ export async function* streamAgentTurn(
   input: AgentTurnRunnerInput
 ): AsyncGenerator<AgentTurnChunk> {
   const signal = resolveDownstreamAbortSignal(input.signal)
-  let quota:
-    | {
-        dataDir: string
-        maxBytes: number
-        abort: AbortController
-        error: JobRuntimeQuotaExceededError | null
-      }
-    | undefined
-  try {
-    const ctx = getAppContext()
-    const maxBytes = readRetentionSettings(ctx.settings).runtimeMaxBytesPerJob
-    const inspected = await inspectJobRuntimeQuota({
-      dataDir: ctx.dataDir,
-      runtimeRoot: input.runtimeRoot,
-      maxBytes
-    })
-    if (inspected.scope) {
-      if (inspected.hardExceeded) {
-        throw new JobRuntimeQuotaExceededError(inspected.scope.jobId, inspected.bytes, maxBytes)
-      }
-      quota = { dataDir: ctx.dataDir, maxBytes, abort: new AbortController(), error: null }
-    }
-  } catch (error) {
-    if (error instanceof JobRuntimeQuotaExceededError) throw error
-    // Unit-level/in-process Provider runs may not own an application context.
-  }
-
-  const guardedSignal = quota
-    ? AbortSignal.any([...(signal ? [signal] : []), quota.abort.signal])
-    : signal
-  const downstreamInput =
-    guardedSignal === input.signal ? input : { ...input, signal: guardedSignal }
-  let checking = false
-  const sampleMs = Math.max(250, Number(process.env.CODETASK_RUNTIME_QUOTA_SAMPLE_MS ?? 30_000))
-  const timer = quota
-    ? setInterval(() => {
-        if (checking || quota!.error) return
-        checking = true
-        void inspectJobRuntimeQuota({
-          dataDir: quota!.dataDir,
-          runtimeRoot: input.runtimeRoot,
-          maxBytes: quota!.maxBytes
-        })
-          .then((inspected) => {
-            if (inspected.hardExceeded && inspected.scope) {
-              quota!.error = new JobRuntimeQuotaExceededError(
-                inspected.scope.jobId,
-                inspected.bytes,
-                quota!.maxBytes
-              )
-              quota!.abort.abort(quota!.error)
-            }
-          })
-          .finally(() => {
-            checking = false
-          })
-      }, sampleMs)
-    : null
-  timer?.unref?.()
-
-  let streamFailed = false
-  let streamFailure: unknown
-  try {
-    yield* streamWithTurnRetry(() => streamAgentTurnOnce(downstreamInput), {
-      signal: guardedSignal,
-      label: `${input.role}/${input.provider}`
-    })
-  } catch (error) {
-    streamFailed = true
-    streamFailure = error
-  } finally {
-    if (timer) clearInterval(timer)
-    if (quota && !quota.error) {
-      const inspected = await inspectJobRuntimeQuota({
-        dataDir: quota.dataDir,
-        runtimeRoot: input.runtimeRoot,
-        maxBytes: quota.maxBytes
-      })
-      if (inspected.hardExceeded && inspected.scope) {
-        quota.error = new JobRuntimeQuotaExceededError(
-          inspected.scope.jobId,
-          inspected.bytes,
-          quota.maxBytes
-        )
-      }
-    }
-  }
-  if (quota?.error) throw quota.error
-  if (streamFailed) throw streamFailure
+  const downstreamInput = signal === input.signal ? input : { ...input, signal }
+  yield* streamWithTurnRetry(() => streamAgentTurnOnce(downstreamInput), {
+    signal,
+    maxAttempts: resolveTurnMaxRetries(getAppConfig().turn.maxRetries),
+    label: `${input.role}/${input.provider}`
+  })
 }
 
 export async function* streamConversationTurn(input: {

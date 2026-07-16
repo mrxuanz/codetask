@@ -43,11 +43,16 @@ let dataDir: string
 
 async function setupDb(): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'codetask-run-lifecycle-'))
-  process.env.CODETASK_RUN_CANCEL_GRACE_MS = '0'
-  process.env.CODETASK_RUN_KILL_GRACE_MS = '0'
   await resetAppContextForTests()
   resetJobReconcileForTests()
-  bootstrapRuntime({ dataDir })
+  bootstrapRuntime({
+    dataDir,
+    config: {
+      execution: {
+        runLifecycle: { cancelGraceMs: 0, killGraceMs: 0 }
+      }
+    }
+  })
   await ensureStartupWorkloadReady()
   stopWorkloadReconcilerForTests()
 }

@@ -19,6 +19,7 @@ import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
 import { generateSetupToken } from '../server/auth/setup-token'
 import { loadMainProcessAuthSecret } from './app-secret'
+import { clearPublishedRunningService, publishRunningService } from './service-discovery'
 
 export interface ServerInfo {
   host: string
@@ -226,6 +227,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     }
 
     let promoteInflight: Promise<void> | null = null
+    let publishedInfo: ServerInfo | null = null
     const setupApp = createSetupShell({
       storage,
       isDev: is.dev,
@@ -246,7 +248,12 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
           const { app, dataDir } = await createReadyApp(cli, resolved, http)
           activeApp = app
           initConversationMcpBackend(boundPort)
-          console.log(`[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`)
+          if (cli.mode === 'server' && publishedInfo) {
+            publishRunningService(resolved.bootstrap, { ...publishedInfo, mode: 'server' }, dataDir)
+          }
+          console.log(
+            `[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`
+          )
           console.log(`[storage] data root: ${dataDir} (source=${resolved.source})`)
         })()
         try {
@@ -286,6 +293,10 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
       requestedPort: cli.port,
       portChanged: bindChanged,
       mode: cli.mode
+    }
+    if (cli.mode === 'server') {
+      publishedInfo = info
+      publishRunningService(storage.bootstrap, { ...info, mode: 'server' })
     }
     console.log(`[server] ${cli.mode} storage setup listening on ${info.url}`)
     console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
@@ -337,6 +348,10 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     mode: cli.mode
   }
 
+  if (cli.mode === 'server') {
+    publishRunningService(storage.bootstrap, { ...info, mode: 'server' }, dataDir)
+  }
+
   console.log(`[server] ${cli.mode} mode listening on ${info.url}`)
   console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
   console.log(`[storage] data root: ${dataDir} (source=${storage.source})`)
@@ -352,6 +367,7 @@ export async function stopAppServer(): Promise<void> {
     activeServer.close()
     activeServer = null
   }
+  clearPublishedRunningService()
 
   try {
     const { stopRetentionJanitor } = await import('../server/retention/lifecycle')

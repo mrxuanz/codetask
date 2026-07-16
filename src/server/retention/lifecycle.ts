@@ -4,7 +4,6 @@ import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
 import {
-  checkJobRuntimeQuota,
   cleanupJobRuntimeTreeIfTerminal,
   estimateJobRuntimeBytes,
   extractRuntimeSummary,
@@ -17,7 +16,6 @@ import { deleteJobCounters } from './counters'
 import { readRetentionSettings, artifactExpirySec } from './settings'
 import { runSqliteMaintenanceIfDue } from './maintenance'
 import {
-  enforceDataDirWatermark,
   pruneCompletedTaskRuntimeTrees,
   pruneOrphanAttachments,
   pruneOrphanJobArtifactFiles,
@@ -139,7 +137,6 @@ export async function onJobReachedTerminal(
       if (bytes > 0) {
         await db.update(threadJobs).set({ runtimeBytes: bytes }).where(eq(threadJobs.id, jobId))
       }
-      await checkJobRuntimeQuota(ctx.dataDir, threadId, jobId, settings.runtimeMaxBytesPerJob)
     } catch (error) {
       console.warn('[retention] runtime bytes estimate failed', jobId, error)
     }
@@ -178,8 +175,6 @@ export async function runRetentionJanitorPass(): Promise<{
   staleAttachmentDirs: number
   orphanRuntimeTrees: number
   emptyCreateTaskThreads: number
-  watermarkCleanedBytes: number
-  watermarkCleanedJobs: number
   sqliteMaintenance: { ran: boolean; vacuumedPages: number }
   expiredDesignRevisions: number
   orphanJobArtifactFiles: number
@@ -209,7 +204,6 @@ export async function runRetentionJanitorPass(): Promise<{
     pruneOrphanJobArtifactFiles(ctx.dataDir, db)
   ])
 
-  const watermark = await enforceDataDirWatermark(ctx.dataDir, db, settings.dataDirMaxBytes)
   const expiredDesignRevisions = deleteExpiredDesignPlanRevisions(db)
 
   const sqliteMaintenance = runSqliteMaintenanceIfDue({
@@ -227,8 +221,6 @@ export async function runRetentionJanitorPass(): Promise<{
     staleAttachmentDirs: staleAttachmentDirs.removed,
     orphanRuntimeTrees: orphanRuntimeTrees.removedPaths.length,
     emptyCreateTaskThreads: emptyCreateTaskThreads.removed,
-    watermarkCleanedBytes: watermark.cleanedBytes,
-    watermarkCleanedJobs: watermark.cleanedJobCount,
     sqliteMaintenance: {
       ran: sqliteMaintenance.ran,
       vacuumedPages: sqliteMaintenance.vacuumedPages

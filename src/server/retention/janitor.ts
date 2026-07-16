@@ -1,7 +1,7 @@
 import { existsSync } from 'fs'
-import { readdir, rm, stat } from 'fs/promises'
+import { readdir, rm } from 'fs/promises'
 import { join } from 'path'
-import { asc, eq, or } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import type { getDb } from '../db'
 import {
   draftReferences,
@@ -209,85 +209,4 @@ export async function pruneStaleThreadAttachmentDirs(
   }
 
   return { removed }
-}
-
-export async function estimateDirSize(dirPath: string): Promise<number> {
-  if (!existsSync(dirPath)) return 0
-  let total = 0
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const full = join(dirPath, entry.name)
-      if (entry.isDirectory()) {
-        total += await estimateDirSize(full)
-      } else {
-        try {
-          const s = await stat(full)
-          total += s.size
-        } catch {
-          // skip inaccessible
-        }
-      }
-    }
-  } catch {
-    // skip inaccessible
-  }
-  return total
-}
-
-export async function isDataDirOverLimit(dataDir: string, maxBytes: number): Promise<boolean> {
-  if (maxBytes <= 0) return false
-  return (await estimateDirSize(dataDir)) > maxBytes
-}
-
-export async function enforceDataDirWatermark(
-  dataDir: string,
-  db: AppDatabase,
-  maxBytes: number
-): Promise<{ cleanedBytes: number; cleanedJobCount: number }> {
-  const totalBytes = await estimateDirSize(dataDir)
-  if (totalBytes <= maxBytes) return { cleanedBytes: 0, cleanedJobCount: 0 }
-
-  console.warn(
-    `[retention] data dir watermark exceeded: ${Math.round(totalBytes / (1024 * 1024))}MB > ${Math.round(maxBytes / (1024 * 1024))}MB, force-cleaning oldest terminal runtimes`
-  )
-
-  const terminalRows = await db
-    .select({
-      id: threadJobs.id,
-      threadId: threadJobs.threadId,
-      updatedAt: threadJobs.updatedAt
-    })
-    .from(threadJobs)
-    .where(
-      or(
-        eq(threadJobs.status, 'completed'),
-        eq(threadJobs.status, 'failed'),
-        eq(threadJobs.status, 'cancelled')
-      )
-    )
-    .orderBy(asc(threadJobs.updatedAt))
-    .limit(50)
-
-  let cleanedBytes = 0
-  let cleanedJobCount = 0
-  const remainingTarget = Math.floor(maxBytes * 0.8)
-
-  for (const row of terminalRows) {
-    if (totalBytes - cleanedBytes <= remainingTarget) break
-    const jobPath = join(dataPaths(dataDir).runtimes, row.threadId, 'jobs', row.id)
-    if (!existsSync(jobPath)) continue
-    const jobSize = await estimateDirSize(jobPath)
-    await rm(jobPath, { recursive: true, force: true })
-    cleanedBytes += jobSize
-    cleanedJobCount += 1
-  }
-
-  if (cleanedJobCount > 0) {
-    console.warn(
-      `[retention] watermark cleanup: freed ${Math.round(cleanedBytes / (1024 * 1024))}MB from ${cleanedJobCount} terminal jobs`
-    )
-  }
-
-  return { cleanedBytes, cleanedJobCount }
 }
