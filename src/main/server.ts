@@ -92,14 +92,16 @@ function isAddressInUse(error: unknown): boolean {
   )
 }
 
-function listen(
-  fetch: (request: Request) => Response | Promise<Response>,
-  host: string,
-  port: number
-): Promise<ServerType> {
+type NodeFetch = (
+  request: Request,
+  env?: unknown,
+  executionCtx?: unknown
+) => Response | Promise<Response>
+
+function listen(fetch: NodeFetch, host: string, port: number): Promise<ServerType> {
   return new Promise((resolve, reject) => {
     const server = serve({
-      fetch,
+      fetch: fetch as Parameters<typeof serve>[0]['fetch'],
       hostname: host,
       port
     })
@@ -107,6 +109,13 @@ function listen(
     server.once('listening', () => resolve(server))
     server.once('error', reject)
   })
+}
+
+/** Hot-swap wrapper: keep serve() env bindings (incoming socket) while swapping activeApp. */
+function activeFetch(
+  getApp: () => Hono
+): NodeFetch {
+  return (request, env, executionCtx) => getApp().fetch(request, env, executionCtx)
 }
 
 async function createReadyApp(
@@ -275,7 +284,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     for (let offset = 0; offset < 100; offset++) {
       const port = startPort + offset
       try {
-        activeServer = await listen((request) => activeApp.fetch(request), cli.host, port)
+        activeServer = await listen(activeFetch(() => activeApp), cli.host, port)
         boundPort = port
         bindChanged = cli.port !== port
         break
@@ -321,7 +330,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   for (let offset = 0; offset < 100; offset++) {
     const port = startPort + offset
     try {
-      activeServer = await listen((request) => activeApp.fetch(request), cli.host, port)
+      activeServer = await listen(activeFetch(() => activeApp), cli.host, port)
       boundPort = port
       bindChanged = cli.port !== port
       initConversationMcpBackend(port)
