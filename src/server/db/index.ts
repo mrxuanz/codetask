@@ -23,11 +23,13 @@ import {
   projects,
   threadJobs,
   threadMessages,
+  conversationTurns,
   threads,
   workloadRuns,
   workloadSlots,
   workspaceLeases,
-  deletionRequests
+  deletionRequests,
+  changeSets
 } from './schema'
 
 const schema = {
@@ -40,6 +42,7 @@ const schema = {
   projects,
   threads,
   threadMessages,
+  conversationTurns,
   threadJobs,
   jobTasks,
   jobTaskAttempts,
@@ -53,7 +56,8 @@ const schema = {
   workloadRuns,
   workloadSlots,
   workspaceLeases,
-  deletionRequests
+  deletionRequests,
+  changeSets
 }
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>

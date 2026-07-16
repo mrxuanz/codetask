@@ -9,8 +9,10 @@ import type {
   JobRecoveryDto
 } from '../job-recovery-state'
 import type { JobProgressCode, JobProgressParams } from '../progress-codes'
+import type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
 
 export type { SliceVerificationRecordDto, TaskEvidenceDto } from './evidence'
+export type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
 
 export interface PlanProgressDto {
   phase: 'idle' | 'planning' | 'plan_ready' | 'failed' | 'cleanup_failed' | 'needs_auth'
@@ -149,6 +151,14 @@ export interface ThreadJobDto {
   snapshotDraftRevision?: number | null | undefined
   snapshotPlanRevision?: number | null | undefined
   snapshotManifestRevision?: number | null | undefined
+
+  /** Structured pause source; null when not paused / unclassified. */
+  suspensionKind?: SuspensionKind | undefined
+  /** Continue requested while still pausing — settle then queue a fresh run. */
+  continueAfterPause?: boolean | undefined
+  /** Why recovery is waiting (e.g. uncertain_provider_outcome). */
+  recoveryReason?: JobRecoveryReason | undefined
+
   createdAt: number
   updatedAt: number
 }

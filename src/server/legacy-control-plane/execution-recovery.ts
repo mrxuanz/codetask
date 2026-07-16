@@ -1,7 +1,8 @@
-import type { TaskProgressDto, TaskProgressItemDto, ThreadJobDto } from './types'
+import type { TaskProgressItemDto, ThreadJobDto } from './types'
 import type { GateMilestoneState, GateSliceState } from './execution-gate'
 import { pausingAttemptKey } from './recovery-limits'
 import { taskErrorFields } from '../turn-errors/store'
+import type { TaskProgressDto } from './types'
 
 function findInterruptedTaskId(taskProgress: TaskProgressDto): string | null {
   if (taskProgress.currentTaskId) return taskProgress.currentTaskId
@@ -145,36 +146,36 @@ export function withPausingAttempt(
 
 export type StaleExecutionJobAction = 'noop' | 'finalize-user-pause' | 'resume-running'
 
+/**
+ * Human-dependency pause must never be treated as restart-interrupted.
+ * Task evidence remains for Continue / UI; auto-resume no longer uses it.
+ */
+export function isHumanDependencyPause(job: ThreadJobDto): boolean {
+  if (job.suspensionKind === 'human_dependency') return true
+  return job.taskProgress.tasks.some(
+    (task) =>
+      task.recoveryAction === 'pause-human' || task.blockerKind === 'dependency-human'
+  )
+}
+
+/**
+ * P7: long-term restart-paused heuristics removed.
+ * Legacy rows were one-time promoted to `pending` by migration 039.
+ * Structured suspensionKind is authoritative; paused never auto-resumes.
+ */
+export function isRestartInterruptedPause(_job: ThreadJobDto): boolean {
+  return false
+}
+
 /** Decide how to reconcile a thread job whose in-memory execution loop is gone. */
 export function resolveStaleExecutionJobAction(
-  job: Pick<ThreadJobDto, 'status' | 'taskProgress' | 'lastError'>
+  job: Pick<
+    ThreadJobDto,
+    'status' | 'taskProgress' | 'lastError' | 'suspensionKind' | 'recoveryReason'
+  >
 ): StaleExecutionJobAction {
   if (job.status === 'pausing') return 'finalize-user-pause'
-  // Legacy restart settled some interrupted runs to paused (without job.paused). F3-A auto-resumes
-  // those the same way as DB `running` jobs so the user is not stuck on Continue.
-  if (job.status === 'paused' && isRestartInterruptedPause(job as ThreadJobDto)) {
-    return 'resume-running'
-  }
   if (job.status === 'paused') return 'noop'
   if (job.status === 'running') return 'resume-running'
   return 'noop'
-}
-
-/** Paused by restart reconcile — not an explicit user pause (job.paused). */
-export function isRestartInterruptedPause(job: ThreadJobDto): boolean {
-  if (job.status !== 'paused') return false
-  if (job.taskProgress.phase !== 'running') return false
-  if (job.lastError?.code === 'job.paused') return false
-
-  const tasks = job.taskProgress.tasks
-  return (
-    job.taskProgress.currentIndex > 0 ||
-    tasks.some(
-      (task) =>
-        task.status !== 'queued' ||
-        task.executionStatus === 'running' ||
-        task.executionStatus === 'retry-queued'
-    ) ||
-    (job.taskProgress.slices?.some((slice) => slice.runtimeStatus != null) ?? false)
-  )
 }

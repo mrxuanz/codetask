@@ -221,7 +221,8 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
  *   2. stop queue/reconciler timers
  *   3. request running turns to stop at a safe checkpoint, wait for provider child/handle closed,
  *      mark the in-flight attempt `interrupted` (NOT failed), end the old run, release slot + lease
- *   4. keep the Job auto-recoverable (`running`), then flush durable events
+ *   4. close Cursor ACP scopes (conversation + job) and stop the idle reaper
+ *   5. keep the Job auto-recoverable (`running`), then flush durable events
  */
 export async function shutdownLegacyApplicationRuntime(
   runtime: LegacyApplicationRuntime,
@@ -253,11 +254,28 @@ async function runShutdown(
   // 3. Drain in-flight execution runs at a safe checkpoint.
   await drainActiveExecutionRuns(logger)
 
-  // 4. Flush durable events (Legacy emits in-memory SSE; nothing durable to persist here yet).
+  // 4. Close Cursor ACP conversation/job scopes (core switch / delete already close per-scope).
+  await closeCursorAcpRuntimes(logger)
+
+  // 5. Flush durable events (Legacy emits in-memory SSE; nothing durable to persist here yet).
   await flushDurableEvents(logger)
 
   runtime.started = false
   logger.info('legacy shutdown completed')
+}
+
+async function closeCursorAcpRuntimes(logger: SafeLoggerImpl): Promise<void> {
+  try {
+    const reaper = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
+    reaper.stopConversationCursorReaper()
+    const { getCursorProviderRuntimeRegistry } =
+      await import('../agent-runtime/cursor-acp/runtime-registry')
+    await getCursorProviderRuntimeRegistry().closeAll()
+  } catch (error) {
+    logger.warn('close Cursor ACP runtimes failed', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
 }
 
 async function drainActiveExecutionRuns(logger: SafeLoggerImpl): Promise<void> {

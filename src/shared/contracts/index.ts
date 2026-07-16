@@ -50,6 +50,21 @@ export {
   jobTopic,
   parseHubTopic,
   threadIdFromTopic,
-  threadTopic
+  threadTopic,
+  turnIdFromTopic,
+  turnTopic
 } from './job-event-hub'
+export type {
+  ConversationTurnDto,
+  ConversationTurnKind,
+  ConversationTurnStatus,
+  CreateTurnAcceptedDto,
+  TurnHubEvent
+} from './conversation-turns'
+export type {
+  ChangeSetDto,
+  ChangeSetStatus,
+  CreateChangeSetAcceptedDto,
+  CreateChangeSetInput
+} from './change-sets'
 export type { ThreadDto, ThreadKind, TitleSource, WizardPhase } from './threads'

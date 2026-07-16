@@ -166,7 +166,7 @@ function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
   }
 }
 
-function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuthPrepared {
+function prepareCursor(runtimeRoot: string): ProviderAuthPrepared {
   const profile = resolveHostProfilePaths()
   const hostAuth = snapshotCursorHostAuth(profile)
   const cursorHome = resolveCursorHostCursorHome(profile)
@@ -197,18 +197,30 @@ function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuth
     profile.localAppData,
     ...resolveCursorAgentInstallDirs()
   ])
-  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(workspaceRoot, '.cursor')])
+  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(runtimeRoot, '.cursor')])
   return {
-    envPatch,
+    envPatch: {
+      ...envPatch,
+      CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
+    },
     readRoots,
     writeRoots,
     cleanupPlan: () => undefined,
-    diagnostics,
+    diagnostics: {
+      ...diagnostics,
+      warnings: [
+        ...diagnostics.warnings,
+        'P5: workspace .cursor is not writable; Cursor project metadata uses runtimeRoot CURSOR_DATA_DIR.'
+      ]
+    },
     filesystemProfile: {
       provider: 'cursorcli',
       hostReadRoots: readRoots,
       hostWriteRoots: writeRoots,
-      runtimeEnv: envPatch,
+      runtimeEnv: {
+        ...envPatch,
+        CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
+      },
       credentialSnapshots: [],
       scrubPatterns: []
     }
@@ -318,19 +330,20 @@ function prepareOpencode(runtimeRoot: string): ProviderAuthPrepared {
 }
 
 export interface PrepareProviderAuthOptions {
+  /** @deprecated P5: Cursor no longer writes project `.cursor`; kept for call-site compat. */
   workspaceRoot?: string
 }
 
 export function prepareProviderAuth(
   provider: SupportedCoreCode,
   runtimeRoot: string,
-  options?: PrepareProviderAuthOptions
+  _options?: PrepareProviderAuthOptions
 ): ProviderAuthPrepared {
   switch (provider) {
     case 'codex':
       return prepareCodex(runtimeRoot)
     case 'cursorcli':
-      return prepareCursor(runtimeRoot, options?.workspaceRoot ?? runtimeRoot)
+      return prepareCursor(runtimeRoot)
     case 'claude-code':
       return prepareClaude(runtimeRoot)
     case 'opencode':

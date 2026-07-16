@@ -1,7 +1,9 @@
+import { join } from 'node:path'
 import {
   applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv,
+  ensureCursorAcpRuntimeDirs,
   stripElectronInheritedEnv
 } from '../env'
 import { buildCursorAcpMcpServers, type CursorAcpMcpServer } from '../mcp'
@@ -16,9 +18,13 @@ export interface CursorTurnPlan {
   cliArgs: string[]
 }
 
-function buildCursorHostEnv(runtimeRoot: string): Record<string, string> {
+function buildCursorHostEnv(runtimeRoot: string, workspaceCwd?: string): Record<string, string> {
   const env = buildProviderChildEnv(runtimeRoot, { preserveHostIdentity: true })
   stripElectronInheritedEnv(env)
+  // Scope Cursor project metadata / MCP approvals under the runtime root, not the host profile.
+  const cursorDataDir = join(runtimeRoot, '.cursor')
+  env.CURSOR_DATA_DIR = cursorDataDir
+  ensureCursorAcpRuntimeDirs(runtimeRoot, workspaceCwd)
   return env
 }
 
@@ -32,8 +38,15 @@ export function buildCursorTurnPlan(
   const outerSandbox = resolveProviderOuterSandbox(input.role, options.outerSandbox)
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
-    : buildCursorHostEnv(input.runtimeRoot)
-  if (outerSandbox) stripElectronInheritedEnv(env)
+    : buildCursorHostEnv(input.runtimeRoot, input.cwd)
+  if (outerSandbox) {
+    stripElectronInheritedEnv(env)
+    // Outer sandbox still scopes writable Cursor data under runtimeRoot when present.
+    if (input.runtimeRoot?.trim()) {
+      env.CURSOR_DATA_DIR = join(input.runtimeRoot, '.cursor')
+      ensureCursorAcpRuntimeDirs(input.runtimeRoot, input.cwd)
+    }
+  }
   applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const mcpServers = buildCursorAcpMcpServers(input.mcpUrl, options.userMcpServers ?? {})

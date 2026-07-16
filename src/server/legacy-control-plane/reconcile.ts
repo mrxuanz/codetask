@@ -6,6 +6,7 @@ import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import {
   clearExecutionLease,
+  getUserJob,
   mapJob,
   refreshExecutionLease,
   updateJobRow,
@@ -69,14 +70,29 @@ export async function reconcileStaleJobIfNeeded(
       progressParams: null
     }
     const pausedError = createTurnError('job.paused').toDto()
+    const continueAfter = job.continueAfterPause === true
     const updated = await updateJobRowForSnapshot(job.id, {
       status: 'paused',
       taskProgress,
-      lastError: pausedError
+      lastError: pausedError,
+      suspensionKind: job.suspensionKind ?? 'user_pause',
+      continueAfterPause: false,
+      recoveryReason: null
     })
     if (!updated) return job
     await clearExecutionLease(job.id)
     emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
+
+    if (continueAfter) {
+      const { authorizeUncertainTaskAttemptReplayForJob } = await import('./task-attempts')
+      authorizeUncertainTaskAttemptReplayForJob(job.id)
+      const { continueJob } = await import('./controls')
+      await continueJob(username, job.id).catch((error) => {
+        console.warn('[jobs] continue_after_pause failed after reconcile pause settle', job.id, error)
+      })
+      const latest = await getUserJob(username, job.id)
+      return latest ?? updated
+    }
     return updated
   }
 
@@ -94,17 +110,12 @@ export async function reconcileStaleJobIfNeeded(
     progressParams: null
   }
 
-  const fromPaused = job.status === 'paused'
   const updated = await updateJobRowForSnapshot(job.id, {
     status: 'running',
     taskProgress,
     lastError: null
   })
   if (!updated) return job
-
-  if (fromPaused) {
-    console.info('[jobs] promoted restart-interrupted paused job to running', { jobId: job.id })
-  }
 
   // Drop the dead process's lease so advanceExecutionQueue can re-acquire it this boot.
   await clearExecutionLease(job.id)

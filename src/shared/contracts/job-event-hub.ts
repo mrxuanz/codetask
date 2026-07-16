@@ -1,15 +1,20 @@
 import type { ConversationMessageDto } from './conversation'
+import type { TurnHubEvent } from './conversation-turns'
 import type { JobSseEvent } from './sse'
 import type { ThreadDto } from './threads'
 
-export type HubTopic = `job:${string}` | `thread:${string}`
+export type HubTopic = `job:${string}` | `thread:${string}` | `turn:${string}`
 
 export type ThreadHubEvent =
   | { event: 'thread_snapshot'; data: { thread: ThreadDto } }
   | { event: 'thread_updated'; data: { thread: ThreadDto } }
   | { event: 'draft_updated'; data: { message: ConversationMessageDto } }
 
-export type HubEvent = JobSseEvent | ThreadHubEvent | { event: 'resync'; data: { reason: string } }
+export type HubEvent =
+  | JobSseEvent
+  | ThreadHubEvent
+  | TurnHubEvent
+  | { event: 'resync'; data: { reason: string } }
 
 export type HubEnvelope = {
   topic: HubTopic
@@ -37,9 +42,14 @@ export function threadTopic(threadId: string): HubTopic {
   return `thread:${threadId}`
 }
 
+export function turnTopic(turnId: string): HubTopic {
+  return `turn:${turnId}`
+}
+
 export function parseHubTopic(topic: string): HubTopic | null {
   if (topic.startsWith('job:') && topic.length > 4) return topic as HubTopic
   if (topic.startsWith('thread:') && topic.length > 7) return topic as HubTopic
+  if (topic.startsWith('turn:') && topic.length > 5) return topic as HubTopic
   return null
 }
 
@@ -49,4 +59,8 @@ export function jobIdFromTopic(topic: HubTopic): string | null {
 
 export function threadIdFromTopic(topic: HubTopic): string | null {
   return topic.startsWith('thread:') ? topic.slice(7) : null
+}
+
+export function turnIdFromTopic(topic: HubTopic): string | null {
+  return topic.startsWith('turn:') ? topic.slice(5) : null
 }

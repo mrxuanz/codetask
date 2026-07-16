@@ -9,7 +9,7 @@ export function putHubSubscriptions(
   connectionId: string,
   topics: HubTopic[]
 ): Promise<{ data: { connectionId: string; topics: HubTopic[] } }> {
-  return api<{ connectionId: string; topics: HubTopic[] }>('/api/events/subscriptions', {
+  return api<{ connectionId: string; topics: HubTopic[] }>('/api/realtime/subscriptions', {
     method: 'PUT',
     body: JSON.stringify({ connectionId, topics })
   })
@@ -43,7 +43,7 @@ export async function connectHubStream(
     headers['Last-Event-ID'] = String(options.lastEventId)
   }
 
-  const url = `/api/events/stream?connectionId=${encodeURIComponent(connectionId)}`
+  const url = `/api/realtime/stream?connectionId=${encodeURIComponent(connectionId)}`
   const res = await fetch(url, {
     headers,
     signal: options?.signal

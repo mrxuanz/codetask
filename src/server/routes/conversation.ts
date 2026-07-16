@@ -1,19 +1,8 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
-import { streamSSE } from 'hono/streaming'
 import { requireUsername } from '../auth/session'
-import { resolveThreadAttachments } from '../conversation/attachments'
-import {
-  executePreparedTurn,
-  listCores,
-  listThreadMessages,
-  loadThreadState,
-  prepareConversationTurn,
-  switchThreadCore
-} from '../conversation/service'
+import { listCores, listThreadMessages, loadThreadState, switchThreadCore } from '../conversation/service'
 import { AppError } from '../error'
-import { releaseWorkspaceLease } from '../legacy-control-plane/workspace-lease-store'
-import { toTurnErrorDto } from '../agent-runtime/errors'
 import { ok } from '../response'
 
 export function createAgentRoutes(_ctx: AppContext): Hono {
@@ -44,81 +33,14 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
     return c.json(ok({ messages }))
   })
 
+  // P7: old per-request conversation SSE removed. Use POST /turns + /api/realtime.
   routes.post('/:threadId/messages', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{
-      message?: string
-      generateDraft?: boolean
-      createTaskMode?: boolean
-      attachmentIds?: string[]
-      selectedDraftSection?: string
-      selectedPlanNodeRef?: string
-    }>()
-    if (!body.message?.trim()) {
-      throw AppError.badRequest('Message cannot be empty', 'message.empty')
-    }
-
+    await requireUsername(c.req.header('Authorization'))
     const threadId = c.req.param('threadId')
-    const attachments = resolveThreadAttachments(threadId, body.attachmentIds ?? [])
-    const accept = c.req.header('Accept') ?? ''
-    const wantsSse = accept.includes('text/event-stream') || c.req.query('stream') === '1'
-
-    if (!wantsSse) {
-      throw AppError.badRequest(
-        'Please use SSE streaming (Accept: text/event-stream)',
-        'conversation.sse_required'
-      )
-    }
-
-    const prepared = await prepareConversationTurn({
-      username,
-      threadId,
-      requestedCreateTaskMode: body.createTaskMode === true,
-      requestedDraft: body.generateDraft === true
-    })
-
-    return streamSSE(c, async (stream) => {
-      // Keep the renderer SSE idle watchdog alive during long tool/LLM gaps
-      // (e.g. OpenCode read/explore). Must be < SSE_IDLE_TIMEOUT_MS (45s).
-      const HEARTBEAT_MS = 15_000
-      let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-      const stopHeartbeat = (): void => {
-        if (!heartbeatTimer) return
-        clearInterval(heartbeatTimer)
-        heartbeatTimer = null
-      }
-      try {
-        heartbeatTimer = setInterval(() => {
-          void stream
-            .writeSSE({
-              event: 'heartbeat',
-              data: JSON.stringify({ ts: Date.now() })
-            })
-            .catch(() => stopHeartbeat())
-        }, HEARTBEAT_MS)
-        heartbeatTimer.unref?.()
-
-        for await (const chunk of executePreparedTurn(prepared, body.message!, {
-          attachments,
-          selectedDraftSection: body.selectedDraftSection,
-          selectedPlanNodeRef: body.selectedPlanNodeRef
-        })) {
-          await stream.writeSSE({
-            event: chunk.event,
-            data: JSON.stringify(chunk.data)
-          })
-        }
-      } catch (error) {
-        const turnError = toTurnErrorDto(error)
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ error: turnError, message: turnError.message })
-        })
-      } finally {
-        stopHeartbeat()
-        releaseWorkspaceLease(prepared.workspaceLeaseId)
-      }
-    })
+    throw AppError.gone(
+      `POST /api/threads/${threadId}/messages is gone; use POST /api/threads/${threadId}/turns and subscribe via /api/realtime`,
+      'conversation.messages_post_gone'
+    )
   })
 
   routes.patch('/:threadId/core', async (c) => {

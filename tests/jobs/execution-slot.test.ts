@@ -39,7 +39,7 @@ test('RuntimeRegistry allows parallel planning for different users', () => {
   assert.equal(registry.findActivePlanningIdForUser('bob'), 'session-b')
 })
 
-test('isRestartInterruptedPause distinguishes restart interrupt from user pause', () => {
+test('isRestartInterruptedPause is retired after P7 one-time migration', () => {
   const interrupted = {
     status: 'paused',
     lastError: null,
@@ -59,11 +59,76 @@ test('isRestartInterruptedPause distinguishes restart interrupt from user pause'
     lastError: { code: 'job.paused', message: 'Paused', params: null }
   } as Parameters<typeof isRestartInterruptedPause>[0]
 
-  assert.equal(isRestartInterruptedPause(interrupted), true)
+  assert.equal(isRestartInterruptedPause(interrupted), false)
   assert.equal(isRestartInterruptedPause(userPaused), false)
 })
 
-test('resolveStaleExecutionJobAction auto-resumes restart-interrupted paused jobs', async () => {
+test('isRestartInterruptedPause does not auto-resume pause-human dependency', () => {
+  const humanPaused = {
+    status: 'paused',
+    lastError: null,
+    suspensionKind: null,
+    taskProgress: {
+      phase: 'running',
+      status: 'running',
+      currentIndex: 1,
+      total: 2,
+      currentTaskId: 't2',
+      message: null,
+      tasks: [
+        { id: 't1', title: 'T1', status: 'completed', executionStatus: 'completed' },
+        {
+          id: 't2',
+          title: 'T2',
+          status: 'failed',
+          executionStatus: 'failed',
+          blockerKind: 'dependency-human',
+          recoveryAction: 'pause-human'
+        }
+      ]
+    }
+  } as Parameters<typeof isRestartInterruptedPause>[0]
+
+  assert.equal(isRestartInterruptedPause(humanPaused), false)
+
+  const structured = {
+    ...humanPaused,
+    suspensionKind: 'human_dependency'
+  } as Parameters<typeof isRestartInterruptedPause>[0]
+  assert.equal(isRestartInterruptedPause(structured), false)
+})
+
+test('resolveStaleExecutionJobAction keeps pause-human as noop', async () => {
+  const { resolveStaleExecutionJobAction } = await import(
+    '../../src/server/legacy-control-plane/execution-recovery'
+  )
+  const humanPaused = {
+    status: 'paused',
+    lastError: null,
+    taskProgress: {
+      phase: 'running',
+      status: 'running',
+      currentIndex: 1,
+      total: 2,
+      currentTaskId: 't2',
+      message: null,
+      tasks: [
+        {
+          id: 't2',
+          title: 'T2',
+          status: 'failed',
+          executionStatus: 'failed',
+          blockerKind: 'dependency-human',
+          recoveryAction: 'pause-human'
+        }
+      ]
+    }
+  } as Parameters<typeof resolveStaleExecutionJobAction>[0]
+
+  assert.equal(resolveStaleExecutionJobAction(humanPaused), 'noop')
+})
+
+test('resolveStaleExecutionJobAction keeps legacy restart-looking paused as noop', async () => {
   const { resolveStaleExecutionJobAction } = await import(
     '../../src/server/legacy-control-plane/execution-recovery'
   )
@@ -89,7 +154,7 @@ test('resolveStaleExecutionJobAction auto-resumes restart-interrupted paused job
     lastError: { code: 'job.paused', message: 'Paused', params: null }
   } as Parameters<typeof resolveStaleExecutionJobAction>[0]
 
-  assert.equal(resolveStaleExecutionJobAction(interrupted), 'resume-running')
+  assert.equal(resolveStaleExecutionJobAction(interrupted), 'noop')
   assert.equal(resolveStaleExecutionJobAction(userPaused), 'noop')
   assert.equal(resolveStaleExecutionJobAction({ status: 'running' } as never), 'resume-running')
 })

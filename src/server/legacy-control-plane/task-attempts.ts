@@ -266,6 +266,24 @@ export function authorizeUncertainTaskAttemptReplayForJob(jobId: string): number
   })
 }
 
+/** True when any attempt still holds a stable logical key that blocks automatic replay. */
+export function jobHasUncertainReplayFence(jobId: string): boolean {
+  const rows = getDb()
+    .select({
+      idempotencyKey: jobTaskAttempts.idempotencyKey,
+      status: jobTaskAttempts.status
+    })
+    .from(jobTaskAttempts)
+    .where(
+      and(
+        eq(jobTaskAttempts.jobId, jobId),
+        inArray(jobTaskAttempts.status, ['running', 'interrupted', 'failed'])
+      )
+    )
+    .all()
+  return rows.some((row) => /^[a-f0-9]{64}$/u.test(row.idempotencyKey))
+}
+
 /**
  * Cross the durable side-effect fence immediately before invoking a Provider. After this succeeds,
  * the stable key must never be freed automatically: a crash or ambiguous Provider failure is an
