@@ -7,7 +7,15 @@ import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
 import { loadJobAbilitiesInTx, loadJobPlan, loadJobPlanInTx, saveJobPlanInTx } from '../db/job-plan'
 import { saveTaskProgressInTx } from '../db/job-progress'
-import { designRuns, threadJobs, threadMessages, threads, type ThreadJob } from '../db/schema'
+import {
+  deletionRequests,
+  designRuns,
+  draftReferences,
+  threadJobs,
+  threadMessages,
+  threads,
+  type ThreadJob
+} from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultTaskProgress } from '../planner/save-plan'
@@ -24,6 +32,7 @@ import {
 import { advanceWorkloadQueue } from '../legacy-control-plane/workload-slot-store'
 import { emitJobEvent } from '../legacy-control-plane/service'
 import { putDesignPlanRevisionInTx } from '../retention/design-plan-artifacts'
+import { stageJobReferenceAssets } from '../legacy-control-plane/job-reference-assets'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -45,11 +54,7 @@ export type DesignSessionRowPatch = Partial<{
 
 export async function getDesignSessionRow(designSessionId: string): Promise<ThreadJob | null> {
   const db = getDb()
-  const rows = await db
-    .select()
-    .from(threadJobs)
-    .where(eq(threadJobs.id, designSessionId))
-    .limit(1)
+  const rows = await db.select().from(threadJobs).where(eq(threadJobs.id, designSessionId)).limit(1)
   return rows[0] ?? null
 }
 
@@ -113,8 +118,14 @@ export async function updateDesignSessionRow(
 ): Promise<ThreadJobDto | null> {
   const db = getDb()
   const now = nowSec()
-  const { plan, planProgress, taskProgress, lastError, launchedJobId: _launchedJobId, ...rowPatch } =
-    patch
+  const {
+    plan,
+    planProgress,
+    taskProgress,
+    lastError,
+    launchedJobId: _launchedJobId,
+    ...rowPatch
+  } = patch
 
   const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
   if (lastError !== undefined) {
@@ -173,9 +184,7 @@ export async function updateDesignSessionRow(
   })
 
   const rows = db.select().from(threadJobs).where(eq(threadJobs.id, designSessionId)).limit(1).all()
-  return rows[0]
-    ? mapJob(rows[0], { includePlan: options?.includePlan ?? true })
-    : null
+  return rows[0] ? mapJob(rows[0], { includePlan: options?.includePlan ?? true }) : null
 }
 
 export async function updateDesignSessionRowFenced(
@@ -192,8 +201,14 @@ export async function updateDesignSessionRowFenced(
     if (!existing) return false
 
     const now = nowSec()
-    const { plan, planProgress, taskProgress, lastError, launchedJobId: _launchedJobId, ...rowPatch } =
-      patch
+    const {
+      plan,
+      planProgress,
+      taskProgress,
+      lastError,
+      launchedJobId: _launchedJobId,
+      ...rowPatch
+    } = patch
 
     const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
     if (lastError !== undefined) {
@@ -255,14 +270,8 @@ export async function updateDesignSessionRowFenced(
 
   if (!applied) return null
 
-  const rows = await db
-    .select()
-    .from(threadJobs)
-    .where(eq(threadJobs.id, designSessionId))
-    .limit(1)
-  return rows[0]
-    ? mapJob(rows[0], { includePlan: options?.includePlan ?? true })
-    : null
+  const rows = await db.select().from(threadJobs).where(eq(threadJobs.id, designSessionId)).limit(1)
+  return rows[0] ? mapJob(rows[0], { includePlan: options?.includePlan ?? true }) : null
 }
 
 export async function createPlannerRun(input: {
@@ -377,9 +386,8 @@ export async function launchJobFromDesignSession(
   const draftMessage = await getMessage(username, threadId, session.draftMessageId, {
     signAssets: false
   })
-  let draftPayloadColumns:
-    | { payloadJson: string | null; payloadArtifactId: string | null }
-    | null = null
+  let draftPayloadColumns: { payloadJson: string | null; payloadArtifactId: string | null } | null =
+    null
   if (draftMessage?.payload) {
     const payload = draftMessage.payload as Record<string, unknown>
     draftPayloadColumns = await prepareMessagePayloadColumns(session.draftMessageId, {
@@ -389,140 +397,216 @@ export async function launchJobFromDesignSession(
     })
   }
 
+  // Stage task-owned copies before the launch CAS. They remain invisible to execution
+  // until the transferred manifest is committed; a failed CAS removes every copy.
+  const stagedAssets = await stageJobReferenceAssets({
+    jobId: designSessionId,
+    threadId,
+    manifest: manifest!
+  }).catch((error) => {
+    if (error instanceof ReferenceFileMissingError) {
+      throw AppError.badRequest('Reference file missing', 'draft.reference_not_found', {
+        referenceId: error.referenceId,
+        referenceName: error.referenceName,
+        path: error.relativePath
+      })
+    }
+    throw error
+  })
+
   // Single atomic confirm boundary: re-read session state inside the transaction,
   // CAS on owner/thread/status/revisions, freeze snapshot revisions, flip the job to
   // pending, write planConfirmedAt, clear old errors AND old lease, persist task
   // progress, link the draft message payload, and mark the thread's active plan.
-  const txResult = db.transaction(() => {
-    const currentRows = db
-      .select()
-      .from(threadJobs)
-      .where(
-        and(
-          eq(threadJobs.id, designSessionId),
-          eq(threadJobs.threadId, threadId),
-          eq(threadJobs.username, username)
+  let txResult:
+    | {
+        ok: true
+        taskProgress: TaskProgressDto
+        planProgress: PlanProgressDto
+      }
+    | { ok: false; reason: 'conflict' | 'deleting' }
+
+  try {
+    txResult = db.transaction(() => {
+      const activeDeletion = db
+        .select({ id: deletionRequests.id })
+        .from(deletionRequests)
+        .where(
+          and(
+            eq(deletionRequests.entityKind, 'thread_job'),
+            eq(deletionRequests.entityId, designSessionId),
+            inArray(deletionRequests.phase, [
+              'requested',
+              'draining',
+              'runtime_closed',
+              'database_deleted',
+              'filesystem_cleaned'
+            ])
+          )
         )
-      )
-      .limit(1)
-      .all()
-    const current = currentRows[0]
-    if (!current) return { ok: false as const }
+        .limit(1)
+        .all()[0]
+      if (activeDeletion) return { ok: false as const, reason: 'deleting' as const }
 
-    assertConfirmRevisionMatches(current, expectedRevisions)
+      const currentRows = db
+        .select()
+        .from(threadJobs)
+        .where(
+          and(
+            eq(threadJobs.id, designSessionId),
+            eq(threadJobs.threadId, threadId),
+            eq(threadJobs.username, username)
+          )
+        )
+        .limit(1)
+        .all()
+      const current = currentRows[0]
+      if (!current) return { ok: false as const, reason: 'conflict' as const }
 
-    const currentPlan = loadJobPlanInTx(db, designSessionId)
-    const currentAbilities = loadJobAbilitiesInTx(db, designSessionId)
-    const currentManifest = parseSessionManifest(current)
+      assertConfirmRevisionMatches(current, expectedRevisions)
 
-    validateLaunchPreconditions({
-      session: current,
-      plan: currentPlan,
-      manifest: currentManifest
-    })
+      const currentPlan = loadJobPlanInTx(db, designSessionId)
+      const currentAbilities = loadJobAbilitiesInTx(db, designSessionId)
+      const currentManifest = parseSessionManifest(current)
 
-    const currentSnapshot = buildJobSnapshot({
-      session: current,
-      plan: currentPlan!,
-      abilities: currentAbilities,
-      manifest: currentManifest!
-    })
-    const currentPlanProgress: PlanProgressDto = {
-      phase: 'plan_ready',
-      status: 'completed',
-      contextsRegistered: currentSnapshot.executionPlan.tasks.length,
-      contextsTotal: currentSnapshot.executionPlan.tasks.length,
-      milestones: currentSnapshot.executionPlan.milestones.length,
-      slices: currentSnapshot.executionPlan.milestones.reduce((n, m) => n + m.slices.length, 0),
-      tasks: currentSnapshot.executionPlan.tasks.length,
-      progressCode: 'plan.plan_ready',
-      progressParams: { tasks: currentSnapshot.executionPlan.tasks.length },
-      message: null
-    }
-    const currentTaskProgress = defaultTaskProgress(currentSnapshot.executionPlan.tasks)
-    const planCounts = {
-      milestones: currentPlanProgress.milestones,
-      slices: currentPlanProgress.slices,
-      tasks: currentPlanProgress.tasks
-    }
-
-    const result = db
-      .update(threadJobs)
-      .set({
-        status: 'pending',
-        phase: 'archived',
-        workspacePath: currentSnapshot.workspaceRoot,
-        planPhase: currentPlanProgress.phase,
-        planStatus: currentPlanProgress.status,
-        planContextsRegistered: currentPlanProgress.contextsRegistered,
-        planContextsTotal: currentPlanProgress.contextsTotal,
-        planMessage: currentPlanProgress.message ?? null,
-        planCountsJson: JSON.stringify(planCounts),
-        draftConfirmedAt: current.draftConfirmedAt ?? confirmedAt,
-        planConfirmedAt: confirmedAt,
-        designSessionId: designSessionId,
-        snapshotDraftRevision: currentSnapshot.draftRevision,
-        snapshotPlanRevision: currentSnapshot.planRevision,
-        snapshotManifestRevision: currentSnapshot.manifestRevision,
-        lastError: null,
-        // Clear any stale lease from a previous run so recovery/claim starts clean.
-        executionLeaseOwner: null,
-        executionLeaseExpiresAt: null,
-        activeRunId: null,
-        updatedAt: confirmedAt
+      validateLaunchPreconditions({
+        session: current,
+        plan: currentPlan,
+        manifest: currentManifest
       })
-      .where(
-        and(
-          eq(threadJobs.id, designSessionId),
-          eq(threadJobs.username, username),
-          eq(threadJobs.threadId, threadId),
-          eq(threadJobs.status, 'plan_editing'),
-          isNull(threadJobs.planConfirmedAt),
-          eq(threadJobs.draftRevision, expectedRevisions.draftRevision),
-          eq(threadJobs.planRevision, expectedRevisions.planRevision),
-          eq(threadJobs.manifestRevision, expectedRevisions.manifestRevision)
-        )
-      )
-      .run()
 
-    if (result.changes !== 1) return { ok: false as const }
+      const currentSnapshot = buildJobSnapshot({
+        session: current,
+        plan: currentPlan!,
+        abilities: currentAbilities,
+        manifest: stagedAssets.manifest
+      })
+      const currentPlanProgress: PlanProgressDto = {
+        phase: 'plan_ready',
+        status: 'completed',
+        contextsRegistered: currentSnapshot.executionPlan.tasks.length,
+        contextsTotal: currentSnapshot.executionPlan.tasks.length,
+        milestones: currentSnapshot.executionPlan.milestones.length,
+        slices: currentSnapshot.executionPlan.milestones.reduce((n, m) => n + m.slices.length, 0),
+        tasks: currentSnapshot.executionPlan.tasks.length,
+        progressCode: 'plan.plan_ready',
+        progressParams: { tasks: currentSnapshot.executionPlan.tasks.length },
+        message: null
+      }
+      const currentTaskProgress = defaultTaskProgress(currentSnapshot.executionPlan.tasks)
+      const planCounts = {
+        milestones: currentPlanProgress.milestones,
+        slices: currentPlanProgress.slices,
+        tasks: currentPlanProgress.tasks
+      }
 
-    saveTaskProgressInTx(
-      db,
-      designSessionId,
-      currentTaskProgress,
-      eq(threadJobs.id, designSessionId)
-    )
-
-    if (draftPayloadColumns) {
-      db.update(threadMessages)
+      const result = db
+        .update(threadJobs)
         .set({
-          payloadJson: draftPayloadColumns.payloadJson,
-          payloadArtifactId: draftPayloadColumns.payloadArtifactId
+          status: 'pending',
+          phase: 'archived',
+          workspacePath: currentSnapshot.workspaceRoot,
+          planPhase: currentPlanProgress.phase,
+          planStatus: currentPlanProgress.status,
+          planContextsRegistered: currentPlanProgress.contextsRegistered,
+          planContextsTotal: currentPlanProgress.contextsTotal,
+          planMessage: currentPlanProgress.message ?? null,
+          planCountsJson: JSON.stringify(planCounts),
+          draftConfirmedAt: current.draftConfirmedAt ?? confirmedAt,
+          planConfirmedAt: confirmedAt,
+          designSessionId: designSessionId,
+          snapshotDraftRevision: currentSnapshot.draftRevision,
+          snapshotPlanRevision: currentSnapshot.planRevision,
+          snapshotManifestRevision: currentSnapshot.manifestRevision,
+          referenceManifestJson: JSON.stringify(stagedAssets.manifest),
+          lastError: null,
+          // Clear any stale lease from a previous run so recovery/claim starts clean.
+          executionLeaseOwner: null,
+          executionLeaseExpiresAt: null,
+          activeRunId: null,
+          updatedAt: confirmedAt
         })
         .where(
           and(
-            eq(threadMessages.id, current.draftMessageId),
-            eq(threadMessages.threadId, threadId),
-            eq(threadMessages.username, username)
+            eq(threadJobs.id, designSessionId),
+            eq(threadJobs.username, username),
+            eq(threadJobs.threadId, threadId),
+            eq(threadJobs.status, 'plan_editing'),
+            isNull(threadJobs.planConfirmedAt),
+            eq(threadJobs.draftRevision, expectedRevisions.draftRevision),
+            eq(threadJobs.planRevision, expectedRevisions.planRevision),
+            eq(threadJobs.manifestRevision, expectedRevisions.manifestRevision)
           )
         )
         .run()
-    }
 
-    db.update(threads)
-      .set({ activePlanId: designSessionId, updatedAt: confirmedAt })
-      .where(and(eq(threads.id, threadId), eq(threads.username, username)))
-      .run()
+      if (result.changes !== 1) return { ok: false as const, reason: 'conflict' as const }
 
-    return {
-      ok: true as const,
-      taskProgress: currentTaskProgress,
-      planProgress: currentPlanProgress
-    }
-  })
+      for (const transfer of stagedAssets.transfers) {
+        db.update(draftReferences)
+          .set({
+            attachmentId: transfer.attachmentId,
+            resolvedPath: transfer.resolvedPath,
+            assetUrl: transfer.assetUrl,
+            updatedAt: confirmedAt
+          })
+          .where(
+            and(
+              eq(draftReferences.designSessionId, designSessionId),
+              eq(draftReferences.id, transfer.referenceId)
+            )
+          )
+          .run()
+      }
+
+      saveTaskProgressInTx(
+        db,
+        designSessionId,
+        currentTaskProgress,
+        eq(threadJobs.id, designSessionId)
+      )
+
+      if (draftPayloadColumns) {
+        db.update(threadMessages)
+          .set({
+            payloadJson: draftPayloadColumns.payloadJson,
+            payloadArtifactId: draftPayloadColumns.payloadArtifactId
+          })
+          .where(
+            and(
+              eq(threadMessages.id, current.draftMessageId),
+              eq(threadMessages.threadId, threadId),
+              eq(threadMessages.username, username)
+            )
+          )
+          .run()
+      }
+
+      db.update(threads)
+        .set({ activePlanId: designSessionId, updatedAt: confirmedAt })
+        .where(and(eq(threads.id, threadId), eq(threads.username, username)))
+        .run()
+
+      return {
+        ok: true as const,
+        taskProgress: currentTaskProgress,
+        planProgress: currentPlanProgress
+      }
+    })
+  } catch (error) {
+    await stagedAssets.cleanup().catch(() => undefined)
+    throw error
+  }
 
   if (!txResult.ok) {
+    await stagedAssets.cleanup().catch(() => undefined)
+    if (txResult.reason === 'deleting') {
+      throw AppError.conflict(
+        'Draft deletion is already in progress',
+        undefined,
+        'draft.deletion_in_progress'
+      )
+    }
     throw AppError.conflict(
       'Plan changed while it was being confirmed',
       undefined,

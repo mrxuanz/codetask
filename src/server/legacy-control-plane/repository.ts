@@ -10,6 +10,7 @@ import { jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { getAppContext } from '../bootstrap'
+import { signAssetUrlsInValue } from '../auth/sign-asset-url'
 import { onJobStatusTransition } from '../retention'
 import { readRetentionSettings } from '../retention/settings'
 import { isManifestFresh } from '../reference-corpus/corpus-sync'
@@ -354,7 +355,13 @@ export async function mapJob(
     taskProgress,
     abilities,
     plan: includePlan ? (plan ?? undefined) : undefined,
-    referenceManifest: manifest ? toPublicReferenceManifest(manifest) : undefined,
+    referenceManifest: manifest
+      ? (signAssetUrlsInValue(
+          getAppContext().security.authSecret,
+          toPublicReferenceManifest(manifest),
+          row.username
+        ) as ReturnType<typeof toPublicReferenceManifest>)
+      : undefined,
     referenceManifestStale: !isManifestFresh(row),
     workspacePath: row.workspacePath,
     lastError: hydrateTurnErrorField(row.lastError),

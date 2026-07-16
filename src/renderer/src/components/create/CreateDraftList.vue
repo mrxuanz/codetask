@@ -2,11 +2,14 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
-import { fetchUserDrafts, type UserDraftListItem } from '@renderer/api/jobs'
+import { Trash2 } from 'lucide-vue-next'
+import { deleteUserDraft, fetchUserDrafts, type UserDraftListItem } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
+import ConfirmDialog from '@renderer/components/ui/ConfirmDialog.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Input from '@renderer/components/ui/Input.vue'
 import { DRAFT_WIZARD_STEP_COUNT } from '@renderer/lib/draftForm'
+import { toastError } from '@renderer/lib/toast'
 
 export type DraftListEntry = UserDraftListItem
 
@@ -23,6 +26,8 @@ const error = ref<string | null>(null)
 const entries = ref<DraftListEntry[]>([])
 const searchQuery = ref('')
 const completionFilter = ref<'all' | 'incomplete' | 'complete'>('all')
+const pendingDelete = ref<DraftListEntry | null>(null)
+const deleting = ref(false)
 
 const completionFilters = computed(() => [
   { value: 'all' as const, label: t('workspace.create.draftFilterAll') },
@@ -34,6 +39,17 @@ const emptyMessage = computed(() => {
   if (searchQuery.value.trim()) return t('workspace.create.draftSearchEmpty')
   if (completionFilter.value === 'incomplete') return t('workspace.create.draftIncompleteEmpty')
   return t('workspace.create.draftListEmpty')
+})
+
+const confirmDeleteTitle = computed(() => t('workspace.create.confirmDeleteDraftTitle'))
+
+const confirmDeleteMessage = computed(() => {
+  const entry = pendingDelete.value
+  if (!entry) return ''
+  if (entry.launched) {
+    return t('workspace.create.confirmDeleteDraftLaunchedMessage', { name: entry.title })
+  }
+  return t('workspace.create.confirmDeleteDraftMessage', { name: entry.title })
 })
 
 function isStillCollecting(draft: DraftListEntry): boolean {
@@ -116,6 +132,27 @@ onMounted(() => {
   void loadAllDrafts()
 })
 
+function requestDelete(entry: DraftListEntry, event: Event): void {
+  event.preventDefault()
+  event.stopPropagation()
+  pendingDelete.value = entry
+}
+
+async function handleConfirmDelete(): Promise<void> {
+  const entry = pendingDelete.value
+  if (!entry || deleting.value) return
+  deleting.value = true
+  try {
+    await deleteUserDraft(entry.threadId, entry.messageId)
+    pendingDelete.value = null
+    await loadAllDrafts()
+  } catch (err) {
+    toastError(err, t('workspace.create.deleteDraftFailed'))
+  } finally {
+    deleting.value = false
+  }
+}
+
 defineExpose({ reload: loadAllDrafts })
 </script>
 
@@ -163,39 +200,64 @@ defineExpose({ reload: loadAllDrafts })
 
     <ul v-else-if="entries.length > 0" class="space-y-2">
       <li v-for="entry in entries" :key="`${entry.threadId}:${entry.messageId}`">
-        <button
-          type="button"
-          class="flex w-full flex-col gap-1 rounded-xl border border-border bg-card px-4 py-3 text-left shadow-sm transition-colors hover:bg-muted"
-          @click="emit('continueDraft', entry)"
+        <div
+          class="flex w-full items-stretch gap-1 rounded-xl border border-border bg-card shadow-sm transition-colors hover:bg-muted"
         >
-          <div class="flex items-center justify-between gap-2">
-            <span class="truncate font-medium">{{ entry.title }}</span>
-            <div class="flex shrink-0 items-center gap-2">
-              <span
-                class="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                :class="draftStatusBadgeClass(entry)"
-              >
-                {{ draftStatusLabel(entry) }}
-              </span>
-              <span class="text-xs text-muted-foreground">{{ stepLabel(entry) }}</span>
+          <button
+            type="button"
+            class="flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left"
+            @click="emit('continueDraft', entry)"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate font-medium">{{ entry.title }}</span>
+              <div class="flex shrink-0 items-center gap-2">
+                <span
+                  class="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                  :class="draftStatusBadgeClass(entry)"
+                >
+                  {{ draftStatusLabel(entry) }}
+                </span>
+                <span class="text-xs text-muted-foreground">{{ stepLabel(entry) }}</span>
+              </div>
             </div>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{{ entry.projectTitle }}</span>
+              <span>·</span>
+              <span>{{ entry.threadTitle }}</span>
+              <span>·</span>
+              <span>{{ draftStatusLabel(entry) }}</span>
+            </div>
+            <p v-if="entry.summary" class="line-clamp-2 text-xs text-muted-foreground/80">
+              {{ entry.summary }}
+            </p>
+          </button>
+          <div class="flex items-center pr-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+              :aria-label="t('common.delete')"
+              @click="requestDelete(entry, $event)"
+            >
+              <Trash2 class="h-4 w-4" />
+            </Button>
           </div>
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{{ entry.projectTitle }}</span>
-            <span>·</span>
-            <span>{{ entry.threadTitle }}</span>
-            <span>·</span>
-            <span>{{ draftStatusLabel(entry) }}</span>
-          </div>
-          <p v-if="entry.summary" class="line-clamp-2 text-xs text-muted-foreground/80">
-            {{ entry.summary }}
-          </p>
-        </button>
+        </div>
       </li>
     </ul>
 
     <div v-else class="rounded-xl border border-dashed border-border py-16 text-center">
       <p class="text-sm text-muted-foreground">{{ emptyMessage }}</p>
     </div>
+
+    <ConfirmDialog
+      :open="Boolean(pendingDelete)"
+      :title="confirmDeleteTitle"
+      :message="confirmDeleteMessage"
+      :loading="deleting"
+      @close="pendingDelete = null"
+      @confirm="handleConfirmDelete"
+    />
   </div>
 </template>

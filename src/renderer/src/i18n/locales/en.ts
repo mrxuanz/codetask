@@ -461,7 +461,7 @@ export default {
       newDraftThread: 'New task thread',
       draftListTitle: 'Draft list',
       draftListHint:
-        'All create-task drafts live here. Resume in-progress work or open completed archives.',
+        'All create-task drafts live here. Delete a draft at any stage; launched tasks stay in the task list.',
       startNew: 'New task',
       backToDraftList: 'Back to draft list',
       draftListEmpty: 'No drafts yet',
@@ -471,6 +471,12 @@ export default {
       draftFilterAll: 'All',
       draftFilterIncomplete: 'In progress',
       draftFilterComplete: 'Completed',
+      confirmDeleteDraftTitle: 'Delete draft',
+      confirmDeleteDraftMessage:
+        'Delete draft "{name}" and its generated files? This cannot be undone.',
+      confirmDeleteDraftLaunchedMessage:
+        'Remove "{name}" from the draft list? The launched task stays in the task list and will not be deleted.',
+      deleteDraftFailed: 'Failed to delete draft',
       draftStatusLaunched: 'Completed',
       draftStatusInProgress: 'In progress',
       draftStatusCollecting: 'Collecting requirements',

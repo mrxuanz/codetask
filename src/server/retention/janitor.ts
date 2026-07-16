@@ -2,6 +2,7 @@ import { existsSync } from 'fs'
 import { readdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { eq, or } from 'drizzle-orm'
+import { parseJobReferenceManifest } from '@shared/job-references'
 import type { getDb } from '../db'
 import {
   draftReferences,
@@ -178,7 +179,7 @@ export async function pruneStaleThreadAttachmentDirs(
     const threadDir = join(attachmentsRoot, thread.id)
     if (!existsSync(threadDir)) continue
 
-    const [referenceRows, messageRows] = await Promise.all([
+    const [referenceRows, messageRows, jobRows] = await Promise.all([
       db
         .select({ attachmentId: draftReferences.attachmentId })
         .from(draftReferences)
@@ -187,7 +188,11 @@ export async function pruneStaleThreadAttachmentDirs(
       db
         .select({ attachmentsJson: threadMessages.attachmentsJson })
         .from(threadMessages)
-        .where(eq(threadMessages.threadId, thread.id))
+        .where(eq(threadMessages.threadId, thread.id)),
+      db
+        .select({ referenceManifestJson: threadJobs.referenceManifestJson })
+        .from(threadJobs)
+        .where(eq(threadJobs.threadId, thread.id))
     ])
 
     const validAttachmentIds = new Set<string>()
@@ -197,6 +202,14 @@ export async function pruneStaleThreadAttachmentDirs(
     for (const row of messageRows) {
       for (const attachmentId of parseMessageAttachmentIds(row.attachmentsJson)) {
         validAttachmentIds.add(attachmentId)
+      }
+    }
+    for (const row of jobRows) {
+      const manifest = parseJobReferenceManifest(row.referenceManifestJson)
+      for (const reference of manifest?.references ?? []) {
+        if (reference.storageOwner === 'job' && reference.attachmentId) {
+          validAttachmentIds.add(reference.attachmentId)
+        }
       }
     }
 

@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto'
+import { rm } from 'fs/promises'
 import { and, eq, inArray } from 'drizzle-orm'
+import { parseJobReferenceManifest } from '@shared/job-references'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { deletionRequests, projects, threadJobs, threads } from '../db/schema'
+import { attachmentDir } from '../data-paths'
 import { AppError } from '../error'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
 import {
@@ -12,9 +15,9 @@ import {
   type ThreadPurgeTargets
 } from '../retention/purge'
 import { releaseJobCursorResources } from '../sandbox'
-import { getUserJob } from './service'
 import { releaseWorkspaceLeaseForOwner } from './workspace-lease-store'
 import { throwIfCurrentRequestAborted } from '../context/request-abort'
+import { assertFrozenAttachmentId, FrozenIdError } from '../../shared/frozen-ids'
 
 export type DeletionEntityKind = 'thread_job' | 'thread' | 'project'
 
@@ -52,7 +55,7 @@ export interface DeletionFrozenSnapshot {
 }
 
 export type CleanupTargets =
-  | { kind: 'job'; threadId: string; jobId: string }
+  | { kind: 'job'; threadId: string; jobId: string; attachmentIds?: string[] }
   | { kind: 'thread'; threadId: string; targets: ThreadPurgeTargets }
   | { kind: 'project' }
 
@@ -220,7 +223,7 @@ export async function isThreadProjectDeletionBlocked(threadId: string): Promise<
   return isProjectDeletionBlocked(projectId)
 }
 
-async function createDeletionRequest(input: {
+function createDeletionRequest(input: {
   entityKind: DeletionEntityKind
   entityId: string
   username: string
@@ -230,7 +233,7 @@ async function createDeletionRequest(input: {
   workspacePath?: string | null
   frozenJson?: string | null
   cleanupTargetsJson?: string | null
-}): Promise<string> {
+}): string {
   const existing = findActiveDeletionRequest(input.entityKind, input.entityId)
   if (existing) {
     return existing.id
@@ -438,6 +441,12 @@ async function purgeCleanupTargets(request: LoadedDeletionRequest): Promise<void
   const dataDir = getAppContext().dataDir
   if (targets.kind === 'job') {
     await purgeJobFilesystemStrictHook(dataDir, targets.threadId, targets.jobId)
+    for (const attachmentId of targets.attachmentIds ?? []) {
+      await rm(attachmentDir(dataDir, targets.threadId, attachmentId), {
+        recursive: true,
+        force: true
+      })
+    }
     return
   }
 
@@ -558,7 +567,12 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
     return executeDeletionRequest(active.id)
   }
 
-  const job = await getUserJob(username, jobId)
+  const job = getDb()
+    .select()
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
+    .limit(1)
+    .all()[0]
   if (!job) {
     throw AppError.notFound('Job not found', 'job.not_found')
   }
@@ -570,6 +584,7 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
     .limit(1)
   const projectId = threadRows[0]?.projectId ?? null
   const frozen = await freezeJobRuntimeIdentity(jobId)
+  const ownedAttachmentIds = collectJobOwnedAttachmentIds(job.referenceManifestJson)
 
   const requestId = await createDeletionRequest({
     entityKind: 'thread_job',
@@ -585,11 +600,96 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
     cleanupTargetsJson: JSON.stringify({
       kind: 'job',
       threadId: job.threadId,
-      jobId
+      jobId,
+      attachmentIds: ownedAttachmentIds
     } satisfies CleanupTargets)
   })
 
   await executeDeletionRequest(requestId)
+}
+
+function collectJobOwnedAttachmentIds(rawManifest: string | null | undefined): string[] {
+  const manifest = parseJobReferenceManifest(rawManifest)
+  if (!manifest) return []
+  const ids = new Set<string>()
+  for (const reference of manifest.references) {
+    if (reference.storageOwner !== 'job' || !reference.attachmentId) continue
+    try {
+      ids.add(assertFrozenAttachmentId(reference.attachmentId))
+    } catch (error) {
+      if (error instanceof FrozenIdError) continue
+      throw error
+    }
+  }
+  return [...ids]
+}
+
+/**
+ * Atomically claim deletion of a pre-launch planning Job. The launch transaction
+ * checks the durable deletion intent, so either deletion wins or launch wins; a
+ * Job can never cross into the task list after this function claims it.
+ */
+export async function drainAndDeletePlanningJob(
+  username: string,
+  jobId: string
+): Promise<{ mode: 'deleted' | 'launched' }> {
+  const db = getDb()
+  const claim = db.transaction(() => {
+    const active = findActiveDeletionRequest('thread_job', jobId)
+    if (active) {
+      return { kind: 'delete' as const, requestId: active.id }
+    }
+
+    const job = db
+      .select()
+      .from(threadJobs)
+      .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
+      .limit(1)
+      .all()[0]
+    if (!job) return { kind: 'missing' as const }
+    if (job.planConfirmedAt != null) return { kind: 'launched' as const }
+
+    const projectId =
+      db
+        .select({ projectId: threads.projectId })
+        .from(threads)
+        .where(eq(threads.id, job.threadId))
+        .limit(1)
+        .all()[0]?.projectId ?? null
+
+    const requestId = createDeletionRequest({
+      entityKind: 'thread_job',
+      entityId: jobId,
+      username,
+      threadId: job.threadId,
+      projectId,
+      workspacePath: job.workspacePath ?? null,
+      frozenJson: JSON.stringify({
+        runtime: {
+          activeRunId: job.activeRunId ?? null,
+          executionLeaseOwner: job.executionLeaseOwner ?? null,
+          workspaceLeaseOwnerKind: 'thread_job',
+          workspaceLeaseOwnerId: jobId
+        },
+        draftMessageId: job.draftMessageId
+      } satisfies DeletionFrozenSnapshot),
+      cleanupTargetsJson: JSON.stringify({
+        kind: 'job',
+        threadId: job.threadId,
+        jobId,
+        attachmentIds: []
+      } satisfies CleanupTargets)
+    })
+    return { kind: 'delete' as const, requestId }
+  })
+
+  if (claim.kind === 'missing') {
+    throw AppError.notFound('Job not found', 'job.not_found')
+  }
+  if (claim.kind === 'launched') return { mode: 'launched' }
+
+  await executeDeletionRequest(claim.requestId)
+  return { mode: 'deleted' }
 }
 
 export async function drainAndDeleteThread(username: string, threadId: string): Promise<void> {
