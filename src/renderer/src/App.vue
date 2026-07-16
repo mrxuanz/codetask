@@ -8,6 +8,8 @@ provideBootstrap()
 </script>
 
 <template>
-  <RouterView />
-  <Toaster class="pointer-events-auto" />
+  <div class="h-full min-h-0 min-w-0">
+    <RouterView />
+    <Toaster class="pointer-events-auto" />
+  </div>
 </template>
