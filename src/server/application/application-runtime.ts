@@ -113,6 +113,16 @@ async function startV3ApplicationRuntimeOnce(runtime: V3ApplicationRuntime): Pro
     })
 
     await startControlPlaneScheduler(runtime.ctx)
+
+    // Conversation Turns/ACP are shared application services, independent of the Job generation.
+    const turns = await import('../conversation/turn-queue')
+    turns.reconcileConversationTurnsOnStartup()
+    await turns.advanceTurnQueue()
+    const reaper = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
+    reaper.configureConversationCursorReaper({
+      isThreadInflight: (threadId) => runtime.ctx.runtimeRegistry.isThreadInflight(threadId)
+    })
+    reaper.startConversationCursorReaper()
     runtime.started = true
   } catch (error: unknown) {
     for (const stop of rollback.reverse()) {
@@ -134,8 +144,22 @@ export async function shutdownApplicationRuntime(
       return runtime.shutdownPromise
     }
     runtime.shutdownPromise = (async () => {
-      await shutdownControlPlaneRuntime(reason, ctx)
-      runtime.started = false
+      try {
+        await shutdownControlPlaneRuntime(reason, ctx)
+        const reaper = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
+        reaper.stopConversationCursorReaper()
+        const { getCursorProviderRuntimeRegistry } =
+          await import('../agent-runtime/cursor-acp/runtime-registry')
+        const { closeAllJobCursorSandboxes } = await import('../sandbox/job-cursor-pool')
+        const { shutdownSandboxSupervisor } = await import('../sandbox/supervisor-manager')
+        await Promise.allSettled([
+          getCursorProviderRuntimeRegistry().closeAll(),
+          closeAllJobCursorSandboxes(),
+          shutdownSandboxSupervisor()
+        ])
+      } finally {
+        runtime.started = false
+      }
     })()
     return runtime.shutdownPromise
   }

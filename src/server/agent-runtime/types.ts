@@ -1,6 +1,7 @@
 import type { SupportedCoreCode } from '../conversation/cores'
 import type { ConversationRole } from './roles'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
+import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 
 export interface AgentTurnInput {
   provider: SupportedCoreCode
@@ -57,6 +58,7 @@ export interface AgentTurnRunnerInput {
   signal?: AbortSignal | undefined
 
   readRoots?: string[] | undefined
+  workspaceAccess?: WorkspaceAccessMode | undefined
 
   jobId?: string | undefined
   workloadRunId?: string | undefined

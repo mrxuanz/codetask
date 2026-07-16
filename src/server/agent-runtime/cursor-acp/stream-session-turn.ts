@@ -120,11 +120,18 @@ export async function closeCursorRuntimeScope(scopeId: string): Promise<void> {
 }
 
 export async function closeConversationCursorRuntime(threadId: string): Promise<void> {
-  await Promise.all([
-    closeCursorRuntimeScope(buildConversationCursorRuntimeScope(threadId, 'chat')),
-    closeCursorRuntimeScope(buildConversationCursorRuntimeScope(threadId, 'create_task')),
-    closeCursorRuntimeScope(`conversation:${threadId}`)
-  ])
+  const scopes = [
+    buildConversationCursorRuntimeScope(threadId, 'chat'),
+    buildConversationCursorRuntimeScope(threadId, 'create_task'),
+    `conversation:${threadId}`
+  ]
+  const { releaseJobCursorResources } = await import('../../sandbox')
+  await Promise.all(
+    scopes.flatMap((scopeId) => [
+      closeCursorRuntimeScope(scopeId),
+      releaseJobCursorResources(scopeId)
+    ])
+  )
 }
 
 export async function invalidateJobCursorRuntimeKey(

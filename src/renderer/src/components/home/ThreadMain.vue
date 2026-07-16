@@ -28,6 +28,7 @@ const streamingMessageId = computed(() => chatCtx.streamingMessageId.value)
 const awaitingAssistantReply = computed(() => chatCtx.awaitingAssistantReply.value)
 const error = computed(() => chatCtx.error.value)
 const runtimeStatus = computed(() => chatCtx.runtimeStatus.value)
+const activeChangeSet = computed(() => chatCtx.activeChangeSet.value)
 
 const activeProject = computed(
   () =>
@@ -63,8 +64,8 @@ const busy = computed(
 )
 
 // Multi-source watch compares each id; a getter that returns `[id, id]` would
-  // allocate a new array every run and re-open on syncThread() (blank flash).
-  watch(
+// allocate a new array every run and re-open on syncThread() (blank flash).
+watch(
   [() => activeProject.value?.id, () => activeThread.value?.id],
   ([projectId, threadId]) => {
     if (!projectId || !threadId || !activeThread.value) {
@@ -89,7 +90,11 @@ async function handleCoreChange(code: string): Promise<void> {
   if (updated) workspace.syncThread(updated)
 }
 
-async function handleSend(payload: { message: string; files: File[] }): Promise<void> {
+async function handleSend(payload: {
+  message: string
+  files: File[]
+  allowCodeChanges?: boolean
+}): Promise<void> {
   const updated = await chat.sendMessage(payload)
   if (updated) workspace.syncThread(updated)
 }
@@ -104,7 +109,9 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
   </div>
 
   <div v-else-if="!activeThread" class="flex h-full min-h-0 flex-1 flex-col">
-    <header class="flex h-12 items-center justify-between gap-2 border-b border-border px-3 sm:px-4">
+    <header
+      class="flex h-12 items-center justify-between gap-2 border-b border-border px-3 sm:px-4"
+    >
       <h1 class="text-sm font-medium">{{ activeProject.title }}</h1>
       <Button type="button" variant="outline" size="sm" @click="handleNewThread">
         {{ t('workspace.newThread') }}
@@ -121,7 +128,9 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
     >
       <div class="flex min-w-0 items-center gap-2">
         <h1 class="truncate text-sm font-medium">{{ threadTitle }}</h1>
-        <span class="hidden shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground sm:inline">
+        <span
+          class="hidden shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground sm:inline"
+        >
           {{ activeProject.title }}
         </span>
         <span v-if="coreSwitching" class="text-xs text-muted-foreground">
@@ -144,6 +153,58 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
       <ErrorAlert :message="selectedCore?.reason ?? t('workspace.coreUnavailable')" />
     </div>
 
+    <div
+      v-if="activeChangeSet"
+      class="mx-4 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs sm:mx-6"
+    >
+      <span>
+        {{ t('workspace.changeSet.label') }} ·
+        {{ t(`workspace.changeSet.status.${activeChangeSet.status}`) }}
+      </span>
+      <div class="flex items-center gap-2">
+        <Button
+          v-if="activeChangeSet.status === 'editing' && !busy"
+          type="button"
+          variant="outline"
+          size="sm"
+          class="h-7"
+          @click="chat.markActiveChangeSetReady()"
+        >
+          {{ t('workspace.changeSet.ready') }}
+        </Button>
+        <Button
+          v-if="activeChangeSet.status === 'ready_to_apply' && !busy"
+          type="button"
+          size="sm"
+          class="h-7"
+          @click="chat.applyActiveChangeSet()"
+        >
+          {{ t('workspace.changeSet.apply') }}
+        </Button>
+        <Button
+          v-if="activeChangeSet.status === 'needs_resolution' && !busy"
+          type="button"
+          variant="outline"
+          size="sm"
+          class="h-7"
+          @click="chat.rebaseActiveChangeSet()"
+        >
+          {{ t('workspace.changeSet.rebase') }}
+        </Button>
+        <Button
+          v-if="!['applied', 'cancelled', 'applying'].includes(activeChangeSet.status)"
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="h-7"
+          :disabled="busy"
+          @click="chat.cancelActiveChangeSet()"
+        >
+          {{ t('workspace.changeSet.cancel') }}
+        </Button>
+      </div>
+    </div>
+
     <div class="flex min-h-0 flex-1 flex-col">
       <ChatMessages
         :messages="messages"
@@ -156,6 +217,7 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
         :core-code="currentCoreCode"
         :disabled="loading || coreSwitching || coreUnavailable"
         :sending="busy"
+        :allow-code-changes="!activeChangeSet"
         @core-change="handleCoreChange"
         @send="handleSend"
       />

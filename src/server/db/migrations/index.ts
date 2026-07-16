@@ -37,6 +37,7 @@ import { migration036ConversationTurns } from './036_conversation_turns'
 import { migration037ChangeSets } from './037_change_sets'
 import { migration038WorkspaceLeaseChangeSetOwner } from './038_workspace_lease_change_set_owner'
 import { migration039PromoteRestartInterruptedPaused } from './039_promote_restart_interrupted_paused'
+import { migration040ConversationTurnChangeSets } from './040_conversation_turn_change_sets'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -79,7 +80,8 @@ export const allMigrations = [
   migration036ConversationTurns,
   migration037ChangeSets,
   migration038WorkspaceLeaseChangeSetOwner,
-  migration039PromoteRestartInterruptedPaused
+  migration039PromoteRestartInterruptedPaused,
+  migration040ConversationTurnChangeSets
 ]
 
 export function applyMigrations(db: Database.Database): void {

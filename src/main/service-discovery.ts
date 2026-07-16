@@ -55,7 +55,19 @@ function parseRecord(raw: unknown): RunningServiceRecord | null {
     return null
   }
 
-  return value as unknown as RunningServiceRecord
+  return {
+    schemaVersion: 1,
+    pid: value.pid,
+    instanceId: value.instanceId,
+    publishedAt: value.publishedAt,
+    host: value.host,
+    port: value.port,
+    url: value.url,
+    requestedPort: value.requestedPort,
+    portChanged: value.portChanged,
+    mode: 'server',
+    ...(value.dataDir !== undefined ? { dataDir: value.dataDir } : {})
+  }
 }
 
 function processIsAlive(pid: number): boolean {

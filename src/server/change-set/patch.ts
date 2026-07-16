@@ -88,9 +88,23 @@ export function readStoredPatch(dataDir: string, changeSetId: string): string | 
   return JSON.stringify({ version: 1, changes: cow })
 }
 
+/** Hash the exact persisted artifact so an out-of-band edit can never be applied silently. */
+export function readStoredPatchHash(dataDir: string, changeSetId: string): string | null {
+  const gitPath = changeSetPatchPath(dataDir, changeSetId)
+  if (existsSync(gitPath)) {
+    return createHash('sha256').update(readFileSync(gitPath)).digest('hex')
+  }
+  const cowPath = join(changeSetRootPath(dataDir, changeSetId), 'patch.json')
+  if (!existsSync(cowPath)) return null
+  return createHash('sha256').update(readFileSync(cowPath)).digest('hex')
+}
+
 export type ApplyPatchResult =
   | { kind: 'applied' }
-  | { kind: 'needs_resolution'; reason: 'base_changed' | 'apply_conflict' | 'non_git' | 'empty_patch' }
+  | {
+      kind: 'needs_resolution'
+      reason: 'base_changed' | 'apply_conflict' | 'non_git' | 'empty_patch'
+    }
   | { kind: 'lease_busy' }
 
 /**
@@ -132,8 +146,17 @@ export function applyPatchToMainWorkspace(input: {
 
   let changes
   try {
-    const parsed = JSON.parse(input.patchText) as { changes?: unknown }
-    if (!Array.isArray(parsed.changes)) {
+    const parsed = JSON.parse(input.patchText) as { changes?: unknown[] }
+    if (
+      !Array.isArray(parsed.changes) ||
+      !parsed.changes.every(
+        (change) =>
+          change !== null &&
+          typeof change === 'object' &&
+          typeof (change as { path?: unknown }).path === 'string' &&
+          ['modify', 'add', 'delete'].includes(String((change as { kind?: unknown }).kind ?? ''))
+      )
+    ) {
       return { kind: 'needs_resolution', reason: 'apply_conflict' }
     }
     changes = parsed.changes

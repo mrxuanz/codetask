@@ -5,8 +5,7 @@ import type { AppContext } from '../context'
 import { requireUsername } from '../auth/session'
 import { AppError } from '../error'
 import { ok } from '../response'
-import { registerJobHubConnection } from '../events/job-event-hub'
-import { getUserJob } from '../legacy-control-plane/service'
+import { getRealtimeJobSnapshot, registerJobHubConnection } from '../events/job-event-hub'
 import { getThread } from '../threads/service'
 import { assertSseClientCapacity } from '../middleware/http-limits'
 import {
@@ -33,7 +32,7 @@ async function assertTopicsOwned(username: string, topics: HubTopic[]): Promise<
     const jobId = jobIdFromTopic(topic)
     if (jobId) {
       if (jobId === 'resync') continue
-      const job = await getUserJob(username, jobId)
+      const job = await getRealtimeJobSnapshot(username, jobId)
       if (!job) {
         throw AppError.notFound('Job not found', 'job.not_found', { jobId })
       }

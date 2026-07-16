@@ -1,4 +1,12 @@
-import { blob, integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
+import {
+  blob,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+  index
+} from 'drizzle-orm/sqlite-core'
 
 export const appSettings = sqliteTable('app_settings', {
   namespace: text('namespace').primaryKey(),
@@ -119,6 +127,7 @@ export const conversationTurns = sqliteTable('conversation_turns', {
   attachmentIdsJson: text('attachment_ids_json').notNull().default('[]'),
   selectedDraftSection: text('selected_draft_section'),
   selectedPlanNodeRef: text('selected_plan_node_ref'),
+  changeSetId: text('change_set_id'),
   idempotencyKey: text('idempotency_key'),
   stateRevision: integer('state_revision').notNull().default(1),
   lastErrorJson: text('last_error_json'),
@@ -254,11 +263,7 @@ export const jobTaskAttempts = sqliteTable(
     endedAt: integer('ended_at')
   },
   (table) => [
-    uniqueIndex('idx_job_task_attempts_job_task_no').on(
-      table.jobId,
-      table.taskId,
-      table.attemptNo
-    ),
+    uniqueIndex('idx_job_task_attempts_job_task_no').on(table.jobId, table.taskId, table.attemptNo),
     uniqueIndex('idx_job_task_attempts_idempotency').on(table.idempotencyKey)
   ]
 )

@@ -94,6 +94,16 @@ export function createLegacyApplicationRuntime(
         execute: () => reconcileOnStartupOnce()
       },
       {
+        name: 'reconcile-conversation-turns',
+        execute: async () => {
+          const { reconcileConversationTurnsOnStartup } = await import('../conversation/turn-queue')
+          const result = reconcileConversationTurnsOnStartup()
+          if (result.failed > 0 || result.cancelled > 0) {
+            logger.info('reconciled orphan conversation turns', result)
+          }
+        }
+      },
+      {
         name: 'prune-runtime-trees',
         execute: async () => {
           const result = await pruneOrphanRuntimeTrees(ctx.dataDir, ctx.db)
@@ -196,6 +206,8 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
     // is complete and the executor is initialized, resume an interrupted running job (or FIFO work).
     const { advanceExecutionQueue } = await import('../legacy-control-plane/queue-coordinator')
     await advanceExecutionQueue()
+    const { advanceTurnQueue } = await import('../conversation/turn-queue')
+    await advanceTurnQueue()
 
     await Promise.all([
       runRetentionStartupPass(logger),
@@ -265,15 +277,30 @@ async function runShutdown(
 }
 
 async function closeCursorAcpRuntimes(logger: SafeLoggerImpl): Promise<void> {
+  const failures: unknown[] = []
   try {
     const reaper = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
     reaper.stopConversationCursorReaper()
     const { getCursorProviderRuntimeRegistry } =
       await import('../agent-runtime/cursor-acp/runtime-registry')
-    await getCursorProviderRuntimeRegistry().closeAll()
+    const { closeAllJobCursorSandboxes } = await import('../sandbox/job-cursor-pool')
+    const { shutdownSandboxSupervisor } = await import('../sandbox/supervisor-manager')
+    const results = await Promise.allSettled([
+      getCursorProviderRuntimeRegistry().closeAll(),
+      closeAllJobCursorSandboxes(),
+      shutdownSandboxSupervisor()
+    ])
+    failures.push(
+      ...results
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => result.reason)
+    )
   } catch (error) {
+    failures.push(error)
+  }
+  if (failures.length > 0) {
     logger.warn('close Cursor ACP runtimes failed', {
-      error: error instanceof Error ? error.message : String(error)
+      errors: failures.map((error) => (error instanceof Error ? error.message : String(error)))
     })
   }
 }

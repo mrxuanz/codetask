@@ -1,5 +1,6 @@
 import { resolve } from 'path'
 import type { AgentRole, AnySandboxPolicy, SandboxPolicyV2 } from './types'
+import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
 
 const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam'] as const
@@ -27,6 +28,7 @@ export function policyForRole(input: {
   workspaceRoot: string
   runtimeRoot: string
   verifierOutputRoot?: string
+  workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicyV2 {
   const workspaceRoot = resolve(input.workspaceRoot)
   const runtimeRoot = resolve(input.runtimeRoot)
@@ -34,9 +36,9 @@ export function policyForRole(input: {
   const allowedReadRoots = [workspaceRoot, runtimeRoot]
   const allowedWriteRoots = [runtimeRoot]
 
-  // FIX-PLAN §1.1 / §10.1: ordinary chat may perform simple workspace edits under outer sandbox
-  // (protected by workspace_leases). Planner must not write project source; only runtime artifacts.
-  if (input.role === 'task-worker' || input.role === 'conversation') {
+  // Only the execution worker may write the real checkout. Conversation/planner changes must use
+  // an isolated Change Set worktree; their direct project access is read-only.
+  if (input.role === 'task-worker' || input.workspaceAccess === 'isolated-write') {
     allowedWriteRoots.push(workspaceRoot)
   }
 
@@ -181,6 +183,7 @@ export function policyForRoleV2(input: {
   providerReadRoots?: string[]
   providerWriteRoots?: string[]
   attachmentReadRoots?: string[]
+  workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicyV2 {
   const workspaceRoot = resolve(input.workspaceRoot)
   const runtimeRoot = resolve(input.runtimeRoot)
@@ -194,7 +197,7 @@ export function policyForRoleV2(input: {
 
   const allowedWriteRoots: string[] = [runtimeRoot]
 
-  if (input.role === 'task-worker') {
+  if (input.role === 'task-worker' || input.workspaceAccess === 'isolated-write') {
     allowedWriteRoots.push(workspaceRoot)
   }
 

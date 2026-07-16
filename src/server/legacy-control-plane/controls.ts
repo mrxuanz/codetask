@@ -13,7 +13,11 @@ import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import { emitJobEvent, getUserJob, updateJobRow, updateJobRowForSnapshot } from './service'
 import { claimJobSlotOrEnqueue, findOccupyingJobId } from './job-queue'
-import { acquireExecutionLease, clearExecutionLease } from './repository'
+import {
+  acquireExecutionLease,
+  clearExecutionLease,
+  promoteContinuedPauseToPending
+} from './repository'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { prepareContinueFailedExecution } from './continue-failed-job'
 import { cancelJobSandboxTurns } from '../sandbox'
@@ -397,24 +401,62 @@ export async function resumePausedJob(username: string, jobId: string): Promise<
       status: job.status
     })
   }
-  // While pausing, record continue intent and wait for the old run to settle.
-  // Never flip pausing → running in place — that races with JOB_PAUSED unwind.
-  if (job.status === 'pausing') {
-    const updated = await updateJobRowForSnapshot(jobId, {
-      continueAfterPause: true,
-      suspensionKind: job.suspensionKind ?? 'user_pause'
-    })
-    if (!updated) throw AppError.internal('Failed to resume job', 'job.invalid_status')
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-    return updated
-  }
-  authorizeUncertainTaskAttemptReplayForJob(jobId)
-  const cleared = await updateJobRowForSnapshot(jobId, {
-    continueAfterPause: false,
-    suspensionKind: null,
-    recoveryReason: null
+  // Continue is first persisted as intent. It is consumed only after the previous run/slot has
+  // settled, so pausing/paused never races an old JOB_PAUSED unwind with a fresh execution loop.
+  const intent = await updateJobRowForSnapshot(jobId, {
+    continueAfterPause: true,
+    suspensionKind: job.suspensionKind ?? 'user_pause'
   })
-  return continueJobExecution(username, jobId, cleared ?? job)
+  if (!intent) throw AppError.internal('Failed to resume job', 'job.invalid_status')
+  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: intent } })
+
+  const { getActiveRun } = await import('./workload-slot-store')
+  const activeRun = await getActiveRun('thread_job', jobId)
+  if (job.status === 'pausing' || isJobExecuting(jobId) || activeRun) {
+    return intent
+  }
+
+  await settleContinueAfterPause(username, jobId)
+  const { advanceExecutionQueue } = await import('./queue-coordinator')
+  await advanceExecutionQueue(username)
+  return (await getUserJob(username, jobId)) ?? intent
+}
+
+/** Called after the old loop/slot closes, and by stable paused Continue. */
+export async function settleContinueAfterPause(username: string, jobId: string): Promise<boolean> {
+  const job = await getUserJob(username, jobId)
+  if (!job || job.status !== 'paused' || job.continueAfterPause !== true) return false
+
+  // This flag exists only after an explicit user Continue, so clearing an uncertain fence here is
+  // an auditable user authorization rather than startup auto-replay.
+  authorizeUncertainTaskAttemptReplayForJob(jobId)
+  if (!promoteContinuedPauseToPending(jobId)) return false
+
+  const { progress } = prepareInterruptedExecutionResume(job.taskProgress)
+  const resumedProgress: TaskProgressDto = {
+    ...progress,
+    phase: 'running',
+    status: 'pending',
+    message: null,
+    progressCode: 'execution.resuming',
+    progressParams: null
+  }
+  const pending = await updateJobRowForSnapshot(jobId, {
+    taskProgress: resumedProgress,
+    planProgress: {
+      ...defaultPlanProgress(),
+      phase: job.plan?.tasks?.length ? 'plan_ready' : 'idle',
+      status: 'pending',
+      message: null,
+      progressCode: 'execution.pending',
+      progressParams: null
+    }
+  })
+  if (pending) {
+    emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress: resumedProgress } })
+    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: pending } })
+  }
+  return true
 }
 
 async function waitForJobLoopIdle(jobId: string, timeoutMs = 30_000): Promise<boolean> {
@@ -568,92 +610,6 @@ export async function resumeJob(username: string, jobId: string): Promise<Thread
     'job.invalid_status',
     { status: job.status }
   )
-}
-
-async function continueJobExecution(
-  username: string,
-  jobId: string,
-  job: ThreadJobDto
-): Promise<ThreadJobDto> {
-  const { progress: recoveredProgress } = prepareInterruptedExecutionResume(job.taskProgress)
-  const resumedTaskProgress: TaskProgressDto = {
-    ...recoveredProgress,
-    phase: 'running',
-    status: 'running',
-    message: null,
-    progressCode: 'execution.resuming',
-    progressParams: null
-  }
-
-  const occupying = await findOccupyingJobId(username, jobId)
-  if (occupying) {
-    const queued = await updateJobRowForSnapshot(jobId, {
-      status: 'pending',
-      planProgress: {
-        ...defaultPlanProgress(),
-        phase: job.plan?.tasks?.length ? 'plan_ready' : 'idle',
-        status: 'pending',
-        message: null,
-        progressCode: 'execution.pending',
-        progressParams: null
-      },
-      lastError: null
-    })
-    if (!queued) throw AppError.internal('Failed to resume job', 'job.invalid_status')
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: queued } })
-    return queued
-  }
-
-  const shouldRun =
-    Boolean(job.plan?.tasks?.length) &&
-    (job.taskProgress.phase === 'running' ||
-      job.taskProgress.tasks.some((t) => t.status !== 'queued'))
-
-  if (shouldRun) {
-    const leased = acquireExecutionLease(username, jobId)
-    if (!leased) {
-      const queued = await updateJobRowForSnapshot(jobId, {
-        status: 'pending',
-        planProgress: {
-          ...defaultPlanProgress(),
-          phase: job.plan?.tasks?.length ? 'plan_ready' : 'idle',
-          status: 'pending',
-          message: null,
-          progressCode: 'execution.pending',
-          progressParams: null
-        },
-        taskProgress: resumedTaskProgress,
-        lastError: null
-      })
-      if (!queued) throw AppError.internal('Failed to resume job', 'job.invalid_status')
-      emitJobEvent(jobId, { event: 'job_snapshot', data: { job: queued } })
-      return queued
-    }
-
-    const patched = await updateJobRowForSnapshot(jobId, {
-      status: 'running',
-      taskProgress: resumedTaskProgress,
-      lastError: null
-    })
-    if (patched) {
-      job.taskProgress = resumedTaskProgress
-    }
-
-    await requestJobExecutionResume(username, jobId)
-    const updated = await getUserJob(username, jobId)
-    if (!updated) throw AppError.internal('Failed to resume job', 'job.invalid_status')
-    emitJobEvent(jobId, { event: 'task_progress', data: { taskProgress: resumedTaskProgress } })
-    emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-    return updated
-  }
-
-  executionRuntime().setControl(jobId, 'running')
-  const updated = await updateJobRowForSnapshot(jobId, { status: 'pending' })
-  if (!updated) throw AppError.internal('Failed to resume job', 'job.invalid_status')
-  emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
-  const { releaseActiveRunOrAdvanceQueue } = await import('./workload-slot-store')
-  await releaseActiveRunOrAdvanceQueue(username, 'thread_job', jobId, 'resumed')
-  return (await getUserJob(username, jobId)) ?? updated
 }
 
 export async function continueJob(username: string, jobId: string): Promise<ThreadJobDto> {

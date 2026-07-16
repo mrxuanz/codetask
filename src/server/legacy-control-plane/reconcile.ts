@@ -13,7 +13,10 @@ import {
   updateJobRowForSnapshot
 } from './repository'
 import { emitJobProgressAfterPersist } from './progress-emit'
-import { prepareInterruptedExecutionResume, resolveStaleExecutionJobAction } from './execution-recovery'
+import {
+  prepareInterruptedExecutionResume,
+  resolveStaleExecutionJobAction
+} from './execution-recovery'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import {
   clearActiveRunIfMatches,
@@ -61,22 +64,22 @@ export async function reconcileStaleJobIfNeeded(
   const { progress } = prepareInterruptedExecutionResume(job.taskProgress)
 
   if (action === 'finalize-user-pause') {
+    const continueAfter = job.continueAfterPause === true
     const taskProgress: TaskProgressDto = {
       ...progress,
       phase: 'running',
-      status: 'running',
+      status: 'pending',
       message: null,
-      progressCode: 'execution.resuming',
+      progressCode: continueAfter ? 'execution.resuming' : 'execution.pending',
       progressParams: null
     }
     const pausedError = createTurnError('job.paused').toDto()
-    const continueAfter = job.continueAfterPause === true
     const updated = await updateJobRowForSnapshot(job.id, {
       status: 'paused',
       taskProgress,
       lastError: pausedError,
       suspensionKind: job.suspensionKind ?? 'user_pause',
-      continueAfterPause: false,
+      continueAfterPause: continueAfter,
       recoveryReason: null
     })
     if (!updated) return job
@@ -84,11 +87,13 @@ export async function reconcileStaleJobIfNeeded(
     emitJobProgressAfterPersist(job.id, 'snapshot', { taskProgress, job: updated })
 
     if (continueAfter) {
-      const { authorizeUncertainTaskAttemptReplayForJob } = await import('./task-attempts')
-      authorizeUncertainTaskAttemptReplayForJob(job.id)
-      const { continueJob } = await import('./controls')
-      await continueJob(username, job.id).catch((error) => {
-        console.warn('[jobs] continue_after_pause failed after reconcile pause settle', job.id, error)
+      const { settleContinueAfterPause } = await import('./controls')
+      await settleContinueAfterPause(username, job.id).catch((error) => {
+        console.warn(
+          '[jobs] continue_after_pause failed after reconcile pause settle',
+          job.id,
+          error
+        )
       })
       const latest = await getUserJob(username, job.id)
       return latest ?? updated

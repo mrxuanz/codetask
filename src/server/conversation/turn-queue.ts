@@ -8,7 +8,10 @@ import type {
   CreateTurnAcceptedDto
 } from '@shared/contracts/conversation-turns'
 import type { TurnHubEvent } from '@shared/contracts/conversation-turns'
-import { conversationWorkspaceAccess } from '../../shared/workspace-access.ts'
+import {
+  changeSetWorkspaceAccess,
+  conversationWorkspaceAccess
+} from '../../shared/workspace-access.ts'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { conversationTurns } from '../db/schema'
@@ -18,6 +21,9 @@ import { hydrateTurnErrorField, persistTurnErrorDto } from '../turn-errors/store
 import { getThread } from '../threads/service'
 import { resolveThreadAttachments } from './attachments'
 import { streamSendMessage } from './service'
+import { createTurnError } from '../../shared/turn-errors.ts'
+
+const activeTurnControllers = new Map<string, AbortController>()
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -32,6 +38,7 @@ function mapRow(row: typeof conversationTurns.$inferSelect): ConversationTurnDto
     status: row.status as ConversationTurnStatus,
     workspaceAccess: row.workspaceAccess,
     provider: row.provider,
+    changeSetId: row.changeSetId ?? null,
     messagePreview: row.messageText.slice(0, 120),
     queuePosition: null,
     stateRevision: row.stateRevision,
@@ -46,7 +53,21 @@ function emitTurn(topicTurnId: string, event: TurnHubEvent): void {
   getAppContext().eventBus.emit(turnTopic(topicTurnId), event)
 }
 
-export async function getTurn(username: string, turnId: string): Promise<ConversationTurnDto | null> {
+async function cancelLinkedChangeSet(
+  username: string,
+  changeSetId: string | null | undefined
+): Promise<void> {
+  if (!changeSetId) return
+  const { cancelChangeSet } = await import('../change-set/service')
+  await cancelChangeSet(username, changeSetId).catch((error) => {
+    console.warn('[turn-queue] failed to cancel linked change set', changeSetId, error)
+  })
+}
+
+export async function getTurn(
+  username: string,
+  turnId: string
+): Promise<ConversationTurnDto | null> {
   const row = getDb()
     .select()
     .from(conversationTurns)
@@ -56,7 +77,7 @@ export async function getTurn(username: string, turnId: string): Promise<Convers
   return row ? mapRow(row) : null
 }
 
-function countQueuedAhead(threadId: string, createdAt: number): number {
+function countQueuedAhead(threadId: string, createdAt: number, turnId: string): number {
   const row = getDb()
     .select({ count: sql<number>`count(*)` })
     .from(conversationTurns)
@@ -64,7 +85,13 @@ function countQueuedAhead(threadId: string, createdAt: number): number {
       and(
         eq(conversationTurns.threadId, threadId),
         eq(conversationTurns.status, 'queued'),
-        sql`${conversationTurns.createdAt} < ${createdAt}`
+        sql`(
+          ${conversationTurns.createdAt} < ${createdAt}
+          OR (
+            ${conversationTurns.createdAt} = ${createdAt}
+            AND rowid < (SELECT rowid FROM conversation_turns WHERE id = ${turnId})
+          )
+        )`
       )
     )
     .get()
@@ -83,13 +110,16 @@ export interface EnqueueTurnInput {
   idempotencyKey?: string | null
   provider?: string | null
   kind?: ConversationTurnKind
+  allowCodeChanges?: boolean
 }
 
 /**
  * Accept a turn asynchronously. Same-thread turns serialize via queued status;
  * over-capacity users also queue instead of receiving 429.
  */
-export async function enqueueConversationTurn(input: EnqueueTurnInput): Promise<CreateTurnAcceptedDto> {
+export async function enqueueConversationTurn(
+  input: EnqueueTurnInput
+): Promise<CreateTurnAcceptedDto> {
   const message = input.message.trim()
   if (!message && !(input.attachmentIds?.length ?? 0)) {
     throw AppError.badRequest('Message cannot be empty', 'message.empty')
@@ -113,13 +143,23 @@ export async function enqueueConversationTurn(input: EnqueueTurnInput): Promise<
       .limit(1)
       .all()[0]
     if (existing) {
+      if (existing.threadId !== input.threadId) {
+        throw AppError.conflict(
+          'Idempotency key was already used for another thread',
+          { existingThreadId: existing.threadId },
+          'turn.idempotency_conflict'
+        )
+      }
       const dto = mapRow(existing)
       return {
         turnId: dto.id,
         status: dto.status,
         revision: dto.stateRevision,
         queuePosition:
-          dto.status === 'queued' ? countQueuedAhead(dto.threadId, dto.createdAt) + 1 : null
+          dto.status === 'queued'
+            ? countQueuedAhead(dto.threadId, dto.createdAt, dto.id) + 1
+            : null,
+        changeSetId: dto.changeSetId
       }
     }
   }
@@ -129,32 +169,62 @@ export async function enqueueConversationTurn(input: EnqueueTurnInput): Promise<
   const kind: ConversationTurnKind =
     input.kind ?? (input.createTaskMode || input.generateDraft ? 'create_task' : 'chat')
 
-  getDb()
-    .insert(conversationTurns)
-    .values({
-      id: turnId,
-      threadId: input.threadId,
-      username: input.username,
-      kind,
-      status: 'queued',
-      workspaceAccess: conversationWorkspaceAccess(true),
-      provider: input.provider ?? null,
-      messageText: message,
-      generateDraft: input.generateDraft === true ? 1 : 0,
-      createTaskMode: input.createTaskMode === true ? 1 : 0,
-      attachmentIdsJson: JSON.stringify(input.attachmentIds ?? []),
-      selectedDraftSection: input.selectedDraftSection ?? null,
-      selectedPlanNodeRef: input.selectedPlanNodeRef ?? null,
-      idempotencyKey: input.idempotencyKey ?? null,
-      stateRevision: 1,
-      lastErrorJson: null,
-      createdAt: now,
-      startedAt: null,
-      completedAt: null
-    })
-    .run()
+  if (input.allowCodeChanges && (kind !== 'chat' || input.createTaskMode || input.generateDraft)) {
+    throw AppError.badRequest(
+      'Code-change mode is only available in ordinary chat turns',
+      'turn.invalid_change_mode'
+    )
+  }
 
-  const queuePosition = countQueuedAhead(input.threadId, now) + 1
+  let changeSetId: string | null = null
+  if (input.allowCodeChanges) {
+    const { createChangeSet } = await import('../change-set/service')
+    const accepted = await createChangeSet(input.username, {
+      projectId: thread.projectId,
+      sourceThreadId: thread.id,
+      sourceTurnId: turnId,
+      applyPolicy: 'manual'
+    })
+    changeSetId = accepted.changeSetId
+  }
+
+  try {
+    getDb()
+      .insert(conversationTurns)
+      .values({
+        id: turnId,
+        threadId: input.threadId,
+        username: input.username,
+        kind,
+        status: 'queued',
+        workspaceAccess: changeSetId
+          ? changeSetWorkspaceAccess()
+          : conversationWorkspaceAccess(true),
+        provider: input.provider ?? null,
+        messageText: message,
+        generateDraft: input.generateDraft === true ? 1 : 0,
+        createTaskMode: input.createTaskMode === true ? 1 : 0,
+        attachmentIdsJson: JSON.stringify(input.attachmentIds ?? []),
+        selectedDraftSection: input.selectedDraftSection ?? null,
+        selectedPlanNodeRef: input.selectedPlanNodeRef ?? null,
+        changeSetId,
+        idempotencyKey: input.idempotencyKey ?? null,
+        stateRevision: 1,
+        lastErrorJson: null,
+        createdAt: now,
+        startedAt: null,
+        completedAt: null
+      })
+      .run()
+  } catch (error) {
+    if (changeSetId) {
+      const { cancelChangeSet } = await import('../change-set/service')
+      await cancelChangeSet(input.username, changeSetId).catch(() => {})
+    }
+    throw error
+  }
+
+  const queuePosition = countQueuedAhead(input.threadId, now, turnId) + 1
   const turn = await getTurn(input.username, turnId)
   if (turn) {
     emitTurn(turnId, { event: 'turn_snapshot', data: { turn: { ...turn, queuePosition } } })
@@ -168,7 +238,8 @@ export async function enqueueConversationTurn(input: EnqueueTurnInput): Promise<
     turnId,
     status: 'queued',
     revision: 1,
-    queuePosition
+    queuePosition,
+    changeSetId
   }
 }
 
@@ -204,10 +275,18 @@ export async function cancelConversationTurn(
       .set({ status: 'cancelling', stateRevision: row.stateRevision + 1 })
       .where(eq(conversationTurns.id, turnId))
       .run()
+    activeTurnControllers
+      .get(turnId)
+      ?.abort(
+        createTurnError('sandbox.turn.cancelled', { detail: 'Conversation turn cancelled by user' })
+      )
   }
 
   const updated = (await getTurn(username, turnId))!
   emitTurn(turnId, { event: 'turn_snapshot', data: { turn: updated } })
+  if (updated.status === 'cancelled') {
+    await cancelLinkedChangeSet(username, row.changeSetId)
+  }
   void advanceTurnQueue(username).catch(() => {})
   return updated
 }
@@ -255,7 +334,7 @@ export async function advanceTurnQueue(username?: string): Promise<void> {
         username ? eq(conversationTurns.username, username) : sql`1 = 1`
       )
     )
-    .orderBy(asc(conversationTurns.createdAt))
+    .orderBy(asc(conversationTurns.createdAt), sql`rowid`)
     .all()
 
   for (const row of queued) {
@@ -288,7 +367,12 @@ export async function advanceTurnQueue(username?: string): Promise<void> {
 
 async function runAdmittedTurn(turnId: string): Promise<void> {
   const db = getDb()
-  const row = db.select().from(conversationTurns).where(eq(conversationTurns.id, turnId)).limit(1).all()[0]
+  const row = db
+    .select()
+    .from(conversationTurns)
+    .where(eq(conversationTurns.id, turnId))
+    .limit(1)
+    .all()[0]
   if (!row || row.status !== 'admitted') return
 
   db.update(conversationTurns)
@@ -303,14 +387,40 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
 
   const attachmentIds = JSON.parse(row.attachmentIdsJson || '[]') as string[]
   const attachments = resolveThreadAttachments(row.threadId, attachmentIds)
+  const controller = new AbortController()
+  activeTurnControllers.set(turnId, controller)
 
   try {
+    let workspacePathOverride: string | undefined
+    let runtimeRootOverride: string | undefined
+    if (row.changeSetId) {
+      const { getChangeSet } = await import('../change-set/service')
+      const changeSet = await getChangeSet(row.username, row.changeSetId)
+      if (changeSet.status !== 'editing' || !changeSet.worktreePath) {
+        throw AppError.badRequest(
+          `Change set is not editable (${changeSet.status})`,
+          'change_set.invalid_status'
+        )
+      }
+      workspacePathOverride = changeSet.worktreePath
+      const { changeSetRuntimePath } = await import('../change-set/paths')
+      runtimeRootOverride = changeSetRuntimePath(
+        getAppContext().dataDir,
+        changeSet.id,
+        row.provider ?? 'conversation'
+      )
+    }
+
     for await (const chunk of streamSendMessage(row.username, row.threadId, row.messageText, {
       generateDraft: row.generateDraft === 1,
       createTaskMode: row.createTaskMode === 1,
       attachments,
-      selectedDraftSection: row.selectedDraftSection ?? undefined,
-      selectedPlanNodeRef: row.selectedPlanNodeRef ?? undefined
+      ...(row.selectedDraftSection ? { selectedDraftSection: row.selectedDraftSection } : {}),
+      ...(row.selectedPlanNodeRef ? { selectedPlanNodeRef: row.selectedPlanNodeRef } : {}),
+      signal: controller.signal,
+      ...(workspacePathOverride ? { workspacePathOverride } : {}),
+      ...(runtimeRootOverride ? { runtimeRootOverride } : {}),
+      ...(row.changeSetId ? { changeSetId: row.changeSetId } : {})
     })) {
       const latest = db
         .select({ status: conversationTurns.status })
@@ -331,33 +441,83 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
         return
       }
       emitTurn(turnId, chunk)
+      if (chunk.event === 'error') {
+        throw Object.assign(new Error(chunk.data.message), {
+          code: chunk.data.error?.code
+        })
+      }
     }
 
+    if (row.changeSetId) {
+      const { getChangeSet, markChangeSetReady } = await import('../change-set/service')
+      const changeSet = await getChangeSet(row.username, row.changeSetId)
+      if (changeSet.status === 'editing') {
+        await markChangeSetReady(row.username, row.changeSetId, changeSet.stateRevision, turnId)
+      }
+    }
+
+    const latest = db
+      .select({ status: conversationTurns.status })
+      .from(conversationTurns)
+      .where(eq(conversationTurns.id, turnId))
+      .limit(1)
+      .all()[0]
+    const terminalStatus = latest?.status === 'cancelling' ? 'cancelled' : 'completed'
     db.update(conversationTurns)
       .set({
-        status: 'completed',
+        status: terminalStatus,
         completedAt: nowSec(),
         stateRevision: sql`${conversationTurns.stateRevision} + 1`
       })
-      .where(eq(conversationTurns.id, turnId))
+      .where(
+        and(
+          eq(conversationTurns.id, turnId),
+          inArray(conversationTurns.status, ['running', 'cancelling'])
+        )
+      )
       .run()
   } catch (error) {
-    const turnError = toTurnErrorDto(error)
-    const errorJson = persistTurnErrorDto(turnError)
-    db.update(conversationTurns)
-      .set({
-        status: 'failed',
-        completedAt: nowSec(),
-        lastErrorJson: errorJson,
-        stateRevision: sql`${conversationTurns.stateRevision} + 1`
-      })
+    const latest = db
+      .select({ status: conversationTurns.status })
+      .from(conversationTurns)
       .where(eq(conversationTurns.id, turnId))
-      .run()
-    emitTurn(turnId, {
-      event: 'error',
-      data: { error: turnError, message: turnError.message }
-    })
+      .limit(1)
+      .all()[0]
+    if (latest?.status === 'cancelling' || controller.signal.aborted) {
+      db.update(conversationTurns)
+        .set({
+          status: 'cancelled',
+          completedAt: nowSec(),
+          stateRevision: sql`${conversationTurns.stateRevision} + 1`
+        })
+        .where(
+          and(
+            eq(conversationTurns.id, turnId),
+            inArray(conversationTurns.status, ['running', 'cancelling'])
+          )
+        )
+        .run()
+    } else {
+      const turnError = toTurnErrorDto(error)
+      const errorJson = persistTurnErrorDto(turnError)
+      db.update(conversationTurns)
+        .set({
+          status: 'failed',
+          completedAt: nowSec(),
+          lastErrorJson: errorJson,
+          stateRevision: sql`${conversationTurns.stateRevision} + 1`
+        })
+        .where(and(eq(conversationTurns.id, turnId), eq(conversationTurns.status, 'running')))
+        .run()
+      emitTurn(turnId, {
+        event: 'error',
+        data: { error: turnError, message: turnError.message }
+      })
+    }
   } finally {
+    if (activeTurnControllers.get(turnId) === controller) {
+      activeTurnControllers.delete(turnId)
+    }
     const finalRow = db
       .select()
       .from(conversationTurns)
@@ -365,8 +525,48 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
       .limit(1)
       .all()[0]
     if (finalRow) {
+      if (finalRow.status === 'cancelled') {
+        await cancelLinkedChangeSet(finalRow.username, finalRow.changeSetId)
+      }
       emitTurn(turnId, { event: 'turn_snapshot', data: { turn: mapRow(finalRow) } })
     }
     void advanceTurnQueue(row.username).catch(() => {})
   }
+}
+
+/**
+ * Process death cannot safely replay a running conversation because its message/draft effects may
+ * already be committed. Settle orphan active rows, then allow untouched queued turns to resume.
+ */
+export function reconcileConversationTurnsOnStartup(): {
+  failed: number
+  cancelled: number
+} {
+  const db = getDb()
+  const now = nowSec()
+  const interruptedError = persistTurnErrorDto(
+    createTurnError('turn.unknown', {
+      detail: 'Conversation turn was interrupted by a service restart'
+    }).toDto()
+  )
+  const cancelled = db
+    .update(conversationTurns)
+    .set({
+      status: 'cancelled',
+      completedAt: now,
+      stateRevision: sql`${conversationTurns.stateRevision} + 1`
+    })
+    .where(eq(conversationTurns.status, 'cancelling'))
+    .run().changes
+  const failed = db
+    .update(conversationTurns)
+    .set({
+      status: 'failed',
+      completedAt: now,
+      lastErrorJson: interruptedError,
+      stateRevision: sql`${conversationTurns.stateRevision} + 1`
+    })
+    .where(inArray(conversationTurns.status, ['admitted', 'running', 'committing']))
+    .run().changes
+  return { failed: failed ?? 0, cancelled: cancelled ?? 0 }
 }

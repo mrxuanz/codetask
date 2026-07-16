@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { changeSets, type ChangeSet } from '../db/schema'
+import { changeSets, conversationTurns, type ChangeSet } from '../db/schema'
 import { getProject } from '../projects/service'
 import type {
   ChangeSetDto,
@@ -15,7 +15,12 @@ import {
   acquireWorkspaceLease,
   releaseWorkspaceLease
 } from '../legacy-control-plane/workspace-lease-store'
-import { applyPatchToMainWorkspace, buildChangeSetPatch, readStoredPatch } from './patch'
+import {
+  applyPatchToMainWorkspace,
+  buildChangeSetPatch,
+  readStoredPatch,
+  readStoredPatchHash
+} from './patch'
 import {
   isGitWorkspace,
   prepareChangeSetWorktree,
@@ -85,6 +90,34 @@ function assertRevision(row: ChangeSet, expectedRevision?: number): void {
   }
 }
 
+function assertNoActiveSourceTurn(row: ChangeSet, allowedSourceTurnId?: string): void {
+  if (!row.sourceTurnId) return
+  if (row.sourceTurnId === allowedSourceTurnId) return
+  const active = getDb()
+    .select({ id: conversationTurns.id })
+    .from(conversationTurns)
+    .where(
+      and(
+        eq(conversationTurns.id, row.sourceTurnId),
+        inArray(conversationTurns.status, [
+          'queued',
+          'admitted',
+          'running',
+          'committing',
+          'cancelling'
+        ])
+      )
+    )
+    .limit(1)
+    .all()[0]
+  if (active) {
+    throw AppError.conflict('Change set is still being edited by its conversation turn', {
+      code: 'change_set.turn_active',
+      turnId: active.id
+    })
+  }
+}
+
 async function updateChangeSet(
   row: ChangeSet,
   patch: {
@@ -101,14 +134,27 @@ async function updateChangeSet(
 ): Promise<ChangeSetDto> {
   const db = getDb()
   const nextRevision = row.stateRevision + 1
-  await db
+  const result = await db
     .update(changeSets)
     .set({
       ...patch,
       stateRevision: nextRevision,
       updatedAt: nowSec()
     })
-    .where(and(eq(changeSets.id, row.id), eq(changeSets.stateRevision, row.stateRevision)))
+    .where(
+      and(
+        eq(changeSets.id, row.id),
+        eq(changeSets.stateRevision, row.stateRevision),
+        eq(changeSets.status, row.status)
+      )
+    )
+  if ((result.changes ?? 0) !== 1) {
+    throw AppError.conflict('Change set revision conflict', {
+      code: 'change_set.revision_conflict',
+      expected: row.stateRevision,
+      status: row.status
+    })
+  }
   return getChangeSet(row.username, row.id)
 }
 
@@ -191,10 +237,12 @@ export async function createChangeSet(
 export async function markChangeSetReady(
   username: string,
   changeSetId: string,
-  expectedRevision?: number
+  expectedRevision?: number,
+  allowedSourceTurnId?: string
 ): Promise<ChangeSetDto> {
   const row = await getChangeSetRow(username, changeSetId)
   assertRevision(row, expectedRevision)
+  assertNoActiveSourceTurn(row, allowedSourceTurnId)
 
   if (row.status === 'ready_to_apply') {
     return toChangeSetDto(row)
@@ -262,6 +310,7 @@ export async function applyChangeSet(
 ): Promise<ChangeSetDto> {
   const row = await getChangeSetRow(username, changeSetId)
   assertRevision(row, expectedRevision)
+  assertNoActiveSourceTurn(row)
 
   if (row.status === 'applied') {
     return toChangeSetDto(row)
@@ -282,6 +331,16 @@ export async function applyChangeSet(
   const patchText = readStoredPatch(dataDir, changeSetId)
   if (patchText == null) {
     throw AppError.badRequest('Change set patch artifact missing', 'change_set.patch_missing')
+  }
+  const storedPatchHash = readStoredPatchHash(dataDir, changeSetId)
+  if (!row.patchHash || storedPatchHash !== row.patchHash) {
+    return updateChangeSet(row, {
+      status: 'needs_resolution',
+      lastErrorJson: JSON.stringify({
+        code: 'change_set.patch_integrity_failed',
+        message: 'Stored change-set patch no longer matches its recorded hash'
+      })
+    })
   }
 
   const lease = acquireWorkspaceLease({
@@ -357,6 +416,7 @@ export async function rebaseChangeSet(
 ): Promise<ChangeSetDto> {
   const row = await getChangeSetRow(username, changeSetId)
   assertRevision(row, expectedRevision)
+  assertNoActiveSourceTurn(row)
 
   if (row.status === 'applying' || row.status === 'applied' || row.status === 'cancelled') {
     throw AppError.badRequest(
@@ -371,7 +431,24 @@ export async function rebaseChangeSet(
   }
 
   const dataDir = getAppContext().dataDir
-  const patchText = readStoredPatch(dataDir, changeSetId) ?? ''
+  let patchText = readStoredPatch(dataDir, changeSetId) ?? ''
+  // Capture the live worktree before replacing it. `editing` commonly has no stored patch yet;
+  // deleting first would silently discard the user's latest changes.
+  if (row.worktreePath) {
+    try {
+      patchText = buildChangeSetPatch({
+        dataDir,
+        changeSetId,
+        worktreePath: row.worktreePath
+      }).patchText
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw AppError.badRequest(
+        `Unable to snapshot change set before rebase: ${message}`,
+        'change_set.patch_failed'
+      )
+    }
+  }
 
   if (isGitWorkspace(project.workspaceRoot)) {
     const rebased = rebaseGitWorktree({
@@ -407,21 +484,42 @@ export async function rebaseChangeSet(
     })
   }
 
+  const { readCowPatch, cowPatchConflictsWithWorkspace, applyCowChangesToWorktree } =
+    await import('./cow')
+  const changes = readCowPatch(dataDir, changeSetId) ?? []
+  const hasConflicts = cowPatchConflictsWithWorkspace({
+    dataDir,
+    changeSetId,
+    workspaceRoot: project.workspaceRoot,
+    changes
+  })
+
   removeChangeSetWorktree(dataDir, changeSetId, project.workspaceRoot)
   const prepared = prepareChangeSetWorktree({
     dataDir,
     changeSetId,
     workspaceRoot: project.workspaceRoot
   })
+  applyCowChangesToWorktree(prepared.worktreePath, changes)
   return updateChangeSet(row, {
-    status: 'editing',
+    status: hasConflicts ? 'needs_resolution' : 'editing',
     worktreePath: prepared.worktreePath,
     baseCommit: prepared.baseCommit,
     baseWorkspaceGeneration: prepared.baseCommit,
     patchHash: null,
     patchArtifactId: null,
-    validationJson: JSON.stringify({ rebased: true, kind: 'non_git', editsReset: true }),
-    lastErrorJson: null
+    validationJson: JSON.stringify({
+      rebased: true,
+      kind: 'non_git',
+      patchApplied: true,
+      conflicts: hasConflicts
+    }),
+    lastErrorJson: hasConflicts
+      ? JSON.stringify({
+          code: 'change_set.rebase_conflict',
+          message: 'Main workspace changed on files edited by this Change Set; resolve in worktree'
+        })
+      : null
   })
 }
 
@@ -437,6 +535,7 @@ export async function cancelChangeSet(
   }
 
   assertRevision(row, expectedRevision)
+  assertNoActiveSourceTurn(row)
 
   if (row.status === 'applying') {
     throw AppError.badRequest('Change set is applying; wait or retry later', 'change_set.busy')
