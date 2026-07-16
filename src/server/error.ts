@@ -7,6 +7,7 @@ export const code = {
   UNAUTHORIZED: 40101,
   NOT_FOUND: 40401,
   CONFLICT: 40901,
+  GONE: 41001,
   INTERNAL: 50001,
   DB: 50002
 } as const
@@ -17,6 +18,7 @@ const HTTP_STATUS_BY_CODE: Record<number, number> = {
   [code.UNAUTHORIZED]: 401,
   [code.NOT_FOUND]: 404,
   [code.CONFLICT]: 409,
+  [code.GONE]: 410,
   [code.INTERNAL]: 500,
   [code.DB]: 500
 }
@@ -78,6 +80,17 @@ export class AppError extends Error {
     turnErrorParams?: Record<string, unknown>
   ): AppError {
     return new AppError(code.NOT_FOUND, message, {
+      error: message,
+      ...(turnErrorCode ? { turnErrorCode, turnErrorParams } : {})
+    })
+  }
+
+  static gone(
+    message: string,
+    turnErrorCode?: string,
+    turnErrorParams?: Record<string, unknown>
+  ): AppError {
+    return new AppError(code.GONE, message, {
       error: message,
       ...(turnErrorCode ? { turnErrorCode, turnErrorParams } : {})
     })

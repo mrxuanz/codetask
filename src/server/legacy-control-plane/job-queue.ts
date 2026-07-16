@@ -7,7 +7,6 @@ import {
   EXECUTION_OCCUPYING_STATUSES,
   findNextPendingJobId,
   findOccupyingJobId,
-  findRestartInterruptedPausedJobId,
   updateJobRowForSnapshot
 } from './repository'
 import type { PlanProgressDto } from './types'
@@ -148,6 +147,5 @@ export function resetJobQueueStartupForTests(): void {
 export {
   EXECUTION_OCCUPYING_STATUSES,
   findOccupyingJobId,
-  findNextPendingJobId,
-  findRestartInterruptedPausedJobId
+  findNextPendingJobId
 }

@@ -1,10 +1,7 @@
 import { getAppContext } from '../bootstrap'
 import { memoryDebug } from '../debug/memory'
-import {
-  cleanupJobRuntimeTreeIfTerminal,
-  isDeferredCleanupResult,
-  isTerminalJobStatus
-} from '../runtime/cleanup'
+import { isTerminalJobStatus } from '../runtime/cleanup'
+import { scheduleRuntimeCleanup } from '../runtime/cleanup-coordinator'
 import { releaseJobCursorResources } from '../sandbox'
 import { getUserJob } from './repository'
 import { emitJobSnapshot } from './progress-emit'
@@ -31,17 +28,15 @@ export async function finalizeJobExecution(
 
   const job = await getUserJob(username, jobId)
   if (job && isTerminalJobStatus(job.status)) {
-    const result = await cleanupJobRuntimeTreeIfTerminal(
-      ctx.dataDir,
-      job.threadId,
+    const result = await scheduleRuntimeCleanup({
+      dataDir: ctx.dataDir,
+      threadId: job.threadId,
       jobId,
-      job.status
-    ).catch((error) => {
-      console.warn('[jobs] cleanupJobRuntimeTreeIfTerminal failed', jobId, error)
-      return null
+      status: job.status,
+      reason: 'finalizeJobExecution'
     })
     // Slot may still be held until finishExecutionRunLifecycle releases it; that path retries.
-    if (result && isDeferredCleanupResult(result)) {
+    if (result === 'deferred_active' || result === 'deferred_slot') {
       memoryDebug('finalizeJobExecution cleanup deferred', { jobId, result })
     }
   }

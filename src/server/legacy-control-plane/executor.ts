@@ -12,10 +12,11 @@ import type {
 } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { ensureJobRuntimeRoot, ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { ensureCursorAcpRuntimeDirs } from '../agent-runtime/env'
 import { memoryDebug } from '../debug/memory'
 import { cleanupJobTaskRuntimeTree } from '../runtime/cleanup'
+import { parseSuspensionKind } from '../../shared/job-suspension.ts'
 import { slimTaskProgressItemsForRuntime } from './evidence/store'
 import { finalizeJobExecution } from './finalize-execution'
 import { getExecutionRunContext, runWithExecutionRunContext } from './execution-run-context'
@@ -244,7 +245,13 @@ async function updateExecutionJobRow(
 async function persistTaskProgress(
   jobId: string,
   taskProgress: TaskProgressDto,
-  patch?: Partial<{ status: string; lastError: TurnErrorDto | string | null }>,
+  patch?: Partial<{
+    status: string
+    lastError: TurnErrorDto | string | null
+    suspensionKind: import('../../shared/job-suspension.ts').SuspensionKind
+    continueAfterPause: boolean | number
+    recoveryReason: import('../../shared/job-suspension.ts').JobRecoveryReason
+  }>,
   gate?: ReturnType<typeof buildGateStates>,
   emit: JobProgressEmitMode = 'delta'
 ): Promise<ThreadJobDto | null> {
@@ -1332,13 +1339,23 @@ async function executeSingleTask(
 
   const coreCode = resolveCoreForTask(job, flat)
   const core = await ensureCoreAvailable(coreCode)
-  const runtimeRoot = ensureJobTaskRuntimeRoot(
-    getAppContext().dataDir,
-    job.threadId,
-    job.id,
-    taskId,
-    core.code
-  )
+  // Cursor ACP long sessions must stay on a stable job-level runtimeRoot across tasks.
+  // Other providers keep per-task isolation for evidence/workdir hygiene.
+  const runtimeRoot =
+    core.code === 'cursorcli'
+      ? ensureJobRuntimeRoot(
+          getAppContext().dataDir,
+          job.threadId,
+          job.id,
+          core.code
+        )
+      : ensureJobTaskRuntimeRoot(
+          getAppContext().dataDir,
+          job.threadId,
+          job.id,
+          taskId,
+          core.code
+        )
   if (core.code === 'cursorcli') {
     ensureCursorAcpRuntimeDirs(runtimeRoot, job.workspacePath ?? '')
   }
@@ -1649,6 +1666,10 @@ async function finalizeExecutionPause(
   gate: ReturnType<typeof buildGateStates>
 ): Promise<void> {
   const paused = taskErrorFields(JOB_PAUSED)
+  const row = await loadJobRow(jobId)
+  const continueAfter = row?.continueAfterPause === 1
+  const username = row?.username
+
   await persistTaskProgress(
     jobId,
     {
@@ -1658,11 +1679,26 @@ async function finalizeExecutionPause(
       message: null,
       progressParams: null
     },
-    { status: 'paused', lastError: paused.error },
+    {
+      status: 'paused',
+      lastError: paused.error,
+      suspensionKind: parseSuspensionKind(row?.suspensionKind) ?? 'user_pause',
+      continueAfterPause: false,
+      recoveryReason: null
+    },
     gate,
     'snapshot'
   )
   pauseJobExecution(jobId)
+
+  if (continueAfter && username) {
+    const { authorizeUncertainTaskAttemptReplayForJob } = await import('./task-attempts')
+    authorizeUncertainTaskAttemptReplayForJob(jobId)
+    const { continueJob } = await import('./controls')
+    await continueJob(username, jobId).catch((error) => {
+      console.warn('[jobs] continue_after_pause failed after pause settle', jobId, error)
+    })
+  }
 }
 
 interface ExecutionLoopState {

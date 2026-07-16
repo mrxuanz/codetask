@@ -103,6 +103,30 @@ export const threadMessages = sqliteTable('thread_messages', {
   createdAt: text('created_at').notNull()
 })
 
+export const conversationTurns = sqliteTable('conversation_turns', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id')
+    .notNull()
+    .references(() => threads.id, { onDelete: 'cascade' }),
+  username: text('username').notNull(),
+  kind: text('kind').notNull(),
+  status: text('status').notNull(),
+  workspaceAccess: text('workspace_access').notNull().default('live-read'),
+  provider: text('provider'),
+  messageText: text('message_text').notNull().default(''),
+  generateDraft: integer('generate_draft').notNull().default(0),
+  createTaskMode: integer('create_task_mode').notNull().default(0),
+  attachmentIdsJson: text('attachment_ids_json').notNull().default('[]'),
+  selectedDraftSection: text('selected_draft_section'),
+  selectedPlanNodeRef: text('selected_plan_node_ref'),
+  idempotencyKey: text('idempotency_key'),
+  stateRevision: integer('state_revision').notNull().default(1),
+  lastErrorJson: text('last_error_json'),
+  createdAt: integer('created_at').notNull(),
+  startedAt: integer('started_at'),
+  completedAt: integer('completed_at')
+})
+
 export const threadJobs = sqliteTable(
   'thread_jobs',
   {
@@ -153,6 +177,12 @@ export const threadJobs = sqliteTable(
     planArtifactId: text('plan_artifact_id'),
     planArtifactPath: text('plan_artifact_path'),
     planSummaryJson: text('plan_summary_json'),
+    /** Structured pause source; null when not paused / not classified. */
+    suspensionKind: text('suspension_kind'),
+    /** When true, settle pausing→paused then immediately queue a fresh run. */
+    continueAfterPause: integer('continue_after_pause').notNull().default(0),
+    /** Why the job is waiting for recovery (e.g. uncertain_provider_outcome). */
+    recoveryReason: text('recovery_reason'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
@@ -473,6 +503,37 @@ export const deletionRequests = sqliteTable('deletion_requests', {
   updatedAt: integer('updated_at').notNull()
 })
 
+/** P6: isolated Change Set (worktree edits applied under exclusive-write). */
+export const changeSets = sqliteTable(
+  'change_sets',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    username: text('username').notNull(),
+    sourceThreadId: text('source_thread_id'),
+    sourceTurnId: text('source_turn_id'),
+    status: text('status').notNull(),
+    baseWorkspaceGeneration: text('base_workspace_generation'),
+    baseCommit: text('base_commit'),
+    worktreePath: text('worktree_path'),
+    patchArtifactId: text('patch_artifact_id'),
+    patchHash: text('patch_hash'),
+    validationJson: text('validation_json'),
+    applyPolicy: text('apply_policy').notNull().default('manual'),
+    stateRevision: integer('state_revision').notNull().default(1),
+    lastErrorJson: text('last_error_json'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    appliedAt: integer('applied_at')
+  },
+  (table) => [
+    index('idx_change_sets_project_status').on(table.projectId, table.status, table.createdAt),
+    index('idx_change_sets_user_status').on(table.username, table.status, table.createdAt)
+  ]
+)
+
 export type AuthState = typeof authState.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Thread = typeof threads.$inferSelect
@@ -481,6 +542,7 @@ export type ThreadJob = typeof threadJobs.$inferSelect
 export type JobTask = typeof jobTasks.$inferSelect
 export type JobTaskAttempt = typeof jobTaskAttempts.$inferSelect
 export type JobArtifact = typeof jobArtifacts.$inferSelect
+export type ConversationTurn = typeof conversationTurns.$inferSelect
 export type JobCounter = typeof jobCounters.$inferSelect
 export type JobAbility = typeof jobAbilities.$inferSelect
 export type JobPlanTask = typeof jobPlanTasks.$inferSelect
@@ -492,3 +554,4 @@ export type WorkloadRun = typeof workloadRuns.$inferSelect
 export type WorkloadSlot = typeof workloadSlots.$inferSelect
 export type WorkspaceLease = typeof workspaceLeases.$inferSelect
 export type DeletionRequest = typeof deletionRequests.$inferSelect
+export type ChangeSet = typeof changeSets.$inferSelect

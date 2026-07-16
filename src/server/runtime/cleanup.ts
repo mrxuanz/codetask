@@ -104,7 +104,7 @@ export async function cleanupJobRuntimeTree(
 }
 
 export function isDeferredCleanupResult(
-  result: CleanupJobRuntimeResult
+  result: CleanupJobRuntimeResult | 'skipped_non_terminal'
 ): result is 'deferred_active' | 'deferred_slot' {
   return result === 'deferred_active' || result === 'deferred_slot'
 }

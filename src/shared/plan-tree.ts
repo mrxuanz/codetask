@@ -213,6 +213,33 @@ function mapExecutionStatus(
     options?.isCurrentTask === true &&
     options?.jobRunning === true &&
     (item.status === 'queued' || item.status === 'running' || item.executionStatus === 'running')
+  // Job paused: any incomplete/in-flight task projects as paused (even if currentTaskId is null).
+  if (
+    options?.jobPaused === true &&
+    item.status !== 'completed' &&
+    item.status !== 'skipped' &&
+    item.status !== 'failed'
+  ) {
+    const looksActive =
+      options?.isCurrentTask === true ||
+      item.status === 'running' ||
+      item.status === 'queued' ||
+      item.executionStatus === 'running' ||
+      item.executionStatus === 'retry-queued'
+    if (looksActive) {
+      return {
+        status: 'paused',
+        executionStatus: 'paused',
+        evidenceStatus: item.evidenceStatus ?? null,
+        errorMessage: item.error?.message ?? item.errorMessage ?? null,
+        error: item.error ?? null,
+        evidence: item.evidence ?? null,
+        evidenceArtifactId: item.evidenceArtifactId ?? null,
+        evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
+        coreCode: item.coreCode ?? null
+      }
+    }
+  }
   if (options?.isCurrentTask === true && options?.jobPaused === true) {
     return {
       status: 'paused',

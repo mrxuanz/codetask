@@ -13,6 +13,7 @@ import {
   type RuntimeHandle
 } from './runtime-supervisor'
 import { getAppConfig } from '../bootstrap'
+import { memoryDebug } from '../debug/memory'
 
 export interface RunLifecycleConfig {
   cancelGraceMs: number
@@ -205,19 +206,20 @@ async function retryTerminalJobRuntimeCleanup(username: string, jobId: string): 
   try {
     const { getAppContext } = await import('../bootstrap')
     const { getUserJob } = await import('./repository')
-    const { cleanupJobRuntimeTreeIfTerminal, isDeferredCleanupResult, isTerminalJobStatus } =
-      await import('../runtime/cleanup')
+    const { scheduleRuntimeCleanup } = await import('../runtime/cleanup-coordinator')
+    const { isTerminalJobStatus } = await import('../runtime/cleanup')
     const ctx = getAppContext()
     const job = await getUserJob(username, jobId)
     if (!job || !isTerminalJobStatus(job.status)) return
-    const result = await cleanupJobRuntimeTreeIfTerminal(
-      ctx.dataDir,
-      job.threadId,
+    const result = await scheduleRuntimeCleanup({
+      dataDir: ctx.dataDir,
+      threadId: job.threadId,
       jobId,
-      job.status
-    )
-    if (isDeferredCleanupResult(result)) {
-      console.warn('[jobs] terminal runtime cleanup still deferred after slot release', jobId, result)
+      status: job.status,
+      reason: 'post_slot_release'
+    })
+    if (result === 'deferred_active' || result === 'deferred_slot') {
+      memoryDebug('terminal runtime cleanup still deferred after slot release', { jobId, result })
     }
   } catch (error) {
     console.warn('[jobs] post-release terminal runtime cleanup failed', jobId, error)

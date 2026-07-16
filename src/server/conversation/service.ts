@@ -47,7 +47,7 @@ import { buildWorkspaceSnapshot } from './workspace-snapshot'
 import type { TaskLaunchDraftPayload } from './draft/types'
 import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
-import { ensureRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { ensureConversationRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
 import { buildConversationCursorRuntimeScope } from '../agent-runtime/cursor-acp/runtime-registry'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
@@ -122,7 +122,9 @@ export interface PreparedConversationTurn {
   createTaskMode: boolean
   conversationMode: ConversationMode
   wizardPhase: WizardPhase
-  workspaceLeaseId: string
+  /** Null when conversation uses read-only access and does not hold an exclusive lease. */
+  workspaceLeaseId: string | null
+  workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
 }
 
 export async function prepareConversationTurn(input: {
@@ -153,38 +155,15 @@ export async function prepareConversationTurn(input: {
   const conversationMode = resolveConversationMode({ threadKind, requestedDraft })
   const createTaskMode = threadKind === THREAD_KIND_CREATE_TASK
   const wizardPhase = resolveWizardPhase(threadRow)
+  const { conversationWorkspaceAccess } = await import('../../shared/workspace-access.ts')
+  // Chat/draft need project context as live-read; they never take exclusive-write.
+  const workspaceAccess = conversationWorkspaceAccess(Boolean(workspacePath))
 
   thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
   reserveThread(thread, username)
 
   try {
-    const { acquireWorkspaceLease, findWorkspaceLeaseConflict } =
-      await import('../legacy-control-plane/workspace-lease-store')
-    const workspaceLease = acquireWorkspaceLease({
-      workspacePath,
-      ownerKind: 'conversation',
-      ownerId: thread.id
-    })
-    if (!workspaceLease) {
-      const occupant = findWorkspaceLeaseConflict(workspacePath, {
-        ownerKind: 'conversation',
-        ownerId: thread.id
-      })
-      throw AppError.conflict(
-        'Workspace is busy',
-        occupant
-          ? {
-              occupant: {
-                ownerKind: occupant.ownerKind,
-                ownerId: occupant.ownerId,
-                runId: occupant.runId
-              }
-            }
-          : undefined,
-        'workspace.busy'
-      )
-    }
-
+    // Read-only conversation must not compete for the exclusive workspace write lease.
     return {
       username,
       threadId: thread.id,
@@ -195,7 +174,8 @@ export async function prepareConversationTurn(input: {
       createTaskMode,
       conversationMode,
       wizardPhase,
-      workspaceLeaseId: workspaceLease.leaseId
+      workspaceLeaseId: null,
+      workspaceAccess
     }
   } catch (error) {
     releaseThread(threadId)
@@ -360,11 +340,13 @@ export async function* executePreparedTurn(
 
   const { enterWorkspaceLeaseContext } =
     await import('../legacy-control-plane/workspace-lease-context')
-  enterWorkspaceLeaseContext({
-    leaseId: prepared.workspaceLeaseId,
-    ownerKind: 'conversation',
-    ownerId: thread.id
-  })
+  if (prepared.workspaceLeaseId) {
+    enterWorkspaceLeaseContext({
+      leaseId: prepared.workspaceLeaseId,
+      ownerKind: 'conversation',
+      ownerId: thread.id
+    })
+  }
 
   try {
     const core = await ensureCoreAvailable(thread.coreCode).catch((error: Error) => {
@@ -434,9 +416,11 @@ export async function* executePreparedTurn(
       null
     )
 
-    const runtimeRoot = ensureRuntimeRoot(
+    const conversationKind = createTaskMode ? 'create_task' : 'chat'
+    const runtimeRoot = ensureConversationRuntimeRoot(
       getAppContext().dataDir,
       thread.id,
+      conversationKind,
       core.code as SupportedCoreCode
     )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
@@ -581,7 +565,7 @@ export async function* executePreparedTurn(
       createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
     const cursorRuntimeScope =
       core.code === 'cursorcli'
-        ? buildConversationCursorRuntimeScope(thread.id, createTaskMode ? 'create_task' : 'chat')
+        ? buildConversationCursorRuntimeScope(thread.id, conversationKind)
         : undefined
 
     const attachmentReadRoots = resolveTurnAttachmentReadRoots({

@@ -339,7 +339,10 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
   if (job.status === 'pending') {
     const updated = await updateJobRowForSnapshot(jobId, {
       status: 'paused',
-      lastError: pausedError
+      lastError: pausedError,
+      suspensionKind: 'user_pause',
+      continueAfterPause: false,
+      recoveryReason: null
     })
     if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
@@ -348,7 +351,12 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
 
   if (job.status === 'running') {
     executionRuntime().setControl(jobId, 'paused')
-    const updated = await updateJobRowForSnapshot(jobId, { status: 'pausing' })
+    const updated = await updateJobRowForSnapshot(jobId, {
+      status: 'pausing',
+      suspensionKind: 'user_pause',
+      continueAfterPause: false,
+      recoveryReason: null
+    })
     if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     abortActiveTurn(jobId, JOB_PAUSED)
@@ -363,7 +371,10 @@ export async function pauseJob(username: string, jobId: string): Promise<ThreadJ
 
   const updated = await updateJobRowForSnapshot(jobId, {
     status: 'paused',
-    lastError: pausedError
+    lastError: pausedError,
+    suspensionKind: 'user_pause',
+    continueAfterPause: false,
+    recoveryReason: null
   })
   if (!updated) throw AppError.internal('Failed to pause job', 'job.invalid_status')
   emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
@@ -386,15 +397,24 @@ export async function resumePausedJob(username: string, jobId: string): Promise<
       status: job.status
     })
   }
+  // While pausing, record continue intent and wait for the old run to settle.
+  // Never flip pausing → running in place — that races with JOB_PAUSED unwind.
   if (job.status === 'pausing') {
-    executionRuntime().setControl(jobId, 'running')
-    const updated = await updateJobRowForSnapshot(jobId, { status: 'running' })
+    const updated = await updateJobRowForSnapshot(jobId, {
+      continueAfterPause: true,
+      suspensionKind: job.suspensionKind ?? 'user_pause'
+    })
     if (!updated) throw AppError.internal('Failed to resume job', 'job.invalid_status')
     emitJobEvent(jobId, { event: 'job_snapshot', data: { job: updated } })
     return updated
   }
   authorizeUncertainTaskAttemptReplayForJob(jobId)
-  return continueJobExecution(username, jobId, job)
+  const cleared = await updateJobRowForSnapshot(jobId, {
+    continueAfterPause: false,
+    suspensionKind: null,
+    recoveryReason: null
+  })
+  return continueJobExecution(username, jobId, cleared ?? job)
 }
 
 async function waitForJobLoopIdle(jobId: string, timeoutMs = 30_000): Promise<boolean> {

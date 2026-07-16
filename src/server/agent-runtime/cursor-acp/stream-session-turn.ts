@@ -39,9 +39,10 @@ export async function* streamCursorSessionTurn(
     })
   }
 
+  // P5: do not mutate real-project .cursor/cli.json (probe only).
   removeInvalidCursorCliConfig(input.cwd)
   if (plan.mcpServers.length > 0) {
-    const approvals = materializeCursorMcpApprovals({
+    const approvals = await materializeCursorMcpApprovals({
       cwd: input.cwd,
       servers: plan.mcpServers,
       env: plan.env

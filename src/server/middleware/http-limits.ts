@@ -15,7 +15,11 @@ export const REQUEST_TIMEOUT_MS = DEFAULT_APP_CONFIG.http.requestTimeoutMs
 export const MAX_SSE_CLIENTS_PER_USER = DEFAULT_APP_CONFIG.http.maxSseClientsPerUser
 export const MAX_CONCURRENT_TURNS_PER_USER = DEFAULT_APP_CONFIG.http.maxConcurrentTurnsPerUser
 
-const SSE_STREAM_PATHS = new Set(['/events/stream', '/events/jobs/stream'])
+const SSE_STREAM_PATHS = new Set([
+  '/events/stream',
+  '/events/jobs/stream',
+  '/realtime/stream'
+])
 
 function requestTimedOut(): Response {
   return new Response(
@@ -34,9 +38,7 @@ function requestTimedOut(): Response {
 }
 
 function isLongLivedSsePath(path: string): boolean {
-  if (isSseStreamRoute(path)) return true
-  const p = normalizedApiPath(path)
-  return /^\/threads\/[^/]+\/messages$/.test(p)
+  return isSseStreamRoute(path)
 }
 
 export function requestTimeout(timeoutMs = REQUEST_TIMEOUT_MS): MiddlewareHandler {

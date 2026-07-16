@@ -4,6 +4,7 @@
  * - List/detail load `/api/v3/jobs` snapshots.
  * - Server `availableActions` is authoritative (no recovery补算).
  * - Commands always use `/api/v3`; the API is never selected per job.
+ * - Realtime: single window JobEventHub (`/api/realtime`); no second `/api/v3/events`.
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -16,12 +17,7 @@ import {
   type JobsApi
 } from '@renderer/api/jobs-api'
 import { fetchControlPlaneGeneration } from '@renderer/api/control-plane-generation'
-import {
-  connectControlPlaneEventsStream,
-  ControlPlaneEventsResyncRequiredError
-} from '@renderer/api/v3-events'
 import { ApiError } from '@renderer/api/client'
-import { EventReducer } from '@renderer/stores/event-reducer'
 import { JobsStore } from '@renderer/stores/jobs-store'
 import {
   canCancel,
@@ -30,6 +26,9 @@ import {
   getPauseButtonText
 } from '@renderer/stores/ui-actions'
 import { toast, toastError } from '@renderer/lib/toast'
+import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import type { JobSseEvent } from '@shared/contracts/sse'
+import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
 
 export interface UseControlPlaneJobsStoreOptions {
   selectedJobId: Ref<string | null>
@@ -106,6 +105,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 } {
   const { selectedJobId } = options
   const router = useRouter()
+  const hub = useJobEventHub()
   const v3Store = new JobsStore()
   let jobsApi: JobsApi = createV3JobsApi()
   let isAuthoritative = false
@@ -142,11 +142,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   const detail = ref<ThreadJob | null>(null)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
-  let streamAbort: AbortController | null = null
-  let streamRetryTimer: number | null = null
+  let hubRelease: (() => void) | null = null
+  let hubListRelease: (() => void) | null = null
   let loadDetailToken = 0
   let loadJobsToken = 0
-  const eventReducer = new EventReducer()
 
   const selectedJob = computed(() =>
     selectedJobId.value
@@ -286,6 +285,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       const res = await jobsApi.fetchJob(jobId)
       if (token !== loadDetailToken) return
       applyJobPatch(res.data.job)
+      syncHubWatch()
     } catch (err) {
       if (token !== loadDetailToken) return
       if (!silent) {
@@ -297,70 +297,51 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
-  eventReducer.registerHandler('job.changed', (event) => {
-    const current = v3Store.getJob(event.entityId)
-    if (current && event.revision <= current.stateRevision) return
-    if (current && event.revision > current.stateRevision + 1) {
-      scheduleResync(event.entityId)
+  function syncHubWatch(): void {
+    hubRelease?.()
+    hubRelease = null
+    const jobId = selectedJobId.value
+    const status = selectedJob.value?.status
+    if (!jobId || !status || !jobNeedsRealtimeWatch(status)) return
+    hubRelease = hub.watchJob(jobId, (event) => handleHubEvent(jobId, event))
+  }
+
+  function handleHubEvent(_jobId: string, event: JobSseEvent): void {
+    if (event.event === 'job_snapshot' || event.event === 'job_done') {
+      applyJobPatch(event.data.job as ThreadJob)
+      if (event.event === 'job_done') {
+        syncHubWatch()
+        debouncedRefreshJobs()
+      }
       return
     }
-    debouncedRefreshJobs()
-    debouncedRefreshSelectedDetail(event.entityId)
-  })
-
-  function startV3EventsStream(): void {
-    streamAbort?.abort()
-    if (streamRetryTimer) {
-      clearTimeout(streamRetryTimer)
-      streamRetryTimer = null
+    if (event.event === 'plan_progress' && selectedJob.value) {
+      applyJobPatch({
+        ...selectedJob.value,
+        planProgress: event.data.planProgress
+      } as ThreadJob)
     }
-
-    const controller = new AbortController()
-    streamAbort = controller
-
-    void connectControlPlaneEventsStream(
-      (event) => {
-        eventReducer.reduce({
-          eventId: event.eventId,
-          topic: event.topic,
-          type: event.type,
-          entityId: event.entityId,
-          revision: event.revision,
-          payload: event.payload
-        })
-      },
-      {
-        signal: controller.signal,
-        lastEventId: eventReducer.getLastEventId()
-      }
-    )
-      .catch((error) => {
-        if (error instanceof ControlPlaneEventsResyncRequiredError) {
-          eventReducer.resetCursor(error.restartFromEventId)
-          scheduleResync()
-          return
-        }
-        if (!controller.signal.aborted) {
-          console.warn('[control-plane-events] stream ended', error)
-        }
-      })
-      .finally(() => {
-        if (streamAbort === controller) {
-          streamAbort = null
-          streamRetryTimer = window.setTimeout(() => {
-            startV3EventsStream()
-          }, 3000)
-        }
-      })
+    if (event.event === 'task_progress' && selectedJob.value) {
+      applyJobPatch({
+        ...selectedJob.value,
+        taskProgress: event.data.taskProgress
+      } as ThreadJob)
+    }
   }
 
   function startHubPolling(): void {
     void apiReady.then(() => {
-      if (isAuthoritative) {
-        startV3EventsStream()
-      }
+      hubListRelease?.()
+      hubListRelease = hub.onAnyJobEvent((envelope) => {
+        if (!envelope.topic.startsWith('job:')) return
+        debouncedRefreshJobs()
+        const jobId = selectedJobId.value
+        if (jobId && envelope.topic === `job:${jobId}`) {
+          debouncedRefreshSelectedDetail(jobId)
+        }
+      })
       pollTimer = setInterval(() => {
-        if (!streamAbort) {
+        if (!hub.connected.value) {
           void loadJobs({ silent: true })
           const jobId = selectedJobId.value
           if (jobId) void loadDetail(jobId, { silent: true })
@@ -370,12 +351,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }
 
   function stopHubPolling(): void {
-    streamAbort?.abort()
-    streamAbort = null
-    if (streamRetryTimer) {
-      clearTimeout(streamRetryTimer)
-      streamRetryTimer = null
-    }
+    hubListRelease?.()
+    hubRelease?.()
+    hubListRelease = null
+    hubRelease = null
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
@@ -388,7 +367,11 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   watch(
     selectedJobId,
-    (jobId) => {
+    (jobId, prevJobId) => {
+      if (jobId !== prevJobId) {
+        hubRelease?.()
+        hubRelease = null
+      }
       if (!jobId) {
         detail.value = null
         return
@@ -396,6 +379,11 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       void loadDetail(jobId)
     },
     { immediate: true }
+  )
+
+  watch(
+    () => selectedJob.value?.status,
+    () => syncHubWatch()
   )
 
   async function runAction(
