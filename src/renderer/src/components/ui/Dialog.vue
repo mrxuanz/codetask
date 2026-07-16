@@ -38,7 +38,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
         aria-modal="true"
         :class="
           cn(
-            'relative z-10 max-h-[calc(100dvh-1rem)] w-full max-w-lg overflow-hidden rounded-t-xl border border-border bg-card shadow-xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-xl',
+            'relative z-10 max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-lg overflow-hidden rounded-t-xl border border-border bg-card shadow-xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-xl',
             props.class
           )
         "

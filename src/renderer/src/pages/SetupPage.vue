@@ -171,64 +171,69 @@ async function onSubmit(payload: {
 </script>
 
 <template>
-  <PageShell max-width="xl">
-    <CredentialsForm
-      :title="t('setup.title')"
-      :description="t(needsStorage ? 'setup.combinedDescription' : 'setup.description')"
-      :submit-label="t('setup.submit')"
-      :submitting-label="t('setup.submitting')"
-      password-auto-complete="new-password"
-      :show-setup-token="needSetupToken"
-      :enforce-credentials-policy="true"
-      :on-submit="onSubmit"
-    >
-      <template v-if="needsStorage" #before="{ disabled }">
-        <div class="flex flex-col gap-2 border-b pb-4">
-          <Label for="storage-path">{{ t('setup.storagePathLabel') }}</Label>
-          <p class="text-xs leading-relaxed text-muted-foreground">
-            {{
-              t(
-                storagePhase === 'recovery_required'
-                  ? 'setup.storageRecoveryDescription'
-                  : 'setup.storageDescription'
-              )
-            }}
-          </p>
-          <div class="flex flex-col gap-2 sm:flex-row">
-            <Input
-              id="storage-path"
-              v-model="storagePath"
-              class="min-w-0 flex-1"
-              :disabled="disabled"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              class="w-full shrink-0 sm:w-auto"
-              :disabled="disabled"
-              @click="openStoragePicker"
+  <div class="h-full min-h-0 min-w-0">
+    <PageShell max-width="xl">
+      <CredentialsForm
+        :title="t('setup.title')"
+        :description="t(needsStorage ? 'setup.combinedDescription' : 'setup.description')"
+        :submit-label="t('setup.submit')"
+        :submitting-label="t('setup.submitting')"
+        password-auto-complete="new-password"
+        :show-setup-token="needSetupToken"
+        :enforce-credentials-policy="true"
+        :on-submit="onSubmit"
+      >
+        <template v-if="needsStorage" #before="{ disabled }">
+          <div class="flex min-w-0 flex-col gap-2 border-b pb-4">
+            <Label for="storage-path">{{ t('setup.storagePathLabel') }}</Label>
+            <p class="text-xs leading-relaxed text-muted-foreground break-words">
+              {{
+                t(
+                  storagePhase === 'recovery_required'
+                    ? 'setup.storageRecoveryDescription'
+                    : 'setup.storageDescription'
+                )
+              }}
+            </p>
+            <!-- Always stack: long Windows paths + Browse overflow every phone/tablet width. -->
+            <div class="flex min-w-0 flex-col gap-2">
+              <Input
+                id="storage-path"
+                v-model="storagePath"
+                class="min-w-0 w-full font-mono"
+                :disabled="disabled"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                class="w-full shrink-0"
+                :disabled="disabled"
+                @click="openStoragePicker"
+              >
+                {{ t('setup.storageBrowse') }}
+              </Button>
+            </div>
+            <p
+              v-if="storageIssue"
+              class="rounded-md bg-destructive/10 p-3 text-sm text-destructive break-words"
             >
-              {{ t('setup.storageBrowse') }}
-            </Button>
+              {{ storageIssue }}
+            </p>
           </div>
-          <p
-            v-if="storageIssue"
-            class="rounded-md bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {{ storageIssue }}
-          </p>
-        </div>
-      </template>
-    </CredentialsForm>
+        </template>
+      </CredentialsForm>
+    </PageShell>
 
     <Dialog
       :open="pickerOpen"
-      class="flex h-[min(90dvh,720px)] min-h-0 max-h-[min(90dvh,720px)] max-w-2xl flex-col"
+      class="flex h-[min(92dvh,720px)] min-h-0 max-h-[min(92dvh,720px)] w-full max-w-2xl flex-col sm:h-[min(90dvh,720px)] sm:max-h-[min(90dvh,720px)]"
       @close="closeStoragePicker"
     >
       <div class="shrink-0 border-b border-border px-3 py-3 sm:px-4 sm:py-4">
         <h2 class="text-base font-semibold">{{ t('setup.storageBrowseTitle') }}</h2>
-        <p class="mt-1 text-sm text-muted-foreground">{{ t('setup.storageBrowseHint') }}</p>
+        <p class="mt-1 text-sm text-muted-foreground break-words">
+          {{ t('setup.storageBrowseHint') }}
+        </p>
       </div>
       <FolderBrowsePanel
         fill-height
@@ -250,5 +255,5 @@ async function onSubmit(payload: {
         @create-folder="createAndSelectFolder"
       />
     </Dialog>
-  </PageShell>
+  </div>
 </template>

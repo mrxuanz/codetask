@@ -23,10 +23,15 @@ const maxWidthClass = computed(() => {
 </script>
 
 <template>
+  <!--
+    #app is height-locked with overflow:hidden. This shell must be h-full + overflow-y-auto
+    so tall auth/setup forms remain scrollable on phones. Inner min-h-full + justify-center
+    centers short forms without clipping tall ones (classic flex centering scroll trap).
+  -->
   <main
     :class="
       cn(
-        'relative flex min-h-[100dvh] items-start justify-center overflow-y-auto px-3 pb-6 pt-14 sm:items-center sm:px-4 sm:py-6',
+        'relative h-full min-h-0 w-full min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain',
         props.class
       )
     "
@@ -34,7 +39,14 @@ const maxWidthClass = computed(() => {
     <div class="absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
       <LanguageSwitcher />
     </div>
-    <div :class="cn('w-full', maxWidthClass)">
+    <div
+      :class="
+        cn(
+          'mx-auto flex min-h-full w-full min-w-0 flex-col justify-center px-3 pb-8 pt-14 sm:px-4 sm:py-6',
+          maxWidthClass
+        )
+      "
+    >
       <slot />
     </div>
   </main>
