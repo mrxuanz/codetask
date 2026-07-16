@@ -5,7 +5,10 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
-import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/legacy-control-plane/reconcile'
+import {
+  resetJobReconcileForTests,
+  stopWorkloadReconcilerForTests
+} from '../../src/server/legacy-control-plane/reconcile'
 import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import {
   jobArtifacts,
@@ -60,11 +63,7 @@ async function teardownDb(): Promise<void> {
   }
 }
 
-async function seedJob(
-  db: ReturnType<typeof GetDb>,
-  jobId: string,
-  status: string
-): Promise<void> {
+async function seedJob(db: ReturnType<typeof GetDb>, jobId: string, status: string): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
   const projectId = `proj-${jobId}`
   const threadId = `thread-${jobId}`
@@ -167,41 +166,17 @@ test('claim capacity=1 rejects second run', async () => {
     })
     assert.equal(second, null)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
-test('CODETASK_WORKLOAD_POOL_CAPACITY > 1 is rejected (capacity fixed at 1)', async () => {
-  await setupDb()
-  const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '2'
-  try {
-    // Reading the capacity must throw a clear config error, and any claim that
-    // reads it must therefore also fail rather than silently allowing >1.
-    assert.throws(() => workloadPoolCapacity('execution'), /capacity is fixed at 1/)
-    assert.throws(() => workloadPoolCapacity('default'), /capacity is fixed at 1/)
-
-    const db = getDb()
-    await seedJob(db, 'job-1', 'planning')
-    await assert.rejects(
-      claimWorkloadSlotTx({
-        username: 'user',
-        ownerKind: 'thread_job',
-        ownerId: 'job-1',
-        kind: 'planning'
-      }),
-      /capacity is fixed at 1/
-    )
-  } finally {
-    process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-  await teardownDb()
-  }
+test('workload capacity remains fixed at 1 in TS config', () => {
+  assert.equal(workloadPoolCapacity('execution'), 1)
+  assert.equal(workloadPoolCapacity('default'), 1)
 })
 
 test('capacity 1 semantics: only one active run per pool', async () => {
   await setupDb()
-  const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '1'
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -225,15 +200,12 @@ test('capacity 1 semantics: only one active run per pool', async () => {
     assert.equal(workloadPoolCapacity('default'), 1)
     assert.equal(workloadPoolCapacity('execution'), 1)
   } finally {
-    process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-  await teardownDb()
+    await teardownDb()
   }
 })
 
 test('release is idempotent', async () => {
   await setupDb()
-  const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '1'
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -252,8 +224,7 @@ test('release is idempotent', async () => {
     assert.equal(first.released, true)
     assert.equal(second.released, false)
   } finally {
-    process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -286,7 +257,7 @@ test('stale release does not clear newer active_run_id', async () => {
     const active = await getActiveRun('thread_job', 'job-1')
     assert.equal(active?.runId, newRun.runId)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -311,7 +282,7 @@ test('fenced update rejects stale run', async () => {
     const row = await db.select().from(threadJobs).where(eq(threadJobs.id, 'job-1')).limit(1)
     assert.notEqual(row[0]?.status, 'failed')
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -364,7 +335,7 @@ test('stale fenced update does not replace committed evidence artifacts', async 
     assert.equal(hydrated?.summary, 'committed evidence')
     assert.equal(hydrated?.status, 'failed')
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -386,7 +357,7 @@ test('assertRunActive is false after release', async () => {
     await releaseWorkloadSlot(run.runId, { reason: 'test' })
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), false)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -410,7 +381,7 @@ test('assertRunWritable is false while run is cancelling', async () => {
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), true)
     assert.equal(await assertRunWritable('thread_job', 'job-1', run.runId), false)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -461,11 +432,14 @@ test('MCP handler rejects stale run', async () => {
       })
 
       assert.equal(result.kind, 'json')
-      assert.equal((result.body as { error?: { message?: string } }).error?.message, 'Plan session closed or stale run')
+      assert.equal(
+        (result.body as { error?: { message?: string } }).error?.message,
+        'Plan session closed or stale run'
+      )
     } finally {
       unregisterPlannerMcpSession('plan-mcp-test')
     }
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })

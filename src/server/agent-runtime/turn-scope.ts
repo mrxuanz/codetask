@@ -23,6 +23,7 @@ export interface TurnScopeInput {
   role: ConversationRole
   externalSignal?: AbortSignal | undefined
   processExit?: Promise<never> | undefined
+  noFirstSignalMs?: number | null | undefined
   progressGuard?: ProgressGuard | undefined
   onKeepAlive?: (() => void) | undefined
 }
@@ -35,6 +36,7 @@ export class TurnScope {
   private readonly _processExit?: Promise<never> | undefined
   private readonly _onKeepAlive?: (() => void) | undefined
   private readonly _progressGuard?: ProgressGuard | undefined
+  private readonly _configuredNoFirstSignalMs?: number | null | undefined
 
   private _disposed = false
   private _sawFirstSignal = false
@@ -52,6 +54,7 @@ export class TurnScope {
     this._processExit = input.processExit
     this._onKeepAlive = input.onKeepAlive
     this._progressGuard = input.progressGuard
+    this._configuredNoFirstSignalMs = input.noFirstSignalMs
 
     if (input.externalSignal?.aborted) {
       this._abortExternal(input.externalSignal.reason)
@@ -70,7 +73,10 @@ export class TurnScope {
 
   arm(): void {
     if (!this._processExit) {
-      const noFirstSignalMs = noFirstSignalMsForRole(this.role)
+      const noFirstSignalMs =
+        this._configuredNoFirstSignalMs === undefined
+          ? noFirstSignalMsForRole(this.role)
+          : this._configuredNoFirstSignalMs
       if (noFirstSignalMs != null) {
         this._noFirstSignalMs = noFirstSignalMs
         this._scheduleNoFirstSignal()

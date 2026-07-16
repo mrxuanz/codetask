@@ -5,6 +5,8 @@ import icon from '../../resources/icon.png?asset'
 import { parseCliArgs } from './cli'
 import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
 import { SafeLoggerImpl } from '../server/application/safe-logger'
+import { resolveDataDirSelection } from './data-dir'
+import { discoverRunningService } from './service-discovery'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
 
@@ -104,7 +106,17 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
-    serverInfo = await startAppServer(cli)
+    if (cli.mode === 'desktop') {
+      const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
+      serverInfo = await discoverRunningService(
+        storage.bootstrap,
+        storage.phase === 'ready' ? storage.dataDir : undefined
+      )
+      if (serverInfo) {
+        console.log(`[desktop] using running service at ${serverInfo.url}`)
+      }
+    }
+    serverInfo ??= await startAppServer(cli)
     ipcMain.handle('get-server-info', () => serverInfo)
     ipcMain.handle('select-data-directory', async () => {
       const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

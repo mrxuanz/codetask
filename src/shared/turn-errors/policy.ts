@@ -3,10 +3,7 @@ import type { TurnErrorDto } from './types.ts'
 import { isTurnError } from './turn-error.ts'
 import { isUserTurnCancellation, normalizeTurnError } from './normalize.ts'
 
-const GENERIC_SANDBOX_WRAPPER_CODES = new Set<string>([
-  'sandbox.sdk.error',
-  'sandbox.worker.exit'
-])
+const GENERIC_SANDBOX_WRAPPER_CODES = new Set<string>(['sandbox.sdk.error', 'sandbox.worker.exit'])
 
 const SANDBOX_NATIVE_NON_RETRY = new Set<string>([
   'sandbox.turn.cancelled',
@@ -35,7 +32,6 @@ const NON_RETRYABLE_TURN_CODES = new Set<TurnErrorCode>([
   'turn.cancelled',
   'job.paused',
   'job.cancelled',
-  'runtime.quota_exceeded',
   'sandbox.turn.cancelled',
   'sandbox.required',
   'sandbox.worker.busy',

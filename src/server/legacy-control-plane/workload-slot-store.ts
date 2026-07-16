@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { and, eq, isNotNull, sql } from 'drizzle-orm'
 import { getDb } from '../db'
-import { getAppContext } from '../bootstrap'
+import { getAppConfig, getAppContext } from '../bootstrap'
 import { threadJobs, workloadRuns, workloadSlots } from '../db/schema'
 import { isEntityDeletionBlocked } from './deletion-coordinator'
 
@@ -68,33 +68,15 @@ function nowSec(): number {
 
 /**
  * F2 (§2.2/§7.3): the execution pool is a process-global pool with capacity
- * fixed at 1 for this release. Any `CODETASK_WORKLOAD_POOL_CAPACITY` other than
- * 1 is rejected at read/startup with a clear config error; concurrency will be
- * reintroduced later together with DB capacity constraints and fair scheduling.
+ * fixed at 1 for this release. Concurrency will be reintroduced later together
+ * with DB capacity constraints and fair scheduling.
  */
 export function workloadPoolCapacity(_pool = 'default'): number {
-  const env = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  if (env !== undefined && env.trim() !== '') {
-    const parsed = Number(env)
-    // Only an explicit numeric capacity is validated. Non-numeric junk (including
-    // the literal "undefined"/"null" left by lax env cleanup) is treated as unset.
-    if (Number.isFinite(parsed) && parsed !== 1) {
-      throw new Error(
-        `Invalid CODETASK_WORKLOAD_POOL_CAPACITY=${env}: execution pool capacity is fixed at 1 for this release. ` +
-          `Remove the variable or set it to 1.`
-      )
-    }
-  }
-  return 1
+  return getAppConfig().execution.workloadPoolCapacity
 }
 
 export function workloadLeaseTtlSec(): number {
-  const env = process.env.CODETASK_WORKLOAD_LEASE_TTL_SEC
-  if (env) {
-    const parsed = Number(env)
-    if (!Number.isNaN(parsed) && parsed > 0) return parsed
-  }
-	  return 90 * 60
+  return getAppConfig().execution.workloadLeaseTtlSec
 }
 
 function ownerTable(_ownerKind: WorkloadOwnerKind): typeof threadJobs {
@@ -198,10 +180,7 @@ export async function claimWorkloadSlotTx(
     const ownerTableRef = ownerTable(ownerKind)
     const ownerIdCol = ownerIdColumn(ownerKind)
 
-    tx.update(ownerTableRef)
-      .set({ activeRunId: runId })
-      .where(eq(ownerIdCol, ownerId))
-      .run()
+    tx.update(ownerTableRef).set({ activeRunId: runId }).where(eq(ownerIdCol, ownerId)).run()
 
     return runId
   })
@@ -550,7 +529,11 @@ export async function listActiveWorkloadSlots(
 export async function isRunActive(runId: string): Promise<boolean> {
   const db = getDb()
   const row = await db
-    .select({ status: workloadRuns.status, ownerKind: workloadRuns.ownerKind, ownerId: workloadRuns.ownerId })
+    .select({
+      status: workloadRuns.status,
+      ownerKind: workloadRuns.ownerKind,
+      ownerId: workloadRuns.ownerId
+    })
     .from(workloadRuns)
     .where(eq(workloadRuns.id, runId))
     .limit(1)
@@ -793,8 +776,8 @@ export async function releaseActiveRunOrAdvanceQueue(
   }
 }
 
-  /** Single queue-advance exit: pending / planning thread jobs. */
-  export async function advanceWorkloadQueue(username: string): Promise<void> {
+/** Single queue-advance exit: pending / planning thread jobs. */
+export async function advanceWorkloadQueue(username: string): Promise<void> {
   const { advanceAllQueues } = await import('./queue-coordinator')
   await advanceAllQueues(username)
 }

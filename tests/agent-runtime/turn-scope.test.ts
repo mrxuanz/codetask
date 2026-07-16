@@ -157,13 +157,11 @@ describe('turn-scope', () => {
   })
 
   it('progress guard reports suspected stall without cancelling the turn', async () => {
-    const prevWindow = process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
-    const prevStalled = process.env.CODETASK_TURN_STALLED_MS
-    process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = '20'
-    process.env.CODETASK_TURN_STALLED_MS = '40'
-
+    const guard = new ProgressGuard('conversation', {
+      progressWindowMs: 20,
+      stalledMs: 40
+    })
     try {
-      const guard = new ProgressGuard('conversation')
       const turnScope = new TurnScope({
         role: 'conversation',
         progressGuard: guard
@@ -180,10 +178,7 @@ describe('turn-scope', () => {
       assert.equal(turnScope.graceCancelled, false)
       turnScope.dispose()
     } finally {
-      if (prevWindow === undefined) delete process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
-      else process.env.CODETASK_TURN_PROGRESS_WINDOW_MS = prevWindow
-      if (prevStalled === undefined) delete process.env.CODETASK_TURN_STALLED_MS
-      else process.env.CODETASK_TURN_STALLED_MS = prevStalled
+      guard.dispose()
     }
   })
 

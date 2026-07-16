@@ -7,21 +7,19 @@ import {
 } from '../../shared/turn-errors.ts'
 import { isTurnError, createTurnError } from '../../shared/turn-errors.ts'
 import type { AgentTurnChunk } from './types'
+import { DEFAULT_APP_CONFIG } from '../config/app-config'
 
-const DEFAULT_MAX_RETRIES = 3
-const ABSOLUTE_MAX_RETRIES = 5
+const DEFAULT_MAX_RETRIES = DEFAULT_APP_CONFIG.turn.maxRetries
+const ABSOLUTE_MAX_RETRIES = DEFAULT_APP_CONFIG.turn.absoluteMaxRetries
 
 function turnErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
 }
 
-export function resolveTurnMaxRetries(): number {
-  const raw = process.env.CODETASK_TURN_MAX_RETRIES?.trim()
-  if (!raw) return DEFAULT_MAX_RETRIES
-  const parsed = Number.parseInt(raw, 10)
-  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_MAX_RETRIES
-  return Math.min(parsed, ABSOLUTE_MAX_RETRIES)
+export function resolveTurnMaxRetries(configured = DEFAULT_MAX_RETRIES): number {
+  if (!Number.isFinite(configured) || configured < 1) return DEFAULT_MAX_RETRIES
+  return Math.min(Math.floor(configured), ABSOLUTE_MAX_RETRIES)
 }
 
 export { isRetryableTurnError } from '../../shared/turn-errors.ts'

@@ -19,6 +19,8 @@ const SERVER_MESSAGE_KEYS: Record<string, string> = {
   storage_database_missing: 'setup.errors.databaseMissing',
   storage_locator_unreadable: 'setup.errors.locatorUnreadable',
   storage_locator_invalid: 'setup.errors.locatorInvalid',
+  storage_legacy_locator_conflict: 'setup.errors.legacyLocatorConflict',
+  storage_legacy_locator_migration_failed: 'setup.errors.legacyLocatorMigrationFailed',
   storage_installation_id_mismatch: 'setup.errors.installationMismatch',
   storage_validation_expired: 'setup.errors.validationExpired',
   insufficient_space: 'setup.errors.insufficientSpace'

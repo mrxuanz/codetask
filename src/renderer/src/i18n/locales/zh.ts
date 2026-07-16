@@ -76,6 +76,8 @@ export default {
       databaseMissing: '目录中找不到数据库文件',
       locatorUnreadable: '已保存的数据位置配置损坏，请重新选择数据目录',
       locatorInvalid: '已保存的数据位置配置无效，请重新选择数据目录',
+      legacyLocatorConflict: '检测到多份不同的数据位置配置，请选择要使用的原数据目录',
+      legacyLocatorMigrationFailed: '迁移原数据位置配置失败，请重新选择原数据目录',
       installationMismatch: '数据目录与当前安装不匹配',
       validationExpired: '目录校验已过期，请重试',
       insufficientSpace: '磁盘空间不足'

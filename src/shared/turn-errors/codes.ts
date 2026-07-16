@@ -18,7 +18,6 @@ export type TurnErrorCode =
   | 'workspace.busy'
   | 'workspace.lease_lost'
   | 'runtime.draining'
-  | 'runtime.quota_exceeded'
   | 'sandbox.worker.missing'
   | 'sandbox.required'
   | 'sandbox.turn.timed_out'
@@ -174,8 +173,6 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'workspace.lease_lost':
     'Workspace lease is not held by this run; cannot execute without single-writer admission',
   'runtime.draining': 'Runtime is shutting down; try again after restart',
-  'runtime.quota_exceeded':
-    'Job runtime quota exceeded ({actualBytes} bytes / {maxBytes} bytes)',
   'sandbox.worker.missing': 'Sandbox worker not available',
   'sandbox.required': 'Sandbox is required for this operation',
   'sandbox.turn.timed_out': 'Sandbox task timed out',

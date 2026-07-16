@@ -35,6 +35,7 @@ export interface BootstrapPaths {
   bootstrapDir: string
   locatorFile: string
   migrationStateFile: string
+  serviceDiscoveryFile: string
   logsDir: string
   secretsDir: string
   authSecretFile: string
@@ -81,6 +82,7 @@ export function bootstrapPaths(root: string): BootstrapPaths {
     bootstrapDir,
     locatorFile: join(bootstrapDir, 'storage-location.json'),
     migrationStateFile: join(bootstrapDir, 'migration-state.json'),
+    serviceDiscoveryFile: join(bootstrapDir, 'running-service.json'),
     logsDir: join(absolute, 'logs'),
     secretsDir,
     authSecretFile: join(secretsDir, 'auth-secret'),
@@ -298,12 +300,13 @@ export function createStorageLocator(input: {
   }
 }
 
-/** Pure path/source resolver used by both Electron composition and Node integration tests. */
+/** Storage resolver used by both Electron composition and Node integration tests. */
 export function resolveStorageLocation(input: {
   explicitDataDir?: string
   envDataDir?: string
   mode: 'desktop' | 'server'
   bootstrapRoot: string
+  legacyBootstrapRoots?: readonly string[]
   defaultDataDir: string
 }): DataDirResolution {
   const bootstrap = bootstrapPaths(input.bootstrapRoot)
@@ -330,7 +333,56 @@ export function resolveStorageLocation(input: {
   }
 
   const repository = new StorageLocatorRepository(bootstrap)
-  const locatorRead = repository.read()
+  let locatorRead = repository.read()
+  if (locatorRead.status === 'missing' && input.legacyBootstrapRoots?.length) {
+    const legacyLocators = new Map<string, { paths: BootstrapPaths; locator: StorageLocator }>()
+    for (const root of input.legacyBootstrapRoots) {
+      const paths = bootstrapPaths(root)
+      if (paths.root === bootstrap.root) continue
+      const legacyRead = new StorageLocatorRepository(paths).read()
+      if (legacyRead.status !== 'valid' || validateLocatorMarker(legacyRead.locator)) continue
+      const key = `${legacyRead.locator.installationId}\0${legacyRead.locator.dataDir}`
+      legacyLocators.set(key, { paths, locator: legacyRead.locator })
+    }
+
+    if (legacyLocators.size > 1) {
+      return {
+        phase: 'recovery_required',
+        dataDir: '',
+        source: 'locator',
+        managed: false,
+        bootstrap,
+        issue: 'storage_legacy_locator_conflict'
+      }
+    }
+
+    const legacy = legacyLocators.values().next().value as
+      | { paths: BootstrapPaths; locator: StorageLocator }
+      | undefined
+    if (legacy) {
+      try {
+        copyBootstrapSecretIfMissing(legacy.paths.authSecretFile, bootstrap.authSecretFile)
+        copyBootstrapSecretIfMissing(legacy.paths.mcpSecretFile, bootstrap.mcpSecretFile)
+        repository.write(
+          createStorageLocator({
+            dataDir: legacy.locator.dataDir,
+            source: 'migration',
+            installationId: legacy.locator.installationId
+          })
+        )
+        locatorRead = repository.read()
+      } catch {
+        return {
+          phase: 'recovery_required',
+          dataDir: legacy.locator.dataDir,
+          source: 'locator',
+          managed: false,
+          bootstrap,
+          issue: 'storage_legacy_locator_migration_failed'
+        }
+      }
+    }
+  }
   if (locatorRead.status === 'corrupt') {
     return {
       phase: 'recovery_required',
@@ -386,6 +438,23 @@ export function resolveStorageLocation(input: {
     source: 'candidate',
     managed: false,
     bootstrap
+  }
+}
+
+function copyBootstrapSecretIfMissing(source: string, target: string): void {
+  if (!existsSync(source) || existsSync(target)) return
+  mkdirSync(dirname(target), { recursive: true })
+  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`
+  let fd: number | null = null
+  try {
+    writeFileSync(tmp, readFileSync(source), { mode: 0o600 })
+    fd = openSync(tmp, 'r+')
+    fsyncSync(fd)
+    closeSync(fd)
+    fd = null
+    renameSync(tmp, target)
+  } finally {
+    if (fd !== null) closeSync(fd)
   }
 }
 
