@@ -196,6 +196,32 @@ export async function finishExecutionRunLifecycle(
     await releaseWorkloadSlot(runId, { reason: input.reason })
   }
   clearExecutionRunId(input.jobId)
+
+  // finalize often runs while the slot is still held and defers runtime cleanup; retry now.
+  await retryTerminalJobRuntimeCleanup(input.username, input.jobId)
+}
+
+async function retryTerminalJobRuntimeCleanup(username: string, jobId: string): Promise<void> {
+  try {
+    const { getAppContext } = await import('../bootstrap')
+    const { getUserJob } = await import('./repository')
+    const { cleanupJobRuntimeTreeIfTerminal, isDeferredCleanupResult, isTerminalJobStatus } =
+      await import('../runtime/cleanup')
+    const ctx = getAppContext()
+    const job = await getUserJob(username, jobId)
+    if (!job || !isTerminalJobStatus(job.status)) return
+    const result = await cleanupJobRuntimeTreeIfTerminal(
+      ctx.dataDir,
+      job.threadId,
+      jobId,
+      job.status
+    )
+    if (isDeferredCleanupResult(result)) {
+      console.warn('[jobs] terminal runtime cleanup still deferred after slot release', jobId, result)
+    }
+  } catch (error) {
+    console.warn('[jobs] post-release terminal runtime cleanup failed', jobId, error)
+  }
 }
 
 export type PlanningRunOutcome = 'success' | 'failure' | 'user_stopped'

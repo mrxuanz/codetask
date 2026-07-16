@@ -183,7 +183,7 @@ function resolvePlanStatus(jobStatus: string, hasContext: boolean): PlanUnitStat
 function mapExecutionStatus(
   item: TaskProgressItemShape | undefined,
   planStatus: PlanUnitStatus,
-  options?: { isCurrentTask?: boolean; jobRunning?: boolean }
+  options?: { isCurrentTask?: boolean; jobRunning?: boolean; jobPaused?: boolean }
 ): Pick<
   UnifiedTaskNode,
   | 'status'
@@ -213,6 +213,19 @@ function mapExecutionStatus(
     options?.isCurrentTask === true &&
     options?.jobRunning === true &&
     (item.status === 'queued' || item.status === 'running' || item.executionStatus === 'running')
+  if (options?.isCurrentTask === true && options?.jobPaused === true) {
+    return {
+      status: 'paused',
+      executionStatus: 'paused',
+      evidenceStatus: item.evidenceStatus ?? null,
+      errorMessage: item.error?.message ?? item.errorMessage ?? null,
+      error: item.error ?? null,
+      evidence: item.evidence ?? null,
+      evidenceArtifactId: item.evidenceArtifactId ?? null,
+      evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
+      coreCode: item.coreCode ?? null
+    }
+  }
   const status = treatAsRunning
     ? 'in_progress'
     : item.status === 'running'
@@ -236,6 +249,7 @@ function mapExecutionStatus(
 function sliceAggregateStatus(tasks: UnifiedTaskNode[]): string {
   if (tasks.length === 0) return 'pending'
   if (tasks.every((t) => t.status === 'completed' || t.status === 'skipped')) return 'completed'
+  if (tasks.some((t) => t.status === 'paused')) return 'paused'
   if (tasks.some((t) => t.status === 'in_progress')) return 'in_progress'
   if (tasks.some((t) => t.status === 'failed')) return 'failed'
   if (tasks.some((t) => t.status === 'completed')) return 'in_progress'
@@ -255,7 +269,10 @@ function sliceInVerification(slice: UnifiedSliceNode): boolean {
   )
 }
 
-function milestoneAggregateStatus(slices: UnifiedSliceNode[]): string {
+function milestoneAggregateStatus(
+  slices: UnifiedSliceNode[],
+  options?: { jobPaused?: boolean }
+): string {
   if (slices.length === 0) return 'pending'
   if (slices.every(sliceFullyVerified)) return 'completed'
   if (
@@ -268,6 +285,19 @@ function milestoneAggregateStatus(slices: UnifiedSliceNode[]): string {
     )
   ) {
     return 'failed'
+  }
+  if (slices.some((s) => s.status === 'paused') || options?.jobPaused === true) {
+    if (
+      slices.some(
+        (s) =>
+          s.status === 'paused' ||
+          s.status === 'in_progress' ||
+          s.runtimeStatus === 'running' ||
+          (s.status === 'completed' && !sliceFullyVerified(s))
+      )
+    ) {
+      return 'paused'
+    }
   }
   if (
     slices.some(
@@ -302,8 +332,8 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
   const sliceProgress = new Map((input.verification?.slices ?? []).map((s) => [s.id, s]))
   const milestoneProgress = new Map((input.verification?.milestones ?? []).map((m) => [m.id, m]))
 
-  const jobRunning =
-    input.jobStatus === 'running' || input.jobStatus === 'pending' || input.jobStatus === 'paused'
+  const jobPaused = input.jobStatus === 'paused' || input.jobStatus === 'pausing'
+  const jobRunning = input.jobStatus === 'running' || input.jobStatus === 'pending'
   const currentTaskId = input.currentTaskId ?? null
 
   const milestones: UnifiedMilestoneNode[] = plan.milestones.map((milestone, mIdx) => {
@@ -324,7 +354,8 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
         const planStatus = resolvePlanStatus(input.jobStatus, hasContext)
         const exec = mapExecutionStatus(progress, planStatus, {
           isCurrentTask: currentTaskId === id,
-          jobRunning
+          jobRunning,
+          jobPaused
         })
         const referenceIds = flat?.referenceIds ?? []
         const assignedReferences = resolveAssignedReferencesFromDto(
@@ -360,6 +391,14 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
       const sliceStatus = sliceAggregateStatus(tasks)
       const sliceRow = sliceProgress.get(sliceId)
       const allTasksDone = tasks.length > 0 && tasks.every((t) => t.status === 'completed')
+      const synthesizedRuntime =
+        allTasksDone
+          ? 'ready-for-verification'
+          : sliceStatus === 'in_progress' && !jobPaused
+            ? 'running'
+            : sliceStatus === 'paused'
+              ? null
+              : null
       return {
         id: sliceId,
         title: slice.title?.trim() || '',
@@ -367,13 +406,14 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
         successCriteria: resolveSliceSuccessCriteria(slice),
         order: sNum,
         status: sliceRow?.runtimeStatus === 'progress-ok' ? 'completed' : sliceStatus,
-        runtimeStatus:
-          sliceRow?.runtimeStatus ??
-          (allTasksDone
-            ? 'ready-for-verification'
-            : sliceStatus === 'in_progress'
-              ? 'running'
-              : null),
+        runtimeStatus: jobPaused
+          ? sliceRow?.runtimeStatus === 'progress-ok'
+            ? sliceRow.runtimeStatus
+            : sliceRow?.runtimeStatus === 'verifying' ||
+                sliceRow?.runtimeStatus === 'ready-for-verification'
+              ? sliceRow.runtimeStatus
+              : null
+          : (sliceRow?.runtimeStatus ?? synthesizedRuntime),
         verificationStatus: sliceRow?.verificationStatus ?? null,
         tasks
       }
@@ -386,7 +426,7 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
       description: milestone.description ?? '',
       successCriteria: milestone.successCriteria?.trim() ?? '',
       order: mNum,
-      status: milestoneAggregateStatus(slices),
+      status: milestoneAggregateStatus(slices, { jobPaused }),
       verificationStatus:
         milestoneRow?.verificationStatus ??
         (slices.length > 0 && slices.every((s) => s.runtimeStatus === 'progress-ok')

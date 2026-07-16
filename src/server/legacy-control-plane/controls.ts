@@ -429,10 +429,14 @@ export async function continueFailedJob(username: string, jobId: string): Promis
 
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
+  // UI/CP "continue" covers paused + recoverable-failed; legacy /continue hits this for both.
+  if (job.status === 'paused' || job.status === 'pausing') {
+    return resumePausedJob(username, jobId)
+  }
   const state = deriveJobRecoveryState(job)
   if (job.status !== 'failed' || !state.recovery.recoverable) {
     throw AppError.badRequest(
-      'Only recoverable failed jobs can be continued',
+      'Only paused or recoverable failed jobs can be continued',
       'job.invalid_status',
       { status: job.status }
     )
@@ -535,7 +539,9 @@ export async function continueFailedJob(username: string, jobId: string): Promis
 export async function resumeJob(username: string, jobId: string): Promise<ThreadJobDto> {
   const job = await getUserJob(username, jobId)
   if (!job) throw AppError.notFound('Job not found', 'job.not_found')
-  if (job.status === 'paused') return resumePausedJob(username, jobId)
+  if (job.status === 'paused' || job.status === 'pausing') {
+    return resumePausedJob(username, jobId)
+  }
   if (job.status === 'failed') return continueFailedJob(username, jobId)
   throw AppError.badRequest(
     'Only paused or recoverable failed jobs can be resumed',

@@ -65,31 +65,48 @@ export async function removeDirectoryIfExists(path: string): Promise<boolean> {
   return true
 }
 
+export type CleanupJobRuntimeResult =
+  | 'deleted'
+  | 'absent'
+  | 'deferred_active'
+  | 'deferred_slot'
+
+/**
+ * Delete the Job runtime tree when safe.
+ * Returns deferred_* when the execution loop or workload slot is still held so callers can
+ * retry after unwind (status often flips to terminal before finally/release).
+ */
 export async function cleanupJobRuntimeTree(
   dataDir: string,
   threadId: string,
   jobId: string,
   options: { deletionDrained?: boolean } = {}
-): Promise<void> {
+): Promise<CleanupJobRuntimeResult> {
+  if (options.deletionDrained) {
+    const removed = await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+    return removed ? 'deleted' : 'absent'
+  }
   try {
-    if (options.deletionDrained) {
-      await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
-      return
-    }
     const { getAppContext } = await import('../bootstrap')
     const ctx = getAppContext()
     if (ctx.executionRuntime.isLoopActive(jobId)) {
-      throw new Error(`Refusing to delete active Job runtime: ${jobId}`)
+      return 'deferred_active'
     }
     const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
     if ((await listActiveWorkloadSlots()).some((slot) => slot.ownerId === jobId)) {
-      throw new Error(`Refusing to delete Job runtime with active workload slot: ${jobId}`)
+      return 'deferred_slot'
     }
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Refusing to delete')) throw error
+  } catch {
     // Standalone retention tests may not have a bootstrapped application context.
   }
-  await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+  const removed = await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+  return removed ? 'deleted' : 'absent'
+}
+
+export function isDeferredCleanupResult(
+  result: CleanupJobRuntimeResult
+): result is 'deferred_active' | 'deferred_slot' {
+  return result === 'deferred_active' || result === 'deferred_slot'
 }
 
 /**
@@ -148,9 +165,9 @@ export async function cleanupJobRuntimeTreeIfTerminal(
   threadId: string,
   jobId: string,
   status: string
-): Promise<void> {
-  if (!isTerminalJobStatus(status)) return
-  await cleanupJobRuntimeTree(dataDir, threadId, jobId)
+): Promise<CleanupJobRuntimeResult | 'skipped_non_terminal'> {
+  if (!isTerminalJobStatus(status)) return 'skipped_non_terminal'
+  return cleanupJobRuntimeTree(dataDir, threadId, jobId)
 }
 
 export async function pruneOrphanRuntimeTrees(

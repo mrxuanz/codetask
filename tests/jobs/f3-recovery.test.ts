@@ -142,11 +142,79 @@ test('F3-A: user paused job stays paused across a reconcile pass (no auto-run)',
   await setupDb()
   try {
     await seedJob('job-paused', { status: 'paused' })
+    await getDb().insert(jobTasks).values({
+      jobId: 'job-paused',
+      taskId: 't1',
+      title: 'T1',
+      sortOrder: 0,
+      status: 'completed',
+      executionStatus: 'completed'
+    })
+    await getDb()
+      .update(threadJobs)
+      .set({
+        lastError: JSON.stringify({
+          v: 1,
+          code: 'job.paused',
+          message: 'Job paused',
+          detail: null
+        }),
+        taskPhase: 'running',
+        taskStatus: 'running',
+        taskCurrentIndex: 1,
+        taskTotal: 2
+      })
+      .where(eq(threadJobs.id, 'job-paused'))
 
-    // The running-job reconciler must not touch paused jobs.
     await reconcileOrphanRunningJobsForUser('user')
 
     assert.equal(await jobStatus('job-paused'), 'paused')
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('F3-A: legacy restart-interrupted paused job is promoted back to running', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-restart-paused', { status: 'paused' })
+    await getDb().insert(jobTasks).values([
+      {
+        jobId: 'job-restart-paused',
+        taskId: 't1',
+        title: 'T1',
+        sortOrder: 0,
+        status: 'completed',
+        executionStatus: 'completed'
+      },
+      {
+        jobId: 'job-restart-paused',
+        taskId: 't2',
+        title: 'T2',
+        sortOrder: 1,
+        status: 'queued',
+        executionStatus: 'queued'
+      }
+    ])
+    await getDb()
+      .update(threadJobs)
+      .set({
+        lastError: null,
+        taskPhase: 'running',
+        taskStatus: 'running',
+        taskCurrentIndex: 1,
+        taskTotal: 2,
+        taskCurrentTaskId: 't2',
+        taskMetaJson: JSON.stringify({
+          slices: [{ id: 'm1-s1', runtimeStatus: 'running', verificationStatus: null }]
+        })
+      })
+      .where(eq(threadJobs.id, 'job-restart-paused'))
+
+    beginDraining()
+    await reconcileOrphanRunningJobsForUser('user')
+
+    assert.equal(await jobStatus('job-restart-paused'), 'running')
   } finally {
     await teardownDb()
   }
@@ -507,6 +575,60 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
 
     // Per-job helper is a no-op once nothing is running.
     assert.equal(markRunningAttemptsInterruptedForJob('job-x'), 0)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('F3-A: auto-resume prep clears uncertain fence so beginTaskAttempt can proceed', async () => {
+  await setupDb()
+  try {
+    const { prepareInterruptedJobForAutoResume } =
+      await import('../../src/server/legacy-control-plane/queue-coordinator')
+
+    await seedJob('job-auto', { status: 'running' })
+    await getDb().insert(jobTasks).values({
+      jobId: 'job-auto',
+      taskId: 'task-1',
+      title: 'T1',
+      sortOrder: 0,
+      status: 'running',
+      executionStatus: 'running'
+    })
+
+    const started = beginTaskAttempt({
+      jobId: 'job-auto',
+      taskId: 'task-1',
+      runId: null,
+      snapshotPlanRevision: 1
+    })
+    assert.equal(started.kind, 'started')
+    if (started.kind !== 'started') throw new Error('unreachable')
+
+    markTaskAttemptProviderStarted({
+      jobId: 'job-auto',
+      taskId: 'task-1',
+      attemptNo: started.attemptNo
+    })
+    markRunningAttemptsInterruptedForJob('job-auto')
+
+    const blocked = beginTaskAttempt({
+      jobId: 'job-auto',
+      taskId: 'task-1',
+      runId: null,
+      snapshotPlanRevision: 1
+    })
+    assert.equal(blocked.kind, 'blocked-uncertain')
+
+    assert.equal(prepareInterruptedJobForAutoResume('job-auto'), 1)
+
+    const resumed = beginTaskAttempt({
+      jobId: 'job-auto',
+      taskId: 'task-1',
+      runId: null,
+      snapshotPlanRevision: 1
+    })
+    assert.equal(resumed.kind, 'started')
   } finally {
     await teardownDb()
   }
