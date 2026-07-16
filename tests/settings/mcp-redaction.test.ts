@@ -22,10 +22,18 @@ test('renderer MCP payload masks headers, tokens, passwords, and sensitive env v
   const settings = defaultUserMcpSettings()
   settings.conversation['claude-code'].mcpServers = {
     docs: {
-      headers: { Authorization: 'Bearer secret', Accept: 'application/json' },
+      headers: {
+        Authorization: 'Bearer secret',
+        Cookie: 'session=secret',
+        'X-API-Key': 'header-secret',
+        Accept: 'application/json'
+      },
       apiKey: 'api-secret',
+      clientSecret: 'client-secret',
+      privateKey: 'private-secret',
       password: 'pw',
-      env: { PUBLIC_VALUE: 'visible', SERVICE_TOKEN: 'env-secret' }
+      env: { PUBLIC_VALUE: 'visible', SERVICE_TOKEN: 'env-secret' },
+      environment: { PUBLIC_VALUE: 'visible', OPENCODE_TOKEN: 'opencode-secret' }
     }
   }
 
@@ -33,15 +41,24 @@ test('renderer MCP payload masks headers, tokens, passwords, and sensitive env v
   const docs = redacted.conversation['claude-code'].mcpServers.docs as {
     headers: Record<string, string>
     apiKey: string
+    clientSecret: string
+    privateKey: string
     password: string
     env: Record<string, string>
+    environment: Record<string, string>
   }
   assert.equal(docs.headers.Authorization, MCP_SECRET_MASK)
+  assert.equal(docs.headers.Cookie, MCP_SECRET_MASK)
+  assert.equal(docs.headers['X-API-Key'], MCP_SECRET_MASK)
   assert.equal(docs.headers.Accept, 'application/json')
   assert.equal(docs.apiKey, MCP_SECRET_MASK)
+  assert.equal(docs.clientSecret, MCP_SECRET_MASK)
+  assert.equal(docs.privateKey, MCP_SECRET_MASK)
   assert.equal(docs.password, MCP_SECRET_MASK)
   assert.equal(docs.env.SERVICE_TOKEN, MCP_SECRET_MASK)
   assert.equal(docs.env.PUBLIC_VALUE, 'visible')
+  assert.equal(docs.environment.OPENCODE_TOKEN, MCP_SECRET_MASK)
+  assert.equal(docs.environment.PUBLIC_VALUE, 'visible')
 })
 
 test('MCP secrets are encrypted outside settings and resolved only in the trusted parent', (t) => {

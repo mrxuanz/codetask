@@ -24,7 +24,10 @@ import {
   resetDeletionCoordinatorForTests,
   setDeletionPurgeHooksForTests
 } from '../../src/server/legacy-control-plane/deletion-coordinator'
-import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/legacy-control-plane/reconcile'
+import {
+  resetJobReconcileForTests,
+  stopWorkloadReconcilerForTests
+} from '../../src/server/legacy-control-plane/reconcile'
 import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import { resetWorkspaceLeaseStateForTests } from '../../src/server/legacy-control-plane/workspace-lease-store'
 import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-control-plane/workload-slot-store'
@@ -34,15 +37,20 @@ import { jobRuntimeDir } from '../../src/server/runtime/cleanup'
 let dataDir = ''
 
 async function setup(): Promise<void> {
-  process.env.CODETASK_RUN_CANCEL_GRACE_MS = '0'
-  process.env.CODETASK_RUN_KILL_GRACE_MS = '0'
   dataDir = mkdtempSync(join(tmpdir(), 'codetask-delete-drain-'))
   await resetAppContextForTests()
   resetJobReconcileForTests()
   resetWorkspaceLeaseStateForTests()
   resetWorkloadRunControllersForTests()
   resetRuntimeSupervisorForTests()
-  bootstrapRuntime({ dataDir })
+  bootstrapRuntime({
+    dataDir,
+    config: {
+      execution: {
+        runLifecycle: { cancelGraceMs: 0, killGraceMs: 0 }
+      }
+    }
+  })
   resetDeletionCoordinatorForTests()
   await ensureStartupWorkloadReady()
   stopWorkloadReconcilerForTests()
@@ -63,7 +71,9 @@ async function teardown(): Promise<void> {
   }
 }
 
-async function seedPendingJob(jobId: string): Promise<{ threadId: string; runId: string; draftId: string }> {
+async function seedPendingJob(
+  jobId: string
+): Promise<{ threadId: string; runId: string; draftId: string }> {
   const db = getDb()
   const now = Math.floor(Date.now() / 1000)
   const projectId = `proj-${jobId}`
@@ -322,7 +332,10 @@ test('filesystem purge failure keeps deletion incomplete and does not mark compl
     })
 
     try {
-      await assert.rejects(() => executeDeletionRequest(requestId), /simulated filesystem purge failure/)
+      await assert.rejects(
+        () => executeDeletionRequest(requestId),
+        /simulated filesystem purge failure/
+      )
     } finally {
       setDeletionPurgeHooksForTests({})
     }
@@ -367,9 +380,8 @@ test('incomplete deletion blocks thread turns and job lease admission', async ()
     assert.equal(isEntityDeletionBlocked('thread_job', jobId), true)
     assert.equal(await isThreadProjectDeletionBlocked(threadId), true)
 
-    const { claimExecutionSlotForJobTx } = await import(
-      '../../src/server/legacy-control-plane/workload-slot-store'
-    )
+    const { claimExecutionSlotForJobTx } =
+      await import('../../src/server/legacy-control-plane/workload-slot-store')
     const claim = await claimExecutionSlotForJobTx('user', jobId)
     assert.equal(claim, null)
   } finally {

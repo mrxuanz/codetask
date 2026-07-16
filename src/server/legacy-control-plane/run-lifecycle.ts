@@ -12,6 +12,7 @@ import {
   waitClosed,
   type RuntimeHandle
 } from './runtime-supervisor'
+import { getAppConfig } from '../bootstrap'
 
 export interface RunLifecycleConfig {
   cancelGraceMs: number
@@ -27,10 +28,7 @@ export interface RunLifecycleDependencies {
 }
 
 export function runLifecycleConfig(): RunLifecycleConfig {
-  return {
-    cancelGraceMs: Number(process.env.CODETASK_RUN_CANCEL_GRACE_MS ?? 10_000),
-    killGraceMs: Number(process.env.CODETASK_RUN_KILL_GRACE_MS ?? 5_000)
-  }
+  return getAppConfig().execution.runLifecycle
 }
 
 function defaultSleep(ms: number): Promise<void> {

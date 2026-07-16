@@ -16,7 +16,6 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'workspace.busy': '工作区正被其他任务占用，请稍后再试',
   'workspace.lease_lost': '工作区租约已失效，无法在未获得单写者许可时执行',
   'runtime.draining': '运行时正在关闭，请重启后再试',
-  'runtime.quota_exceeded': '作业运行时空间超过上限（{actualBytes} / {maxBytes} 字节）',
   'sandbox.worker.missing': '沙箱 worker 不可用',
   'sandbox.required': '此操作需要沙箱环境',
   'sandbox.turn.timed_out': '沙箱任务超时',

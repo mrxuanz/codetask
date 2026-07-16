@@ -259,8 +259,12 @@ async function loadThreadProject(
 }
 
 function reserveThread(thread: ThreadDto, username: string): void {
-  const registry = getAppContext().runtimeRegistry
-  assertConcurrentTurnCapacity(registry.countInflightForUser(username))
+  const ctx = getAppContext()
+  const registry = ctx.runtimeRegistry
+  assertConcurrentTurnCapacity(
+    registry.countInflightForUser(username),
+    ctx.config.http.maxConcurrentTurnsPerUser
+  )
   if (registry.isThreadInflight(thread.id)) {
     throw AppError.badRequest('Thread is busy; wait for the reply to finish', 'thread.busy')
   }

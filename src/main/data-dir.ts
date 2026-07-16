@@ -38,10 +38,13 @@ function isAppPackageJson(packageJsonPath: string): boolean {
 
 export type { DataDirResolution, DataDirSource } from './storage-locator'
 
-export function resolveBootstrapRoot(mode: AppMode, override?: string): string {
+/**
+ * Desktop and server mode are two entry points into the same installation, so they must share
+ * bootstrap metadata (storage locator and secrets) instead of deriving it from the launch mode.
+ */
+export function resolveBootstrapRoot(_mode: AppMode, override?: string): string {
   const configured = override?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
   if (configured) return resolve(configured)
-  if (mode === 'desktop') return app.getPath('userData')
   if (process.platform === 'win32') {
     return join(process.env.APPDATA?.trim() || app.getPath('userData'), 'CodeTask')
   }
@@ -61,11 +64,19 @@ export function resolveDataDirSelection(input: {
   bootstrapRoot?: string
   defaultDataDir?: string
 }): DataDirResolution {
+  const bootstrapOverridden = Boolean(
+    input.bootstrapRoot?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
+  )
+  const bootstrapRoot = resolveBootstrapRoot(input.mode, input.bootstrapRoot)
   return resolveStorageLocation({
     explicitDataDir: input.explicitDataDir,
     envDataDir: process.env.CODETASK_DATA_DIR,
     mode: input.mode,
-    bootstrapRoot: resolveBootstrapRoot(input.mode, input.bootstrapRoot),
+    bootstrapRoot,
+    // Before bootstrap roots were unified, desktop mode stored these files under Electron's
+    // userData directory. Adopt that valid legacy installation once, without overriding an
+    // explicit operator-selected bootstrap root.
+    legacyBootstrapRoots: bootstrapOverridden ? [] : [app.getPath('userData')],
     defaultDataDir: input.defaultDataDir ?? resolveDefaultDataDir()
   })
 }

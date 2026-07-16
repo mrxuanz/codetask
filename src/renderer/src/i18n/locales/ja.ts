@@ -66,7 +66,8 @@ export default {
     errors: {
       pathNotAbsolute: '絶対パスを入力してください',
       pathNotWritable: '書き込みできません。別の場所を選んでください',
-      pathNotEmpty: '空でないディレクトリで、CodeTask データルートでもありません。空のフォルダを選んでください',
+      pathNotEmpty:
+        '空でないディレクトリで、CodeTask データルートでもありません。空のフォルダを選んでください',
       pathForbiddenRoot: 'システムルートやホームディレクトリは使用できません',
       pathOwnedByOther: 'このディレクトリは別の CodeTask インストールに属しています',
       markerMissing:
@@ -74,6 +75,10 @@ export default {
       databaseMissing: 'このディレクトリにデータベースがありません',
       locatorUnreadable: '保存された保存先設定が壊れています。再度選択してください',
       locatorInvalid: '保存された保存先設定が無効です。再度選択してください',
+      legacyLocatorConflict:
+        '異なる保存先設定が複数見つかりました。使用する元のデータディレクトリを選択してください',
+      legacyLocatorMigrationFailed:
+        '元の保存先設定を移行できませんでした。元のデータディレクトリを再度選択してください',
       installationMismatch: 'データディレクトリがこのインストールと一致しません',
       validationExpired: 'ディレクトリ検証の期限が切れました。再試行してください',
       insufficientSpace: 'ディスク容量が不足しています'

@@ -2,7 +2,7 @@ import type { ConversationRole } from './roles'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import type { TurnActivityKind } from './turn-scope'
 import { stalledAfterMsForRole } from './turn-timeouts'
-import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from '../sandbox/session-state'
+import { DEFAULT_APP_CONFIG, type TurnConfig } from '../config/app-config'
 
 const LONG_RUNNING_COMMAND_RE =
   /\b(npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|yarn\s+test|bun\s+test|pytest|cargo\s+test|go\s+test|jest|vitest|playwright\s+test|mvn\s+test|gradle\s+test|make\s+test|ctest)\b/i
@@ -17,29 +17,19 @@ interface StalledListener {
   (): void
 }
 
-function progressWindowMs(): number {
-  const env = process.env.CODETASK_TURN_PROGRESS_WINDOW_MS
-  if (env) {
-    const parsed = Number(env)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  return 5 * 60_000
-}
+export type ProgressGuardConfig = Pick<
+  TurnConfig,
+  'progressWindowMs' | 'stalledMs' | 'longRunningToolCapMs'
+>
 
 /**
  * Absolute single-tool grace cap. After this elapses, open tools no longer
  * suppress stall — even if `_openToolCount > 0` (the C.2 hole).
- * Env: CODETASK_LONG_TOOL_CAP_MS (preferred) or CODETASK_TURN_TOOL_WALL_MS.
  */
-export function longRunningToolCapMs(): number {
-  for (const key of ['CODETASK_LONG_TOOL_CAP_MS', 'CODETASK_TURN_TOOL_WALL_MS'] as const) {
-    const env = process.env[key]
-    if (env) {
-      const parsed = Number(env)
-      if (Number.isFinite(parsed) && parsed > 0) return parsed
-    }
-  }
-  return DEFAULT_SANDBOX_TURN_TIMEOUT_MS
+export function longRunningToolCapMs(
+  configuredMs = DEFAULT_APP_CONFIG.turn.longRunningToolCapMs
+): number {
+  return configuredMs
 }
 
 /** @deprecated Prefer longRunningToolCapMs — kept for existing test imports. */
@@ -47,6 +37,7 @@ export const toolWallMs = longRunningToolCapMs
 
 export class ProgressGuard {
   private readonly _role: ConversationRole
+  private readonly _config: ProgressGuardConfig
   private readonly _stalledListeners = new Set<StalledListener>()
   private _openToolCount = 0
   private _windowHadProgress = false
@@ -60,8 +51,14 @@ export class ProgressGuard {
   private _toolGraceStartedAt: number | null = null
   private _stalledEmitted = false
 
-  constructor(role: ConversationRole) {
+  constructor(role: ConversationRole, config: Partial<ProgressGuardConfig> = {}) {
     this._role = role
+    this._config = {
+      progressWindowMs: DEFAULT_APP_CONFIG.turn.progressWindowMs,
+      stalledMs: DEFAULT_APP_CONFIG.turn.stalledMs,
+      longRunningToolCapMs: DEFAULT_APP_CONFIG.turn.longRunningToolCapMs,
+      ...config
+    }
   }
 
   get isStarted(): boolean {
@@ -71,7 +68,7 @@ export class ProgressGuard {
   start(): void {
     if (this._started || this._disposed) return
     this._started = true
-    const windowMs = progressWindowMs()
+    const windowMs = this._config.progressWindowMs
     this._tickTimer = setInterval(() => this._tick(windowMs), windowMs)
     this._tickTimer?.unref?.()
   }
@@ -166,7 +163,7 @@ export class ProgressGuard {
     const startedAt = this._toolGraceStartedAt
     if (startedAt == null) return true
     const elapsed = Date.now() - startedAt
-    if (elapsed > longRunningToolCapMs()) {
+    if (elapsed > this._config.longRunningToolCapMs) {
       return false
     }
     return true
@@ -177,7 +174,7 @@ export class ProgressGuard {
     return this._windowHadProgress
   }
 
-  private _tick(windowMs = progressWindowMs()): void {
+  private _tick(windowMs = this._config.progressWindowMs): void {
     if (this._disposed || this._stalledEmitted) return
 
     const graceActive = this._isToolGraceActive()
@@ -188,7 +185,7 @@ export class ProgressGuard {
       if (this._hasOpenTool() && !graceActive) {
         sandboxTurnDebug('progress-guard: tool wall expired', {
           role: this._role,
-          wallMs: longRunningToolCapMs(),
+          wallMs: this._config.longRunningToolCapMs,
           openToolCount: this._openToolCount,
           longRunningTool: this._longRunningTool,
           stalledAccumMs: this._stalledAccum
@@ -200,7 +197,7 @@ export class ProgressGuard {
     this._windowHadProgress = false
     this._windowHadLiveness = false
 
-    const threshold = stalledAfterMsForRole(this._role)
+    const threshold = stalledAfterMsForRole(this._role, this._config.stalledMs)
     if (this._stalledAccum >= threshold) {
       sandboxTurnDebug('progress-guard: stalled', {
         role: this._role,

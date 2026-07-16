@@ -48,10 +48,7 @@ async function assertTopicsOwned(username: string, topics: HubTopic[]): Promise<
   }
 }
 
-function parseTopicsFromBody(body: {
-  topics?: string[]
-  jobIds?: string[]
-}): HubTopic[] {
+function parseTopicsFromBody(body: { topics?: string[]; jobIds?: string[] }): HubTopic[] {
   if (Array.isArray(body.topics)) {
     const topics: HubTopic[] = []
     for (const raw of body.topics) {
@@ -97,7 +94,7 @@ async function handleSubscriptions(c: Context): Promise<Response> {
   return c.json(ok({ connectionId, topics }))
 }
 
-async function handleStream(c: Context): Promise<Response> {
+async function handleStream(c: Context, maxClientsPerUser: number): Promise<Response> {
   const username = await requireUsername(c.req.header('Authorization'))
   const connectionId =
     c.req.query('connectionId')?.trim() ||
@@ -107,7 +104,7 @@ async function handleStream(c: Context): Promise<Response> {
   const parsedLast = lastRaw ? Number.parseInt(lastRaw, 10) : NaN
   const lastEventId = Number.isFinite(parsedLast) ? parsedLast : null
 
-  assertSseClientCapacity(activeHubs.keys(), username)
+  assertSseClientCapacity(activeHubs.keys(), username, maxClientsPerUser)
 
   const hub = registerJobHubConnection(username, connectionId, { lastEventId })
   const key = hubKey(username, hub.connectionId)
@@ -135,13 +132,13 @@ async function handleStream(c: Context): Promise<Response> {
   })
 }
 
-export function createEventsRoutes(_ctx: AppContext): Hono {
+export function createEventsRoutes(ctx: AppContext): Hono {
   const routes = new Hono()
 
   routes.put('/subscriptions', (c) => handleSubscriptions(c))
   routes.put('/jobs/subscriptions', (c) => handleSubscriptions(c))
-  routes.get('/stream', (c) => handleStream(c))
-  routes.get('/jobs/stream', (c) => handleStream(c))
+  routes.get('/stream', (c) => handleStream(c, ctx.config.http.maxSseClientsPerUser))
+  routes.get('/jobs/stream', (c) => handleStream(c, ctx.config.http.maxSseClientsPerUser))
 
   return routes
 }

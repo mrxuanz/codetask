@@ -28,6 +28,12 @@ import {
   collectMcpSecretReferenceIds,
   resolveProtectedMcpSensitiveValues
 } from './settings/mcp-secrets'
+import {
+  createAppConfig,
+  DEFAULT_APP_CONFIG,
+  type AppConfig,
+  type AppConfigOverrides
+} from './config/app-config'
 
 export type { AppContext } from './context'
 
@@ -36,6 +42,7 @@ export type AppMode = 'desktop' | 'server'
 export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
+  config?: AppConfigOverrides
   authSecretPath?: string
   authSecret?: string
   mcpSecretPath?: string
@@ -68,6 +75,10 @@ export function getAppContext(): AppContext {
     throw new Error('Runtime not bootstrapped')
   }
   return appContext
+}
+
+export function getAppConfig(): AppConfig {
+  return appContext?.config ?? DEFAULT_APP_CONFIG
 }
 
 export function getStartupCoordinator(): StartupCoordinator | null {
@@ -113,6 +124,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     const bootId = randomUUID()
 
     const nextContext: AppContext = {
+      config: createAppConfig(options.config),
       dataDir: options.dataDir,
       db,
       settings,

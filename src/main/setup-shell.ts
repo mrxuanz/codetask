@@ -95,42 +95,30 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     const path = body.path ?? ''
     const allowLowSpace = body.allowLowSpace === true
 
-    // Prefer recovering a valid existing root; otherwise allow a fresh initialize target.
-    // This keeps recovery UIs from getting stuck when the user picks a new empty folder.
-    if (options.storage.phase === 'recovery_required') {
-      const existing = validateExistingStorageRoot({
-        path,
-        forbiddenRoots,
-        nonceRepository: recoveryNonces
-      })
-      if (existing.ok) {
-        return c.json(ok({ ...existing, action: 'recover' as const }))
-      }
-      const fresh = validateStorageTarget({
-        path,
-        forbiddenRoots,
-        allowLowSpace,
-        nonceRepository: initializationNonces
-      })
-      if (fresh.ok) {
-        return c.json(ok({ ...fresh, action: 'initialize' as const }))
-      }
-      return c.json(
-        fail(400, fresh.issue ?? existing.issue ?? 'storage_target_invalid', fresh),
-        400
-      )
+    // A missing locator does not mean the selected directory is new. Both first-run selection
+    // and recovery may safely adopt a marked CodeTask root after SQLite integrity validation.
+    const existing = validateExistingStorageRoot({
+      path,
+      forbiddenRoots,
+      nonceRepository: recoveryNonces
+    })
+    if (existing.ok) {
+      return c.json(ok({ ...existing, action: 'recover' as const }))
     }
 
-    const result = validateStorageTarget({
+    const fresh = validateStorageTarget({
       path,
       forbiddenRoots,
       allowLowSpace,
       nonceRepository: initializationNonces
     })
-    if (!result.ok) {
-      return c.json(fail(400, result.issue ?? 'storage_target_invalid', result), 400)
+    if (!fresh.ok) {
+      return c.json(
+        fail(400, fresh.issue ?? existing.issue ?? 'storage_target_invalid', fresh),
+        400
+      )
     }
-    return c.json(ok({ ...result, action: 'initialize' as const }))
+    return c.json(ok({ ...fresh, action: 'initialize' as const }))
   })
 
   app.post('/api/system/storage/initialize', async (c) => {
@@ -180,7 +168,10 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   })
 
   app.post('/api/system/storage/recover', async (c) => {
-    if (options.storage.phase !== 'recovery_required') {
+    if (
+      options.storage.phase !== 'selection_required' &&
+      options.storage.phase !== 'recovery_required'
+    ) {
       return c.json(fail(409, 'storage_recovery_not_allowed', {}), 409)
     }
     const body = await c.req.json<{ path?: string; validationNonce?: string }>()

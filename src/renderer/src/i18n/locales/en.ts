@@ -68,7 +68,8 @@ export default {
     errors: {
       pathNotAbsolute: 'Enter an absolute path',
       pathNotWritable: 'Directory is not writable; choose another location',
-      pathNotEmpty: 'Directory is not empty and is not a CodeTask data root; choose an empty folder',
+      pathNotEmpty:
+        'Directory is not empty and is not a CodeTask data root; choose an empty folder',
       pathForbiddenRoot: 'Cannot use the system root or home directory',
       pathOwnedByOther: 'This directory belongs to another CodeTask installation',
       markerMissing:
@@ -76,6 +77,10 @@ export default {
       databaseMissing: 'Database file not found in this directory',
       locatorUnreadable: 'Saved storage location is corrupt; choose a data directory again',
       locatorInvalid: 'Saved storage location is invalid; choose a data directory again',
+      legacyLocatorConflict:
+        'Multiple different storage locations were found; choose the original data directory to use',
+      legacyLocatorMigrationFailed:
+        'Could not migrate the original storage location; choose the original data directory again',
       installationMismatch: 'Data directory does not match this installation',
       validationExpired: 'Directory validation expired; try again',
       insufficientSpace: 'Not enough disk space'

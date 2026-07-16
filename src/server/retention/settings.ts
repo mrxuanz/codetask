@@ -44,15 +44,7 @@ export function readRetentionSettings(store: SettingsStore): RetentionSettings {
     messagePayloadInlineMaxBytes:
       typeof input.messagePayloadInlineMaxBytes === 'number'
         ? input.messagePayloadInlineMaxBytes
-        : DEFAULT_RETENTION_SETTINGS.messagePayloadInlineMaxBytes,
-    runtimeMaxBytesPerJob:
-      typeof input.runtimeMaxBytesPerJob === 'number'
-        ? input.runtimeMaxBytesPerJob
-        : DEFAULT_RETENTION_SETTINGS.runtimeMaxBytesPerJob,
-    dataDirMaxBytes:
-      typeof input.dataDirMaxBytes === 'number'
-        ? input.dataDirMaxBytes
-        : DEFAULT_RETENTION_SETTINGS.dataDirMaxBytes
+        : DEFAULT_RETENTION_SETTINGS.messagePayloadInlineMaxBytes
   }
 }
 
