@@ -46,9 +46,10 @@ test('resolveProviderOuterSandbox rejects disable for file roles', () => {
 test('resolveRoleMcpToolNames per role', () => {
   assert.equal(resolveRoleMcpToolNames('conversation'), undefined)
   assert.deepEqual(resolveRoleMcpToolNames('planner'), [
+    'register_plan_outline',
     'register_task_context',
     'update_task_context',
-    'register_plan'
+    'finalize_plan'
   ])
   assert.deepEqual(resolveRoleMcpToolNames('task-worker'), ['report_task_result'])
   assert.deepEqual(resolveRoleMcpToolNames('slice-verifier'), ['complete_slice_verification'])

@@ -232,6 +232,7 @@ export default {
         planning: '計画生成中 {done}/{total}',
         planningPartial: '計画生成中 · {done} ステップ完了',
         planningRunning: '計画を生成中…',
+        planOutlineReady: '計画の骨格をロックしました（{total} タスク）。詳細を生成中…',
         planFinalizing: '計画構造は準備完了、仕上げ中…',
         executionDone: '実行完了 {done}/{total}',
         executionFailed: '実行失敗',
@@ -242,6 +243,7 @@ export default {
           'plan.pending':
             'キューに入っています。前のタスクが完了または一時停止するのを待っています…',
           'plan.planning': '計画を生成中…',
+          'plan.outline_ready': '計画の骨格をロックしました（{total} タスク）。詳細を生成中…',
           'plan.planning_partial': '計画生成中 · {done} ステップ完了',
           'plan.planning_failed': '計画生成に失敗しました',
           'plan.needs_auth': 'CLI が未ログインです。端末で先にログインしてください',

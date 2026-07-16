@@ -18,9 +18,10 @@ export function roleRequiresOuterSandbox(role: ConversationRole): boolean {
 }
 
 export const PLANNER_ROLE_MCP_TOOLS = [
+  'register_plan_outline',
   'register_task_context',
   'update_task_context',
-  'register_plan'
+  'finalize_plan'
 ] as const
 
 export function resolveRoleMcpToolNames(role: ConversationRole): readonly string[] | undefined {

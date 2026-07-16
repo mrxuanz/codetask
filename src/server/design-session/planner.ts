@@ -2,9 +2,8 @@ import { randomUUID } from 'crypto'
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { saveDesignPlan, saveDesignPlanProgress, saveDesignAbilities } from '../db/design-plan'
+import { saveDesignAbilities } from '../db/design-plan'
 import { threadJobs } from '../db/schema'
-import { mapJob } from '../legacy-control-plane/repository'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import { ensureJobRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
@@ -25,8 +24,7 @@ import {
 import {
   defaultPlanProgress,
   defaultTaskProgress,
-  flattenRegisteredPlan,
-  buildPartialPlanFromContexts
+  flattenRegisteredPlan
 } from '../planner/save-plan'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { countPlanUnits } from '../planner/mcp/normalize'
@@ -50,10 +48,6 @@ import { WIZARD_PHASE_PLAN_EDIT } from '../wizard/types'
 import type { PlanningRunOutcome } from '../legacy-control-plane/run-lifecycle'
 import { getRunController } from '../legacy-control-plane/workload-slot-store'
 import { runWithExecutionRunContext } from '../legacy-control-plane/execution-run-context'
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000)
-}
 
 export async function commitDesignPlanReady(
   designSessionId: string,
@@ -145,7 +139,7 @@ function summarizePlannerSession(session: PlannerMcpSession): Record<string, unk
   return {
     contextsRegistered: session.taskContexts.size,
     contextKeys: [...session.taskContexts.keys()],
-    hasRegisteredPlan: Boolean(session.registeredPlan),
+    hasPlanOutline: Boolean(session.planOutline),
     allowedAbilityCodes: session.allowedAbilityCodes
   }
 }
@@ -169,54 +163,30 @@ async function pushDesignPlanningProgress(
   runId: string,
   done: number,
   partialPlan: SavedJobPlan,
-  registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
+  planOutline: import('../planner/plan-types').PlannerRegisteredPlan
 ): Promise<void> {
-  const db = getDb()
-  const fenced = await db
-    .select({ activeRunId: threadJobs.activeRunId })
-    .from(threadJobs)
-    .where(and(eq(threadJobs.id, designSessionId), eq(threadJobs.activeRunId, runId)))
-    .limit(1)
-    .then((rows) => rows[0])
-
-  if (!fenced) {
-    plannerSandboxDebug('runDesignPlanner: partial progress stale run ignored', { designSessionId, runId })
-    return
-  }
-
-  const structuredTotal = registeredPlan ? countPlanUnits(registeredPlan).tasks : 0
-  const partialCount = partialPlan.tasks.length
-  const total =
-    structuredTotal > 0
-      ? structuredTotal
-      : partialCount > 0
-        ? Math.max(partialCount + 1, done + 1)
-        : 0
+  const counts = countPlanUnits(planOutline)
+  const total = counts.tasks
   const planProgress: PlanProgressDto = {
     phase: 'planning',
     status: 'running',
     contextsRegistered: done,
     contextsTotal: total,
-    progressCode: 'plan.planning_partial',
-    progressParams:
-      structuredTotal > 0 ? { done, total: structuredTotal } : done > 0 ? { done } : undefined,
+    milestones: counts.milestones,
+    slices: counts.slices,
+    tasks: counts.tasks,
+    progressCode: done === 0 ? 'plan.outline_ready' : 'plan.planning_partial',
+    progressParams: { done, total },
     message: null
   }
 
-  await saveDesignPlan(db, designSessionId, partialPlan)
-  await saveDesignPlanProgress(db, designSessionId, planProgress)
-  await db
-    .update(threadJobs)
-    .set({ updatedAt: nowSec() })
-    .where(eq(threadJobs.id, designSessionId))
-
-  const rows = await db
-    .select()
-    .from(threadJobs)
-    .where(eq(threadJobs.id, designSessionId))
-    .limit(1)
-  const job = rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
-  if (!job) return
+  const job = await updateDesignSessionRowFenced(designSessionId, runId, {
+    plan: partialPlan,
+    planProgress
+  })
+  if (!job) {
+    throw AppError.badRequest('Plan session closed or stale run', 'plan.stale_run')
+  }
 
   emitJobEvent(designSessionId, {
     event: 'plan_progress',
@@ -238,9 +208,9 @@ export async function pushDesignPlanningProgressFenced(
   runId: string,
   done: number,
   partialPlan: SavedJobPlan,
-  registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
+  planOutline: import('../planner/plan-types').PlannerRegisteredPlan
 ): Promise<void> {
-  return pushDesignPlanningProgress(designSessionId, runId, done, partialPlan, registeredPlan)
+  return pushDesignPlanningProgress(designSessionId, runId, done, partialPlan, planOutline)
 }
 
 async function commitPlanningSoftPause(
@@ -319,9 +289,8 @@ async function runDesignPlanner(
     return
   }
 
-  const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } = await import(
-    '../legacy-control-plane/workspace-lease-store'
-  )
+  const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } =
+    await import('../legacy-control-plane/workspace-lease-store')
   const workspaceLease = acquireWorkspaceLease({
     workspacePath,
     ownerKind: 'planner',
@@ -364,7 +333,10 @@ async function runDesignPlanner(
   getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username)
 
   const revisionBefore = options?.planRevisionBefore ?? 0
-  const designRunId = await createPlannerRun({ designSessionId, planRevisionBefore: revisionBefore })
+  const designRunId = await createPlannerRun({
+    designSessionId,
+    planRevisionBefore: revisionBefore
+  })
   const planningDraft = ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode)
   if (planningDraft.abilities.length > 0 && draft.abilities.length === 0) {
     await saveDesignAbilities(
@@ -408,7 +380,8 @@ async function runDesignPlanner(
   const plannerScopeId = `${designSessionId}:${run.runId}`
 
   const { registerRunRuntime } = await import('../legacy-control-plane/runtime-supervisor')
-  const { buildCursorPlannerRuntimeHandle } = await import('../legacy-control-plane/runtime-handle-cursor')
+  const { buildCursorPlannerRuntimeHandle } =
+    await import('../legacy-control-plane/runtime-handle-cursor')
   const { updateRunRuntimeRef } = await import('../legacy-control-plane/workload-slot-store')
   registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
   await updateRunRuntimeRef(run.runId, { kind: 'cursor-acp', scopeId: plannerScopeId })
@@ -440,7 +413,7 @@ async function runDesignPlanner(
         planningDraft.references.map((item) => item.id),
       referenceManifest,
       taskContexts: new Map(),
-      registeredPlan: null,
+      planOutline: null,
       phaseAdvance,
       planRevision: revisionBefore + 1,
       clearConfirmed: Boolean(options?.regenerationInstruction),
@@ -448,23 +421,21 @@ async function runDesignPlanner(
         const controller = getRunController(run.runId)
         if (controller && !controller.signal.aborted) {
           try {
-            controller.abort('register_plan')
+            controller.abort('finalize_plan')
           } catch {
             // ignore
           }
         }
       },
-      onTaskContextRegistered: (_key, done) => {
-        const partial = plannerSession!.registeredPlan
-          ? flattenRegisteredPlan(plannerSession!.registeredPlan, plannerSession!.taskContexts)
-          : buildPartialPlanFromContexts(plannerSession!.taskContexts)
-        void pushDesignPlanningProgress(
-          designSessionId,
-          run.runId,
-          done,
-          partial,
-          plannerSession!.registeredPlan
-        )
+      onPlanOutlineRegistered: async () => {
+        const outline = plannerSession!.planOutline!
+        const partial = flattenRegisteredPlan(outline, plannerSession!.taskContexts)
+        await pushDesignPlanningProgress(designSessionId, run.runId, 0, partial, outline)
+      },
+      onTaskContextRegistered: async (_key, done) => {
+        const outline = plannerSession!.planOutline!
+        const partial = flattenRegisteredPlan(outline, plannerSession!.taskContexts)
+        await pushDesignPlanningProgress(designSessionId, run.runId, done, partial, outline)
       }
     }
 
@@ -523,9 +494,8 @@ async function runDesignPlanner(
       })
 
       let chunkCount = 0
-      const { enterWorkspaceLeaseContext } = await import(
-        '../legacy-control-plane/workspace-lease-context'
-      )
+      const { enterWorkspaceLeaseContext } =
+        await import('../legacy-control-plane/workspace-lease-context')
       enterWorkspaceLeaseContext({
         leaseId: workspaceLease.leaseId,
         ownerKind: 'planner',
@@ -586,41 +556,26 @@ async function runDesignPlanner(
 
     if (session.planCommitted) {
       planCommitted = true
+      await finishPlannerRun(designRunId, {
+        status: 'completed',
+        planRevisionAfter: session.planRevision
+      })
       plannerSandboxDebug('runDesignPlanner: done (plan committed during stream)', {
         designSessionId
       })
       return
     }
 
-    if (!session.registeredPlan) {
-      plannerSandboxDebug('runDesignPlanner: failed (no register_plan)', {
-        designSessionId,
-        ...summarizePlannerSession(session)
-      })
-      throw createTurnError('draft.plan_not_ready', {
-        detail: 'Planner did not register a structured plan via register_plan'
-      })
+    if (session.finalizerError) {
+      throw session.finalizerError
     }
-
-    const savedPlan = flattenRegisteredPlan(session.registeredPlan, session.taskContexts)
-    const counts = countPlanUnits(session.registeredPlan)
-    const nextRevision = revisionBefore + 1
-    session.planCommitting = true
-    const ok = await commitDesignPlanReady(designSessionId, run.runId, savedPlan, counts, phaseAdvance, {
-      planRevision: nextRevision,
-      clearConfirmed: Boolean(options?.regenerationInstruction)
+    plannerSandboxDebug('runDesignPlanner: failed (no finalize_plan)', {
+      designSessionId,
+      ...summarizePlannerSession(session)
     })
-    if (ok) {
-      planCommitted = true
-      session.planCommitted = true
-      plannerSandboxDebug('runDesignPlanner: done (plan committed after stream)', {
-        designSessionId,
-        milestones: counts.milestones,
-        slices: counts.slices,
-        tasks: counts.tasks
-      })
-      await finishPlannerRun(designRunId, { status: 'completed', planRevisionAfter: nextRevision })
-    }
+    throw createTurnError('draft.plan_not_ready', {
+      detail: 'Planner did not finalize the structured plan via finalize_plan'
+    })
   } catch (error) {
     if (isPlannerPlanCommitted(planCommitted, plannerSession)) {
       planCommitted = true
@@ -636,7 +591,7 @@ async function runDesignPlanner(
         runId: run.runId,
         errorCode:
           error instanceof Error && 'code' in error
-            ? (error as { code?: string }).code ?? null
+            ? ((error as { code?: string }).code ?? null)
             : null
       })
       return

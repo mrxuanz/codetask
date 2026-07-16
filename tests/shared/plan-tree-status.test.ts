@@ -121,3 +121,26 @@ test('buildUnifiedProgressTree marks currentTaskId as in_progress while job is p
   assert.equal(task?.status, 'in_progress')
   assert.equal(task?.executionStatus, 'running')
 })
+
+test('planning status follows exact task context instead of completed count order', () => {
+  const plan = structuredClone(minimalPlan)
+  plan.milestones[0]!.slices[0]!.tasks.push({ title: 'T2', abilityCode: 'scaffolding' })
+  plan.tasks[0]!.contextMarkdown = ''
+  plan.tasks.push({
+    ...plan.tasks[0]!,
+    id: 'm1-s1-t2',
+    taskIndex: 1,
+    title: 'T2',
+    contextMarkdown: 'second task context'
+  })
+
+  const tree = buildUnifiedProgressTree({
+    jobId: 'job-1',
+    title: 'Job',
+    jobStatus: 'planning',
+    plan
+  })
+  const tasks = tree.milestones[0]?.slices[0]?.tasks ?? []
+  assert.equal(tasks[0]?.planStatus, 'pending')
+  assert.equal(tasks[1]?.planStatus, 'planned')
+})

@@ -15,10 +15,12 @@ export interface PlannerMcpSession {
   validReferenceIds: string[]
   referenceManifest?: JobReferenceManifest | null | undefined
   taskContexts: Map<string, PlannerRegisteredTaskContext>
-  registeredPlan: PlannerRegisteredPlan | null
+  planOutline: PlannerRegisteredPlan | null
   planCommitted?: boolean | undefined
   planCommitting?: boolean | undefined
   finalizerPromise?: Promise<void> | undefined
+  finalizerError?: Error | undefined
+  operationQueue?: Promise<void> | undefined
   phaseAdvance?:
     | {
         username: string
@@ -30,9 +32,9 @@ export interface PlannerMcpSession {
   planRevision?: number | undefined
   clearConfirmed?: boolean | undefined
   abortTurn?: (() => void) | undefined
-  onTaskContextRegistered?: ((key: string, done: number) => void) | undefined
-  onPlanRegistered?:
-    | ((counts: { milestones: number; slices: number; tasks: number }) => void)
+  onTaskContextRegistered?: ((key: string, done: number) => Promise<void>) | undefined
+  onPlanOutlineRegistered?:
+    | ((counts: { milestones: number; slices: number; tasks: number }) => Promise<void>)
     | undefined
 }
 
@@ -77,10 +79,10 @@ export function authorizePlannerMcpRequest(input: {
   return input.capability?.trim() === expected
 }
 
-export function countExpectedTaskContexts(plan: PlannerRegisteredPlan | null): number {
-  if (!plan) return 0
+export function countExpectedTaskContexts(outline: PlannerRegisteredPlan | null): number {
+  if (!outline) return 0
   let total = 0
-  for (const milestone of plan.milestones) {
+  for (const milestone of outline.milestones) {
     for (const slice of milestone.slices) {
       total += slice.tasks.length
     }

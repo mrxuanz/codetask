@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readJobLastErrorCode } from '../helpers/turn-error'
 import { after, before, beforeEach, describe, it } from 'node:test'
-import { buildProposeTaskDraftArgs, buildRegisterPlanArgs } from '../helpers/fixtures'
+import { buildPlanOutlineArgs, buildProposeTaskDraftArgs } from '../helpers/fixtures'
 import { THREAD_KIND_CREATE_TASK, WorkflowHarness } from '../helpers/workflow-harness'
 
 describe('05 references workflow', () => {
@@ -61,7 +61,8 @@ describe('05 references workflow', () => {
     harness.registry.set('planner:0', {
       reply: 'plan with ref-a',
       mcpCalls: [
-        ...buildRegisterPlanArgs([refA.id]).milestones.flatMap((m, mi) =>
+        { tool: 'register_plan_outline', args: buildPlanOutlineArgs([refA.id]) },
+        ...buildPlanOutlineArgs([refA.id]).milestones.flatMap((m, mi) =>
           m.slices.flatMap((s, si) =>
             s.tasks.map((t, ti) => ({
               tool: 'register_task_context',
@@ -75,7 +76,7 @@ describe('05 references workflow', () => {
             }))
           )
         ),
-        { tool: 'register_plan', args: buildRegisterPlanArgs([refA.id]) }
+        { tool: 'finalize_plan', args: {} }
       ]
     })
 
@@ -100,7 +101,7 @@ describe('05 references workflow', () => {
     assert.deepEqual(implTask?.referenceIds, [refA.id])
   })
 
-  it('rejects register_plan with non-frozen reference ids', async () => {
+  it('rejects register_plan_outline with non-frozen reference ids', async () => {
     const task = await harness.createThread(THREAD_KIND_CREATE_TASK, 'codex')
     const refA = await harness.uploadAttachment(task.id, 'ref-a.md', '# Ref A\n')
 
@@ -133,23 +134,7 @@ describe('05 references workflow', () => {
     })
     harness.registry.set('planner:0', {
       reply: 'bad ref',
-      mcpCalls: [
-        ...buildRegisterPlanArgs(['ref-not-frozen']).milestones.flatMap((m, mi) =>
-          m.slices.flatMap((s, si) =>
-            s.tasks.map((t, ti) => ({
-              tool: 'register_task_context',
-              args: {
-                milestone: mi + 1,
-                slice: si + 1,
-                task: ti + 1,
-                taskTitle: t.title,
-                content: `context for ${t.title}`
-              }
-            }))
-          )
-        ),
-        { tool: 'register_plan', args: buildRegisterPlanArgs(['ref-not-frozen']) }
-      ]
+      mcpCalls: [{ tool: 'register_plan_outline', args: buildPlanOutlineArgs(['ref-not-frozen']) }]
     })
 
     await harness.sendMessage(task.id, 'review', { createTaskMode: true })
