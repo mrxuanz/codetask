@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync
 } from 'node:fs'
-import { dirname, join, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { changeSetRootPath, changeSetWorktreePath } from './paths'
 
 const SKIP_DIR_NAMES = new Set([
@@ -47,10 +47,11 @@ function walkFiles(root: string, dir: string, out: string[]): void {
     const absolute = join(dir, name)
     let st
     try {
-      st = statSync(absolute)
+      st = lstatSync(absolute)
     } catch {
       continue
     }
+    if (st.isSymbolicLink()) continue
     if (st.isDirectory()) {
       walkFiles(root, absolute, out)
       continue
@@ -112,6 +113,11 @@ export function prepareNonGitCowWorktree(input: {
   const baseFingerprint = fingerprintWorkspaceTree(input.workspaceRoot)
   copyTree(input.workspaceRoot, basePath)
   copyTree(input.workspaceRoot, worktreePath)
+  const afterCopyFingerprint = fingerprintWorkspaceTree(input.workspaceRoot)
+  if (afterCopyFingerprint !== baseFingerprint) {
+    rmSync(root, { recursive: true, force: true })
+    throw new Error('Workspace changed while creating the isolated snapshot; retry the turn')
+  }
 
   return { worktreePath, baseFingerprint }
 }
@@ -140,10 +146,7 @@ function fileMap(root: string): Map<string, string> {
   return map
 }
 
-export function buildCowPatch(input: {
-  dataDir: string
-  changeSetId: string
-}): CowPatchArtifact {
+export function buildCowPatch(input: { dataDir: string; changeSetId: string }): CowPatchArtifact {
   const basePath = changeSetBaseMirrorPath(input.dataDir, input.changeSetId)
   const worktreePath = changeSetWorktreePath(input.dataDir, input.changeSetId)
   if (!existsSync(basePath) || !existsSync(worktreePath)) {
@@ -172,8 +175,9 @@ export function buildCowPatch(input: {
 
   const patchPath = changeSetCowPatchPath(input.dataDir, input.changeSetId)
   const body = JSON.stringify({ version: 1, changes }, null, 2)
-  writeFileSync(patchPath, `${body}\n`, 'utf8')
-  const patchHash = createHash('sha256').update(body).digest('hex')
+  const storedBody = `${body}\n`
+  writeFileSync(patchPath, storedBody, 'utf8')
+  const patchHash = createHash('sha256').update(storedBody).digest('hex')
   return { patchPath, patchHash, changes, empty: changes.length === 0 }
 }
 
@@ -184,9 +188,78 @@ export function readCowPatch(dataDir: string, changeSetId: string): CowFileChang
     const parsed = JSON.parse(readFileSync(patchPath, 'utf8')) as {
       changes?: CowFileChange[]
     }
-    return Array.isArray(parsed.changes) ? parsed.changes : null
+    if (!Array.isArray(parsed.changes)) return null
+    const valid = parsed.changes.every(
+      (change) =>
+        change !== null &&
+        typeof change === 'object' &&
+        typeof change.path === 'string' &&
+        (change.kind === 'modify' || change.kind === 'add' || change.kind === 'delete') &&
+        (change.contentBase64 === undefined || typeof change.contentBase64 === 'string')
+    )
+    return valid ? parsed.changes : null
   } catch {
     return null
+  }
+}
+
+function resolveContainedFile(root: string, path: string): string {
+  if (!path || isAbsolute(path) || path.includes('\0')) {
+    throw new Error(`Invalid COW patch path: ${path}`)
+  }
+  const absolute = resolve(root, path)
+  const rel = relative(resolve(root), absolute)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`COW patch path escapes worktree: ${path}`)
+  }
+
+  let cursor = resolve(root)
+  const parts = rel.split(sep)
+  for (const part of parts) {
+    cursor = join(cursor, part)
+    if (!existsSync(cursor)) continue
+    if (lstatSync(cursor).isSymbolicLink()) {
+      throw new Error(`COW patch path crosses symlink: ${path}`)
+    }
+  }
+  return absolute
+}
+
+function fileHash(path: string): string | null {
+  if (!existsSync(path)) return null
+  const stat = lstatSync(path)
+  if (!stat.isFile() || stat.isSymbolicLink()) return null
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+export function cowPatchConflictsWithWorkspace(input: {
+  dataDir: string
+  changeSetId: string
+  workspaceRoot: string
+  changes: CowFileChange[]
+}): boolean {
+  const basePath = changeSetBaseMirrorPath(input.dataDir, input.changeSetId)
+  return input.changes.some((change) => {
+    const base = resolveContainedFile(basePath, change.path)
+    const current = resolveContainedFile(input.workspaceRoot, change.path)
+    const baseHash = fileHash(base)
+    const currentHash = fileHash(current)
+    if (change.kind === 'add') return currentHash !== null
+    return baseHash === null || baseHash !== currentHash
+  })
+}
+
+/** Apply the user's COW patch to a newly prepared isolated worktree, never to main. */
+export function applyCowChangesToWorktree(worktreePath: string, changes: CowFileChange[]): void {
+  for (const change of changes) {
+    const absolute = resolveContainedFile(worktreePath, change.path)
+    if (change.kind === 'delete') {
+      if (existsSync(absolute)) rmSync(absolute, { force: true })
+      continue
+    }
+    if (!change.contentBase64) throw new Error(`COW patch content missing: ${change.path}`)
+    mkdirSync(dirname(absolute), { recursive: true })
+    writeFileSync(absolute, Buffer.from(change.contentBase64, 'base64'))
   }
 }
 
@@ -211,7 +284,7 @@ export function applyCowPatchToMainWorkspace(input: {
 
   try {
     for (const change of input.changes) {
-      const absolute = join(input.workspaceRoot, change.path)
+      const absolute = resolveContainedFile(input.workspaceRoot, change.path)
       if (change.kind === 'delete') {
         if (existsSync(absolute)) rmSync(absolute, { force: true })
         continue

@@ -51,8 +51,12 @@ describe('conversation turn preflight', () => {
     assert.equal((await harness.listMessages(task.id)).length, 0)
   })
 
-  it('returns HTTP 409 workspace.busy without inserting a user message', async () => {
+  it('allows read-only chat while a task owns the workspace write lease', async () => {
     const chat = await harness.createThread(THREAD_KIND_CHAT, 'codex')
+    harness.setScript('conversation:general:codex:1', {
+      reply: 'read-only reply',
+      mcpCalls: []
+    })
     const held = acquireWorkspaceLease({
       workspacePath: harness.workspaceRoot,
       ownerKind: 'thread_job',
@@ -61,10 +65,16 @@ describe('conversation turn preflight', () => {
     assert.ok(held)
 
     try {
-      const err = await harness.postMessageExpectHttpError(chat.id, 'hello while busy')
-      assert.equal(err.httpStatus, 409)
-      assert.equal(err.code, 'workspace.busy')
-      assert.equal((await harness.listMessages(chat.id)).length, 0)
+      const events = await harness.sendMessage(chat.id, 'hello while busy')
+      assert.equal(
+        events.some((event) => event.event === 'error'),
+        false
+      )
+      assert.equal(
+        events.some((event) => event.event === 'assistant_message'),
+        true
+      )
+      assert.equal((await harness.listMessages(chat.id)).length, 2)
     } finally {
       releaseWorkspaceLeaseForOwner('thread_job', 'blocking-job')
     }

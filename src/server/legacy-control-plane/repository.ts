@@ -5,12 +5,7 @@ import { hydrateTurnErrorField, coercePersistedTurnError } from '../turn-errors/
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
 import { loadTaskProgress, saveTaskProgressInTx } from '../db/job-progress'
-import {
-  loadJobAbilities,
-  loadJobPlan,
-  loadPlanProgress,
-  saveJobPlanInTx
-} from '../db/job-plan'
+import { loadJobAbilities, loadJobPlan, loadPlanProgress, saveJobPlanInTx } from '../db/job-plan'
 import { jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
@@ -408,6 +403,35 @@ export async function getThreadJob(
   return rows[0] ? await mapJob(rows[0], { includePlan: true }) : null
 }
 
+/**
+ * Consume a Continue intent only after the old pause run has fully settled. The CAS prevents a
+ * late lifecycle callback from reviving a job that was cancelled or paused again meanwhile.
+ */
+export function promoteContinuedPauseToPending(jobId: string): boolean {
+  const now = nowSec()
+  const result = getDb()
+    .update(threadJobs)
+    .set({
+      status: 'pending',
+      suspensionKind: null,
+      continueAfterPause: 0,
+      recoveryReason: null,
+      lastError: null,
+      executionLeaseOwner: null,
+      executionLeaseExpiresAt: null,
+      updatedAt: now
+    })
+    .where(
+      and(
+        eq(threadJobs.id, jobId),
+        eq(threadJobs.status, 'paused'),
+        eq(threadJobs.continueAfterPause, 1)
+      )
+    )
+    .run()
+  return (result.changes ?? 0) === 1
+}
+
 export type JobRowPatch = Partial<{
   status: string
   phase: string | null
@@ -461,13 +485,17 @@ export async function updateJobRow(
   if (taskProgress) {
     const dataDir = getAppContext().dataDir
     const settings = readRetentionSettings(getAppContext().settings)
-    storedTaskProgress = await externalizeTaskProgressEvidence(dataDir, jobId, taskProgress, settings)
+    storedTaskProgress = await externalizeTaskProgressEvidence(
+      dataDir,
+      jobId,
+      taskProgress,
+      settings
+    )
   }
 
   db.transaction(() => {
     if (Object.keys(dbPatch).length > 0) {
-      db
-        .update(threadJobs)
+      db.update(threadJobs)
         .set({ ...dbPatch, ...leaseClear, updatedAt: now })
         .where(eq(threadJobs.id, jobId))
         .run()
@@ -499,8 +527,7 @@ export async function updateJobRow(
         slices: planProgress.slices,
         tasks: planProgress.tasks
       }
-      db
-        .update(threadJobs)
+      db.update(threadJobs)
         .set({
           planPhase: planProgress.phase,
           planStatus: planProgress.status,
@@ -549,9 +576,7 @@ function jobRowFence(jobId: string, runId: string): SQL {
   return and(eq(threadJobs.id, jobId), eq(threadJobs.activeRunId, runId))!
 }
 
-type FencedJobPatchTxResult =
-  | { ok: false }
-  | { ok: true; previousStatus: string; threadId: string }
+type FencedJobPatchTxResult = { ok: false } | { ok: true; previousStatus: string; threadId: string }
 
 function applyPlanProgressInTx(
   tx: ReturnType<typeof getDb>,
@@ -728,11 +753,7 @@ export async function updateJobRowFenced(
 
   await cleanupSupersededEvidenceArtifacts(taskProgressDataDir, jobId, createdArtifacts)
 
-  if (
-    patch.status &&
-    txResult.previousStatus &&
-    patch.status !== txResult.previousStatus
-  ) {
+  if (patch.status && txResult.previousStatus && patch.status !== txResult.previousStatus) {
     await onJobStatusTransition({
       jobId,
       threadId: txResult.threadId,

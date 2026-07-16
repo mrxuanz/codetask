@@ -1,4 +1,4 @@
-import { mkdirSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import type { SupportedCoreCode } from '../../conversation/cores'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
@@ -7,7 +7,6 @@ import {
   resolveCodexHostAuthPath,
   resolveCodexInstallDirs,
   resolveCursorAgentInstallDirs,
-  resolveCursorHostCursorHome,
   resolveHostProfilePaths,
   resolveOpencodeExecutable,
   resolveOpencodeInstallDirs,
@@ -17,7 +16,12 @@ import {
   snapshotCursorHostAuth,
   snapshotOpencodeHostAuth
 } from './paths'
-import { materializeCodexAuth, materializeOpencodeAuth, opencodeRuntimeLayout } from './materialize'
+import {
+  materializeCodexAuth,
+  materializeCursorAuth,
+  materializeOpencodeAuth,
+  opencodeRuntimeLayout
+} from './materialize'
 import type { ProviderAuthDiagnostics, ProviderAuthMode, ProviderAuthPrepared } from './types'
 
 const RUNTIME_AUTH_ENV_KEYS = [
@@ -85,41 +89,6 @@ function buildRuntimeBaseEnv(runtimeRoot: string): Record<string, string> {
   return env
 }
 
-function buildHostIdentityEnv(
-  runtimeRoot: string,
-  profile = resolveHostProfilePaths()
-): Record<string, string> {
-  const tmp = join(runtimeRoot, 'tmp')
-  mkdirSync(tmp, { recursive: true })
-
-  const env: Record<string, string> = {
-    HOME: profile.home,
-    CODETASK_RUNTIME_ROOT: runtimeRoot,
-    TMPDIR: tmp,
-    TEMP: tmp,
-    TMP: tmp,
-    CODETASK_PROVIDER_AUTH_MODE: 'host-identity' satisfies ProviderAuthMode
-  }
-
-  if (process.platform === 'win32') {
-    env.USERPROFILE = profile.home
-    env.APPDATA = profile.appData
-    env.LOCALAPPDATA = profile.localAppData
-    if (/^[A-Za-z]:/.test(profile.home)) {
-      env.HOMEDRIVE = profile.home.slice(0, 2)
-      env.HOMEPATH = profile.home.slice(2) || '\\'
-    }
-    applyWindowsCrashReporterEnv(env)
-  } else {
-    env.XDG_CONFIG_HOME = join(profile.home, '.config')
-    env.XDG_CACHE_HOME = join(profile.home, '.cache')
-    env.XDG_DATA_HOME = join(profile.home, '.local', 'share')
-  }
-
-  copyRuntimeAuthEnv(env)
-  return env
-}
-
 function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
   const hostAuth = snapshotCodexHostAuth()
   const hostAuthPath = resolveCodexHostAuthPath()
@@ -166,45 +135,46 @@ function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
   }
 }
 
-function prepareCursor(runtimeRoot: string): ProviderAuthPrepared {
+const preparedCursorRuntimeRoots = new Set<string>()
+
+function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuthPrepared {
   const profile = resolveHostProfilePaths()
   const hostAuth = snapshotCursorHostAuth(profile)
-  const cursorHome = resolveCursorHostCursorHome(profile)
+  const hasPreparedRuntime =
+    preparedCursorRuntimeRoots.has(runtimeRoot) &&
+    existsSync(join(runtimeRoot, '.cursor')) &&
+    existsSync(join(runtimeRoot, 'config', 'cursor'))
+  const materialized = hasPreparedRuntime ? null : materializeCursorAuth(runtimeRoot, workspaceRoot)
+  preparedCursorRuntimeRoots.add(runtimeRoot)
   const envPatch = {
-    ...buildHostIdentityEnv(runtimeRoot, profile),
-    CODETASK_PROVIDER_AUTH_MODE: 'host-identity' satisfies ProviderAuthMode
+    ...buildRuntimeBaseEnv(runtimeRoot),
+    CODETASK_PROVIDER_AUTH_MODE: 'runtime-copy' satisfies ProviderAuthMode,
+    CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
   }
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'cursorcli',
-    mode: 'host-identity',
+    mode: 'runtime-copy',
     authMaterialPresent: hostAuth.present || hostAuth.sources.length > 0,
     hostAuthPath: hostAuth.authPath,
-    runtimeAuthPath: hostAuth.authPath,
+    runtimeAuthPath:
+      materialized?.runtimeAuthPath ?? join(runtimeRoot, 'config', 'cursor', 'auth.json'),
     warnings: [
       hostAuth.present || hostAuth.sources.length > 0
-        ? 'Cursor uses the host profile identity (including macOS Keychain); outer sandbox allows read/write to ~/.cursor and related directories.'
+        ? 'Cursor auth/config is copied into the scope runtime; host Cursor directories are read-only.'
         : `Host Cursor auth.json not found (macOS may use Keychain login only); set CURSOR_API_KEY.`,
       'ACP uses --force --sandbox disabled --approve-mcps --trust; temp files written to runtime.'
     ]
   }
 
-  const readRoots = uniqueRoots([
-    profile.home,
-    cursorHome,
-    hostAuth.configDir,
-    profile.appData,
-    profile.localAppData,
-    ...resolveCursorAgentInstallDirs()
-  ])
-  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(runtimeRoot, '.cursor')])
+  const readRoots = uniqueRoots([...hostAuth.sources, ...resolveCursorAgentInstallDirs()])
+  const writeRoots = [join(runtimeRoot, '.cursor')]
   return {
-    envPatch: {
-      ...envPatch,
-      CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
-    },
+    envPatch,
     readRoots,
     writeRoots,
+    // Cursor ACP is intentionally long-lived. Runtime credentials are scrubbed with the runtime
+    // tree on scope close/startup janitor, not after each prompt.
     cleanupPlan: () => undefined,
     diagnostics: {
       ...diagnostics,
@@ -217,12 +187,9 @@ function prepareCursor(runtimeRoot: string): ProviderAuthPrepared {
       provider: 'cursorcli',
       hostReadRoots: readRoots,
       hostWriteRoots: writeRoots,
-      runtimeEnv: {
-        ...envPatch,
-        CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
-      },
-      credentialSnapshots: [],
-      scrubPatterns: []
+      runtimeEnv: envPatch,
+      credentialSnapshots: [{ relativePath: 'config/cursor/auth.json', required: false }],
+      scrubPatterns: ['config/cursor/auth.json']
     }
   }
 }
@@ -330,7 +297,6 @@ function prepareOpencode(runtimeRoot: string): ProviderAuthPrepared {
 }
 
 export interface PrepareProviderAuthOptions {
-  /** @deprecated P5: Cursor no longer writes project `.cursor`; kept for call-site compat. */
   workspaceRoot?: string
 }
 
@@ -343,7 +309,7 @@ export function prepareProviderAuth(
     case 'codex':
       return prepareCodex(runtimeRoot)
     case 'cursorcli':
-      return prepareCursor(runtimeRoot)
+      return prepareCursor(runtimeRoot, _options?.workspaceRoot ?? runtimeRoot)
     case 'claude-code':
       return prepareClaude(runtimeRoot)
     case 'opencode':

@@ -24,6 +24,7 @@ export function createTurnRoutes(_ctx: AppContext): Hono {
       idempotencyKey?: string
       provider?: string
       kind?: 'chat' | 'create_task' | 'draft'
+      allowCodeChanges?: boolean
     }>()
 
     const accepted = await enqueueConversationTurn({
@@ -37,7 +38,8 @@ export function createTurnRoutes(_ctx: AppContext): Hono {
       selectedPlanNodeRef: body.selectedPlanNodeRef,
       idempotencyKey: body.idempotencyKey ?? c.req.header('Idempotency-Key') ?? null,
       provider: body.provider ?? null,
-      kind: body.kind
+      kind: body.kind,
+      allowCodeChanges: body.allowCodeChanges === true
     })
 
     return c.json(ok(accepted), 202)

@@ -178,24 +178,26 @@ test('F3-A: legacy restart-looking paused stays paused after P7 (no heuristic au
   await setupDb()
   try {
     await seedJob('job-restart-paused', { status: 'paused' })
-    await getDb().insert(jobTasks).values([
-      {
-        jobId: 'job-restart-paused',
-        taskId: 't1',
-        title: 'T1',
-        sortOrder: 0,
-        status: 'completed',
-        executionStatus: 'completed'
-      },
-      {
-        jobId: 'job-restart-paused',
-        taskId: 't2',
-        title: 'T2',
-        sortOrder: 1,
-        status: 'queued',
-        executionStatus: 'queued'
-      }
-    ])
+    await getDb()
+      .insert(jobTasks)
+      .values([
+        {
+          jobId: 'job-restart-paused',
+          taskId: 't1',
+          title: 'T1',
+          sortOrder: 0,
+          status: 'completed',
+          executionStatus: 'completed'
+        },
+        {
+          jobId: 'job-restart-paused',
+          taskId: 't2',
+          title: 'T2',
+          sortOrder: 1,
+          status: 'queued',
+          executionStatus: 'queued'
+        }
+      ])
     await getDb()
       .update(threadJobs)
       .set({
@@ -216,6 +218,45 @@ test('F3-A: legacy restart-looking paused stays paused after P7 (no heuristic au
 
     // P7: long-term heuristic removed; one-time promotion is migration 039 → pending.
     assert.equal(await jobStatus('job-restart-paused'), 'paused')
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('continue intent survives a pausing restart and settles to pending exactly once', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-pausing-continue', { status: 'pausing' })
+    await getDb()
+      .update(threadJobs)
+      .set({
+        continueAfterPause: 1,
+        suspensionKind: 'user_pause',
+        taskPhase: 'running',
+        taskStatus: 'running',
+        taskCurrentIndex: 0,
+        taskTotal: 1
+      })
+      .where(eq(threadJobs.id, 'job-pausing-continue'))
+
+    beginDraining()
+    await reconcileOrphanRunningJobsForUser('user')
+
+    const row = getDb()
+      .select({
+        status: threadJobs.status,
+        continueAfterPause: threadJobs.continueAfterPause,
+        taskStatus: threadJobs.taskStatus
+      })
+      .from(threadJobs)
+      .where(eq(threadJobs.id, 'job-pausing-continue'))
+      .get()
+    assert.equal(row?.status, 'pending')
+    assert.equal(row?.continueAfterPause, 0)
+    assert.equal(row?.taskStatus, 'pending')
+
+    await reconcileOrphanRunningJobsForUser('user')
+    assert.equal(await jobStatus('job-pausing-continue'), 'pending')
   } finally {
     await teardownDb()
   }

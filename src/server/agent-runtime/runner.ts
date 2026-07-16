@@ -154,7 +154,8 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       signal: input.signal,
       readRoots: input.readRoots,
       jobId: input.jobId,
-      idempotencyKey: input.idempotencyKey
+      idempotencyKey: input.idempotencyKey,
+      workspaceAccess: input.workspaceAccess
     })
     if (input.workloadRunId) {
       yield* withWorkloadLeaseRefresh(sandboxStream, input.workloadRunId, input.signal)

@@ -49,6 +49,7 @@ import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
 import { ensureConversationRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
+import { ensureIsolatedProviderDirs } from '../agent-runtime/env'
 import { buildConversationCursorRuntimeScope } from '../agent-runtime/cursor-acp/runtime-registry'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
 import type {
@@ -125,6 +126,8 @@ export interface PreparedConversationTurn {
   /** Null when conversation uses read-only access and does not hold an exclusive lease. */
   workspaceLeaseId: string | null
   workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
+  changeSetId: string | null
+  runtimeRootOverride: string | null
 }
 
 export async function prepareConversationTurn(input: {
@@ -175,7 +178,9 @@ export async function prepareConversationTurn(input: {
       conversationMode,
       wizardPhase,
       workspaceLeaseId: null,
-      workspaceAccess
+      workspaceAccess,
+      changeSetId: null,
+      runtimeRootOverride: null
     }
   } catch (error) {
     releaseThread(threadId)
@@ -307,14 +312,27 @@ export async function* streamSendMessage(
     attachments?: MessageAttachment[]
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
+    signal?: AbortSignal
+    workspacePathOverride?: string
+    runtimeRootOverride?: string
+    changeSetId?: string
   }
 ): AsyncGenerator<ChatSseEvent> {
-  const prepared = await prepareConversationTurn({
+  const basePrepared = await prepareConversationTurn({
     username,
     threadId,
     requestedCreateTaskMode: options?.createTaskMode === true,
     requestedDraft: options?.generateDraft === true
   })
+  const prepared: PreparedConversationTurn = options?.workspacePathOverride
+    ? {
+        ...basePrepared,
+        workspacePath: options.workspacePathOverride,
+        workspaceAccess: 'isolated-write',
+        changeSetId: options.changeSetId ?? null,
+        runtimeRootOverride: options.runtimeRootOverride ?? null
+      }
+    : basePrepared
   yield* executePreparedTurn(prepared, message, options)
 }
 
@@ -325,6 +343,7 @@ export async function* executePreparedTurn(
     attachments?: MessageAttachment[]
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
+    signal?: AbortSignal
   }
 ): AsyncGenerator<ChatSseEvent> {
   const trimmed = message.trim()
@@ -417,12 +436,15 @@ export async function* executePreparedTurn(
     )
 
     const conversationKind = createTaskMode ? 'create_task' : 'chat'
-    const runtimeRoot = ensureConversationRuntimeRoot(
-      getAppContext().dataDir,
-      thread.id,
-      conversationKind,
-      core.code as SupportedCoreCode
-    )
+    const runtimeRoot = prepared.runtimeRootOverride
+      ? prepared.runtimeRootOverride
+      : ensureConversationRuntimeRoot(
+          getAppContext().dataDir,
+          thread.id,
+          conversationKind,
+          core.code as SupportedCoreCode
+        )
+    if (prepared.runtimeRootOverride) ensureIsolatedProviderDirs(runtimeRoot)
     const model = resolveCoreModel(core.code as SupportedCoreCode)
     const turnRole: ConversationTurnRole = conversationMode.generateDraft ? 'draft' : 'chat'
     const wizardStage: WizardPhase | null = createTaskMode ? wizardPhase : null
@@ -479,7 +501,7 @@ export async function* executePreparedTurn(
     const phasePrompt = wizardStage ? buildWizardPhasePromptSection(wizardStage) : ''
     const systemPromptBase =
       turnRole === 'draft' ? buildDraftTurnSystemPrompt(basePrompt) : basePrompt
-    const systemPrompt = createTaskMode
+    const baseSystemPrompt = createTaskMode
       ? phasePrompt
         ? `${systemPromptBase}\n\n${phasePrompt}`
         : systemPromptBase
@@ -487,6 +509,9 @@ export async function* executePreparedTurn(
           mode: 'chat',
           mcpToolsAvailable: false
         })
+    const systemPrompt = prepared.changeSetId
+      ? `${baseSystemPrompt}\n\nYou are working in an isolated Change Set worktree. Implement the requested code changes directly in this worktree and verify them when practical. Do not attempt to write the user's main checkout; application is a separate explicit step.`
+      : baseSystemPrompt
 
     let draftRevision: number | null = null
     let planRevision: number | null = null
@@ -565,7 +590,9 @@ export async function* executePreparedTurn(
       createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
     const cursorRuntimeScope =
       core.code === 'cursorcli'
-        ? buildConversationCursorRuntimeScope(thread.id, conversationKind)
+        ? prepared.changeSetId
+          ? `change:${prepared.changeSetId}`
+          : buildConversationCursorRuntimeScope(thread.id, conversationKind)
         : undefined
 
     const attachmentReadRoots = resolveTurnAttachmentReadRoots({
@@ -594,7 +621,9 @@ export async function* executePreparedTurn(
         mcpUrl,
         mcpToolNames,
         readRoots: attachmentReadRoots.length > 0 ? attachmentReadRoots : undefined,
-        jobId: cursorRuntimeScope
+        jobId: cursorRuntimeScope,
+        signal: options?.signal,
+        workspaceAccess: prepared.workspaceAccess
       })) {
         while (draftEvents.length > 0) {
           const draftEvent = draftEvents.shift()

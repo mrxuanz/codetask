@@ -12,7 +12,11 @@ import type {
 } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureJobRuntimeRoot, ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import {
+  ensureJobRuntimeRoot,
+  ensureJobTaskRuntimeRoot,
+  streamAgentTurn
+} from '../agent-runtime/runner'
 import { ensureCursorAcpRuntimeDirs } from '../agent-runtime/env'
 import { memoryDebug } from '../debug/memory'
 import { cleanupJobTaskRuntimeTree } from '../runtime/cleanup'
@@ -1343,19 +1347,8 @@ async function executeSingleTask(
   // Other providers keep per-task isolation for evidence/workdir hygiene.
   const runtimeRoot =
     core.code === 'cursorcli'
-      ? ensureJobRuntimeRoot(
-          getAppContext().dataDir,
-          job.threadId,
-          job.id,
-          core.code
-        )
-      : ensureJobTaskRuntimeRoot(
-          getAppContext().dataDir,
-          job.threadId,
-          job.id,
-          taskId,
-          core.code
-        )
+      ? ensureJobRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, core.code)
+      : ensureJobTaskRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, taskId, core.code)
   if (core.code === 'cursorcli') {
     ensureCursorAcpRuntimeDirs(runtimeRoot, job.workspacePath ?? '')
   }
@@ -1667,8 +1660,6 @@ async function finalizeExecutionPause(
 ): Promise<void> {
   const paused = taskErrorFields(JOB_PAUSED)
   const row = await loadJobRow(jobId)
-  const continueAfter = row?.continueAfterPause === 1
-  const username = row?.username
 
   await persistTaskProgress(
     jobId,
@@ -1683,22 +1674,12 @@ async function finalizeExecutionPause(
       status: 'paused',
       lastError: paused.error,
       suspensionKind: parseSuspensionKind(row?.suspensionKind) ?? 'user_pause',
-      continueAfterPause: false,
       recoveryReason: null
     },
     gate,
     'snapshot'
   )
   pauseJobExecution(jobId)
-
-  if (continueAfter && username) {
-    const { authorizeUncertainTaskAttemptReplayForJob } = await import('./task-attempts')
-    authorizeUncertainTaskAttemptReplayForJob(jobId)
-    const { continueJob } = await import('./controls')
-    await continueJob(username, jobId).catch((error) => {
-      console.warn('[jobs] continue_after_pause failed after pause settle', jobId, error)
-    })
-  }
 }
 
 interface ExecutionLoopState {

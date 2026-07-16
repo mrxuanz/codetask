@@ -2,11 +2,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { prepareNonGitCowWorktree } from './cow'
-import {
-  changeSetRootPath,
-  changeSetRuntimePath,
-  changeSetWorktreePath
-} from './paths'
+import { changeSetRootPath, changeSetRuntimePath, changeSetWorktreePath } from './paths'
 
 export { changeSetRootPath, changeSetRuntimePath, changeSetWorktreePath }
 
@@ -43,9 +39,12 @@ export function prepareChangeSetWorktree(input: {
       removeChangeSetWorktree(input.dataDir, input.changeSetId, input.workspaceRoot)
     }
     const baseCommit = resolveGitHead(input.workspaceRoot)
+    if (!baseCommit) {
+      throw new Error('Unable to resolve Git HEAD for change-set worktree')
+    }
     execFileSync(
       'git',
-      ['-C', input.workspaceRoot, 'worktree', 'add', '--detach', worktreePath, 'HEAD'],
+      ['-C', input.workspaceRoot, 'worktree', 'add', '--detach', worktreePath, baseCommit],
       { encoding: 'utf8', windowsHide: true }
     )
     return { worktreePath, baseCommit, kind: 'git' }
@@ -119,6 +118,21 @@ export function rebaseGitWorktree(input: {
       patchApplied: true
     }
   } catch {
+    // Preserve as much of the user's patch as possible and materialize *.rej files for resolution.
+    try {
+      execFileSync(
+        'git',
+        ['-C', prepared.worktreePath, 'apply', '--reject', '--whitespace=nowarn'],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          input: input.patchText,
+          maxBuffer: 32 * 1024 * 1024
+        }
+      )
+    } catch {
+      // `git apply --reject` normally exits non-zero when it writes reject files.
+    }
     return {
       worktreePath: prepared.worktreePath,
       baseCommit: prepared.baseCommit,

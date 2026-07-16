@@ -12,13 +12,7 @@ import {
   reapSandboxChild,
   terminateSandboxTree
 } from './launcher'
-import {
-  policyForRole,
-  applyProviderWriteRoots,
-  applyProviderReadRoots,
-  collectPolicyReadRoots,
-  collectPolicyWriteRoots
-} from './policy'
+import { policyForRoleV2, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { preflightSandbox } from './preflight'
 import { prepareProviderAuth, runProviderAuthPreflight } from './provider-auth'
@@ -29,6 +23,7 @@ import { SandboxError } from './types'
 import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { streamJobCursorSandboxTurn } from './job-cursor-pool'
 import { throwIfSandboxTurnAborted } from './turn-guards'
+import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 export interface RunSandboxedTurnInput {
   role: ConversationRole
   coreCode: SupportedCoreCode
@@ -46,6 +41,7 @@ export interface RunSandboxedTurnInput {
   readRoots?: string[] | undefined
   jobId?: string | undefined
   idempotencyKey?: string | undefined
+  workspaceAccess?: WorkspaceAccessMode | undefined
 }
 
 function resolveRoleWorkerPath(): string {
@@ -194,17 +190,18 @@ export async function* streamSandboxedConversationTurnLocal(
     ...(input.readRoots ?? [])
   ])
 
-  const policy = applyProviderReadRoots(
-    applyProviderWriteRoots(
-      policyForRole({
-        role: input.role,
-        workspaceRoot: input.workspaceRoot,
-        runtimeRoot: input.runtimeRoot
-      }),
-      authPrepared.writeRoots
-    ),
-    providerReadRoots
-  )
+  // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
+  // Conversation/planner roles can read the project and write runtime/provider state only;
+  // task-worker remains the sole role that may write the real workspace.
+  const policy = policyForRoleV2({
+    role: input.role,
+    workspaceRoot: input.workspaceRoot,
+    runtimeRoot: input.runtimeRoot,
+    providerReadRoots,
+    ...(authPrepared.writeRoots ? { providerWriteRoots: authPrepared.writeRoots } : {}),
+    ...(input.readRoots ? { attachmentReadRoots: input.readRoots } : {}),
+    ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {})
+  })
 
   sandboxTurnDebug('sandbox orchestrator: provider auth prepared', {
     provider: input.coreCode,
@@ -221,14 +218,15 @@ export async function* streamSandboxedConversationTurnLocal(
   const readRoots = collectPolicyReadRoots(policy)
   const writeRoots = collectPolicyWriteRoots(policy)
 
-  const useJobCursorPool =
+  const usePersistentCursorPool =
     process.platform !== 'win32' &&
     input.coreCode === 'cursorcli' &&
     Boolean(input.jobId?.trim()) &&
-    input.role === 'task-worker'
+    (input.role === 'task-worker' ||
+      (input.role === 'conversation' && input.jobId!.startsWith('conversation:')))
 
   try {
-    if (useJobCursorPool) {
+    if (usePersistentCursorPool) {
       throwIfSandboxTurnAborted(input.signal)
       yield* streamJobCursorSandboxTurn(input.jobId!, input, {
         policy,

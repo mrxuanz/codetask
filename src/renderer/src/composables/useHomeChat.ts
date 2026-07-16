@@ -15,6 +15,14 @@ import type { ChatSseEvent, ConversationTurnStatus } from '@shared/contracts'
 import { turnTopic } from '@shared/contracts/job-event-hub'
 import type { Thread } from '@renderer/api/threads'
 import { updateThreadCore } from '@renderer/api/threads'
+import {
+  applyChangeSet,
+  cancelChangeSet,
+  fetchChangeSet,
+  fetchProjectChangeSets,
+  markChangeSetReady,
+  rebaseChangeSet
+} from '@renderer/api/change-sets'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
 import {
   finalizeStreamingAssistantMessage,
@@ -26,6 +34,7 @@ import { setPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import type { TurnErrorDto } from '@shared/turn-errors'
 import { coerceTurnErrorField } from '@shared/turn-errors'
+import type { ChangeSetDto } from '@shared/contracts/change-sets'
 
 export interface HomeChatContext {
   cores: Ref<ConversationCore[]>
@@ -39,6 +48,7 @@ export interface HomeChatContext {
   coreSwitching: Ref<boolean>
   sending: Ref<boolean>
   error: Ref<string | null>
+  activeChangeSet: Ref<ChangeSetDto | null>
   loadCores: () => Promise<void>
   openThread: (thread: Thread) => Promise<void>
   setCoreCode: (threadId: string, coreCode: string) => Promise<Thread | null>
@@ -47,9 +57,14 @@ export interface HomeChatContext {
     files?: File[]
     generateDraft?: boolean
     createTaskMode?: boolean
+    allowCodeChanges?: boolean
     onPlanUpdated?: (job: ThreadJobDto) => void
   }) => Promise<Thread | null>
   updateDraftMessage: (message: ConversationMessage) => void
+  applyActiveChangeSet: () => Promise<void>
+  markActiveChangeSetReady: () => Promise<void>
+  rebaseActiveChangeSet: () => Promise<void>
+  cancelActiveChangeSet: () => Promise<void>
   clear: () => void
 }
 
@@ -89,6 +104,7 @@ export function useHomeChat(
   const coreSwitching = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
+  const activeChangeSet = ref<ChangeSetDto | null>(null)
   let openToken = 0
   let turnUnsub: (() => void) | null = null
   let settleActiveTurn: ((err?: unknown) => void) | null = null
@@ -120,6 +136,7 @@ export function useHomeChat(
     awaitingAssistantReply.value = false
     sending.value = false
     error.value = null
+    activeChangeSet.value = null
     loading.value = false
   }
 
@@ -166,14 +183,24 @@ export function useHomeChat(
     error.value = displayError(thread.lastError)
 
     try {
-      const [stateRes, historyRes] = await Promise.all([
+      const [stateRes, historyRes, changeSetsRes] = await Promise.all([
         fetchThreadConversationState(thread.id),
-        fetchThreadMessages(thread.id, 100)
+        fetchThreadMessages(thread.id, 100),
+        fetchProjectChangeSets(thread.projectId).catch(() => ({ data: [] }))
       ])
       if (token !== openToken || activeThreadId.value !== thread.id) return
       messages.value = historyRes.data.messages ?? []
       applyStatus(stateRes.data)
       activeCoreCode.value = stateRes.data.core?.code ?? thread.coreCode
+      activeChangeSet.value =
+        [...changeSetsRes.data]
+          .filter(
+            (changeSet) =>
+              changeSet.sourceThreadId === thread.id &&
+              changeSet.status !== 'applied' &&
+              changeSet.status !== 'cancelled'
+          )
+          .sort((left, right) => right.createdAt - left.createdAt)[0] ?? null
     } catch (err) {
       if (token !== openToken || activeThreadId.value !== thread.id) return
       error.value = err instanceof Error ? err.message : t('workspace.loadThreadFailed')
@@ -223,6 +250,7 @@ export function useHomeChat(
     files?: File[]
     generateDraft?: boolean
     createTaskMode?: boolean
+    allowCodeChanges?: boolean
     onPlanUpdated?: (job: ThreadJobDto) => void
   }): Promise<Thread | null> {
     const threadId = activeThreadId.value
@@ -275,9 +303,19 @@ export function useHomeChat(
       const accepted = await createThreadTurn(threadId, outbound, {
         generateDraft,
         createTaskMode: input.createTaskMode === true,
-        attachmentIds
+        attachmentIds,
+        allowCodeChanges: input.allowCodeChanges === true
       })
       const turnId = accepted.data.turnId
+      if (accepted.data.changeSetId) {
+        void fetchChangeSet(accepted.data.changeSetId)
+          .then((response) => {
+            if (generation === streamGeneration && isViewingThread(threadId)) {
+              activeChangeSet.value = response.data
+            }
+          })
+          .catch(() => {})
+      }
 
       await new Promise<void>((resolve, reject) => {
         let settled = false
@@ -297,16 +335,49 @@ export function useHomeChat(
 
           if (envelope.event === 'turn_snapshot') {
             if (isTerminalTurnStatus(envelope.data.turn.status)) {
-              if (envelope.data.turn.status === 'failed') {
-                const turnError = envelope.data.turn.lastError
-                if (isViewingThread(threadId)) {
+              const terminalTurn = envelope.data.turn
+              // POST may finish before the topic subscription is installed, and reconnect may
+              // legitimately resync with only a terminal snapshot. Re-read durable messages/state
+              // so the final answer never depends on receiving every streaming delta.
+              void Promise.all([
+                fetchThreadMessages(threadId, 100),
+                fetchThreadConversationState(threadId)
+              ])
+                .then(([historyRes, stateRes]) => {
+                  if (generation !== streamGeneration || !isViewingThread(threadId)) return
+                  messages.value = historyRes.data.messages ?? []
+                  activeStreamingId = null
+                  streamingMessageId.value = null
+                  awaitingAssistantReply.value = false
+                  applyStatus(stateRes.data)
+                  if (terminalTurn.changeSetId) {
+                    void fetchChangeSet(terminalTurn.changeSetId)
+                      .then((response) => {
+                        if (generation === streamGeneration && isViewingThread(threadId)) {
+                          activeChangeSet.value = response.data
+                        }
+                      })
+                      .catch(() => {})
+                  }
+                  if (terminalTurn.status === 'failed') {
+                    runtimeStatus.value = 'error'
+                    error.value = displayError(terminalTurn.lastError)
+                  } else if (terminalTurn.status === 'cancelled') {
+                    runtimeStatus.value = 'idle'
+                  }
+                })
+                .catch((syncError) => {
+                  if (generation !== streamGeneration || !isViewingThread(threadId)) return
                   clearStreamingMessage()
                   activeStreamingId = null
                   awaitingAssistantReply.value = false
-                  runtimeStatus.value = 'error'
-                  error.value = displayError(turnError)
-                }
-              }
+                  if (terminalTurn.status === 'failed') {
+                    runtimeStatus.value = 'error'
+                    error.value = displayError(terminalTurn.lastError)
+                  } else {
+                    error.value = syncError instanceof Error ? syncError.message : null
+                  }
+                })
               finish()
             }
             return
@@ -455,6 +526,22 @@ export function useHomeChat(
     }
   }
 
+  async function runChangeSetAction(
+    action: (id: string, revision: number) => Promise<{ data: ChangeSetDto }>
+  ): Promise<void> {
+    const current = activeChangeSet.value
+    if (!current) return
+    error.value = null
+    try {
+      const response = await action(current.id, current.stateRevision)
+      activeChangeSet.value = ['applied', 'cancelled'].includes(response.data.status)
+        ? null
+        : response.data
+    } catch (actionError) {
+      error.value = actionError instanceof Error ? actionError.message : t('workspace.sendFailed')
+    }
+  }
+
   onMounted(() => {
     void loadCores()
   })
@@ -471,11 +558,16 @@ export function useHomeChat(
     coreSwitching,
     sending,
     error,
+    activeChangeSet,
     loadCores,
     openThread,
     setCoreCode,
     sendMessage,
     updateDraftMessage,
+    applyActiveChangeSet: () => runChangeSetAction(applyChangeSet),
+    markActiveChangeSetReady: () => runChangeSetAction(markChangeSetReady),
+    rebaseActiveChangeSet: () => runChangeSetAction(rebaseChangeSet),
+    cancelActiveChangeSet: () => runChangeSetAction(cancelChangeSet),
     clear
   }
 }
