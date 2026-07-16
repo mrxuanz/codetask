@@ -30,7 +30,11 @@ export async function purgeJobFilesystem(
   threadId: string,
   jobId: string
 ): Promise<void> {
-  await cleanupJobRuntimeTree(dataDir, threadId, jobId).catch(() => {})
+  try {
+    await cleanupJobRuntimeTree(dataDir, threadId, jobId)
+  } catch {
+    // best-effort filesystem purge
+  }
 }
 
 /** Strict variant for deletion coordinator — surfaces filesystem errors instead of swallowing. */

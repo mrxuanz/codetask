@@ -94,12 +94,17 @@ export async function reconcileStaleJobIfNeeded(
     progressParams: null
   }
 
+  const fromPaused = job.status === 'paused'
   const updated = await updateJobRowForSnapshot(job.id, {
     status: 'running',
     taskProgress,
     lastError: null
   })
   if (!updated) return job
+
+  if (fromPaused) {
+    console.info('[jobs] promoted restart-interrupted paused job to running', { jobId: job.id })
+  }
 
   // Drop the dead process's lease so advanceExecutionQueue can re-acquire it this boot.
   await clearExecutionLease(job.id)
@@ -139,7 +144,11 @@ export async function reconcileOrphanRunningJobsForUser(username: string): Promi
     .where(
       and(
         eq(threadJobs.username, username),
-        or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing'))
+        or(
+          eq(threadJobs.status, 'running'),
+          eq(threadJobs.status, 'pausing'),
+          eq(threadJobs.status, 'paused')
+        )
       )
     )
 
@@ -164,7 +173,11 @@ export async function reconcileOrphanRunningJobsOnStartup(
     .select()
     .from(threadJobs)
     .where(
-      or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing'))
+      or(
+        eq(threadJobs.status, 'running'),
+        eq(threadJobs.status, 'pausing'),
+        eq(threadJobs.status, 'paused')
+      )
     )
 
   const errors: Error[] = []

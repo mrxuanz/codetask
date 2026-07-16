@@ -32,7 +32,7 @@ import {
   pauseJob,
   restartJob,
   resumePausedJob,
-  continueFailedJob,
+  continueJob,
   attachControlPlaneJobFields
 } from '../legacy-control-plane/controls'
 import { AppError } from '../error'
@@ -479,7 +479,7 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
     const username = await requireUsername(c.req.header('Authorization'))
     const job = attachControlPlaneJobFields(
       username,
-      await continueFailedJob(username, c.req.param('jobId'))
+      await continueJob(username, c.req.param('jobId'))
     )
     return c.json(ok({ job }))
   })

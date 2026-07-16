@@ -115,7 +115,14 @@ export function prepareInterruptedExecutionResume(taskProgress: TaskProgressDto)
   }
   const tasksRecovered = resetInterruptedRunningTasks(progress.tasks)
   const verifyRecovered = resetInterruptedVerificationInProgress(progress)
-  return { progress, recovered: tasksRecovered || verifyRecovered }
+  // Drop stale in-flight slice markers so a stopped job does not render as "执行中".
+  let sliceCleared = false
+  for (const slice of progress.slices ?? []) {
+    if (slice.runtimeStatus !== 'running') continue
+    slice.runtimeStatus = null
+    sliceCleared = true
+  }
+  return { progress, recovered: tasksRecovered || verifyRecovered || sliceCleared }
 }
 
 export function readPausingAttempt(progress: TaskProgressDto, jobId: string): number {
@@ -140,10 +147,15 @@ export type StaleExecutionJobAction = 'noop' | 'finalize-user-pause' | 'resume-r
 
 /** Decide how to reconcile a thread job whose in-memory execution loop is gone. */
 export function resolveStaleExecutionJobAction(
-  job: Pick<ThreadJobDto, 'status'>
+  job: Pick<ThreadJobDto, 'status' | 'taskProgress' | 'lastError'>
 ): StaleExecutionJobAction {
-  if (job.status === 'paused') return 'noop'
   if (job.status === 'pausing') return 'finalize-user-pause'
+  // Legacy restart settled some interrupted runs to paused (without job.paused). F3-A auto-resumes
+  // those the same way as DB `running` jobs so the user is not stuck on Continue.
+  if (job.status === 'paused' && isRestartInterruptedPause(job as ThreadJobDto)) {
+    return 'resume-running'
+  }
+  if (job.status === 'paused') return 'noop'
   if (job.status === 'running') return 'resume-running'
   return 'noop'
 }

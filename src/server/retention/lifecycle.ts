@@ -160,9 +160,17 @@ export async function onJobReachedTerminal(
       console.warn('[retention] runtime summary extraction failed', jobId, error)
     }
 
-    await cleanupJobRuntimeTreeIfTerminal(ctx.dataDir, threadId, jobId, status).catch((error) => {
-      console.warn('[retention] terminal runtime cleanup failed', jobId, error)
-    })
+    await cleanupJobRuntimeTreeIfTerminal(ctx.dataDir, threadId, jobId, status).then(
+      (result) => {
+        if (result === 'deferred_active' || result === 'deferred_slot') {
+          // Expected while the executor is still unwinding; finalize retries after release.
+          return
+        }
+      },
+      (error) => {
+        console.warn('[retention] terminal runtime cleanup failed', jobId, error)
+      }
+    )
   }
 }
 

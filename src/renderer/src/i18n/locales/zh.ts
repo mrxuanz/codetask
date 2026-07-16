@@ -325,6 +325,7 @@ export default {
         exec: {
           completed: '已完成',
           in_progress: '执行中',
+          paused: '已暂停',
           failed: '失败',
           pending: '等待',
           queued: '排队',

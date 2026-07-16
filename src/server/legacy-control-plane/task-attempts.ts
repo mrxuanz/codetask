@@ -214,10 +214,11 @@ export function beginTaskAttempt(input: BeginTaskAttemptInput): BeginTaskAttempt
 }
 
 /**
- * Record explicit operator authorization to replay tasks whose Provider outcome is uncertain.
- * This is only called by user-driven resume/continue controls after the old runtime is closed.
- * The next attempt still receives the same logical idempotency key; the suffix is retained on the
- * old row as an auditable record that automatic replay was not used.
+ * Record authorization to replay tasks whose Provider outcome is uncertain.
+ * Called by user-driven resume/continue, and by auto-resume after process death once the old
+ * runtime/slot is confirmed closed. The next attempt still receives the same logical idempotency
+ * key; the suffix is retained on the old row as an auditable record that automatic replay of the
+ * prior fence was explicitly cleared.
  */
 export function authorizeUncertainTaskAttemptReplayForJob(jobId: string): number {
   const now = nowSec()

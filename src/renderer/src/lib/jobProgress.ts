@@ -418,9 +418,22 @@ export function buildPlanTree(
 
 export function taskVisualStatus(task: UnifiedTaskNode, jobStatus: string): string {
   if (jobStatus === 'planning') return task.planStatus
+  if (jobStatus === 'paused' || jobStatus === 'pausing') {
+    if (task.status === 'completed' || task.executionStatus === 'completed') return 'completed'
+    if (task.status === 'failed' || task.executionStatus === 'failed') return 'failed'
+    if (
+      task.status === 'paused' ||
+      task.status === 'in_progress' ||
+      task.executionStatus === 'running' ||
+      task.executionStatus === 'paused'
+    ) {
+      return 'paused'
+    }
+  }
   const status = task.executionStatus ?? task.status
   if (status === 'completed') return 'completed'
   if (status === 'running' || status === 'ready') return 'in_progress'
+  if (status === 'paused') return 'paused'
   if (status === 'waiting-on-dependency' || status === 'queued') return 'pending'
   if (status === 'failed' || status === 'blocked') return 'failed'
   if (
@@ -441,6 +454,8 @@ export function nodeIcon(status: string, active = false): string {
       return '✓'
     case 'in_progress':
       return '◉'
+    case 'paused':
+      return 'Ⅱ'
     case 'failed':
       return '✕'
     case 'pending':
