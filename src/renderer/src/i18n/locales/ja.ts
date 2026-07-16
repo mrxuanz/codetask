@@ -312,6 +312,7 @@ export default {
         exec: {
           completed: '完了',
           in_progress: '実行中',
+          paused: '一時停止',
           failed: '失敗',
           pending: '待機',
           queued: 'キュー',

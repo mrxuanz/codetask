@@ -448,6 +448,68 @@ test('finishExecutionRunLifecycle failure runs stop lifecycle before release', a
   }
 })
 
+test('finishExecutionRunLifecycle deletes deferred runtime after slot release', async () => {
+  await setupDb()
+  try {
+    const { mkdirSync, writeFileSync, existsSync } = await import('node:fs')
+    const { jobRuntimeDir } = await import('../../src/server/runtime/cleanup')
+    const { getAppContext } = await import('../../src/server/bootstrap')
+
+    await seedJob('job-exec-cleanup')
+    await getDb()
+      .update(threadJobs)
+      .set({ status: 'failed' })
+      .where(eq(threadJobs.id, 'job-exec-cleanup'))
+
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-exec-cleanup',
+      kind: 'execution'
+    })
+    assert.ok(run)
+
+    const runtimeDir = jobRuntimeDir(dataDir, 'thread-job-exec-cleanup', 'job-exec-cleanup')
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(join(runtimeDir, 'leftover.txt'), 'pending cleanup')
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {}
+    })
+
+    await finishExecutionRunLifecycle(
+      run.runId,
+      {
+        username: 'user',
+        jobId: 'job-exec-cleanup',
+        reason: 'execution_failed',
+        outcome: 'failure'
+      },
+      {
+        sleep: async () => {},
+        finalizeExecution: async () => {
+          // Mimic production finalize: drop loop, try cleanup while slot still held.
+          getAppContext().executionRuntime.dropRuntime('job-exec-cleanup')
+          const { cleanupJobRuntimeTree } = await import('../../src/server/runtime/cleanup')
+          const result = await cleanupJobRuntimeTree(
+            dataDir,
+            'thread-job-exec-cleanup',
+            'job-exec-cleanup'
+          )
+          assert.equal(result, 'deferred_slot')
+          assert.ok(existsSync(runtimeDir))
+        }
+      }
+    )
+
+    assert.equal(await getActiveRun('thread_job', 'job-exec-cleanup'), null)
+    assert.equal(existsSync(runtimeDir), false, 'runtime should be deleted after slot release')
+  } finally {
+    await teardownDb()
+  }
+})
+
 test('finishPlanningRunLifecycle skips release when run already released', async () => {
   await setupDb()
   try {

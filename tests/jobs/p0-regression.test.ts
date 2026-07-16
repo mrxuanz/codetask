@@ -146,8 +146,40 @@ describe('terminal runtime cleanup', () => {
     assert.ok(existsSync(runtimeDir))
 
     const { cleanupJobRuntimeTreeIfTerminal } = await import('../../src/server/runtime/cleanup')
-    await cleanupJobRuntimeTreeIfTerminal(dataDir, 'thread-cleanup', 'job-cleanup-test', 'running')
+    const result = await cleanupJobRuntimeTreeIfTerminal(
+      dataDir,
+      'thread-cleanup',
+      'job-cleanup-test',
+      'running'
+    )
+    assert.equal(result, 'skipped_non_terminal')
     assert.ok(existsSync(runtimeDir), 'running job runtime should not be deleted')
+  })
+
+  it('defers cleanup while execution loop is active instead of throwing', async () => {
+    const db = getDb()
+    await db
+      .update(threadJobs)
+      .set({ status: 'failed' })
+      .where(eq(threadJobs.id, 'job-cleanup-test'))
+
+    const runtimeDir = jobRuntimeDir(dataDir, 'thread-cleanup', 'job-cleanup-test')
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(join(runtimeDir, 'deferred.txt'), 'still-running')
+
+    const ctx = getAppContext()
+    assert.equal(ctx.executionRuntime.tryStartLoop('job-cleanup-test', USERNAME), true)
+    try {
+      const result = await cleanupJobRuntimeTree(dataDir, 'thread-cleanup', 'job-cleanup-test')
+      assert.equal(result, 'deferred_active')
+      assert.ok(existsSync(runtimeDir), 'runtime must remain while loop is active')
+    } finally {
+      ctx.executionRuntime.endLoop('job-cleanup-test')
+    }
+
+    const after = await cleanupJobRuntimeTree(dataDir, 'thread-cleanup', 'job-cleanup-test')
+    assert.equal(after, 'deleted')
+    assert.equal(existsSync(runtimeDir), false)
   })
 })
 

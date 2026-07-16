@@ -100,7 +100,7 @@ test('buildUnifiedProgressTree marks milestone completed only after slice verifi
   assert.equal(tree.milestones[0]?.status, 'completed')
 })
 
-test('buildUnifiedProgressTree marks currentTaskId as in_progress while job is paused', () => {
+test('buildUnifiedProgressTree marks currentTaskId as paused while job is paused', () => {
   const tree = buildUnifiedProgressTree({
     jobId: 'job-1',
     title: 'Job',
@@ -114,12 +114,18 @@ test('buildUnifiedProgressTree marks currentTaskId as in_progress while job is p
         status: 'queued',
         executionStatus: 'queued'
       }
-    ]
+    ],
+    verification: {
+      slices: [{ id: 'm1-s1', runtimeStatus: 'running', verificationStatus: null }]
+    }
   })
 
   const task = tree.milestones[0]?.slices[0]?.tasks[0]
-  assert.equal(task?.status, 'in_progress')
-  assert.equal(task?.executionStatus, 'running')
+  assert.equal(task?.status, 'paused')
+  assert.equal(task?.executionStatus, 'paused')
+  assert.equal(tree.milestones[0]?.status, 'paused')
+  assert.equal(tree.milestones[0]?.slices[0]?.status, 'paused')
+  assert.notEqual(tree.milestones[0]?.slices[0]?.runtimeStatus, 'running')
 })
 
 test('planning status follows exact task context instead of completed count order', () => {

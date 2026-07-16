@@ -63,6 +63,37 @@ test('isRestartInterruptedPause distinguishes restart interrupt from user pause'
   assert.equal(isRestartInterruptedPause(userPaused), false)
 })
 
+test('resolveStaleExecutionJobAction auto-resumes restart-interrupted paused jobs', async () => {
+  const { resolveStaleExecutionJobAction } = await import(
+    '../../src/server/legacy-control-plane/execution-recovery'
+  )
+  const interrupted = {
+    status: 'paused',
+    lastError: null,
+    taskProgress: {
+      phase: 'running',
+      status: 'running',
+      currentIndex: 1,
+      total: 3,
+      currentTaskId: 't2',
+      message: null,
+      tasks: [
+        { id: 't1', title: 'T1', status: 'completed', executionStatus: 'completed' },
+        { id: 't2', title: 'T2', status: 'queued', executionStatus: 'queued' }
+      ]
+    }
+  } as Parameters<typeof resolveStaleExecutionJobAction>[0]
+
+  const userPaused = {
+    ...interrupted,
+    lastError: { code: 'job.paused', message: 'Paused', params: null }
+  } as Parameters<typeof resolveStaleExecutionJobAction>[0]
+
+  assert.equal(resolveStaleExecutionJobAction(interrupted), 'resume-running')
+  assert.equal(resolveStaleExecutionJobAction(userPaused), 'noop')
+  assert.equal(resolveStaleExecutionJobAction({ status: 'running' } as never), 'resume-running')
+})
+
 test('isExecutionInfraNotReadyError detects MCP and sandbox startup failures', () => {
   assert.equal(
     isExecutionInfraNotReadyError(new Error('Task MCP backend port is not initialized')),

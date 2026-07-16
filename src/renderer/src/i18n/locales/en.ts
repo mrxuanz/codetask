@@ -331,6 +331,7 @@ export default {
         exec: {
           completed: 'Completed',
           in_progress: 'Running',
+          paused: 'Paused',
           failed: 'Failed',
           pending: 'Waiting',
           queued: 'Queued',
