@@ -36,7 +36,7 @@ import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/thre
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
 import {
   buildProposeTaskDraftArgs,
-  buildRegisterPlanArgs,
+  buildPlanOutlineArgs,
   FIXTURE_TASK_CONTEXTS,
   FIXTURE_TASK_EVIDENCE,
   FIXTURE_SLICE_VERDICT_PASSED,
@@ -255,9 +255,8 @@ export class WorkflowHarness {
       /* best-effort, ignore errors */
     }
     try {
-      const { releaseAllActiveWorkspaceLeases } = await import(
-        '../../src/server/legacy-control-plane/workspace-lease-store'
-      )
+      const { releaseAllActiveWorkspaceLeases } =
+        await import('../../src/server/legacy-control-plane/workspace-lease-store')
       releaseAllActiveWorkspaceLeases()
     } catch {
       /* best-effort */
@@ -327,12 +326,14 @@ export class WorkflowHarness {
     ])
     draftReview(4, [{ tool: 'confirm_requirements_contract', args: {} }])
 
+    const outline = buildPlanOutlineArgs()
     const plannerCalls = [
+      { tool: 'register_plan_outline', args: outline },
       ...FIXTURE_TASK_CONTEXTS.map((ctx) => ({
         tool: 'register_task_context',
         args: { ...ctx }
       })),
-      { tool: 'register_plan', args: buildRegisterPlanArgs() }
+      { tool: 'finalize_plan', args: {} }
     ]
     this.registry.set('planner:0', { reply: 'plan registered', mcpCalls: plannerCalls })
   }

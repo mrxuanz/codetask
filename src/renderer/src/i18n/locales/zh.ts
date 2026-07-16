@@ -251,6 +251,7 @@ export default {
         planning: '正在生成计划 {done}/{total}',
         planningPartial: '正在生成计划 · 已完成 {done} 步',
         planningRunning: '正在生成计划…',
+        planOutlineReady: '计划骨架已锁定，共 {total} 个小任务，正在逐项生成内容…',
         planFinalizing: '计划结构已就绪，正在收尾…',
         executionDone: '执行完成 {done}/{total}',
         executionFailed: '执行失败',
@@ -260,6 +261,7 @@ export default {
         code: {
           'plan.pending': '排队中，等待前序任务完成或暂停…',
           'plan.planning': '正在生成计划…',
+          'plan.outline_ready': '计划骨架已锁定，共 {total} 个小任务，正在逐项生成内容…',
           'plan.planning_partial': '正在生成计划 · 已完成 {done} 步',
           'plan.planning_failed': '计划生成失败',
           'plan.needs_auth': '本机 CLI 未登录，请先在终端完成授权',

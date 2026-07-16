@@ -409,7 +409,7 @@ test('MCP handler rejects stale run', async () => {
       allowedAbilityCodes: ['code'],
       validReferenceIds: [],
       taskContexts: new Map(),
-      registeredPlan: null
+      planOutline: null
     }
     registerPlannerMcpSession(session)
     try {

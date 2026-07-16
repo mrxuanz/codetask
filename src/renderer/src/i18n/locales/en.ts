@@ -256,6 +256,7 @@ export default {
         planning: 'Generating plan {done}/{total}',
         planningPartial: 'Generating plan · {done} steps done',
         planningRunning: 'Generating plan…',
+        planOutlineReady: 'Plan outline locked with {total} tasks; generating task details…',
         planFinalizing: 'Plan structure ready, finalizing…',
         executionDone: 'Completed {done}/{total}',
         executionFailed: 'Execution failed',
@@ -265,6 +266,7 @@ export default {
         code: {
           'plan.pending': 'Queued, waiting for the previous task to finish or pause…',
           'plan.planning': 'Generating plan…',
+          'plan.outline_ready': 'Plan outline locked with {total} tasks; generating task details…',
           'plan.planning_partial': 'Generating plan · {done} steps done',
           'plan.planning_failed': 'Plan generation failed',
           'plan.needs_auth': 'CLI not authenticated on this machine — log in locally first',
