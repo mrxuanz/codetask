@@ -460,23 +460,23 @@ onUnmounted(() => {
                   <p class="text-sm font-medium">
                     {{ t('workspace.settings.storage.changeTitle') }}
                   </p>
-                  <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <div class="mt-2 flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
                     <input
                       v-model="storageTarget"
-                      class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                      class="min-w-0 w-full flex-1 rounded-md border bg-background px-3 py-2 text-base font-mono sm:text-sm"
                       :disabled="storageLoading || !!storageMigration"
                     />
-                    <div class="flex gap-2">
+                    <div class="flex min-w-0 gap-2">
                       <Button
                         variant="outline"
-                        class="flex-1 sm:flex-none"
+                        class="min-w-0 flex-1 md:flex-none"
                         :disabled="storageLoading || !!storageMigration"
                         @click="chooseStorageTarget"
                       >
                         {{ t('workspace.settings.storage.browse') }}
                       </Button>
                       <Button
-                        class="flex-1 sm:flex-none"
+                        class="min-w-0 flex-1 md:flex-none"
                         :disabled="storageLoading || !!storageMigration || !storageTarget.trim()"
                         @click="migrateStorage"
                       >
@@ -633,14 +633,14 @@ onUnmounted(() => {
 
     <Dialog
       :open="storagePickerOpen"
-      class="flex h-[min(90dvh,720px)] min-h-0 max-h-[min(90dvh,720px)] max-w-2xl flex-col"
+      class="flex h-[min(92dvh,720px)] min-h-0 max-h-[min(92dvh,720px)] w-full max-w-2xl flex-col sm:h-[min(90dvh,720px)] sm:max-h-[min(90dvh,720px)]"
       @close="closeStoragePicker"
     >
       <div class="shrink-0 border-b border-border px-3 py-3 sm:px-4 sm:py-4">
         <h2 class="text-base font-semibold">
           {{ t('workspace.settings.storage.browseTitle') }}
         </h2>
-        <p class="mt-1 text-sm text-muted-foreground">
+        <p class="mt-1 text-sm text-muted-foreground break-words">
           {{ t('workspace.settings.storage.browseHint') }}
         </p>
       </div>

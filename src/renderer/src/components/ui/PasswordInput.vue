@@ -26,7 +26,7 @@ function toggleVisible(): void {
 </script>
 
 <template>
-  <div class="relative">
+  <div class="relative min-w-0 w-full">
     <Input
       :id="id"
       :model-value="modelValue"

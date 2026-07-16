@@ -40,11 +40,12 @@ const { t } = useI18n()
 <template>
   <div :class="cn('flex flex-col', fillHeight && 'min-h-0 flex-1')">
     <div class="shrink-0 space-y-2 border-b border-border px-3 py-3 sm:px-4">
-      <div class="flex items-center gap-2">
+      <div class="flex min-w-0 items-center gap-2">
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          class="shrink-0"
           :disabled="loading || !currentPath"
           :aria-label="t('folderPicker.goParent')"
           @click="emit('goParent')"
@@ -54,7 +55,7 @@ const { t } = useI18n()
         <Input
           :model-value="query"
           :placeholder="t('folderPicker.pathPlaceholder')"
-          class="border-0 px-0 shadow-none focus-visible:ring-0"
+          class="min-w-0 flex-1 border-0 px-0 font-mono shadow-none focus-visible:ring-0"
           @update:model-value="emit('update:query', $event)"
           @keydown.enter.prevent="emit('select', currentPath)"
         />
@@ -63,7 +64,7 @@ const { t } = useI18n()
       <!-- Keep create-folder in the sticky header so it never gets clipped by the list. -->
       <div
         v-if="showCreateFolder !== false && hideFooter !== true"
-        class="flex flex-col gap-2 sm:flex-row sm:items-center"
+        class="flex min-w-0 flex-col gap-2 md:flex-row md:items-center"
       >
         <Input
           :model-value="newFolderName"
@@ -75,7 +76,7 @@ const { t } = useI18n()
         <Button
           type="button"
           variant="outline"
-          class="w-full shrink-0 whitespace-nowrap sm:w-auto"
+          class="w-full shrink-0 whitespace-nowrap md:w-auto"
           :disabled="submitting || !newFolderName.trim()"
           @click="emit('createFolder')"
         >
@@ -132,13 +133,13 @@ const { t } = useI18n()
       v-if="hideFooter !== true"
       class="shrink-0 space-y-3 border-t border-border px-3 py-3 sm:px-4"
     >
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-        <span class="min-w-0 break-all text-xs text-muted-foreground sm:truncate">
+      <div class="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+        <span class="min-w-0 break-all text-xs text-muted-foreground md:truncate">
           {{ t('folderPicker.currentDirectory', { path: currentPath || '—' }) }}
         </span>
         <Button
           type="button"
-          class="w-full shrink-0 sm:w-auto"
+          class="w-full shrink-0 md:w-auto"
           :disabled="submitting || !currentPath"
           @click="emit('select', currentPath)"
         >
