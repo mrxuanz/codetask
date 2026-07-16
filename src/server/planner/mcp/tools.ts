@@ -1,6 +1,6 @@
-const REGISTER_PLAN_TOOL_JSON = `{
-  "name": "register_plan",
-  "description": "Register the final structured execution plan through MCP. Call after all task contexts are registered. Do not include verificationCommand or verificationPolicy on slices.",
+const REGISTER_PLAN_OUTLINE_TOOL_JSON = `{
+  "name": "register_plan_outline",
+  "description": "Register and lock the complete ordered plan outline before writing any task context. The outline establishes stable task coordinates, titles, objectives, dependencies, abilities, references, and success criteria. Keep task descriptions concise; detailed implementation instructions belong in register_task_context. Do not include verificationCommand or verificationPolicy on slices.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -74,11 +74,11 @@ const REGISTER_PLAN_TOOL_JSON = `{
                         },
                         "successCriteria": {
                           "type": "string",
-                          "description": "Task-level success criteria. When omitted, inherits the slice success criteria."
+                          "description": "Task-level observable completion criteria. Detailed implementation instructions belong in register_task_context."
                         },
                         "canRunInParallel": { "type": "boolean" }
                       },
-                      "required": ["title", "description", "taskKind", "abilityCode"]
+                      "required": ["title", "description", "taskKind", "abilityCode", "successCriteria"]
                     }
                   }
                 },
@@ -99,7 +99,7 @@ export function registerTaskContextToolDefinition(): Record<string, unknown> {
   return {
     name: 'register_task_context',
     description:
-      'Register the self-contained execution context for one planned task. Supply 1-based milestone/slice/task indices, the exact taskTitle you will use in register_plan, and a detailed content string.',
+      'Fill one task from the locked plan outline. Supply its 1-based milestone/slice/task coordinates, the exact locked task title, and a self-contained implementation context. The call is rejected before register_plan_outline, for unknown coordinates, title drift, or conflicting duplicate content.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -135,14 +135,28 @@ export function updateTaskContextToolDefinition(): Record<string, unknown> {
   }
 }
 
-export function registerPlanToolDefinition(): Record<string, unknown> {
-  return JSON.parse(REGISTER_PLAN_TOOL_JSON) as Record<string, unknown>
+export function registerPlanOutlineToolDefinition(): Record<string, unknown> {
+  return JSON.parse(REGISTER_PLAN_OUTLINE_TOOL_JSON) as Record<string, unknown>
+}
+
+export function finalizePlanToolDefinition(): Record<string, unknown> {
+  return {
+    name: 'finalize_plan',
+    description:
+      'Validate that every task in the locked outline has a matching context, assemble the final plan on the server, and commit it. Takes no arguments and is idempotent while finalization is in progress.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    }
+  }
 }
 
 export function plannerMcpToolDefinitions(): Record<string, unknown>[] {
   return [
+    registerPlanOutlineToolDefinition(),
     registerTaskContextToolDefinition(),
     updateTaskContextToolDefinition(),
-    registerPlanToolDefinition()
+    finalizePlanToolDefinition()
   ]
 }

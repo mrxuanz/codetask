@@ -237,7 +237,7 @@ export function conversationMcpToolDefinitions(): Record<string, unknown>[] {
           },
           milestones: {
             type: 'array',
-            description: 'Full milestone → slice → task tree (same shape as register_plan)'
+            description: 'Full milestone → slice → task tree (same shape as the planner outline)'
           }
         },
         required: ['expectedPlanRevision', 'milestones']

@@ -14,11 +14,7 @@ import type { SavedJobPlan } from '../planner/plan-types'
 import { PLAN_WORKSPACE_STATUSES, TASK_LIST_JOB_STATUSES } from './constants'
 import { getAppContext } from '../bootstrap'
 import { signAssetUrlsInValue } from '../auth/sign-asset-url'
-import {
-  getThreadJob as getThreadJobRow,
-  getUserJob as getUserJobRow,
-  mapJob
-} from './repository'
+import { getThreadJob as getThreadJobRow, getUserJob as getUserJobRow, mapJob } from './repository'
 
 export function initJobService(): void {
   getAppContext()
@@ -99,8 +95,7 @@ export async function listUserJobs(
   // Task list is only for jobs whose execution tree was confirmed (enqueued).
   // Planning / plan_editing / pre-confirm failures live in the create workspace.
   const planWorkspace = PLAN_WORKSPACE_STATUSES as readonly string[]
-  const statusFilter =
-    status && status !== 'all' && !planWorkspace.includes(status) ? status : null
+  const statusFilter = status && status !== 'all' && !planWorkspace.includes(status) ? status : null
 
   let whereClause = and(
     eq(threadJobs.username, username),
@@ -574,10 +569,10 @@ export async function pushPlanningProgressFenced(
   runId: string,
   done: number,
   partialPlan: SavedJobPlan,
-  registeredPlan?: import('../planner/plan-types').PlannerRegisteredPlan | null
+  planOutline: import('../planner/plan-types').PlannerRegisteredPlan
 ): Promise<void> {
   const { pushDesignPlanningProgressFenced } = await import('../design-session/planner')
-  return pushDesignPlanningProgressFenced(jobId, runId, done, partialPlan, registeredPlan)
+  return pushDesignPlanningProgressFenced(jobId, runId, done, partialPlan, planOutline)
 }
 
 export async function getTaskEvidenceDetailForUser(input: {

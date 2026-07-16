@@ -138,18 +138,11 @@ export interface TaskProgressItemShape {
   coreCode?: string | null | undefined
 }
 
-export interface PlanProgressShape {
-  phase: string
-  contextsRegistered: number
-  contextsTotal: number
-}
-
 export interface BuildTreeInput {
   jobId: string
   title: string
   jobStatus: string
   plan: SavedPlanShape | null | undefined
-  planProgress?: PlanProgressShape | null | undefined
   taskProgressItems?: TaskProgressItemShape[] | null | undefined
 
   currentTaskId?: string | null | undefined
@@ -176,18 +169,12 @@ function taskKey(mIdx: number, sIdx: number, tIdx: number): string {
   return `m${mIdx}-s${sIdx}-t${tIdx}`
 }
 
-function resolvePlanStatus(
-  jobStatus: string,
-  orderIndex: number,
-  contextsRegistered: number,
-  hasContext: boolean
-): PlanUnitStatus {
+function resolvePlanStatus(jobStatus: string, hasContext: boolean): PlanUnitStatus {
   if (jobStatus === 'plan_ready' || jobStatus === 'running' || jobStatus === 'completed') {
     return 'queued'
   }
   if (jobStatus === 'planning') {
     if (hasContext) return 'planned'
-    if (orderIndex < contextsRegistered) return 'planned'
     return 'pending'
   }
   return 'pending'
@@ -315,12 +302,8 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
   const sliceProgress = new Map((input.verification?.slices ?? []).map((s) => [s.id, s]))
   const milestoneProgress = new Map((input.verification?.milestones ?? []).map((m) => [m.id, m]))
 
-  const contextsRegistered = input.planProgress?.contextsRegistered ?? 0
-  let globalOrder = 0
   const jobRunning =
-    input.jobStatus === 'running' ||
-    input.jobStatus === 'pending' ||
-    input.jobStatus === 'paused'
+    input.jobStatus === 'running' || input.jobStatus === 'pending' || input.jobStatus === 'paused'
   const currentTaskId = input.currentTaskId ?? null
 
   const milestones: UnifiedMilestoneNode[] = plan.milestones.map((milestone, mIdx) => {
@@ -338,13 +321,7 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
         const flat = flatById.get(id)
         const progress = progressById.get(id)
         const hasContext = Boolean(flat?.contextMarkdown?.trim())
-        const planStatus = resolvePlanStatus(
-          input.jobStatus,
-          globalOrder,
-          contextsRegistered,
-          hasContext
-        )
-        globalOrder += 1
+        const planStatus = resolvePlanStatus(input.jobStatus, hasContext)
         const exec = mapExecutionStatus(progress, planStatus, {
           isCurrentTask: currentTaskId === id,
           jobRunning

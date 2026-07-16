@@ -43,9 +43,10 @@ test('resolveCodexMcpToolNamesForTurn picks role defaults', () => {
     'report_task_result'
   ])
   assert.deepEqual(resolveCodexMcpToolNamesForTurn(baseInput('planner')), [
+    'register_plan_outline',
     'register_task_context',
     'update_task_context',
-    'register_plan'
+    'finalize_plan'
   ])
   assert.equal(resolveCodexMcpToolNamesForTurn(baseInput('conversation')), undefined)
 })
@@ -67,7 +68,8 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
     { outerSandbox: true }
   )
   assert.equal(planner.outerSandbox, true)
-  assert.ok(planner.mcpToolNames?.includes('register_plan'))
+  assert.ok(planner.mcpToolNames?.includes('register_plan_outline'))
+  assert.ok(planner.mcpToolNames?.includes('finalize_plan'))
 
   const task = buildCodexTurnPlan(
     {
