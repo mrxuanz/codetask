@@ -174,7 +174,7 @@ test('F3-A: user paused job stays paused across a reconcile pass (no auto-run)',
   }
 })
 
-test('F3-A: legacy restart-interrupted paused job is promoted back to running', async () => {
+test('F3-A: legacy restart-looking paused stays paused after P7 (no heuristic auto-resume)', async () => {
   await setupDb()
   try {
     await seedJob('job-restart-paused', { status: 'paused' })
@@ -214,7 +214,8 @@ test('F3-A: legacy restart-interrupted paused job is promoted back to running', 
     beginDraining()
     await reconcileOrphanRunningJobsForUser('user')
 
-    assert.equal(await jobStatus('job-restart-paused'), 'running')
+    // P7: long-term heuristic removed; one-time promotion is migration 039 → pending.
+    assert.equal(await jobStatus('job-restart-paused'), 'paused')
   } finally {
     await teardownDb()
   }
@@ -580,11 +581,13 @@ test('F3-B: startup fence flips running/starting attempts to interrupted', async
   }
 })
 
-test('F3-A: auto-resume prep clears uncertain fence so beginTaskAttempt can proceed', async () => {
+test('F3-A: uncertain fence stays blocked until explicit user authorize (no silent auto-resume)', async () => {
   await setupDb()
   try {
-    const { prepareInterruptedJobForAutoResume } =
+    const { prepareInterruptedJobForUserContinue } =
       await import('../../src/server/legacy-control-plane/queue-coordinator')
+    const { jobHasUncertainReplayFence } =
+      await import('../../src/server/legacy-control-plane/task-attempts')
 
     await seedJob('job-auto', { status: 'running' })
     await getDb().insert(jobTasks).values({
@@ -619,8 +622,11 @@ test('F3-A: auto-resume prep clears uncertain fence so beginTaskAttempt can proc
       snapshotPlanRevision: 1
     })
     assert.equal(blocked.kind, 'blocked-uncertain')
+    assert.equal(jobHasUncertainReplayFence('job-auto'), true)
 
-    assert.equal(prepareInterruptedJobForAutoResume('job-auto'), 1)
+    // Explicit Continue-path authorization clears the fence.
+    assert.equal(prepareInterruptedJobForUserContinue('job-auto'), 1)
+    assert.equal(jobHasUncertainReplayFence('job-auto'), false)
 
     const resumed = beginTaskAttempt({
       jobId: 'job-auto',

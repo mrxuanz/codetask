@@ -289,46 +289,9 @@ async function runDesignPlanner(
     return
   }
 
-  const { acquireWorkspaceLease, releaseWorkspaceLeaseForOwner } =
+  // Planner uses snapshot-read / runtimeRoot writes only — never exclusive main-workspace lease.
+  const { releaseWorkspaceLeaseForOwner } =
     await import('../legacy-control-plane/workspace-lease-store')
-  const workspaceLease = acquireWorkspaceLease({
-    workspacePath,
-    ownerKind: 'planner',
-    ownerId: designSessionId,
-    runId: run.runId
-  })
-  if (!workspaceLease) {
-    plannerSandboxDebug('runDesignPlanner: skipped (workspace lease unavailable), waiting', {
-      designSessionId
-    })
-    const { releaseWorkloadSlot } = await import('../legacy-control-plane/workload-slot-store')
-    await releaseWorkloadSlot(run.runId, {
-      reason: 'workspace_lease_unavailable',
-      skipQueueAdvance: true
-    }).catch(() => {})
-    const planProgress: PlanProgressDto = {
-      ...defaultPlanProgress(),
-      phase: 'idle',
-      status: 'pending',
-      progressCode: 'plan.pending',
-      progressParams: null,
-      message: null
-    }
-    const updated = await updateDesignSessionRow(designSessionId, { planProgress })
-    if (updated) {
-      emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
-      emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: updated } })
-    }
-    const { advanceWorkloadQueue } = await import('../legacy-control-plane/workload-slot-store')
-    await advanceWorkloadQueue(username).catch((error) => {
-      console.warn(
-        '[runDesignPlanner] advance queue after workspace lease wait failed',
-        designSessionId,
-        error
-      )
-    })
-    return
-  }
 
   getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username)
 
@@ -494,13 +457,6 @@ async function runDesignPlanner(
       })
 
       let chunkCount = 0
-      const { enterWorkspaceLeaseContext } =
-        await import('../legacy-control-plane/workspace-lease-context')
-      enterWorkspaceLeaseContext({
-        leaseId: workspaceLease.leaseId,
-        ownerKind: 'planner',
-        ownerId: designSessionId
-      })
       await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
         for await (const chunk of streamAgentTurn({
           role: 'planner',
@@ -652,9 +608,8 @@ async function runDesignPlanner(
     })
     const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
     await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
-    // The workspace is only safe for another owner after the provider runtime
-    // has actually closed. A close failure leaves both the slot and lease in
-    // quarantine for diagnosis instead of admitting a concurrent writer.
+    // Provider close must finish before admitting another exclusive writer; planner no longer
+    // holds an exclusive lease, but release remains idempotent for any leftover row.
     releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
     getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
   }

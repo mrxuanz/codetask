@@ -24,6 +24,7 @@ import {
   pruneStaleThreadAttachmentDirs
 } from './janitor'
 import { pruneEmptyCreateTaskThreads } from '../threads/service'
+import { pruneTerminalChangeSetTrees } from '../change-set/cleanup'
 import {
   deleteExpiredDesignPlanRevisions,
   finalizeDesignPlanRevisions
@@ -186,6 +187,7 @@ export async function runRetentionJanitorPass(): Promise<{
   sqliteMaintenance: { ran: boolean; vacuumedPages: number }
   expiredDesignRevisions: number
   orphanJobArtifactFiles: number
+  terminalChangeSetTrees: number
 }> {
   const ctx = getAppContext()
   const db = getDb()
@@ -199,7 +201,8 @@ export async function runRetentionJanitorPass(): Promise<{
     staleAttachmentDirs,
     orphanRuntimeTrees,
     emptyCreateTaskThreads,
-    orphanJobArtifactFiles
+    orphanJobArtifactFiles,
+    terminalChangeSetTrees
   ] = await Promise.all([
     deleteExpiredArtifacts(db, ctx.dataDir),
     pruneOrphanAttachments(ctx.dataDir, db),
@@ -209,7 +212,8 @@ export async function runRetentionJanitorPass(): Promise<{
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
     pruneOrphanRuntimeTrees(ctx.dataDir, db),
     pruneEmptyCreateTaskThreads(),
-    pruneOrphanJobArtifactFiles(ctx.dataDir, db)
+    pruneOrphanJobArtifactFiles(ctx.dataDir, db),
+    pruneTerminalChangeSetTrees(ctx.dataDir)
   ])
 
   const expiredDesignRevisions = deleteExpiredDesignPlanRevisions(db)
@@ -234,7 +238,8 @@ export async function runRetentionJanitorPass(): Promise<{
       vacuumedPages: sqliteMaintenance.vacuumedPages
     },
     expiredDesignRevisions: expiredDesignRevisions.deleted,
-    orphanJobArtifactFiles: orphanJobArtifactFiles.removed
+    orphanJobArtifactFiles: orphanJobArtifactFiles.removed,
+    terminalChangeSetTrees: terminalChangeSetTrees.removed
   }
 }
 

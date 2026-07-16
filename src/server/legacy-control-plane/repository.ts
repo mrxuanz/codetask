@@ -27,6 +27,12 @@ import {
 } from './evidence/store'
 import { slimTaskProgressForSse } from './progress-sse'
 import { putDesignPlanRevisionInTx } from '../retention/design-plan-artifacts'
+import {
+  parseRecoveryReason,
+  parseSuspensionKind,
+  type JobRecoveryReason,
+  type SuspensionKind
+} from '../../shared/job-suspension.ts'
 
 export const EXECUTION_OCCUPYING_STATUSES = ['running'] as const
 export const EXECUTION_LEASE_TTL_SEC = 30 * 60
@@ -143,22 +149,6 @@ export async function findNextPendingJob(
     .orderBy(asc(threadJobs.planConfirmedAt), asc(threadJobs.createdAt), asc(threadJobs.id))
     .limit(1)
   return rows[0] ?? null
-}
-
-export async function findRestartInterruptedPausedJobId(username: string): Promise<string | null> {
-  const db = getDb()
-  const rows = await db
-    .select()
-    .from(threadJobs)
-    .where(and(eq(threadJobs.username, username), eq(threadJobs.status, 'paused')))
-    .orderBy(asc(threadJobs.updatedAt))
-
-  for (const row of rows) {
-    const job = await mapJob(row, { includePlan: true })
-    const { isRestartInterruptedPause } = await import('./execution-recovery')
-    if (isRestartInterruptedPause(job)) return job.id
-  }
-  return null
 }
 
 export function tryPromoteJobToRunning(username: string, jobId: string): boolean {
@@ -380,6 +370,9 @@ export async function mapJob(
     snapshotDraftRevision: row.snapshotDraftRevision ?? null,
     snapshotPlanRevision: row.snapshotPlanRevision ?? null,
     snapshotManifestRevision: row.snapshotManifestRevision ?? null,
+    suspensionKind: parseSuspensionKind(row.suspensionKind),
+    continueAfterPause: row.continueAfterPause === 1,
+    recoveryReason: parseRecoveryReason(row.recoveryReason),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   })
@@ -433,6 +426,9 @@ export type JobRowPatch = Partial<{
   title: string
   summary: string
   workspacePath: string
+  suspensionKind: SuspensionKind
+  continueAfterPause: boolean | number
+  recoveryReason: JobRecoveryReason
 }>
 
 export async function updateJobRow(
@@ -452,10 +448,13 @@ export async function updateJobRow(
       ? { executionLeaseOwner: null, executionLeaseExpiresAt: null }
       : {}
 
-  const { lastError, ...restRowPatch } = rowPatch
+  const { lastError, continueAfterPause, ...restRowPatch } = rowPatch
   const dbPatch = {
     ...restRowPatch,
-    ...(lastError !== undefined ? { lastError: coercePersistedTurnError(lastError) } : {})
+    ...(lastError !== undefined ? { lastError: coercePersistedTurnError(lastError) } : {}),
+    ...(continueAfterPause !== undefined
+      ? { continueAfterPause: continueAfterPause === true || continueAfterPause === 1 ? 1 : 0 }
+      : {})
   }
 
   let storedTaskProgress: TaskProgressDto | undefined
@@ -598,10 +597,13 @@ function applyFencedJobPatchInTx(
       ? { executionLeaseOwner: null, executionLeaseExpiresAt: null }
       : {}
 
-  const { lastError, ...restRowPatch } = rowPatch
+  const { lastError, continueAfterPause, ...restRowPatch } = rowPatch
   const dbPatch = {
     ...restRowPatch,
-    ...(lastError !== undefined ? { lastError: coercePersistedTurnError(lastError) } : {})
+    ...(lastError !== undefined ? { lastError: coercePersistedTurnError(lastError) } : {}),
+    ...(continueAfterPause !== undefined
+      ? { continueAfterPause: continueAfterPause === true || continueAfterPause === 1 ? 1 : 0 }
+      : {})
   }
 
   if (Object.keys(dbPatch).length > 0) {

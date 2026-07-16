@@ -3,7 +3,9 @@ import {
   jobIdFromTopic,
   jobTopic,
   threadIdFromTopic,
-  threadTopic
+  threadTopic,
+  turnIdFromTopic,
+  turnTopic
 } from '@shared/contracts/job-event-hub'
 import { jobHubTerminalStatus } from '@shared/job-realtime'
 import { getAppContext } from '../bootstrap'
@@ -298,6 +300,20 @@ export function registerJobHubConnection(
           pushEnvelope(conn, topic, payload)
         })
         conn.unsubByTopic.set(topic, unsub)
+        continue
+      }
+
+      const turnId = turnIdFromTopic(topic)
+      if (turnId) {
+        const { getTurn } = await import('../conversation/turn-queue')
+        const turn = await getTurn(conn.username, turnId)
+        if (!turn) continue
+        pushEnvelope(conn, topic, { event: 'turn_snapshot', data: { turn } })
+        conn.subscribedTopics.add(topic)
+        const unsub = bus.subscribe(topic, (payload) => {
+          pushEnvelope(conn, topic, payload)
+        })
+        conn.unsubByTopic.set(topic, unsub)
       }
     }
   }
@@ -326,4 +342,4 @@ export function registerJobHubConnection(
   }
 }
 
-export { jobTopic, threadTopic }
+export { jobTopic, threadTopic, turnTopic }

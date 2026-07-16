@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { serve, type ServerType } from '@hono/node-server'
-import type { Hono } from 'hono'
+import type { ExecutionContext, Hono } from 'hono'
 import { app as electronApp } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
@@ -95,7 +95,7 @@ function isAddressInUse(error: unknown): boolean {
 type NodeFetch = (
   request: Request,
   env?: unknown,
-  executionCtx?: unknown
+  executionCtx?: ExecutionContext
 ) => Response | Promise<Response>
 
 function listen(fetch: NodeFetch, host: string, port: number): Promise<ServerType> {

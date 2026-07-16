@@ -1,4 +1,6 @@
 export {
+  ensureConversationRuntimeRoot,
+  ensureJobRuntimeRoot,
   ensureJobTaskRuntimeRoot,
   ensureRuntimeRoot,
   streamAgentTurn,

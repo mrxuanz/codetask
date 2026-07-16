@@ -13,6 +13,7 @@ import {
   jobIdFromTopic,
   parseHubTopic,
   threadIdFromTopic,
+  turnIdFromTopic,
   type HubTopic
 } from '@shared/contracts/job-event-hub'
 
@@ -43,6 +44,15 @@ async function assertTopicsOwned(username: string, topics: HubTopic[]): Promise<
       const thread = await getThread(username, threadId)
       if (!thread) {
         throw AppError.notFound('Thread not found', 'thread.not_found', { threadId })
+      }
+      continue
+    }
+    const turnId = turnIdFromTopic(topic)
+    if (turnId) {
+      const { getTurn } = await import('../conversation/turn-queue')
+      const turn = await getTurn(username, turnId)
+      if (!turn) {
+        throw AppError.notFound('Turn not found', 'turn.not_found', { turnId })
       }
     }
   }

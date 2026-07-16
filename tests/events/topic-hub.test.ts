@@ -5,16 +5,19 @@ import {
   jobTopic,
   parseHubTopic,
   threadIdFromTopic,
-  threadTopic
+  threadTopic,
+  turnIdFromTopic,
+  turnTopic
 } from '../../src/shared/contracts/job-event-hub'
 import { parseSseBlock } from '../../src/shared/sse'
 import { JobEventBus, enqueueHubEvent } from '../../src/server/context/event-bus'
 import type { HubEvent } from '../../src/shared/contracts/job-event-hub'
 import { registerJobHubConnection } from '../../src/server/events/job-event-hub'
 
-test('parseHubTopic accepts job and thread topics', () => {
+test('parseHubTopic accepts job, thread, and turn topics', () => {
   assert.equal(parseHubTopic('job:abc'), 'job:abc')
   assert.equal(parseHubTopic('thread:t1'), 'thread:t1')
+  assert.equal(parseHubTopic('turn:u1'), 'turn:u1')
   assert.equal(parseHubTopic('other:x'), null)
   assert.equal(parseHubTopic('job:'), null)
 })
@@ -22,6 +25,7 @@ test('parseHubTopic accepts job and thread topics', () => {
 test('topic helpers round-trip ids', () => {
   assert.equal(jobIdFromTopic(jobTopic('j1')), 'j1')
   assert.equal(threadIdFromTopic(threadTopic('t1')), 't1')
+  assert.equal(turnIdFromTopic(turnTopic('x')), 'x')
   assert.equal(jobIdFromTopic(threadTopic('t1')), null)
 })
 

@@ -120,11 +120,16 @@ export function startConversationCursorReaper(
   })
 }
 
-export function stopConversationCursorReaperForTests(): void {
+/** Stop the idle reaper timer (production shutdown / tests). */
+export function stopConversationCursorReaper(): void {
   if (reaperTimer) {
     clearInterval(reaperTimer)
     reaperTimer = null
   }
+}
+
+export function stopConversationCursorReaperForTests(): void {
+  stopConversationCursorReaper()
   defaultIsThreadInflight = null
   resetConversationCursorDirectoryForTests()
   resetCursorProviderRuntimeRegistryForTests()

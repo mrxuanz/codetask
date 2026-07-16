@@ -7,7 +7,7 @@ import { workspaceLeases } from '../db/schema'
 import { canonicalizePath } from '../sandbox/paths'
 import { workloadLeaseTtlSec } from './workload-slot-store'
 
-export type WorkspaceLeaseOwnerKind = 'conversation' | 'planner' | 'thread_job'
+export type WorkspaceLeaseOwnerKind = 'conversation' | 'planner' | 'thread_job' | 'change_set'
 
 export interface WorkspaceLeaseOccupant {
   leaseId: string

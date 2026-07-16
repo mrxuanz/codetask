@@ -1,18 +1,21 @@
 import { onMounted, ref, type InjectionKey, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  createThreadTurn,
   fetchConversationCores,
   fetchThreadConversationState,
   fetchThreadMessages,
-  streamThreadMessage,
   type ConversationCore,
   type ConversationMessage,
   type ConversationState
 } from '@renderer/api/conversation'
 import { uploadThreadAttachment } from '@renderer/api/jobs'
 import type { ThreadJobDto } from '@shared/contracts/jobs'
+import type { ChatSseEvent, ConversationTurnStatus } from '@shared/contracts'
+import { turnTopic } from '@shared/contracts/job-event-hub'
 import type { Thread } from '@renderer/api/threads'
 import { updateThreadCore } from '@renderer/api/threads'
+import { useJobEventHub } from '@renderer/composables/useJobEventHub'
 import {
   finalizeStreamingAssistantMessage,
   removeStreamingAssistantMessage,
@@ -59,6 +62,10 @@ function isAbortError(err: unknown): boolean {
   )
 }
 
+function isTerminalTurnStatus(status: ConversationTurnStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
 export function useHomeChat(
   syncThread: (thread: Thread) => void,
   patchThreadRuntime: (
@@ -70,6 +77,7 @@ export function useHomeChat(
   ) => void
 ): HomeChatContext {
   const { t } = useI18n()
+  const hub = useJobEventHub()
   const cores = ref<ConversationCore[]>([])
   const messages = ref<ConversationMessage[]>([])
   const activeThreadId = ref<string | null>(null)
@@ -82,13 +90,19 @@ export function useHomeChat(
   const sending = ref(false)
   const error = ref<string | null>(null)
   let openToken = 0
-  let streamAbort: AbortController | null = null
+  let turnUnsub: (() => void) | null = null
+  let settleActiveTurn: ((err?: unknown) => void) | null = null
   let streamGeneration = 0
 
-  function abortActiveStream(): void {
-    if (!streamAbort) return
-    streamAbort.abort()
-    streamAbort = null
+  /** Detach UI from an in-flight turn. Does NOT cancel the server turn. */
+  function detachActiveTurn(reason?: unknown): void {
+    turnUnsub?.()
+    turnUnsub = null
+    const settle = settleActiveTurn
+    settleActiveTurn = null
+    if (settle) {
+      settle(reason ?? new DOMException('The operation was aborted.', 'AbortError'))
+    }
   }
 
   function isViewingThread(threadId: string): boolean {
@@ -97,7 +111,7 @@ export function useHomeChat(
 
   function clear(): void {
     openToken += 1
-    abortActiveStream()
+    detachActiveTurn()
     messages.value = []
     activeThreadId.value = null
     activeCoreCode.value = null
@@ -138,8 +152,8 @@ export function useHomeChat(
     const sameThread = activeThreadId.value === thread.id
     const token = ++openToken
     if (!sameThread) {
-      // Detach in-flight SSE from the previous thread so deltas cannot leak into this view.
-      abortActiveStream()
+      // Detach UI from previous turn; server turn keeps running.
+      detachActiveTurn()
       awaitingAssistantReply.value = false
       sending.value = false
       messages.value = []
@@ -218,10 +232,8 @@ export function useHomeChat(
     const outbound = input.message.trim()
     if (!outbound && !(input.files?.length ?? 0)) return null
 
-    abortActiveStream()
-    const controller = new AbortController()
+    detachActiveTurn()
     const generation = ++streamGeneration
-    streamAbort = controller
 
     sending.value = true
     runtimeStatus.value = 'running'
@@ -253,18 +265,54 @@ export function useHomeChat(
     try {
       const attachmentIds: string[] = []
       for (const file of input.files ?? []) {
-        if (controller.signal.aborted || !isViewingThread(threadId)) {
+        if (!isViewingThread(threadId) || generation !== streamGeneration) {
           throw new DOMException('The operation was aborted.', 'AbortError')
         }
         const attachment = await uploadThreadAttachment(threadId, file)
         attachmentIds.push(attachment.id)
       }
 
-      await streamThreadMessage(
-        threadId,
-        outbound,
-        (event) => {
-          // Sidebar/runtime patches are safe for any thread; message UI is view-scoped.
+      const accepted = await createThreadTurn(threadId, outbound, {
+        generateDraft,
+        createTaskMode: input.createTaskMode === true,
+        attachmentIds
+      })
+      const turnId = accepted.data.turnId
+
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const finish = (err?: unknown): void => {
+          if (settled) return
+          settled = true
+          settleActiveTurn = null
+          turnUnsub?.()
+          turnUnsub = null
+          if (err) reject(err)
+          else resolve()
+        }
+        settleActiveTurn = finish
+
+        turnUnsub = hub.watchTopic(turnTopic(turnId), (envelope) => {
+          if (generation !== streamGeneration) return
+
+          if (envelope.event === 'turn_snapshot') {
+            if (isTerminalTurnStatus(envelope.data.turn.status)) {
+              if (envelope.data.turn.status === 'failed') {
+                const turnError = envelope.data.turn.lastError
+                if (isViewingThread(threadId)) {
+                  clearStreamingMessage()
+                  activeStreamingId = null
+                  awaitingAssistantReply.value = false
+                  runtimeStatus.value = 'error'
+                  error.value = displayError(turnError)
+                }
+              }
+              finish()
+            }
+            return
+          }
+
+          const event = envelope as ChatSseEvent
           const viewing = isViewingThread(threadId)
 
           switch (event.event) {
@@ -364,7 +412,6 @@ export function useHomeChat(
               }
               break
             case 'heartbeat':
-              // Keeps the SSE idle watchdog alive; no UI update.
               break
             case 'error':
               patchThreadRuntime(threadId, {
@@ -375,22 +422,20 @@ export function useHomeChat(
                 lastUsedAt: Math.floor(Date.now() / 1000),
                 updatedAt: Math.floor(Date.now() / 1000)
               })
-              if (!viewing) break
-              clearStreamingMessage()
-              activeStreamingId = null
-              awaitingAssistantReply.value = false
-              runtimeStatus.value = 'error'
-              error.value = displayError(event.data.error ?? event.data.message)
+              if (viewing) {
+                clearStreamingMessage()
+                activeStreamingId = null
+                awaitingAssistantReply.value = false
+                runtimeStatus.value = 'error'
+                error.value = displayError(event.data.error ?? event.data.message)
+              }
               break
           }
-        },
-        {
-          generateDraft,
-          createTaskMode: input.createTaskMode === true,
-          attachmentIds,
-          signal: controller.signal
-        }
-      )
+        })
+
+        void hub.flushSubscriptionsNow()
+      })
+
       return resultThread
     } catch (err) {
       if (isAbortError(err)) {
@@ -404,9 +449,6 @@ export function useHomeChat(
       }
       return null
     } finally {
-      if (streamAbort === controller) {
-        streamAbort = null
-      }
       if (generation === streamGeneration && isViewingThread(threadId)) {
         sending.value = false
       }

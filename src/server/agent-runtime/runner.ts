@@ -20,6 +20,21 @@ export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: s
   return runtimeRoot
 }
 
+/**
+ * Conversation Cursor (and other providers) isolate chat vs create-task state.
+ * Path: runtimes/<threadId>/<kind>/<coreCode>
+ */
+export function ensureConversationRuntimeRoot(
+  dataDir: string,
+  threadId: string,
+  kind: 'chat' | 'create_task',
+  coreCode: string
+): string {
+  const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, kind, coreCode)
+  ensureIsolatedProviderDirs(runtimeRoot)
+  return runtimeRoot
+}
+
 export function ensureJobRuntimeRoot(
   dataDir: string,
   threadId: string,
