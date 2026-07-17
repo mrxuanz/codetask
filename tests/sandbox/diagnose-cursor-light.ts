@@ -448,6 +448,7 @@ async function runStatic(
     runtimeIsolated:
       prepared.diagnostics.mode === 'host-identity' &&
       prepared.envPatch.HOME !== runtimeRoot &&
+      prepared.envPatch.CURSOR_DATA_DIR === join(runtimeRoot, '.cursor') &&
       (prepared.writeRoots ?? []).length > 0
   }
 
