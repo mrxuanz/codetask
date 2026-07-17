@@ -37,7 +37,11 @@ export function throwSdkTurnError(error: unknown): never {
 }
 
 export function formatSdkTurnError(error: unknown): string {
-  return normalizeTurnError(error).message
+  const dto = normalizeTurnError(error)
+  if (dto.detail && dto.detail.trim() && dto.detail !== dto.message) {
+    return `${dto.message}: ${dto.detail}`
+  }
+  return dto.message
 }
 
 export { isUserTurnCancellation } from '../../shared/turn-errors.ts'

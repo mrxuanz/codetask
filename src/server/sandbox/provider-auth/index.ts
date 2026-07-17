@@ -9,6 +9,8 @@ export {
   materializeCodexAuth,
   materializeCursorAuth,
   materializeOpencodeAuth,
+  ensureCursorRuntimeAuth,
+  runtimeCursorCliAuthPath,
   opencodeRuntimeLayout
 } from './materialize'
 export {
