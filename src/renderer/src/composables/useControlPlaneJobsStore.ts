@@ -450,14 +450,29 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }
 
   async function handleDelete(): Promise<void> {
+    const job = selectedJob.value
+    if (!job) return
     if (!jobsApi.delete) {
       toast.error('Deleting V3 jobs is not supported by the control-plane API')
       return
     }
-    await runAction('delete', async (job) => {
-      await jobsApi.delete!(job.id)
+    // Skip runAction — it reloads detail after success and 404s on a deleted job.
+    runningAction.value = 'delete'
+    actionError.value = null
+    error.value = null
+    try {
+      await apiReady
+      await jobsApi.delete(job.id)
+      detail.value = null
+      jobs.value = jobs.value.filter((item) => item.id !== job.id)
+      total.value = Math.max(0, total.value - 1)
       await router.replace({ name: 'tasks' })
-    })
+      await loadJobs({ silent: true })
+    } catch (err) {
+      toastError(err, 'Failed to delete')
+    } finally {
+      runningAction.value = null
+    }
   }
 
   return {

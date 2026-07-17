@@ -23,7 +23,7 @@ import {
   markChangeSetReady,
   rebaseChangeSet
 } from '@renderer/api/change-sets'
-import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import type { JobEventHub } from '@renderer/composables/useJobEventHub'
 import {
   finalizeStreamingAssistantMessage,
   removeStreamingAssistantMessage,
@@ -82,6 +82,7 @@ function isTerminalTurnStatus(status: ConversationTurnStatus): boolean {
 }
 
 export function useHomeChat(
+  hub: JobEventHub,
   syncThread: (thread: Thread) => void,
   patchThreadRuntime: (
     threadId: string,
@@ -92,7 +93,6 @@ export function useHomeChat(
   ) => void
 ): HomeChatContext {
   const { t } = useI18n()
-  const hub = useJobEventHub()
   const cores = ref<ConversationCore[]>([])
   const messages = ref<ConversationMessage[]>([])
   const activeThreadId = ref<string | null>(null)
