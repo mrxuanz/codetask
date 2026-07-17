@@ -13,6 +13,8 @@ import { resolveUserMcpServersMap } from '../settings/mcp'
 import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './types'
 import { resolveDownstreamAbortSignal } from '../context/request-abort'
 import { getAppConfig } from '../bootstrap'
+import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
+import { isWorkspaceLeaseActive } from '../legacy-control-plane/workspace-lease-store'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
   const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
@@ -130,6 +132,24 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
   const useFakeInProcess = isTestFakeProvider(provider)
   const userMcpServers =
     input.userMcpServers ?? resolveUserMcpServersMap(input.provider, input.role)
+
+  if (input.workspaceAccess === 'exclusive-write') {
+    const lease = input.workspaceLease ?? getWorkspaceLeaseContext()
+    if (
+      !lease ||
+      !isWorkspaceLeaseActive({
+        leaseId: lease.leaseId,
+        ownerKind: lease.ownerKind,
+        ownerId: lease.ownerId,
+        workspacePath: input.workspaceRoot
+      })
+    ) {
+      throw new SandboxError(
+        'Workspace write access requires an active matching lease',
+        'workspace.lease_required'
+      )
+    }
+  }
 
   if (roleRequiresOuterSandbox(input.role) && !useFakeInProcess) {
     if (!isOuterSandboxEnabled()) {

@@ -317,21 +317,27 @@ test('duplicate confirm does not re-pending or advance queue twice', async () =>
     const first = await launchJobFromDesignSession(USER, THREAD_ID, SESSION_ID, {
       skipQueueAdvance: true
     })
+    assert.notEqual(first.id, SESSION_ID)
     assert.equal(first.status, 'pending')
     const confirmedAt = first.planConfirmedAt
 
-    await assert.rejects(
-      () => launchJobFromDesignSession(USER, THREAD_ID, SESSION_ID, { skipQueueAdvance: true }),
-      (error: unknown) =>
-        error instanceof AppError && error.data.turnErrorCode === 'job.already_launched'
-    )
+    const retried = await launchJobFromDesignSession(USER, THREAD_ID, SESSION_ID, {
+      skipQueueAdvance: true
+    })
+    assert.equal(retried.id, first.id)
 
     const row = (
       await getDb().select().from(threadJobs).where(eq(threadJobs.id, SESSION_ID)).limit(1)
     )[0]
-    assert.equal(row?.status, 'pending')
-    assert.equal(row?.planConfirmedAt, confirmedAt)
-    assert.equal(row?.snapshotPlanRevision, captureConfirmRevisionExpectations(row!).planRevision)
+    assert.equal(row?.status, 'published')
+    assert.equal(row?.planConfirmedAt, null)
+    const taskRows = await getDb().select().from(threadJobs).where(eq(threadJobs.id, first.id))
+    assert.equal(taskRows.length, 1)
+    assert.equal(taskRows[0]?.planConfirmedAt, confirmedAt)
+    assert.equal(
+      taskRows[0]?.snapshotPlanRevision,
+      captureConfirmRevisionExpectations(row!).planRevision
+    )
   } finally {
     await teardownDb()
   }
@@ -343,14 +349,14 @@ test('confirm transfers attachments to the Job; draft and Job deletion clean onl
     await seedLaunchableSession({ withAttachment: true })
     const originalPath = join(attachmentDir(dataDir, THREAD_ID, ATTACHMENT_ID), 'requirements.txt')
 
-    await launchJobFromDesignSession(USER, THREAD_ID, SESSION_ID, {
+    const publishedTask = await launchJobFromDesignSession(USER, THREAD_ID, SESSION_ID, {
       skipQueueAdvance: true
     })
 
     const launched = getDb()
       .select()
       .from(threadJobs)
-      .where(eq(threadJobs.id, SESSION_ID))
+      .where(eq(threadJobs.id, publishedTask.id))
       .limit(1)
       .all()[0]!
     const manifest = parseJobReferenceManifest(launched.referenceManifestJson)!
@@ -367,33 +373,84 @@ test('confirm transfers attachments to the Job; draft and Job deletion clean onl
       .where(eq(draftReferences.designSessionId, SESSION_ID))
       .limit(1)
       .all()[0]!
-    assert.equal(corpus.attachmentId, reference.attachmentId)
+    assert.equal(corpus.attachmentId, ATTACHMENT_ID)
 
     const deletedDraft = await deleteUserDraft(USER, THREAD_ID, 'draft-1')
-    assert.equal(deletedDraft.mode, 'archived')
+    assert.equal(deletedDraft.mode, 'removed')
     assert.equal(existsSync(originalPath), false)
     assert.equal(existsSync(reference.resolvedPath!), true)
     assert.equal(
-      resolveAssignedReferenceLocalPaths(manifest, [ATTACHMENT_ID], THREAD_ID).get(ATTACHMENT_ID),
+      resolveAssignedReferenceLocalPaths(manifest, [ATTACHMENT_ID], launched.threadId).get(
+        ATTACHMENT_ID
+      ),
       reference.resolvedPath
     )
-    assert.ok(getDb().select().from(threadJobs).where(eq(threadJobs.id, SESSION_ID)).all()[0])
+    assert.equal(getDb().select().from(threads).where(eq(threads.id, THREAD_ID)).all().length, 0)
+    assert.ok(getDb().select().from(threadJobs).where(eq(threadJobs.id, publishedTask.id)).all()[0])
+    assert.equal(
+      getDb().select().from(threads).where(eq(threads.id, launched.threadId)).all()[0]?.threadKind,
+      'task_snapshot'
+    )
 
-    await drainAndDeleteJob(USER, SESSION_ID)
+    await drainAndDeleteJob(USER, publishedTask.id)
     assert.equal(existsSync(reference.resolvedPath!), false)
-    const archivedDraft = getDb()
+    assert.equal(
+      getDb().select().from(threadJobs).where(eq(threadJobs.id, publishedTask.id)).all().length,
+      0
+    )
+    assert.equal(
+      getDb().select().from(threads).where(eq(threads.id, launched.threadId)).all().length,
+      0
+    )
+    assert.equal((await listUserDrafts(USER)).length, 0)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('deleting a published task does not restore or mutate its source draft', async () => {
+  await setupDb()
+  try {
+    await seedLaunchableSession()
+    const publishedTask = await launchJobFromDesignSession(USER, THREAD_ID, SESSION_ID, {
+      skipQueueAdvance: true
+    })
+    const taskThreadId = publishedTask.threadId
+
+    await drainAndDeleteJob(USER, publishedTask.id)
+
+    assert.equal(
+      getDb().select().from(threadJobs).where(eq(threadJobs.id, publishedTask.id)).all().length,
+      0
+    )
+    assert.equal(getDb().select().from(threads).where(eq(threads.id, taskThreadId)).all().length, 0)
+
+    const sourceSession = getDb()
+      .select()
+      .from(threadJobs)
+      .where(eq(threadJobs.id, SESSION_ID))
+      .limit(1)
+      .all()[0]
+    assert.equal(sourceSession?.status, 'published')
+    assert.equal(sourceSession?.planConfirmedAt, null)
+
+    const sourceMessage = getDb()
       .select()
       .from(threadMessages)
       .where(eq(threadMessages.id, 'draft-1'))
       .limit(1)
-      .all()[0]!
-    const archivedPayload = JSON.parse(archivedDraft.payloadJson ?? '{}') as {
+      .all()[0]
+    const payload = JSON.parse(sourceMessage?.payloadJson ?? '{}') as {
       status?: string
-      linkedPlanId?: string | null
+      linkedPlanId?: string
+      launchedJobId?: string
     }
-    assert.equal(archivedPayload.status, 'archived')
-    assert.equal(archivedPayload.linkedPlanId, null)
-    assert.equal((await listUserDrafts(USER)).length, 0)
+    assert.equal(payload.status, 'confirmed')
+    assert.equal(payload.linkedPlanId, publishedTask.id)
+    assert.equal(payload.launchedJobId, publishedTask.id)
+
+    await deleteUserDraft(USER, THREAD_ID, 'draft-1')
+    assert.equal(getDb().select().from(threads).where(eq(threads.id, THREAD_ID)).all().length, 0)
   } finally {
     await teardownDb()
   }

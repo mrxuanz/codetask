@@ -43,7 +43,6 @@ export function createThreadTurn(
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
     idempotencyKey?: string
-    allowCodeChanges?: boolean
   }
 ): Promise<ApiResponse<CreateTurnAcceptedDto>> {
   return api<CreateTurnAcceptedDto>(`/api/threads/${threadId}/turns`, {
@@ -55,8 +54,7 @@ export function createThreadTurn(
       attachmentIds: options?.attachmentIds ?? [],
       selectedDraftSection: options?.selectedDraftSection,
       selectedPlanNodeRef: options?.selectedPlanNodeRef,
-      idempotencyKey: options?.idempotencyKey,
-      allowCodeChanges: options?.allowCodeChanges === true
+      idempotencyKey: options?.idempotencyKey
     })
   })
 }

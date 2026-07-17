@@ -22,7 +22,6 @@ export interface ConversationTurnDto {
   status: ConversationTurnStatus
   workspaceAccess: string
   provider: string | null
-  changeSetId: string | null
   messagePreview: string
   queuePosition: number | null
   stateRevision: number
@@ -37,7 +36,6 @@ export interface CreateTurnAcceptedDto {
   status: ConversationTurnStatus
   revision: number
   queuePosition: number | null
-  changeSetId: string | null
 }
 
 export type TurnHubEvent =

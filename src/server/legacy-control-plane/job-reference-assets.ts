@@ -32,7 +32,8 @@ function safeFilename(name: string): string {
  */
 export async function stageJobReferenceAssets(input: {
   jobId: string
-  threadId: string
+  sourceThreadId: string
+  targetThreadId: string
   manifest: JobReferenceManifest
 }): Promise<StagedJobReferenceAssets> {
   const dataDir = getAppContext().dataDir
@@ -48,7 +49,11 @@ export async function stageJobReferenceAssets(input: {
       }
       // Resolve attachment sources through the thread attachment root even when a
       // persisted manifest also contains an absolute resolvedPath.
-      const sourcePath = resolveReferenceAbsolutePath(dataDir, input.threadId, entry.relativePath)
+      const sourcePath = resolveReferenceAbsolutePath(
+        dataDir,
+        input.sourceThreadId,
+        entry.relativePath
+      )
       const sourceStat = await stat(sourcePath)
       if (!sourceStat.isFile()) {
         throw new Error(`Attachment reference is not a file: ${entry.id}`)
@@ -56,7 +61,7 @@ export async function stageJobReferenceAssets(input: {
 
       const attachmentId = `att-${randomUUID()}`
       const filename = safeFilename(entry.name || basename(sourcePath))
-      const destinationDir = attachmentDir(dataDir, input.threadId, attachmentId)
+      const destinationDir = attachmentDir(dataDir, input.targetThreadId, attachmentId)
       const destinationPath = join(destinationDir, filename)
       await mkdir(destinationDir, { recursive: true })
       createdAttachmentIds.push(attachmentId)
@@ -67,13 +72,13 @@ export async function stageJobReferenceAssets(input: {
         attachmentId,
         relativePath: `${attachmentId}/${filename}`,
         resolvedPath: await realpath(destinationPath),
-        assetUrl: `/api/threads/${encodeURIComponent(input.threadId)}/attachments/${encodeURIComponent(attachmentId)}`
+        assetUrl: `/api/threads/${encodeURIComponent(input.targetThreadId)}/attachments/${encodeURIComponent(attachmentId)}`
       })
     }
   } catch (error) {
     await Promise.all(
       createdAttachmentIds.map((attachmentId) =>
-        rm(attachmentDir(dataDir, input.threadId, attachmentId), {
+        rm(attachmentDir(dataDir, input.targetThreadId, attachmentId), {
           recursive: true,
           force: true
         }).catch(() => undefined)
@@ -117,7 +122,7 @@ export async function stageJobReferenceAssets(input: {
     cleanup: async () => {
       await Promise.all(
         transfers.map((transfer) =>
-          rm(attachmentDir(dataDir, input.threadId, transfer.attachmentId), {
+          rm(attachmentDir(dataDir, input.targetThreadId, transfer.attachmentId), {
             recursive: true,
             force: true
           })

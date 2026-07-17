@@ -21,7 +21,6 @@ import { createSystemRoutes } from './system'
 import { createEventsRoutes } from './events'
 import { createProjectThreadRoutes, createThreadRoutes } from './threads'
 import { createTurnRoutes } from './turns'
-import { createChangeSetRoutes, createProjectChangeSetRoutes } from './change-sets'
 import { isV3Authoritative } from '../application/cutover-state'
 import { mountV3Routes } from '../http/v3/mount'
 import { isStorageMigrationActive } from '../storage/migration'
@@ -62,8 +61,6 @@ export function createApiRoutes(ctx: AppContext): Hono {
   api.route('/mcp', createMcpRoutes(ctx))
   api.route('/projects', createProjectRoutes(ctx))
   api.route('/projects', createProjectThreadRoutes(ctx))
-  api.route('/projects', createProjectChangeSetRoutes(ctx))
-  api.route('/change-sets', createChangeSetRoutes(ctx))
   api.route('/agent', createAgentRoutes(ctx))
   api.route('/threads', createThreadRoutes(ctx))
   api.route('/threads', createThreadAgentRoutes(ctx))

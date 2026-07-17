@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { policyForRoleV2 } from '../../src/server/sandbox/policy'
 
-test('conversation workspace is read-only unless it is an isolated Change Set', (t) => {
+test('conversation workspace is writable only with exclusive workspace access', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-policy-role-'))
   const workspaceRoot = join(root, 'workspace')
   const runtimeRoot = join(root, 'runtime')
@@ -23,11 +23,11 @@ test('conversation workspace is read-only unless it is an isolated Change Set', 
   assert.equal(readOnly.filesystem.allowedReadRoots.includes(canonicalWorkspace), true)
   assert.equal(readOnly.filesystem.allowedWriteRoots.includes(canonicalWorkspace), false)
 
-  const isolated = policyForRoleV2({
+  const writable = policyForRoleV2({
     role: 'conversation',
     workspaceRoot,
     runtimeRoot,
-    workspaceAccess: 'isolated-write'
+    workspaceAccess: 'exclusive-write'
   })
-  assert.equal(isolated.filesystem.allowedWriteRoots.includes(canonicalWorkspace), true)
+  assert.equal(writable.filesystem.allowedWriteRoots.includes(canonicalWorkspace), true)
 })

@@ -1,13 +1,13 @@
 import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, gt, isNull } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb, type AppDatabase } from '../db'
 import { workspaceLeases } from '../db/schema'
 import { canonicalizePath } from '../sandbox/paths'
 import { workloadLeaseTtlSec } from './workload-slot-store'
 
-export type WorkspaceLeaseOwnerKind = 'conversation' | 'planner' | 'thread_job' | 'change_set'
+export type WorkspaceLeaseOwnerKind = 'conversation' | 'planner' | 'thread_job'
 
 export interface WorkspaceLeaseOccupant {
   leaseId: string
@@ -339,6 +339,52 @@ export function findWorkspaceLeaseConflict(
     cleanStaleWorkspaceLeasesTx(client, now)
     const activeRows = listActiveLeaseRowsTx(client)
     return findConflictingOccupant(canonicalPath, activeRows, excludeOwner)
+  })
+}
+
+/** Non-mutating lease snapshot for status UIs; authoritative acquisition still uses BEGIN IMMEDIATE. */
+export function findWorkspaceLeaseConflictSnapshot(
+  workspacePath: string,
+  excludeOwner?: { ownerKind: WorkspaceLeaseOwnerKind; ownerId: string }
+): WorkspaceLeaseOccupant | null {
+  const canonicalPath = normalizeWorkspaceLeasePath(workspacePath)
+  const rows = getDb()
+    .select({
+      id: workspaceLeases.id,
+      canonicalPath: workspaceLeases.canonicalPath,
+      ownerKind: workspaceLeases.ownerKind,
+      ownerId: workspaceLeases.ownerId,
+      runId: workspaceLeases.runId
+    })
+    .from(workspaceLeases)
+    .where(and(eq(workspaceLeases.status, 'active'), gt(workspaceLeases.leaseExpiresAt, nowSec())))
+    .all()
+  return findConflictingOccupant(
+    canonicalPath,
+    parseActiveLeaseRows(rows.map((row) => ({ ...row, ownerKind: row.ownerKind }))),
+    excludeOwner
+  )
+}
+
+export function isWorkspaceLeaseActive(input: {
+  leaseId: string
+  ownerKind: WorkspaceLeaseOwnerKind
+  ownerId: string
+  workspacePath: string
+}): boolean {
+  const canonicalPath = normalizeWorkspaceLeasePath(input.workspacePath)
+  const client = getSqliteClient()
+  const now = nowSec()
+
+  return runImmediateTransaction(client, () => {
+    cleanStaleWorkspaceLeasesTx(client, now)
+    return listActiveLeaseRowsTx(client).some(
+      (row) =>
+        row.leaseId === input.leaseId &&
+        row.ownerKind === input.ownerKind &&
+        row.ownerId === input.ownerId &&
+        row.canonicalPath === canonicalPath
+    )
   })
 }
 

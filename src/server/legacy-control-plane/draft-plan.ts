@@ -1,12 +1,9 @@
 import { randomUUID } from 'crypto'
-import { rm } from 'fs/promises'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getAppContext } from '../bootstrap'
-import { attachmentDir } from '../data-paths'
 import { getDb } from '../db'
 import {
-  draftReferences,
   projects,
   threadJobs,
   threadMessages,
@@ -14,7 +11,6 @@ import {
   type Thread,
   type ThreadJob
 } from '../db/schema'
-import { deleteMessageArtifactFiles } from '../retention/message-artifacts'
 import type { ConversationMessageDto } from '../conversation/types'
 import type { PlanProgressDto, ThreadJobDto } from './types'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
@@ -39,7 +35,6 @@ import { defaultPlanProgress, defaultTaskProgress } from '../planner/save-plan'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { collectMissingReferenceDescriptions } from '@shared/draft-references'
 import { validateTaskReferenceIds } from '@shared/job-references'
-import { assertFrozenAttachmentId, FrozenIdError } from '@shared/frozen-ids'
 import { isDraftListEntryLaunched } from '@shared/job-lifecycle'
 import { DESIGN_SESSION_WORKSPACE_STATUSES, isPlanningJobStatus } from '@shared/design-session'
 import { mergeDraftReferences } from './draft-references'
@@ -95,17 +90,21 @@ function resolveDraftPlanId(
   planRow: { id: string } | undefined,
   payload: Pick<TaskLaunchDraftPayload, 'linkedPlanId'> & { designSessionId?: string | null }
 ): string | null {
-  if (planRow?.id) return planRow.id
   const fromPayload = payload.designSessionId?.trim()
   if (fromPayload) return fromPayload
+  if (planRow?.id) return planRow.id
   const linked = payload.linkedPlanId?.trim()
   return linked || null
 }
 
 function resolveDraftLaunchedJobId(
   planRow: { id: string; planConfirmedAt: number | null; status: string } | undefined,
-  linkedPlanId: string | null
+  linkedPlanId: string | null,
+  publishedJobId?: string | null
 ): string | null {
+  const explicit = publishedJobId?.trim()
+  if (explicit) return explicit
+  if (linkedPlanId && linkedPlanId !== planRow?.id) return linkedPlanId
   if (planRow?.planConfirmedAt != null) return planRow.id
   if (planRow && isDraftListEntryLaunched({ planStatus: planRow.status })) return planRow.id
   if (
@@ -545,7 +544,7 @@ export async function listThreadDrafts(
     const planRow = planByDraftId.get(msg.id)
     const linkedPlanId = resolveDraftSummaryLinkedPlanId(payload, planRow)
     const designSessionId = resolveDraftPlanId(planRow, payload)
-    const launchedJobId = resolveDraftLaunchedJobId(planRow, linkedPlanId)
+    const launchedJobId = resolveDraftLaunchedJobId(planRow, linkedPlanId, payload.launchedJobId)
     return {
       messageId: msg.id,
       draftId: payload.draftId ?? msg.id,
@@ -640,11 +639,14 @@ export async function listUserDrafts(
       linkedPlanId && planRow
         ? { id: planRow.id, status: planRow.status, title: planRow.title }
         : null
+    const publishedJobId =
+      payload.launchedJobId?.trim() ||
+      (linkedPlanId && linkedPlanId !== planRow?.id ? linkedPlanId : null)
     const launched = isDraftListEntryLaunched({
       planStatus: planRow?.status ?? plan?.status,
-      hasLaunchedJobId: planRow?.planConfirmedAt != null
+      hasLaunchedJobId: Boolean(publishedJobId) || planRow?.planConfirmedAt != null
     })
-    const jobId = launched && planRow ? planRow.id : null
+    const jobId = launched ? (publishedJobId ?? planRow?.id ?? null) : null
     entries.push({
       messageId: row.messageId,
       draftId: payload.draftId ?? row.messageId,
@@ -681,218 +683,16 @@ export async function listUserDrafts(
   return entries
 }
 
-function collectDraftAttachmentIds(
-  message: ConversationMessageDto,
-  payload: Partial<TaskLaunchDraftPayload> | undefined
-): string[] {
-  const ids = new Set<string>()
-  for (const attachment of message.attachments ?? []) {
-    if (attachment.id) ids.add(attachment.id)
-  }
-  for (const attachment of payload?.sourceAttachments ?? []) {
-    if (attachment.id) ids.add(attachment.id)
-  }
-  for (const reference of payload?.references ?? []) {
-    if (!reference.id) continue
-    if (
-      reference.source === 'upload' ||
-      reference.source === 'message' ||
-      reference.source === 'import'
-    ) {
-      ids.add(reference.id)
-    }
-  }
-  return [...ids]
-}
-
-async function purgeDraftMessageAndFiles(
-  username: string,
-  threadId: string,
-  message: ConversationMessageDto
-): Promise<void> {
-  const dataDir = getAppContext().dataDir
-  const payload = message.payload as Partial<TaskLaunchDraftPayload> | undefined
-  const attachmentIds = collectDraftAttachmentIds(message, payload)
-
-  getDb().transaction((tx) => {
-    tx.update(threads)
-      .set({
-        activeDraftId: null,
-        activePlanId: null,
-        wizardPhase: 'collect',
-        updatedAt: nowSec()
-      })
-      .where(
-        and(
-          eq(threads.id, threadId),
-          eq(threads.username, username),
-          eq(threads.activeDraftId, message.id)
-        )
-      )
-      .run()
-
-    tx.delete(threadMessages)
-      .where(
-        and(
-          eq(threadMessages.id, message.id),
-          eq(threadMessages.threadId, threadId),
-          eq(threadMessages.username, username)
-        )
-      )
-      .run()
-  })
-
-  await deleteMessageArtifactFiles(dataDir, message.id)
-  await purgeUnreferencedDraftAttachments(username, threadId, message.id, attachmentIds)
-}
-
-async function collectReferencedAttachmentIds(
-  username: string,
-  threadId: string,
-  excludedMessageId: string
-): Promise<Set<string>> {
-  const db = getDb()
-  const ids = new Set<string>()
-  const messageRows = await db
-    .select({ id: threadMessages.id })
-    .from(threadMessages)
-    .where(and(eq(threadMessages.threadId, threadId), eq(threadMessages.username, username)))
-
-  for (const row of messageRows) {
-    if (row.id === excludedMessageId) continue
-    const message = await getMessage(username, threadId, row.id, { signAssets: false })
-    if (!message) continue
-    const payload =
-      message.kind === 'task-launch-draft'
-        ? (message.payload as Partial<TaskLaunchDraftPayload> | undefined)
-        : undefined
-    for (const attachmentId of collectDraftAttachmentIds(message, payload)) {
-      ids.add(attachmentId)
-    }
-  }
-
-  const corpusRows = await db
-    .select({ attachmentId: draftReferences.attachmentId })
-    .from(draftReferences)
-    .innerJoin(threadJobs, eq(draftReferences.designSessionId, threadJobs.id))
-    .where(and(eq(threadJobs.threadId, threadId), eq(threadJobs.username, username)))
-  for (const row of corpusRows) {
-    if (row.attachmentId) ids.add(row.attachmentId)
-  }
-  return ids
-}
-
-async function purgeUnreferencedDraftAttachments(
-  username: string,
-  threadId: string,
-  excludedMessageId: string,
-  candidateIds: string[]
-): Promise<void> {
-  if (candidateIds.length === 0) return
-  const referenced = await collectReferencedAttachmentIds(username, threadId, excludedMessageId)
-  const dataDir = getAppContext().dataDir
-  const safeCandidateIds = candidateIds.flatMap((attachmentId) => {
-    try {
-      return [assertFrozenAttachmentId(attachmentId)]
-    } catch (error) {
-      if (error instanceof FrozenIdError) return []
-      throw error
-    }
-  })
-  await Promise.all(
-    safeCandidateIds
-      .filter((attachmentId) => !referenced.has(attachmentId))
-      .map((attachmentId) =>
-        rm(attachmentDir(dataDir, threadId, attachmentId), {
-          recursive: true,
-          force: true
-        }).catch(() => undefined)
-      )
-  )
-}
-
-async function archiveLaunchedDraft(input: {
-  username: string
-  threadId: string
-  message: ConversationMessageDto
-  linkedJob: ThreadJob
-}): Promise<{ mode: 'archived'; keptJobId: string }> {
-  const { username, threadId, message, linkedJob } = input
-  const payload = message.payload as Partial<TaskLaunchDraftPayload> | undefined
-  const attachmentIds = collectDraftAttachmentIds(message, payload)
-
-  if (
-    normalizeDraftStatus(payload?.status) !== 'archived' ||
-    (payload?.references?.length ?? 0) > 0 ||
-    (payload?.sourceAttachments?.length ?? 0) > 0 ||
-    message.attachments.length > 0
-  ) {
-    const next: TaskLaunchDraftPayload = {
-      draftId: payload?.draftId ?? message.id,
-      sourceMessageId: payload?.sourceMessageId ?? message.id,
-      title: payload?.title ?? message.content.split('\n')[0] ?? 'Draft',
-      summary: payload?.summary ?? '',
-      userFlow: payload?.userFlow ?? '',
-      techStack: payload?.techStack ?? '',
-      nfr: payload?.nfr ?? [],
-      acceptance: payload?.acceptance ?? [],
-      verification: payload?.verification ?? [],
-      outOfScope: payload?.outOfScope ?? [],
-      assumptions: payload?.assumptions ?? [],
-      requirementsContract: payload?.requirementsContract ?? {
-        markdown: '',
-        status: 'pending'
-      },
-      workspacePath: payload?.workspacePath ?? '',
-      status: 'archived',
-      linkedPlanId: payload?.linkedPlanId ?? linkedJob.id,
-      lockedSections: payload?.lockedSections ?? {},
-      abilities: payload?.abilities ?? [],
-      references: [],
-      sourceAttachments: [],
-      revision: payload?.revision,
-      collecting: payload?.collecting
-    }
-    await persistDraftPayload(username, threadId, message.id, next)
-  }
-
-  getDb().transaction((tx) => {
-    tx.update(threadMessages)
-      .set({ attachmentsJson: '[]' })
-      .where(
-        and(
-          eq(threadMessages.id, message.id),
-          eq(threadMessages.threadId, threadId),
-          eq(threadMessages.username, username)
-        )
-      )
-      .run()
-    tx.update(threads)
-      .set({ activeDraftId: null, updatedAt: nowSec() })
-      .where(
-        and(
-          eq(threads.id, threadId),
-          eq(threads.username, username),
-          eq(threads.activeDraftId, message.id)
-        )
-      )
-      .run()
-  })
-
-  await purgeUnreferencedDraftAttachments(username, threadId, message.id, attachmentIds)
-  return { mode: 'archived', keptJobId: linkedJob.id }
-}
-
 /**
- * Remove a draft from the draft list at any lifecycle stage.
- * - Unlaunched / planning-only: delete the draft message, its files, and the planning job.
- * - Already in the task list (planConfirmedAt set): archive the draft only; keep the job.
+ * Delete the draft aggregate: its whole create-task conversation, planning tree,
+ * message artifacts and attachments. Published tasks are independent snapshots and
+ * are deliberately not restored or deleted here.
  */
 export async function deleteUserDraft(
   username: string,
   threadId: string,
   messageId: string
-): Promise<{ mode: 'removed' | 'archived'; keptJobId: string | null }> {
+): Promise<{ mode: 'removed'; keptJobId: null }> {
   const row = await getThreadRow(username, threadId)
   if (!row) throw AppError.notFound('Thread not found', 'thread.not_found')
 
@@ -903,36 +703,20 @@ export async function deleteUserDraft(
 
   const linkedJob = await findPlanningJobForDraft(username, threadId, messageId)
 
-  if (linkedJob?.planConfirmedAt != null) {
-    return archiveLaunchedDraft({ username, threadId, message, linkedJob })
-  }
-
   if (linkedJob) {
     const { drainAndDeletePlanningJob } = await import('./deletion-coordinator')
     const result = await drainAndDeletePlanningJob(username, linkedJob.id)
     if (result.mode === 'launched') {
-      const launchedJob = await findPlanningJobForDraft(username, threadId, messageId)
-      if (!launchedJob?.planConfirmedAt) {
-        throw AppError.conflict('Draft lifecycle changed', undefined, 'draft.delete_conflict')
-      }
-      const latestMessage = await getMessage(username, threadId, messageId, { signAssets: false })
-      if (!latestMessage || latestMessage.kind !== 'task-launch-draft') {
-        throw AppError.notFound('Draft message not found', 'draft.not_found')
-      }
-      return archiveLaunchedDraft({
-        username,
-        threadId,
-        message: latestMessage,
-        linkedJob: launchedJob
-      })
+      throw AppError.conflict(
+        'Legacy coupled draft/task data is unsupported in development builds',
+        undefined,
+        'draft.legacy_coupled_data'
+      )
     }
   }
 
-  // Re-read in case job-delete hooks mutated the draft payload.
-  const latest = (await getMessage(username, threadId, messageId, { signAssets: false })) ?? message
-  if (latest.kind === 'task-launch-draft') {
-    await purgeDraftMessageAndFiles(username, threadId, latest)
-  }
+  const { drainAndDeleteThread } = await import('./deletion-coordinator')
+  await drainAndDeleteThread(username, threadId)
 
   return { mode: 'removed', keptJobId: null }
 }

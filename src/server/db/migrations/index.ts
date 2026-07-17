@@ -34,10 +34,7 @@ import { migration033DesignPlanRevisions } from './033_design_plan_revisions'
 import { migration034JobArtifactBlob } from './034_job_artifact_blob'
 import { migration035JobSuspensionRecovery } from './035_job_suspension_recovery'
 import { migration036ConversationTurns } from './036_conversation_turns'
-import { migration037ChangeSets } from './037_change_sets'
-import { migration038WorkspaceLeaseChangeSetOwner } from './038_workspace_lease_change_set_owner'
 import { migration039PromoteRestartInterruptedPaused } from './039_promote_restart_interrupted_paused'
-import { migration040ConversationTurnChangeSets } from './040_conversation_turn_change_sets'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -78,10 +75,7 @@ export const allMigrations = [
   migration034JobArtifactBlob,
   migration035JobSuspensionRecovery,
   migration036ConversationTurns,
-  migration037ChangeSets,
-  migration038WorkspaceLeaseChangeSetOwner,
-  migration039PromoteRestartInterruptedPaused,
-  migration040ConversationTurnChangeSets
+  migration039PromoteRestartInterruptedPaused
 ]
 
 export function applyMigrations(db: Database.Database): void {

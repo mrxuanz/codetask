@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '@shared/job-references'
 import { isDesignSessionId, DESIGN_SESSION_WORKSPACE_STATUSES } from '@shared/design-session'
 import { coercePersistedTurnError } from '../turn-errors/store'
@@ -10,7 +10,7 @@ import { saveTaskProgressInTx } from '../db/job-progress'
 import {
   deletionRequests,
   designRuns,
-  draftReferences,
+  jobAbilities,
   threadJobs,
   threadMessages,
   threads,
@@ -33,6 +33,8 @@ import { advanceWorkloadQueue } from '../legacy-control-plane/workload-slot-stor
 import { emitJobEvent } from '../legacy-control-plane/service'
 import { putDesignPlanRevisionInTx } from '../retention/design-plan-artifacts'
 import { stageJobReferenceAssets } from '../legacy-control-plane/job-reference-assets'
+import { THREAD_KIND_TASK_SNAPSHOT } from '../threads/types'
+import { stripAssetUrlAuthTokensInValue } from '../auth/sign-asset-url'
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -359,6 +361,22 @@ export async function launchJobFromDesignSession(
   const session = sessionRows[0]
   if (!session) throw AppError.notFound('Design session not found', 'job.not_found')
 
+  if (session.status === 'published' && session.phase === 'archived') {
+    const publishedTask = db
+      .select()
+      .from(threadJobs)
+      .where(
+        and(
+          eq(threadJobs.username, username),
+          eq(threadJobs.designSessionId, designSessionId),
+          isNotNull(threadJobs.planConfirmedAt)
+        )
+      )
+      .limit(1)
+      .all()[0]
+    if (publishedTask) return mapJob(publishedTask, { includePlan: true })
+  }
+
   const plan = await loadJobPlan(db, designSessionId)
   const manifest = parseSessionManifest(session)
 
@@ -377,31 +395,61 @@ export async function launchJobFromDesignSession(
 
   const expectedRevisions = captureConfirmRevisionExpectations(session)
   const confirmedAt = nowSec()
+  const taskJobId = `job-${randomUUID()}`
+  const taskThreadId = `task-${randomUUID()}`
+  const taskDraftMessageId = `msg-${randomUUID()}`
+  const taskConversationId = `task-conv-${taskJobId}`
 
-  // F2 (§7.1): the draft message's linkedPlanId MUST be frozen in the SAME
-  // transaction that makes the job executable. Prepare the payload columns
-  // (async: strips asset tokens / externalizes) BEFORE opening the synchronous
-  // transaction, then apply them atomically inside it.
+  // Publication is a copy boundary. The source draft/design session remains owned by
+  // the draft conversation; execution gets a fresh Job id plus a hidden, task-owned
+  // snapshot container. No executable row points back to the source thread/message.
   const { prepareMessagePayloadColumns, getMessage } = await import('../conversation/messages')
   const draftMessage = await getMessage(username, threadId, session.draftMessageId, {
     signAssets: false
   })
-  let draftPayloadColumns: { payloadJson: string | null; payloadArtifactId: string | null } | null =
-    null
-  if (draftMessage?.payload) {
-    const payload = draftMessage.payload as Record<string, unknown>
-    draftPayloadColumns = await prepareMessagePayloadColumns(session.draftMessageId, {
-      ...payload,
-      linkedPlanId: designSessionId,
-      designSessionId
-    })
+  if (!draftMessage?.payload) {
+    throw AppError.notFound('Draft message not found', 'draft.not_found')
   }
+  const sourceThread = db
+    .select()
+    .from(threads)
+    .where(and(eq(threads.id, threadId), eq(threads.username, username)))
+    .limit(1)
+    .all()[0]
+  if (!sourceThread) throw AppError.notFound('Thread not found', 'thread.not_found')
 
-  // Stage task-owned copies before the launch CAS. They remain invisible to execution
-  // until the transferred manifest is committed; a failed CAS removes every copy.
+  const sourceDraftPayload = draftMessage.payload as Record<string, unknown>
+  const sourceDraftPayloadColumns = await prepareMessagePayloadColumns(session.draftMessageId, {
+    ...sourceDraftPayload,
+    linkedPlanId: taskJobId,
+    launchedJobId: taskJobId,
+    designSessionId
+  })
+  // The snapshot message does not exist until the publication transaction, so it
+  // cannot use message_artifacts (which has an FK to thread_messages) beforehand.
+  // Keep this internal immutable snapshot inline; it is deleted with the task owner.
+  const taskSnapshotPayloadJson = JSON.stringify(
+    stripAssetUrlAuthTokensInValue({
+      ...sourceDraftPayload,
+      linkedPlanId: taskJobId,
+      launchedJobId: taskJobId,
+      designSessionId,
+      references: [],
+      sourceAttachments: [],
+      snapshot: {
+        sourceThreadId: threadId,
+        sourceDraftMessageId: session.draftMessageId,
+        sourceDesignSessionId: designSessionId,
+        publishedAt: confirmedAt
+      }
+    })
+  )
+
+  // Stage task-owned copies under the task snapshot thread before the publication CAS.
   const stagedAssets = await stageJobReferenceAssets({
-    jobId: designSessionId,
-    threadId,
+    jobId: taskJobId,
+    sourceThreadId: threadId,
+    targetThreadId: taskThreadId,
     manifest: manifest!
   }).catch((error) => {
     if (error instanceof ReferenceFileMissingError) {
@@ -414,10 +462,8 @@ export async function launchJobFromDesignSession(
     throw error
   })
 
-  // Single atomic confirm boundary: re-read session state inside the transaction,
-  // CAS on owner/thread/status/revisions, freeze snapshot revisions, flip the job to
-  // pending, write planConfirmedAt, clear old errors AND old lease, persist task
-  // progress, link the draft message payload, and mark the thread's active plan.
+  // Single atomic publication boundary: CAS the design session, create the hidden
+  // task snapshot container, then deep-copy the executable plan and abilities.
   let txResult:
     | {
         ok: true
@@ -503,24 +549,9 @@ export async function launchJobFromDesignSession(
       const result = db
         .update(threadJobs)
         .set({
-          status: 'pending',
+          status: 'published',
           phase: 'archived',
-          workspacePath: currentSnapshot.workspaceRoot,
-          planPhase: currentPlanProgress.phase,
-          planStatus: currentPlanProgress.status,
-          planContextsRegistered: currentPlanProgress.contextsRegistered,
-          planContextsTotal: currentPlanProgress.contextsTotal,
-          planMessage: currentPlanProgress.message ?? null,
-          planCountsJson: JSON.stringify(planCounts),
-          draftConfirmedAt: current.draftConfirmedAt ?? confirmedAt,
-          planConfirmedAt: confirmedAt,
-          designSessionId: designSessionId,
-          snapshotDraftRevision: currentSnapshot.draftRevision,
-          snapshotPlanRevision: currentSnapshot.planRevision,
-          snapshotManifestRevision: currentSnapshot.manifestRevision,
-          referenceManifestJson: JSON.stringify(stagedAssets.manifest),
           lastError: null,
-          // Clear any stale lease from a previous run so recovery/claim starts clean.
           executionLeaseOwner: null,
           executionLeaseExpiresAt: null,
           activeRunId: null,
@@ -542,48 +573,135 @@ export async function launchJobFromDesignSession(
 
       if (result.changes !== 1) return { ok: false as const, reason: 'conflict' as const }
 
-      for (const transfer of stagedAssets.transfers) {
-        db.update(draftReferences)
-          .set({
-            attachmentId: transfer.attachmentId,
-            resolvedPath: transfer.resolvedPath,
-            assetUrl: transfer.assetUrl,
-            updatedAt: confirmedAt
+      db.insert(threads)
+        .values({
+          id: taskThreadId,
+          username,
+          projectId: sourceThread.projectId,
+          title: current.title,
+          status: 'draft',
+          conversationId: taskConversationId,
+          coreCode: sourceThread.coreCode,
+          runtimeStatus: 'idle',
+          runtimeSessionId: null,
+          coreRuntimeJson: '{}',
+          lastError: null,
+          lastUsedAt: null,
+          titleSource: 'auto',
+          activeDraftId: null,
+          activePlanId: null,
+          wizardPhase: 'collect',
+          threadKind: THREAD_KIND_TASK_SNAPSHOT,
+          createdAt: confirmedAt,
+          updatedAt: confirmedAt
+        })
+        .run()
+
+      db.insert(threadMessages)
+        .values({
+          id: taskDraftMessageId,
+          threadId: taskThreadId,
+          username,
+          role: 'assistant',
+          kind: 'task-launch-draft',
+          content: draftMessage.content,
+          coreCode: sourceThread.coreCode,
+          conversationId: taskConversationId,
+          runtimeSessionId: null,
+          payloadJson: taskSnapshotPayloadJson,
+          payloadArtifactId: null,
+          attachmentsJson: '[]',
+          wizardPhase: null,
+          createdAt: new Date(confirmedAt * 1000).toISOString()
+        })
+        .run()
+
+      db.insert(threadJobs)
+        .values({
+          ...current,
+          id: taskJobId,
+          threadId: taskThreadId,
+          draftMessageId: taskDraftMessageId,
+          status: 'pending',
+          phase: 'archived',
+          workspacePath: currentSnapshot.workspaceRoot,
+          planPhase: currentPlanProgress.phase,
+          planStatus: currentPlanProgress.status,
+          planContextsRegistered: currentPlanProgress.contextsRegistered,
+          planContextsTotal: currentPlanProgress.contextsTotal,
+          planMessage: currentPlanProgress.message ?? null,
+          planCountsJson: JSON.stringify(planCounts),
+          taskPhase: 'idle',
+          taskStatus: 'pending',
+          taskCurrentIndex: 0,
+          taskTotal: currentTaskProgress.total,
+          taskCurrentTaskId: null,
+          taskMessage: null,
+          taskMetaJson: '{}',
+          draftConfirmedAt: current.draftConfirmedAt ?? confirmedAt,
+          planConfirmedAt: confirmedAt,
+          designSessionId,
+          snapshotDraftRevision: currentSnapshot.draftRevision,
+          snapshotPlanRevision: currentSnapshot.planRevision,
+          snapshotManifestRevision: currentSnapshot.manifestRevision,
+          referenceManifestJson: JSON.stringify(stagedAssets.manifest),
+          lastError: null,
+          executionLeaseOwner: null,
+          executionLeaseExpiresAt: null,
+          activeRunId: null,
+          planArtifactId: null,
+          planArtifactPath: null,
+          planSummaryJson: null,
+          createdAt: confirmedAt,
+          updatedAt: confirmedAt
+        })
+        .run()
+
+      saveJobPlanInTx(db, taskJobId, currentPlan!)
+      for (const [index, ability] of currentAbilities.entries()) {
+        db.insert(jobAbilities)
+          .values({
+            jobId: taskJobId,
+            abilityCode: ability.abilityCode,
+            sortOrder: index,
+            label: ability.label ?? null,
+            recommendedCoreCode: ability.recommendedCoreCode ?? null
           })
-          .where(
-            and(
-              eq(draftReferences.designSessionId, designSessionId),
-              eq(draftReferences.id, transfer.referenceId)
-            )
-          )
           .run()
       }
 
-      saveTaskProgressInTx(
-        db,
-        designSessionId,
-        currentTaskProgress,
-        eq(threadJobs.id, designSessionId)
-      )
+      saveTaskProgressInTx(db, taskJobId, currentTaskProgress, eq(threadJobs.id, taskJobId))
 
-      if (draftPayloadColumns) {
-        db.update(threadMessages)
-          .set({
-            payloadJson: draftPayloadColumns.payloadJson,
-            payloadArtifactId: draftPayloadColumns.payloadArtifactId
-          })
-          .where(
-            and(
-              eq(threadMessages.id, current.draftMessageId),
-              eq(threadMessages.threadId, threadId),
-              eq(threadMessages.username, username)
-            )
+      const taskPlanArtifact = putDesignPlanRevisionInTx(db, {
+        jobId: taskJobId,
+        planRevision: current.planRevision,
+        plan: currentPlan!
+      })
+      db.update(threadJobs)
+        .set({
+          planArtifactId: taskPlanArtifact.artifactId,
+          planArtifactPath: taskPlanArtifact.contentPath,
+          planSummaryJson: taskPlanArtifact.summaryJson
+        })
+        .where(eq(threadJobs.id, taskJobId))
+        .run()
+
+      db.update(threadMessages)
+        .set({
+          payloadJson: sourceDraftPayloadColumns.payloadJson,
+          payloadArtifactId: sourceDraftPayloadColumns.payloadArtifactId
+        })
+        .where(
+          and(
+            eq(threadMessages.id, current.draftMessageId),
+            eq(threadMessages.threadId, threadId),
+            eq(threadMessages.username, username)
           )
-          .run()
-      }
+        )
+        .run()
 
       db.update(threads)
-        .set({ activePlanId: designSessionId, updatedAt: confirmedAt })
+        .set({ activePlanId: null, wizardPhase: 'collect', updatedAt: confirmedAt })
         .where(and(eq(threads.id, threadId), eq(threads.username, username)))
         .run()
 
@@ -616,17 +734,12 @@ export async function launchJobFromDesignSession(
 
   const { taskProgress } = txResult
 
-  const jobRows = db
-    .select()
-    .from(threadJobs)
-    .where(eq(threadJobs.id, designSessionId))
-    .limit(1)
-    .all()
+  const jobRows = db.select().from(threadJobs).where(eq(threadJobs.id, taskJobId)).limit(1).all()
   const job = jobRows[0] ? await mapJob(jobRows[0], { includePlan: true }) : null
   if (!job) throw AppError.internal('Failed to launch job', 'turn.unknown')
 
-  emitJobEvent(designSessionId, { event: 'task_progress', data: { taskProgress } })
-  emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job } })
+  emitJobEvent(taskJobId, { event: 'task_progress', data: { taskProgress } })
+  emitJobEvent(taskJobId, { event: 'job_snapshot', data: { job } })
 
   // F2 (§7.1): queue advance happens strictly AFTER commit. If it fails the job
   // stays pending for the reconciler / next startup to pick up — never roll back
@@ -637,14 +750,14 @@ export async function launchJobFromDesignSession(
     } catch (error) {
       console.warn(
         '[design-session] advance queue after confirm failed; job stays pending',
-        designSessionId,
+        taskJobId,
         error
       )
     }
     const latestRows = db
       .select()
       .from(threadJobs)
-      .where(eq(threadJobs.id, designSessionId))
+      .where(eq(threadJobs.id, taskJobId))
       .limit(1)
       .all()
     if (latestRows[0]) {

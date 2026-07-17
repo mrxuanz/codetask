@@ -22,7 +22,7 @@ import {
 import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-control-plane/workload-slot-store'
 import { resetWorkspaceLeaseStateForTests } from '../../src/server/legacy-control-plane/workspace-lease-store'
-import { THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
+import { THREAD_KIND_CREATE_TASK, THREAD_KIND_TASK_SNAPSHOT } from '../../src/server/threads/types'
 
 let dataDir = ''
 
@@ -225,9 +225,7 @@ test('deleteUserDraft removes unlaunched draft, planning job, and attachment fil
   )
 
   const thread = getDb().select().from(threads).where(eq(threads.id, threadId)).all()[0]
-  assert.equal(thread?.activeDraftId, null)
-  assert.equal(thread?.activePlanId, null)
-  assert.equal(thread?.wizardPhase, 'collect')
+  assert.equal(thread, undefined)
 
   const listed = await listUserDrafts('user')
   assert.equal(
@@ -236,13 +234,16 @@ test('deleteUserDraft removes unlaunched draft, planning job, and attachment fil
   )
 })
 
-test('deleteUserDraft archives a running draft and keeps the task-list job', async (t) => {
+test('deleteUserDraft removes its aggregate and keeps an independently published task', async (t) => {
   await setup()
   t.after(teardown)
 
   const draftId = 'draft-launched'
   const threadId = 'thread-launched'
+  const designSessionId = 'design-published'
   const jobId = 'job-launched'
+  const taskThreadId = 'task-snapshot-thread'
+  const taskMessageId = 'task-snapshot-message'
   const now = Math.floor(Date.now() / 1000)
   seedDraft({
     draftId,
@@ -251,28 +252,76 @@ test('deleteUserDraft archives a running draft and keeps the task-list job', asy
     title: 'Launched draft',
     status: 'confirmed',
     job: {
-      id: jobId,
-      status: 'running',
-      planConfirmedAt: now
+      id: designSessionId,
+      status: 'published',
+      planConfirmedAt: null
     }
   })
 
-  const result = await deleteUserDraft('user', threadId, draftId)
-  assert.equal(result.mode, 'archived')
-  assert.equal(result.keptJobId, jobId)
+  getDb()
+    .insert(threads)
+    .values({
+      id: taskThreadId,
+      username: 'user',
+      projectId: 'proj-launched',
+      title: 'Task snapshot',
+      status: 'draft',
+      threadKind: THREAD_KIND_TASK_SNAPSHOT,
+      conversationId: `conv-${taskThreadId}`,
+      coreCode: 'cursor',
+      runtimeStatus: 'idle',
+      coreRuntimeJson: '{}',
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
+  getDb()
+    .insert(threadMessages)
+    .values({
+      id: taskMessageId,
+      threadId: taskThreadId,
+      username: 'user',
+      role: 'assistant',
+      kind: 'task-launch-draft',
+      content: 'Task snapshot',
+      payloadJson: '{}',
+      coreCode: 'cursor',
+      conversationId: `conv-${taskThreadId}`,
+      createdAt: String(now)
+    })
+    .run()
+  getDb()
+    .insert(threadJobs)
+    .values({
+      id: jobId,
+      threadId: taskThreadId,
+      username: 'user',
+      draftMessageId: taskMessageId,
+      title: 'Launched draft',
+      summary: '',
+      status: 'running',
+      workspacePath: join(dataDir, 'workspace'),
+      planConfirmedAt: now,
+      designSessionId,
+      createdAt: now,
+      updatedAt: now
+    })
+    .run()
 
-  const message = getDb()
-    .select()
-    .from(threadMessages)
-    .where(eq(threadMessages.id, draftId))
-    .all()[0]
-  assert.ok(message)
-  const payload = JSON.parse(message.payloadJson ?? '{}') as { status?: string }
-  assert.equal(payload.status, 'archived')
+  const result = await deleteUserDraft('user', threadId, draftId)
+  assert.equal(result.mode, 'removed')
+  assert.equal(result.keptJobId, null)
+
+  assert.equal(getDb().select().from(threads).where(eq(threads.id, threadId)).all().length, 0)
+  assert.equal(
+    getDb().select().from(threadJobs).where(eq(threadJobs.id, designSessionId)).all().length,
+    0
+  )
 
   const job = getDb().select().from(threadJobs).where(eq(threadJobs.id, jobId)).all()[0]
   assert.ok(job)
   assert.equal(job.planConfirmedAt, now)
+  assert.ok(getDb().select().from(threads).where(eq(threads.id, taskThreadId)).all()[0])
 
   const listed = await listUserDrafts('user')
   assert.equal(

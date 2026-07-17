@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
-import { projects, type Project } from '../db/schema'
+import { projects, threadJobs, type Project } from '../db/schema'
+import { controlJobs } from '../infra/sqlite/control-plane/schema'
+import { findWorkspaceLeaseConflictSnapshot } from '../legacy-control-plane/workspace-lease-store'
 import { cleanDisplayPath, inferTitleFromPath, normalizeWorkspacePath } from '../fs'
 
 function nowSec(): number {
@@ -109,6 +111,65 @@ export async function getProject(username: string, projectId: string): Promise<P
 
   const row = rows[0]
   return row ? sanitizeProject(row) : null
+}
+
+export interface ProjectWorkspaceAccess {
+  mode: 'read_write' | 'read_only'
+  blocker: {
+    kind: 'task'
+    taskId: string
+    taskTitle: string
+    status: string
+  } | null
+}
+
+/** Read-only UI snapshot. The lease acquisition path remains the concurrency authority. */
+export async function getProjectWorkspaceAccess(
+  username: string,
+  projectId: string
+): Promise<ProjectWorkspaceAccess> {
+  const project = await getProject(username, projectId)
+  if (!project) throw AppError.notFound('Project not found', 'project.not_found')
+
+  const conflict = findWorkspaceLeaseConflictSnapshot(project.workspaceRoot)
+  if (!conflict || conflict.ownerKind !== 'thread_job') {
+    return { mode: 'read_write', blocker: null }
+  }
+
+  const legacyJob = getDb()
+    .select({ title: threadJobs.title, status: threadJobs.status })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, conflict.ownerId), eq(threadJobs.username, username)))
+    .limit(1)
+    .all()[0]
+  if (legacyJob) {
+    return {
+      mode: 'read_only',
+      blocker: {
+        kind: 'task',
+        taskId: conflict.ownerId,
+        taskTitle: legacyJob.title,
+        status: legacyJob.status
+      }
+    }
+  }
+
+  const controlJob = getDb()
+    .select({ title: controlJobs.title, state: controlJobs.state })
+    .from(controlJobs)
+    .where(and(eq(controlJobs.id, conflict.ownerId), eq(controlJobs.projectId, projectId)))
+    .limit(1)
+    .all()[0]
+
+  return {
+    mode: 'read_only',
+    blocker: {
+      kind: 'task',
+      taskId: conflict.ownerId,
+      taskTitle: controlJob?.title ?? '正在执行的任务',
+      status: controlJob?.state ?? 'running'
+    }
+  }
 }
 
 export async function touchProject(username: string, projectId: string): Promise<void> {

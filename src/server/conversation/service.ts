@@ -49,7 +49,6 @@ import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
 import { ensureConversationRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
-import { ensureIsolatedProviderDirs } from '../agent-runtime/env'
 import { buildConversationCursorRuntimeScope } from '../agent-runtime/cursor-acp/runtime-registry'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
 import type {
@@ -125,9 +124,8 @@ export interface PreparedConversationTurn {
   wizardPhase: WizardPhase
   /** Null when conversation uses read-only access and does not hold an exclusive lease. */
   workspaceLeaseId: string | null
+  workspaceLeaseOwnerId: string | null
   workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
-  changeSetId: string | null
-  runtimeRootOverride: string | null
 }
 
 export async function prepareConversationTurn(input: {
@@ -135,6 +133,7 @@ export async function prepareConversationTurn(input: {
   threadId: string
   requestedCreateTaskMode: boolean
   requestedDraft: boolean
+  turnId?: string
 }): Promise<PreparedConversationTurn> {
   const { username, threadId, requestedCreateTaskMode, requestedDraft } = input
 
@@ -158,15 +157,35 @@ export async function prepareConversationTurn(input: {
   const conversationMode = resolveConversationMode({ threadKind, requestedDraft })
   const createTaskMode = threadKind === THREAD_KIND_CREATE_TASK
   const wizardPhase = resolveWizardPhase(threadRow)
-  const { conversationWorkspaceAccess } = await import('../../shared/workspace-access.ts')
-  // Chat/draft need project context as live-read; they never take exclusive-write.
-  const workspaceAccess = conversationWorkspaceAccess(Boolean(workspacePath))
-
   thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
   reserveThread(thread, username)
 
   try {
-    // Read-only conversation must not compete for the exclusive workspace write lease.
+    let workspaceLeaseId: string | null = null
+    let workspaceLeaseOwnerId: string | null = null
+    let workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode =
+      workspacePath ? 'live-read' : 'metadata'
+
+    // Requirements collection and draft turns are always read-only. Ordinary chat may make
+    // focused edits, but only after winning the same main-workspace lease used by task workers.
+    if (threadKind === THREAD_KIND_CHAT && workspacePath) {
+      const { acquireWorkspaceLease } =
+        await import('../legacy-control-plane/workspace-lease-store')
+      workspaceLeaseOwnerId = input.turnId ?? `direct:${thread.id}`
+      const lease = acquireWorkspaceLease({
+        workspacePath,
+        ownerKind: 'conversation',
+        ownerId: workspaceLeaseOwnerId,
+        runId: input.turnId ?? null
+      })
+      if (lease) {
+        workspaceLeaseId = lease.leaseId
+        workspaceAccess = 'exclusive-write'
+      } else {
+        workspaceLeaseOwnerId = null
+      }
+    }
+
     return {
       username,
       threadId: thread.id,
@@ -177,10 +196,9 @@ export async function prepareConversationTurn(input: {
       createTaskMode,
       conversationMode,
       wizardPhase,
-      workspaceLeaseId: null,
-      workspaceAccess,
-      changeSetId: null,
-      runtimeRootOverride: null
+      workspaceLeaseId,
+      workspaceLeaseOwnerId,
+      workspaceAccess
     }
   } catch (error) {
     releaseThread(threadId)
@@ -313,26 +331,20 @@ export async function* streamSendMessage(
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
     signal?: AbortSignal
-    workspacePathOverride?: string
-    runtimeRootOverride?: string
-    changeSetId?: string
+    turnId?: string
+    onWorkspaceAccessResolved?: (
+      workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
+    ) => void
   }
 ): AsyncGenerator<ChatSseEvent> {
-  const basePrepared = await prepareConversationTurn({
+  const prepared = await prepareConversationTurn({
     username,
     threadId,
     requestedCreateTaskMode: options?.createTaskMode === true,
-    requestedDraft: options?.generateDraft === true
+    requestedDraft: options?.generateDraft === true,
+    turnId: options?.turnId
   })
-  const prepared: PreparedConversationTurn = options?.workspacePathOverride
-    ? {
-        ...basePrepared,
-        workspacePath: options.workspacePathOverride,
-        workspaceAccess: 'isolated-write',
-        changeSetId: options.changeSetId ?? null,
-        runtimeRootOverride: options.runtimeRootOverride ?? null
-      }
-    : basePrepared
+  options?.onWorkspaceAccessResolved?.(prepared.workspaceAccess)
   yield* executePreparedTurn(prepared, message, options)
 }
 
@@ -359,11 +371,11 @@ export async function* executePreparedTurn(
 
   const { enterWorkspaceLeaseContext } =
     await import('../legacy-control-plane/workspace-lease-context')
-  if (prepared.workspaceLeaseId) {
+  if (prepared.workspaceLeaseId && prepared.workspaceLeaseOwnerId) {
     enterWorkspaceLeaseContext({
       leaseId: prepared.workspaceLeaseId,
       ownerKind: 'conversation',
-      ownerId: thread.id
+      ownerId: prepared.workspaceLeaseOwnerId
     })
   }
 
@@ -436,15 +448,12 @@ export async function* executePreparedTurn(
     )
 
     const conversationKind = createTaskMode ? 'create_task' : 'chat'
-    const runtimeRoot = prepared.runtimeRootOverride
-      ? prepared.runtimeRootOverride
-      : ensureConversationRuntimeRoot(
-          getAppContext().dataDir,
-          thread.id,
-          conversationKind,
-          core.code as SupportedCoreCode
-        )
-    if (prepared.runtimeRootOverride) ensureIsolatedProviderDirs(runtimeRoot)
+    const runtimeRoot = ensureConversationRuntimeRoot(
+      getAppContext().dataDir,
+      thread.id,
+      conversationKind,
+      core.code as SupportedCoreCode
+    )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
     const turnRole: ConversationTurnRole = conversationMode.generateDraft ? 'draft' : 'chat'
     const wizardStage: WizardPhase | null = createTaskMode ? wizardPhase : null
@@ -509,9 +518,13 @@ export async function* executePreparedTurn(
           mode: 'chat',
           mcpToolsAvailable: false
         })
-    const systemPrompt = prepared.changeSetId
-      ? `${baseSystemPrompt}\n\nYou are working in an isolated Change Set worktree. Implement the requested code changes directly in this worktree and verify them when practical. Do not attempt to write the user's main checkout; application is a separate explicit step.`
-      : baseSystemPrompt
+    const workspacePolicyPrompt =
+      threadKind === THREAD_KIND_CHAT
+        ? prepared.workspaceAccess === 'exclusive-write'
+          ? 'The project workspace is writable for this turn. You may implement small, focused changes directly and verify them when practical.'
+          : 'The project workspace is read-only for this turn because another operation is modifying it. You may inspect and explain the code, but do not claim to have changed project files.'
+        : 'The project workspace is read-only. Requirements collection and planning must not modify project files.'
+    const systemPrompt = `${baseSystemPrompt}\n\n${workspacePolicyPrompt}`
 
     let draftRevision: number | null = null
     let planRevision: number | null = null
@@ -590,9 +603,7 @@ export async function* executePreparedTurn(
       createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
     const cursorRuntimeScope =
       core.code === 'cursorcli'
-        ? prepared.changeSetId
-          ? `change:${prepared.changeSetId}`
-          : buildConversationCursorRuntimeScope(thread.id, conversationKind)
+        ? buildConversationCursorRuntimeScope(thread.id, conversationKind)
         : undefined
 
     const attachmentReadRoots = resolveTurnAttachmentReadRoots({
@@ -623,7 +634,15 @@ export async function* executePreparedTurn(
         readRoots: attachmentReadRoots.length > 0 ? attachmentReadRoots : undefined,
         jobId: cursorRuntimeScope,
         signal: options?.signal,
-        workspaceAccess: prepared.workspaceAccess
+        workspaceAccess: prepared.workspaceAccess,
+        workspaceLease:
+          prepared.workspaceLeaseId && prepared.workspaceLeaseOwnerId
+            ? {
+                leaseId: prepared.workspaceLeaseId,
+                ownerKind: 'conversation',
+                ownerId: prepared.workspaceLeaseOwnerId
+              }
+            : undefined
       })) {
         while (draftEvents.length > 0) {
           const draftEvent = draftEvents.shift()
@@ -745,9 +764,10 @@ export async function* executePreparedTurn(
     }
     yield { event: 'error', data: { message: errMessage, error: turnError } }
   } finally {
-    const { releaseWorkspaceLeaseForOwner } =
-      await import('../legacy-control-plane/workspace-lease-store')
-    releaseWorkspaceLeaseForOwner('conversation', threadId)
+    const { releaseWorkspaceLease } = await import('../legacy-control-plane/workspace-lease-store')
+    if (prepared.workspaceLeaseId) {
+      releaseWorkspaceLease({ leaseId: prepared.workspaceLeaseId })
+    }
     releaseThread(threadId)
   }
 }
