@@ -14,6 +14,7 @@ import { provideJobEventHub } from '@renderer/composables/useJobEventHub'
 const hub = provideJobEventHub()
 const workspace = provideHomeWorkspace(hub)
 const chat = useHomeChat(
+  hub,
   (thread) => workspace.syncThread(thread),
   (threadId, patch) => workspace.patchThreadRuntime(threadId, patch)
 )
