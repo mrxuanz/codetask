@@ -7,6 +7,11 @@ import { throwSdkTurnError } from '../errors'
 import { buildClaudeMcpServers } from '../mcp'
 import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
 import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '../roles'
+import {
+  CLI_READ_ONLY_BUILTINS,
+  capabilityProfileIsReadOnly,
+  resolveInputCapabilityProfile
+} from '../capabilities'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
@@ -28,7 +33,9 @@ export async function* streamClaudeTurn(
     })
   }
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
-  const builtins = [...CLI_FULL_ACCESS_BUILTINS]
+  const capabilityProfile = resolveInputCapabilityProfile(input)
+  const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
+  const builtins = readOnly ? [...CLI_READ_ONLY_BUILTINS] : [...CLI_FULL_ACCESS_BUILTINS]
   let reply = ''
   let thinking = ''
 
@@ -62,10 +69,12 @@ export async function* streamClaudeTurn(
     options: {
       cwd: input.cwd,
       systemPrompt: resolveClaudeSystemPrompt(input.systemPrompt),
-      settingSources: resolveClaudeSettingSources(outerSandbox),
+      settingSources: resolveClaudeSettingSources(outerSandbox, capabilityProfile),
       tools: builtins,
       allowedTools,
-      disallowedTools: ['AskUserQuestion'],
+      disallowedTools: readOnly
+        ? ['AskUserQuestion', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'Agent']
+        : ['AskUserQuestion'],
       permissionMode: 'bypassPermissions',
       persistSession: true,
       abortController: turnAbort,

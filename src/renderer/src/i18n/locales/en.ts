@@ -159,6 +159,9 @@ export default {
     switchCoreFailed: 'Failed to switch CLI',
     sendFailed: 'Failed to send message',
     taskWorkspaceReadOnly: 'Task “{task}” is running. This conversation is read-only.',
+    conversationWorkspaceReadOnly:
+      'Another conversation is modifying this directory. This conversation is read-only.',
+    workspaceReadOnly: 'Another operation is using this directory. This conversation is read-only.',
     relativeHours: '{n}h ago',
     relativeMinutes: '{n}m ago',
     sidebar: {

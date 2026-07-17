@@ -26,6 +26,7 @@ import { setPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import type { TurnErrorDto } from '@shared/turn-errors'
 import { coerceTurnErrorField } from '@shared/turn-errors'
+import type { WorkspaceAccessMode } from '@shared/workspace-access'
 
 export interface HomeChatContext {
   cores: Ref<ConversationCore[]>
@@ -39,6 +40,7 @@ export interface HomeChatContext {
   coreSwitching: Ref<boolean>
   sending: Ref<boolean>
   error: Ref<string | null>
+  activeWorkspaceAccess: Ref<WorkspaceAccessMode | null>
   loadCores: () => Promise<void>
   openThread: (thread: Thread) => Promise<void>
   setCoreCode: (threadId: string, coreCode: string) => Promise<Thread | null>
@@ -89,6 +91,7 @@ export function useHomeChat(
   const coreSwitching = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
+  const activeWorkspaceAccess = ref<WorkspaceAccessMode | null>(null)
   let openToken = 0
   let turnUnsub: (() => void) | null = null
   let settleActiveTurn: ((err?: unknown) => void) | null = null
@@ -116,6 +119,7 @@ export function useHomeChat(
     activeThreadId.value = null
     activeCoreCode.value = null
     runtimeStatus.value = 'idle'
+    activeWorkspaceAccess.value = null
     streamingMessageId.value = null
     awaitingAssistantReply.value = false
     sending.value = false
@@ -296,6 +300,12 @@ export function useHomeChat(
           if (generation !== streamGeneration) return
 
           if (envelope.event === 'turn_snapshot') {
+            const snapshotAccess = envelope.data.turn.workspaceAccess
+            activeWorkspaceAccess.value =
+              !isTerminalTurnStatus(envelope.data.turn.status) &&
+              (snapshotAccess === 'exclusive-write' || snapshotAccess === 'live-read')
+                ? snapshotAccess
+                : null
             if (isTerminalTurnStatus(envelope.data.turn.status)) {
               const terminalTurn = envelope.data.turn
               // POST may finish before the topic subscription is installed, and reconnect may
@@ -495,6 +505,7 @@ export function useHomeChat(
     coreSwitching,
     sending,
     error,
+    activeWorkspaceAccess,
     loadCores,
     openThread,
     setCoreCode,

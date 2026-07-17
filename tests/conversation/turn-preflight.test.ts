@@ -52,8 +52,8 @@ describe('conversation turn preflight', () => {
   })
 
   it('allows read-only chat while a task owns the workspace write lease', async () => {
-    const chat = await harness.createThread(THREAD_KIND_CHAT, 'codex')
-    harness.setScript('conversation:general:codex:1', {
+    const chat = await harness.createThread(THREAD_KIND_CHAT, 'claude-code')
+    harness.setScript('conversation:general:claude-code:1', {
       reply: 'read-only reply',
       mcpCalls: []
     })

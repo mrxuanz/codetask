@@ -26,16 +26,13 @@ function baseInput(role: AgentTurnInput['role']): AgentTurnInput {
   }
 }
 
-test('resolveCodexOuterSandbox: every provider role requires outer sandbox', () => {
-  assert.equal(resolveCodexOuterSandbox('conversation', undefined), true)
-  assert.equal(resolveCodexOuterSandbox('planner', undefined), true)
+test('resolveCodexOuterSandbox: only execution roles require outer sandbox', () => {
+  assert.equal(resolveCodexOuterSandbox('conversation', undefined), false)
+  assert.equal(resolveCodexOuterSandbox('planner', undefined), false)
   assert.equal(resolveCodexOuterSandbox('task-worker', true), true)
   assert.equal(resolveCodexOuterSandbox('slice-verifier', undefined), true)
   assert.equal(resolveCodexOuterSandbox('milestone-verifier', undefined), true)
-  assert.throws(
-    () => resolveCodexOuterSandbox('conversation', false),
-    /cannot disable outer sandbox/
-  )
+  assert.equal(resolveCodexOuterSandbox('conversation', false), false)
 })
 
 test('resolveCodexMcpToolNamesForTurn picks role defaults', () => {
@@ -53,21 +50,31 @@ test('resolveCodexMcpToolNamesForTurn picks role defaults', () => {
 
 test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () => {
   const conversation = buildCodexTurnPlan(
-    { ...baseInput('conversation'), mcpUrl: 'http://127.0.0.1:9/mcp' },
-    { outerSandbox: true }
+    {
+      ...baseInput('conversation'),
+      capabilityProfile: 'chat-write',
+      mcpUrl: 'http://127.0.0.1:9/mcp'
+    },
+    { outerSandbox: false }
   )
-  assert.equal(conversation.outerSandbox, true)
-  assert.equal(conversation.threadOptions.sandboxMode, 'danger-full-access')
+  assert.equal(conversation.outerSandbox, false)
+  assert.equal(conversation.threadOptions.sandboxMode, 'workspace-write')
   assert.equal(conversation.mcpToolNames, undefined)
   assert.ok(
     conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
   )
 
   const planner = buildCodexTurnPlan(
-    { ...baseInput('planner'), mcpUrl: 'http://127.0.0.1:9/mcp' },
-    { outerSandbox: true }
+    {
+      ...baseInput('planner'),
+      capabilityProfile: 'planner-read',
+      mcpUrl: 'http://127.0.0.1:9/mcp'
+    },
+    { outerSandbox: false }
   )
-  assert.equal(planner.outerSandbox, true)
+  assert.equal(planner.outerSandbox, false)
+  assert.equal(planner.threadOptions.sandboxMode, 'read-only')
+  assert.equal(planner.threadOptions.networkAccessEnabled, false)
   assert.ok(planner.mcpToolNames?.includes('register_plan_outline'))
   assert.ok(planner.mcpToolNames?.includes('finalize_plan'))
 
@@ -89,8 +96,12 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
 
 test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {
   const conversation = buildCodexTurnPlan(
-    { ...baseInput('conversation'), mcpUrl: 'http://127.0.0.1:9/mcp' },
-    { outerSandbox: true }
+    {
+      ...baseInput('conversation'),
+      capabilityProfile: 'create-task-read',
+      mcpUrl: 'http://127.0.0.1:9/mcp'
+    },
+    { outerSandbox: false }
   )
   const tools =
     conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers

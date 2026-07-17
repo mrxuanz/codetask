@@ -8,8 +8,9 @@ import type { AgentTurnInput } from '../types'
 import { resolveProviderOuterSandbox } from '../provider-policy'
 import { resolveRoleMcpToolNames, roleRequiresOuterSandbox, type ConversationRole } from '../roles'
 import { createTurnError } from '../../../shared/turn-errors.ts'
+import { capabilityProfileIsReadOnly, resolveInputCapabilityProfile } from '../capabilities'
 
-export type CodexSandboxMode = 'danger-full-access' | 'workspace-write'
+export type CodexSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only'
 
 export interface CodexThreadOptions {
   model?: string
@@ -17,7 +18,7 @@ export interface CodexThreadOptions {
   skipGitRepoCheck: true
   approvalPolicy: 'never'
   sandboxMode: CodexSandboxMode
-  networkAccessEnabled: true
+  networkAccessEnabled: boolean
   additionalDirectories?: string[]
 }
 
@@ -53,6 +54,8 @@ export function buildCodexTurnPlan(
     })
   }
   const mcpToolNames = resolveCodexMcpToolNamesForTurn(input)
+  const capabilityProfile = resolveInputCapabilityProfile(input)
+  const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
 
   const sdkConfig = buildCodexSdkConfig({
     mcpUrl: input.mcpUrl,
@@ -66,16 +69,20 @@ export function buildCodexTurnPlan(
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
   applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
-  const sandboxMode: CodexSandboxMode = outerSandbox ? 'danger-full-access' : 'workspace-write'
+  const sandboxMode: CodexSandboxMode = outerSandbox
+    ? 'danger-full-access'
+    : readOnly
+      ? 'read-only'
+      : 'workspace-write'
 
   const threadOptions: CodexThreadOptions = {
     workingDirectory: input.cwd,
     skipGitRepoCheck: true,
     approvalPolicy: 'never',
     sandboxMode,
-    networkAccessEnabled: true,
+    networkAccessEnabled: !readOnly,
     ...(input.model !== undefined ? { model: input.model } : {}),
-    ...(outerSandbox ? {} : { additionalDirectories: [input.runtimeRoot] })
+    ...(!outerSandbox && !readOnly ? { additionalDirectories: [input.runtimeRoot] } : {})
   }
 
   return {

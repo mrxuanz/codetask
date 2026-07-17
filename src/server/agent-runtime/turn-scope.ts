@@ -182,13 +182,13 @@ export class TurnScope {
     this._lastKeepAlive = now
     try {
       this._onKeepAlive()
-    } catch {
-      // best-effort
+    } catch (error) {
+      this._abortInternal(error)
     }
   }
 
   private _startKeepalive(): void {
-    if (!this._onKeepAlive || !this._processExit) return
+    if (!this._onKeepAlive) return
     this._keepaliveTimer = setInterval(() => {
       if (this._disposed || this.signal.aborted) {
         this._stopKeepalive()
@@ -199,8 +199,8 @@ export class TurnScope {
         this._lastKeepAlive = now
         try {
           this._onKeepAlive?.()
-        } catch {
-          // best-effort
+        } catch (error) {
+          this._abortInternal(error)
         }
       }
     }, KEEPALIVE_INTERVAL_MS)
@@ -232,6 +232,13 @@ export class TurnScope {
   }
 
   private _abortExternal(reason?: unknown): void {
+    if (this.signal.aborted) return
+    this._abortError = reason instanceof Error ? reason : TURN_CANCELLED
+    this._abort.abort(this._abortError)
+    this.dispose()
+  }
+
+  private _abortInternal(reason: unknown): void {
     if (this.signal.aborted) return
     this._abortError = reason instanceof Error ? reason : TURN_CANCELLED
     this._abort.abort(this._abortError)

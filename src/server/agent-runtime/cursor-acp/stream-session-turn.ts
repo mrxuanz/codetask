@@ -58,7 +58,8 @@ export async function* streamCursorSessionTurn(
   const runtimeOptions = {
     cwd: input.cwd,
     env: plan.env,
-    cliArgs: plan.cliArgs
+    cliArgs: plan.cliArgs,
+    capabilityProfile: plan.capabilityProfile
   }
 
   const mcpProfile = buildTaskMcpProfile(input.mcpUrl)
@@ -75,7 +76,8 @@ export async function* streamCursorSessionTurn(
       provider: input.provider,
       workspaceRoot: input.cwd,
       model: input.model,
-      mcpProfile
+      mcpProfile,
+      capabilityProfile: plan.capabilityProfile
     })
     runtime = await getCursorProviderRuntimeRegistry().getOrCreate(
       registryKey,
@@ -147,4 +149,5 @@ export type JobCursorRuntimeKeyInput = {
   workspaceRoot: string
   model?: string
   mcpProfile: string
+  capabilityProfile?: import('../capabilities').AgentCapabilityProfile
 }

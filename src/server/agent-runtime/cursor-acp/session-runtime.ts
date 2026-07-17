@@ -3,7 +3,7 @@ import { RequestError, type ActiveSession, type ClientContext } from '@agentclie
 import type { ConversationRole } from '../roles'
 import type { CursorAcpMcpServer } from '../mcp'
 import type { AgentTurnChunk } from '../types'
-import { createTurnError } from '../../../shared/turn-errors.ts'
+import { createTurnError, type TurnErrorDto } from '../../../shared/turn-errors.ts'
 import type { TurnErrorCode } from '../../../shared/turn-errors/codes.ts'
 import { classifyCursorAcpError } from './errors'
 import { abortReason, createProviderTurnScope } from '../provider-turn'
@@ -26,6 +26,7 @@ import {
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../delta-emit'
 import { assertTaskWorkerAcpCompletion } from './turn-guards'
 import { recordAcpToolCallActivity } from '../turn-scope'
+import type { AgentCapabilityProfile } from '../capabilities'
 
 export interface CursorPromptInput {
   role: ConversationRole
@@ -42,6 +43,7 @@ export interface CursorAcpSessionRuntimeOptions {
   cwd: string
   env: Record<string, string>
   cliArgs: string[]
+  capabilityProfile: AgentCapabilityProfile
 }
 
 type CursorAcpErrorDto = {
@@ -133,7 +135,7 @@ export class CursorAcpSessionRuntime {
     this.connectionDone = connectionDone
     this.releaseConnection = releaseConnection
 
-    const app = createCodetaskAcpClient(() => this.closed)
+    const app = createCodetaskAcpClient(() => this.closed, this.options.capabilityProfile)
     void app
       .connectWith(createChildAcpStream(child), async (ctx) => {
         this.ctx = ctx
@@ -174,7 +176,7 @@ export class CursorAcpSessionRuntime {
     const mcpSignature = input.mcpServers
       .map((server) => `${server.name}:${server.type}:${server.url ?? server.command ?? ''}`)
       .join('|')
-    return `${input.cwd}\0${input.runtimeSessionId ?? ''}\0${mcpSignature}`
+    return `${input.cwd}\0${input.runtimeSessionId ?? ''}\0${mcpSignature}\0${this.options.capabilityProfile}`
   }
 
   private async openTaskSession(input: CursorPromptInput): Promise<ActiveSession> {
@@ -287,20 +289,19 @@ export class CursorAcpSessionRuntime {
             : dto
               ? (dto.detail ?? message)
               : message
-        const displayMessage =
-          detail && detail !== message ? `${message}: ${detail}` : message
+        const displayMessage = detail && detail !== message ? `${message}: ${detail}` : message
         queue.push({
           type: 'error',
           message: displayMessage,
           ...(dto
             ? {
-                code: dto.code,
+                code: dto.code as TurnErrorCode,
                 error: {
-                  code: dto.code,
+                  code: dto.code as TurnErrorCode,
                   message: dto.message,
                   params: dto.params,
                   detail: dto.detail
-                }
+                } as TurnErrorDto
               }
             : {})
         })

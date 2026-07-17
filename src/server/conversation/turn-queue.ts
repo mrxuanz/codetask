@@ -348,9 +348,21 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
       signal: controller.signal,
       onWorkspaceAccessResolved: (workspaceAccess) => {
         db.update(conversationTurns)
-          .set({ workspaceAccess })
+          .set({
+            workspaceAccess,
+            stateRevision: sql`${conversationTurns.stateRevision} + 1`
+          })
           .where(eq(conversationTurns.id, turnId))
           .run()
+        const resolved = db
+          .select()
+          .from(conversationTurns)
+          .where(eq(conversationTurns.id, turnId))
+          .limit(1)
+          .all()[0]
+        if (resolved) {
+          emitTurn(turnId, { event: 'turn_snapshot', data: { turn: mapRow(resolved) } })
+        }
       }
     })) {
       const latest = db

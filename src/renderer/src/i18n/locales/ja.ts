@@ -155,6 +155,9 @@ export default {
     switchCoreFailed: 'CLI の切り替えに失敗しました',
     sendFailed: '送信に失敗しました',
     taskWorkspaceReadOnly: 'タスク「{task}」を実行中です。この会話は読み取り専用です。',
+    conversationWorkspaceReadOnly:
+      '別の会話がこのディレクトリを変更中です。この会話は読み取り専用です。',
+    workspaceReadOnly: '別の操作がこのディレクトリを使用中です。この会話は読み取り専用です。',
     relativeHours: '{n} 時間前',
     relativeMinutes: '{n} 分前',
     composer: {

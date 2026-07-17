@@ -1,5 +1,16 @@
+import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
+import { allCreateTaskMcpToolNames } from '../../wizard/tools'
+import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
+
+const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
+  'codeteam-manager',
+  ...allCreateTaskMcpToolNames(),
+  ...PLANNER_ROLE_MCP_TOOLS
+])
+
 export type CursorPermissionRequestParams = {
   options: Array<{ optionId: string }>
+  toolCall?: { title?: string; kind?: string }
 }
 
 export function selectAllowOption(options: Array<{ optionId: string }>): { optionId: string } {
@@ -20,8 +31,49 @@ export function selectAllowOption(options: Array<{ optionId: string }>): { optio
   )
 }
 
-export function createCursorPermissionHandler() {
+export function selectDenyOption(
+  options: Array<{ optionId: string }>
+): { optionId: string } | null {
+  return (
+    options.find((option) => option.optionId === 'deny-always') ??
+    options.find((option) => option.optionId === 'deny-once') ??
+    options.find((option) => /deny|reject|cancel/i.test(option.optionId)) ??
+    null
+  )
+}
+
+function isReadOnlyCursorTool(toolCall: CursorPermissionRequestParams['toolCall']): boolean {
+  const description = `${toolCall?.kind ?? ''} ${toolCall?.title ?? ''}`.trim().toLowerCase()
+  if (!description) return false
+  if (
+    [...READ_ONLY_SYSTEM_MCP_TOOLS].some((toolName) => description.includes(toolName.toLowerCase()))
+  ) {
+    return true
+  }
+  if (/\b(read|search|grep|glob|list|lsp|diagnostic|inspect)\b/.test(description)) {
+    return true
+  }
+  return false
+}
+
+export function createCursorPermissionHandler(capabilityProfile?: AgentCapabilityProfile) {
   return async ({ params }: { params: CursorPermissionRequestParams }) => {
+    if (
+      capabilityProfile &&
+      capabilityProfileIsReadOnly(capabilityProfile) &&
+      !isReadOnlyCursorTool(params.toolCall)
+    ) {
+      const denied = selectDenyOption(params.options)
+      if (!denied) {
+        return { outcome: { outcome: 'cancelled' as const } }
+      }
+      return {
+        outcome: {
+          outcome: 'selected' as const,
+          optionId: denied.optionId
+        }
+      }
+    }
     const preferred = selectAllowOption(params.options)
     return {
       outcome: {

@@ -6,11 +6,6 @@ import { is } from '@electron-toolkit/utils'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { readSchemaGeneration } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
-import {
-  getSandboxSupervisorManager,
-  shutdownSandboxSupervisor
-} from '../server/sandbox/supervisor-manager'
-import { ensureWindowsSandboxReady } from '../server/sandbox/windows-bootstrap'
 import { mkdirSync } from 'fs'
 import { resolveDataDirSelection } from './data-dir'
 import { ensureResolvedDataRoot, type DataDirResolution } from './storage-locator'
@@ -53,36 +48,6 @@ function announceSetupToken(authSecret: string): void {
   console.log('')
 }
 
-/**
- * FIX-PLAN F3-C (§8.5): confirm the sandbox/provider is executable with bounded backoff retry.
- * Throws (fail closed) if it never becomes ready, so we never claim the runtime is ready.
- */
-async function confirmSandboxReadyOrThrow(supervisor: {
-  ensureReady(): Promise<void>
-}): Promise<void> {
-  const maxAttempts = Math.max(1, Number(process.env.CODETASK_SANDBOX_READY_MAX_ATTEMPTS ?? 5))
-  let lastError: unknown
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      await supervisor.ensureReady()
-      console.log('[sandbox] supervisor ready')
-      return
-    } catch (error) {
-      lastError = error
-      const message = error instanceof Error ? error.message : String(error)
-      const delayMs = 500 * attempt
-      console.warn(
-        `[sandbox] not ready (attempt ${attempt}/${maxAttempts}): ${message}; retrying in ${delayMs}ms`
-      )
-      if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs))
-      }
-    }
-  }
-  const message = lastError instanceof Error ? lastError.message : String(lastError)
-  throw new Error(`Sandbox/provider unavailable after ${maxAttempts} attempts: ${message}`)
-}
-
 function isAddressInUse(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -112,9 +77,7 @@ function listen(fetch: NodeFetch, host: string, port: number): Promise<ServerTyp
 }
 
 /** Hot-swap wrapper: keep serve() env bindings (incoming socket) while swapping activeApp. */
-function activeFetch(
-  getApp: () => Hono
-): NodeFetch {
+function activeFetch(getApp: () => Hono): NodeFetch {
   return (request, env, executionCtx) => getApp().fetch(request, env, executionCtx)
 }
 
@@ -125,19 +88,6 @@ async function createReadyApp(
 ): Promise<{ app: Hono; dataDir: string }> {
   const dataDir = ensureResolvedDataRoot(storage)
   process.env.CODETASK_DATA_DIR = dataDir
-
-  if (process.platform === 'win32') {
-    void ensureWindowsSandboxReady(dataDir).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`[sandbox] Windows bootstrap deferred: ${message}`)
-    })
-  }
-
-  const supervisor = getSandboxSupervisorManager()
-  supervisor.on('restart_failed', (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error(`[sandbox] supervisor restart failed permanently: ${message}`)
-  })
 
   const authSecret = await loadMainProcessAuthSecret({
     mode: cli.mode,
@@ -161,19 +111,11 @@ async function createReadyApp(
   const schemaRead = readSchemaGeneration(ctx.db)
   const usesLegacyComposition = schemaRead !== 'v3_authoritative'
 
-  // FIX-PLAN F3-C / R6: full recovery must complete BEFORE HTTP bind/listen:
-  //   open DB/migrate → select Legacy root → init sandbox/provider (confirm executable) →
-  //   reclaim stale run/slot/lease → running attempt → interrupted → resume last running Job →
-  //   advance pending FIFO → start reconciler → (only then) listen.
-  if (usesLegacyComposition) {
-    await confirmSandboxReadyOrThrow(supervisor)
-  }
-
   await ensureRuntimeReady(ctx)
 
   if (usesLegacyComposition) {
     await import('../server/legacy-control-plane/job-queue').then((module) =>
-      module.resumeJobQueuesAfterServerReady(supervisor)
+      module.resumeJobQueuesAfterServerReady()
     )
   }
 
@@ -284,7 +226,11 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     for (let offset = 0; offset < 100; offset++) {
       const port = startPort + offset
       try {
-        activeServer = await listen(activeFetch(() => activeApp), cli.host, port)
+        activeServer = await listen(
+          activeFetch(() => activeApp),
+          cli.host,
+          port
+        )
         boundPort = port
         bindChanged = cli.port !== port
         break
@@ -330,7 +276,11 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
   for (let offset = 0; offset < 100; offset++) {
     const port = startPort + offset
     try {
-      activeServer = await listen(activeFetch(() => activeApp), cli.host, port)
+      activeServer = await listen(
+        activeFetch(() => activeApp),
+        cli.host,
+        port
+      )
       boundPort = port
       bindChanged = cli.port !== port
       initConversationMcpBackend(port)
@@ -400,7 +350,9 @@ export async function stopAppServer(): Promise<void> {
     console.warn('[server] failed to shutdown application runtime', error)
   }
 
-  await shutdownSandboxSupervisor()
+  await import('../server/sandbox/supervisor-manager').then((module) =>
+    module.shutdownSandboxSupervisor()
+  )
 
   try {
     const { closeDatabaseForTests } = await import('../server/db')

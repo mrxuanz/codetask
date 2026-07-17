@@ -61,6 +61,7 @@ import { buildAttachmentReferenceMarkdown, resolveTurnAttachmentReadRoots } from
 import { getAppContext } from '../bootstrap'
 import { assertConcurrentTurnCapacity } from '../middleware/http-limits'
 import { maybeSeedThreadTitleFromFirstMessage } from './thread-title'
+import { createTurnError } from '../../shared/turn-errors.ts'
 
 export function initConversationService(_options: { dataDir: string }): void {
   getAppContext()
@@ -169,14 +170,17 @@ export async function prepareConversationTurn(input: {
     // Requirements collection and draft turns are always read-only. Ordinary chat may make
     // focused edits, but only after winning the same main-workspace lease used by task workers.
     if (threadKind === THREAD_KIND_CHAT && workspacePath) {
+      if (!input.turnId) {
+        throw AppError.internal('Conversation write admission requires a turn id', 'turn.unknown')
+      }
       const { acquireWorkspaceLease } =
         await import('../legacy-control-plane/workspace-lease-store')
-      workspaceLeaseOwnerId = input.turnId ?? `direct:${thread.id}`
+      workspaceLeaseOwnerId = input.turnId
       const lease = acquireWorkspaceLease({
         workspacePath,
         ownerKind: 'conversation',
         ownerId: workspaceLeaseOwnerId,
-        runId: input.turnId ?? null
+        runId: input.turnId
       })
       if (lease) {
         workspaceLeaseId = lease.leaseId
@@ -448,6 +452,11 @@ export async function* executePreparedTurn(
     )
 
     const conversationKind = createTaskMode ? 'create_task' : 'chat'
+    const capabilityProfile = createTaskMode
+      ? ('create-task-read' as const)
+      : prepared.workspaceAccess === 'exclusive-write'
+        ? ('chat-write' as const)
+        : ('chat-read' as const)
     const runtimeRoot = ensureConversationRuntimeRoot(
       getAppContext().dataDir,
       thread.id,
@@ -460,7 +469,7 @@ export async function* executePreparedTurn(
     const mcpWizardStage = wizardStage ?? 'general'
     const phaseRuntimeId = createTaskMode
       ? (getThreadPhaseRuntime(threadRow) ?? thread.runtimeSessionId)
-      : thread.runtimeSessionId
+      : null
     const priorMessages = await listMessages(username, thread.id, 50, { signAssets: false })
 
     const draftEvents: ChatSseEvent[] = []
@@ -496,8 +505,11 @@ export async function* executePreparedTurn(
           threadId: thread.id,
           wizardStage: mcpWizardStage
         })
-      } catch {
-        mcpUrl = undefined
+      } catch (error) {
+        unregisterConversationMcpSession(mcpSessionId)
+        throw createTurnError('conversation.mcp_unavailable', {
+          detail: error instanceof Error ? error.message : String(error)
+        })
       }
     }
 
@@ -510,21 +522,11 @@ export async function* executePreparedTurn(
     const phasePrompt = wizardStage ? buildWizardPhasePromptSection(wizardStage) : ''
     const systemPromptBase =
       turnRole === 'draft' ? buildDraftTurnSystemPrompt(basePrompt) : basePrompt
-    const baseSystemPrompt = createTaskMode
+    const systemPrompt = createTaskMode
       ? phasePrompt
         ? `${systemPromptBase}\n\n${phasePrompt}`
         : systemPromptBase
-      : buildConversationSystemPrompt('CodeTask Conversation', {
-          mode: 'chat',
-          mcpToolsAvailable: false
-        })
-    const workspacePolicyPrompt =
-      threadKind === THREAD_KIND_CHAT
-        ? prepared.workspaceAccess === 'exclusive-write'
-          ? 'The project workspace is writable for this turn. You may implement small, focused changes directly and verify them when practical.'
-          : 'The project workspace is read-only for this turn because another operation is modifying it. You may inspect and explain the code, but do not claim to have changed project files.'
-        : 'The project workspace is read-only. Requirements collection and planning must not modify project files.'
-    const systemPrompt = `${baseSystemPrompt}\n\n${workspacePolicyPrompt}`
+      : undefined
 
     let draftRevision: number | null = null
     let planRevision: number | null = null
@@ -602,7 +604,7 @@ export async function* executePreparedTurn(
     const mcpToolNames =
       createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
     const cursorRuntimeScope =
-      core.code === 'cursorcli'
+      core.code === 'cursorcli' && createTaskMode
         ? buildConversationCursorRuntimeScope(thread.id, conversationKind)
         : undefined
 
@@ -622,6 +624,7 @@ export async function* executePreparedTurn(
     try {
       for await (const chunk of streamAgentTurn({
         role: 'conversation',
+        capabilityProfile,
         provider: core.code as SupportedCoreCode,
         workspaceRoot: workspacePath,
         runtimeRoot,
@@ -766,7 +769,13 @@ export async function* executePreparedTurn(
   } finally {
     const { releaseWorkspaceLease } = await import('../legacy-control-plane/workspace-lease-store')
     if (prepared.workspaceLeaseId) {
-      releaseWorkspaceLease({ leaseId: prepared.workspaceLeaseId })
+      const released = releaseWorkspaceLease({ leaseId: prepared.workspaceLeaseId })
+      if (released) {
+        const { advanceExecutionQueue } = await import('../legacy-control-plane/queue-coordinator')
+        await advanceExecutionQueue(username).catch((error) => {
+          console.warn('[conversation] failed to advance task queue after lease release', error)
+        })
+      }
     }
     releaseThread(threadId)
   }

@@ -31,16 +31,19 @@ test('resolveProviderRunPolicy uses runtime-copy inside outer sandbox', () => {
 })
 
 test('resolveProviderOuterSandbox matrix', () => {
-  for (const role of ROLES) {
-    const outer = resolveProviderOuterSandbox(role, undefined)
-    assert.equal(outer, true, role)
-  }
+  assert.equal(resolveProviderOuterSandbox('conversation', undefined), false)
+  assert.equal(resolveProviderOuterSandbox('planner', undefined), false)
+  assert.equal(resolveProviderOuterSandbox('task-worker', undefined), true)
+  assert.equal(resolveProviderOuterSandbox('slice-verifier', undefined), true)
+  assert.equal(resolveProviderOuterSandbox('milestone-verifier', undefined), true)
 })
 
 test('resolveProviderOuterSandbox rejects disable for file roles', () => {
-  for (const role of ROLES) {
+  for (const role of ['task-worker', 'slice-verifier', 'milestone-verifier'] as const) {
     assert.throws(() => resolveProviderOuterSandbox(role, false), /cannot disable outer sandbox/)
   }
+  assert.equal(resolveProviderOuterSandbox('conversation', false), false)
+  assert.equal(resolveProviderOuterSandbox('planner', false), false)
 })
 
 test('resolveRoleMcpToolNames per role', () => {
