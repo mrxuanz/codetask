@@ -5,9 +5,19 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
 import { eq } from 'drizzle-orm'
-import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
+import {
+  bootstrapRuntime,
+  getAppContext,
+  resetAppContextForTests
+} from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
-import { projects, threadJobs, threadMessages, threads, workspaceLeases } from '../../src/server/db/schema'
+import {
+  projects,
+  threadJobs,
+  threadMessages,
+  threads,
+  workspaceLeases
+} from '../../src/server/db/schema'
 import {
   resetJobReconcileForTests,
   stopWorkloadReconcilerForTests
@@ -25,9 +35,15 @@ import {
   releaseWorkspaceLeaseForOwner,
   resetWorkspaceLeaseStateForTests
 } from '../../src/server/legacy-control-plane/workspace-lease-store'
+import { prepareConversationTurn } from '../../src/server/conversation/service'
+import { getProjectWorkspaceAccess } from '../../src/server/projects/service'
+import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
 
 const executorPath = join(process.cwd(), 'src/server/legacy-control-plane/executor.ts')
-const queueCoordinatorPath = join(process.cwd(), 'src/server/legacy-control-plane/queue-coordinator.ts')
+const queueCoordinatorPath = join(
+  process.cwd(),
+  'src/server/legacy-control-plane/queue-coordinator.ts'
+)
 const plannerPath = join(process.cwd(), 'src/server/design-session/planner.ts')
 
 let dataDir = ''
@@ -221,6 +237,87 @@ test('owner-only release on failed acquire path would drop a concurrent winner l
   }
 })
 
+test('ordinary chat dynamically follows the project task lease while draft chat stays read-only', async () => {
+  await setup()
+  try {
+    await seedPendingJob('job-active', workspaceRoot)
+    const projectId = 'proj-job-active'
+    const now = Math.floor(Date.now() / 1000)
+
+    for (const [threadId, threadKind] of [
+      ['chat-blocked', THREAD_KIND_CHAT],
+      ['chat-writable', THREAD_KIND_CHAT],
+      ['draft-readonly', THREAD_KIND_CREATE_TASK]
+    ] as const) {
+      await getDb()
+        .insert(threads)
+        .values({
+          id: threadId,
+          username: 'user',
+          projectId,
+          title: threadId,
+          status: 'draft',
+          conversationId: `conv-${threadId}`,
+          coreCode: 'cursor',
+          runtimeStatus: 'idle',
+          coreRuntimeJson: '{}',
+          threadKind,
+          createdAt: now,
+          updatedAt: now
+        })
+    }
+
+    const taskLease = acquireWorkspaceLease({
+      workspacePath: workspaceRoot,
+      ownerKind: 'thread_job',
+      ownerId: 'job-active'
+    })
+    assert.ok(taskLease)
+
+    const accessWhileRunning = await getProjectWorkspaceAccess('user', projectId)
+    assert.equal(accessWhileRunning.mode, 'read_only')
+    assert.equal(accessWhileRunning.blocker?.taskId, 'job-active')
+
+    const blocked = await prepareConversationTurn({
+      username: 'user',
+      threadId: 'chat-blocked',
+      requestedCreateTaskMode: false,
+      requestedDraft: false,
+      turnId: 'turn-blocked'
+    })
+    assert.equal(blocked.workspaceAccess, 'live-read')
+    assert.equal(blocked.workspaceLeaseId, null)
+    getAppContext().runtimeRegistry.removeInflightThread('chat-blocked')
+
+    releaseWorkspaceLease(taskLease.leaseId)
+
+    const writable = await prepareConversationTurn({
+      username: 'user',
+      threadId: 'chat-writable',
+      requestedCreateTaskMode: false,
+      requestedDraft: false,
+      turnId: 'turn-writable'
+    })
+    assert.equal(writable.workspaceAccess, 'exclusive-write')
+    assert.ok(writable.workspaceLeaseId)
+    releaseWorkspaceLease(writable.workspaceLeaseId!)
+    getAppContext().runtimeRegistry.removeInflightThread('chat-writable')
+
+    const draft = await prepareConversationTurn({
+      username: 'user',
+      threadId: 'draft-readonly',
+      requestedCreateTaskMode: true,
+      requestedDraft: false,
+      turnId: 'turn-draft'
+    })
+    assert.equal(draft.workspaceAccess, 'live-read')
+    assert.equal(draft.workspaceLeaseId, null)
+    getAppContext().runtimeRegistry.removeInflightThread('draft-readonly')
+  } finally {
+    await teardown()
+  }
+})
+
 test('executeSingleTask fails closed before provider when lease is unavailable', () => {
   const source = readFileSync(executorPath, 'utf8')
   const fnStart = source.indexOf('async function executeSingleTask(')
@@ -255,8 +352,5 @@ test('planner releases its workspace lease only after runtime lifecycle completi
   const releaseIdx = source.indexOf("releaseWorkspaceLeaseForOwner('planner'", finallyStart)
   assert.ok(lifecycleIdx > finallyStart)
   assert.ok(releaseIdx > lifecycleIdx, 'planner lease must outlive provider runtime close')
-  assert.match(
-    source.slice(releaseIdx, releaseIdx + 100),
-    /designSessionId, run\.runId/
-  )
+  assert.match(source.slice(releaseIdx, releaseIdx + 100), /designSessionId, run\.runId/)
 })

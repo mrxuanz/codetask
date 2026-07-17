@@ -28,8 +28,7 @@ import {
   workloadRuns,
   workloadSlots,
   workspaceLeases,
-  deletionRequests,
-  changeSets
+  deletionRequests
 } from './schema'
 
 const schema = {
@@ -56,8 +55,7 @@ const schema = {
   workloadRuns,
   workloadSlots,
   workspaceLeases,
-  deletionRequests,
-  changeSets
+  deletionRequests
 }
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>

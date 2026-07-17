@@ -1,5 +1,5 @@
 export type TitleSource = 'auto' | 'manual'
-export type ThreadKind = 'chat' | 'create_task'
+export type ThreadKind = 'chat' | 'create_task' | 'task_snapshot'
 export type WizardPhase =
   | 'collect'
   | 'draft_review'

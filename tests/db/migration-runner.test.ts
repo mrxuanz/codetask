@@ -210,6 +210,17 @@ test('migrations apply through latest version on empty database', () => {
   db.pragma('foreign_keys = ON')
   runMigrations(db, allMigrations)
   assert.equal(currentMigrationVersion(db), latestMigrationVersion)
+  assert.equal(
+    db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'change_sets'`).get(),
+    undefined
+  )
+  const turnColumns = db.prepare(`PRAGMA table_info(conversation_turns)`).all() as Array<{
+    name: string
+  }>
+  assert.equal(
+    turnColumns.some((column) => column.name === 'change_set_id'),
+    false
+  )
   db.close()
 })
 

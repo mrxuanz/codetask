@@ -101,6 +101,6 @@ test('only exclusive-write requires main workspace lease', () => {
   assert.equal(requiresExclusiveWorkspaceLease('metadata'), false)
   assert.equal(requiresExclusiveWorkspaceLease('live-read'), false)
   assert.equal(requiresExclusiveWorkspaceLease('snapshot-read'), false)
-  assert.equal(requiresExclusiveWorkspaceLease('isolated-write'), false)
+  assert.equal(requiresExclusiveWorkspaceLease('live-read'), false)
   assert.equal(requiresExclusiveWorkspaceLease('exclusive-write'), true)
 })

@@ -18,6 +18,7 @@ import { releaseJobCursorResources } from '../sandbox'
 import { releaseWorkspaceLeaseForOwner } from './workspace-lease-store'
 import { throwIfCurrentRequestAborted } from '../context/request-abort'
 import { assertFrozenAttachmentId, FrozenIdError } from '../../shared/frozen-ids'
+import { THREAD_KIND_TASK_SNAPSHOT } from '../threads/types'
 
 export type DeletionEntityKind = 'thread_job' | 'thread' | 'project'
 
@@ -50,6 +51,7 @@ export interface FrozenJobRuntimeIdentity {
 export interface DeletionFrozenSnapshot {
   runtime?: FrozenJobRuntimeIdentity | null
   draftMessageId?: string | null
+  deleteOwningThread?: boolean
   childJobIds?: string[]
   childThreadIds?: string[]
 }
@@ -468,7 +470,7 @@ export function setDeletionPurgeHooksForTests(input: {
 async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<void> {
   if (request.entityKind === 'thread_job') {
     const frozen = parseFrozenSnapshot(request.frozenJson)
-    if (request.threadId && frozen.draftMessageId) {
+    if (request.threadId && frozen.draftMessageId && !frozen.deleteOwningThread) {
       const { releaseDraftAfterJobDeleted } = await import('./draft-plan')
       await releaseDraftAfterJobDeleted(
         request.username,
@@ -478,6 +480,14 @@ async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<voi
       ).catch((error) => {
         console.warn('[deletion] failed to release draft after job delete', request.entityId, error)
       })
+    }
+
+    if (
+      request.threadId &&
+      frozen.deleteOwningThread &&
+      !isEntityDeletionBlocked('thread', request.threadId)
+    ) {
+      await drainAndDeleteThread(request.username, request.threadId)
     }
 
     const { advanceExecutionQueue } = await import('./queue-coordinator')
@@ -578,7 +588,7 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
   }
 
   const threadRows = await getDb()
-    .select({ projectId: threads.projectId })
+    .select({ projectId: threads.projectId, threadKind: threads.threadKind })
     .from(threads)
     .where(eq(threads.id, job.threadId))
     .limit(1)
@@ -595,7 +605,8 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
     workspacePath: job.workspacePath ?? null,
     frozenJson: JSON.stringify({
       runtime: frozen,
-      draftMessageId: job.draftMessageId
+      draftMessageId: job.draftMessageId,
+      deleteOwningThread: threadRows[0]?.threadKind === THREAD_KIND_TASK_SNAPSHOT
     }),
     cleanupTargetsJson: JSON.stringify({
       kind: 'job',

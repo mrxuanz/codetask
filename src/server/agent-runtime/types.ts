@@ -59,6 +59,14 @@ export interface AgentTurnRunnerInput {
 
   readRoots?: string[] | undefined
   workspaceAccess?: WorkspaceAccessMode | undefined
+  /** Explicit lease identity used to fail closed before enabling main-workspace writes. */
+  workspaceLease?:
+    | {
+        leaseId: string
+        ownerKind: 'conversation' | 'planner' | 'thread_job'
+        ownerId: string
+      }
+    | undefined
 
   jobId?: string | undefined
   workloadRunId?: string | undefined

@@ -154,39 +154,19 @@ export default {
     loadThreadFailed: 'スレッドの読み込みに失敗しました',
     switchCoreFailed: 'CLI の切り替えに失敗しました',
     sendFailed: '送信に失敗しました',
+    taskWorkspaceReadOnly: 'タスク「{task}」を実行中です。この会話は読み取り専用です。',
     relativeHours: '{n} 時間前',
     relativeMinutes: '{n} 分前',
     composer: {
       placeholder: 'フォローアップの変更を入力…',
       attachment: '添付',
       addAttachment: '添付を追加（画像またはファイル）',
-      codeChanges: 'コード変更',
-      codeChangesHint: '実行中タスクの作業領域には書き込まず、隔離 Change Set で編集します',
       send: '送信',
       thinking: '思考中',
       thinkingStreaming: '思考中…',
       thinkingDone: '思考済み',
       thinkingDoneWithDuration: '思考済み（{duration}）',
       thinkingDurationSeconds: '{n} 秒'
-    },
-    changeSet: {
-      label: '隔離コード変更',
-      apply: 'プロジェクトに適用',
-      ready: 'パッチを生成',
-      rebase: '最新状態にリベース',
-      cancel: '破棄',
-      status: {
-        queued: '待機中',
-        preparing_worktree: '作業ツリーを準備中',
-        editing: '編集中',
-        validating: '検証中',
-        ready_to_apply: '適用可能',
-        applying: '適用中',
-        applied: '適用済み',
-        needs_resolution: '競合の解決が必要',
-        failed: '失敗',
-        cancelled: '破棄済み'
-      }
     },
     core: {
       claude: 'Claude',
