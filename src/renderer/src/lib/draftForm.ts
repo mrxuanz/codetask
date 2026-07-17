@@ -39,6 +39,7 @@ export interface TaskLaunchDraftPayload {
   status?: 'editing' | 'confirmed' | 'archived' | 'pending' | 'launched' | string
   linkedPlanId?: string | null
   designSessionId?: string | null
+  launchedJobId?: string | null
   lockedSections?: Record<string, boolean>
   requirementsContract?: {
     markdown?: string

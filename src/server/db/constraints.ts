@@ -7,7 +7,7 @@ export const WIZARD_PHASES = [
   'plan_edit',
   'ready_to_launch'
 ] as const
-export const THREAD_KINDS = ['chat', 'create_task'] as const
+export const THREAD_KINDS = ['chat', 'create_task', 'task_snapshot'] as const
 export const TITLE_SOURCES = ['auto', 'manual'] as const
 
 export const MESSAGE_ROLES = ['user', 'assistant', 'system'] as const
@@ -19,6 +19,7 @@ export const JOB_STATUSES = [
   'plan_editing',
   'plan_confirmed',
   'plan_ready',
+  'published',
   'running',
   'pausing',
   'paused',

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import test from 'node:test'
@@ -13,11 +13,6 @@ import {
   getTurn,
   reconcileConversationTurnsOnStartup
 } from '../../src/server/conversation/turn-queue'
-import { getChangeSet, markChangeSetReady } from '../../src/server/change-set/service'
-import {
-  acquireWorkspaceLease,
-  releaseWorkspaceLease
-} from '../../src/server/legacy-control-plane/workspace-lease-store'
 import {
   resetCoreAvailabilityStubForTests,
   setCoreAvailabilityStubForTests
@@ -206,120 +201,6 @@ test('same-second queued turns preserve insertion order', async (t) => {
   const second = await enqueueConversationTurn({ username, threadId, message: 'second' })
   assert.equal(first.queuePosition, 1)
   assert.equal(second.queuePosition, 2)
-})
-
-test('code-change turns use an isolated worktree and cancellation removes it', async (t) => {
-  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-turn-change-set-'))
-  bootstrapRuntime({ dataDir })
-  t.after(async () => {
-    await resetAppContextForTests()
-    rmSync(dataDir, { recursive: true, force: true })
-  })
-
-  const now = Math.floor(Date.now() / 1000)
-  const username = 'change-turn-user'
-  const projectId = 'proj-change-turn'
-  const threadId = 'thread-change-turn'
-  const workspaceRoot = join(dataDir, 'workspace')
-  mkdirSync(workspaceRoot, { recursive: true })
-  writeFileSync(join(workspaceRoot, 'main.txt'), 'main checkout\n')
-
-  getDb()
-    .insert(projects)
-    .values({
-      id: projectId,
-      username,
-      title: 'Change Turn',
-      workspaceRoot,
-      createdAt: now,
-      updatedAt: now
-    })
-    .run()
-  getDb()
-    .insert(threads)
-    .values({
-      id: threadId,
-      projectId,
-      username,
-      title: 'Change Turn',
-      status: 'draft',
-      conversationId: `conv-${threadId}`,
-      coreCode: 'codex',
-      threadKind: 'chat',
-      runtimeStatus: 'idle',
-      coreRuntimeJson: '{}',
-      createdAt: now,
-      updatedAt: now,
-      lastUsedAt: now
-    })
-    .run()
-  getDb()
-    .insert(conversationTurns)
-    .values({
-      id: 'turn-change-blocker',
-      threadId,
-      username,
-      kind: 'chat',
-      status: 'running',
-      workspaceAccess: 'live-read',
-      provider: null,
-      messageText: 'blocker',
-      generateDraft: 0,
-      createTaskMode: 0,
-      attachmentIdsJson: '[]',
-      selectedDraftSection: null,
-      selectedPlanNodeRef: null,
-      idempotencyKey: null,
-      stateRevision: 1,
-      lastErrorJson: null,
-      createdAt: now - 1,
-      startedAt: now - 1,
-      completedAt: null
-    })
-    .run()
-
-  const jobLease = acquireWorkspaceLease({
-    workspacePath: workspaceRoot,
-    ownerKind: 'thread_job',
-    ownerId: 'job-writing-main'
-  })
-  assert.ok(jobLease)
-
-  const ordinary = await enqueueConversationTurn({
-    username,
-    threadId,
-    message: 'explain the current code'
-  })
-  assert.equal(ordinary.changeSetId, null)
-  assert.equal((await getTurn(username, ordinary.turnId))?.workspaceAccess, 'live-read')
-  await cancelConversationTurn(username, ordinary.turnId)
-
-  const accepted = await enqueueConversationTurn({
-    username,
-    threadId,
-    message: 'edit main.txt',
-    allowCodeChanges: true
-  })
-  releaseWorkspaceLease(jobLease.leaseId)
-  assert.ok(accepted.changeSetId)
-  const turn = await getTurn(username, accepted.turnId)
-  assert.equal(turn?.workspaceAccess, 'isolated-write')
-  assert.equal(turn?.changeSetId, accepted.changeSetId)
-
-  const editing = await getChangeSet(username, accepted.changeSetId)
-  assert.equal(editing.status, 'editing')
-  assert.ok(editing.worktreePath)
-  assert.equal(existsSync(editing.worktreePath), true)
-  await assert.rejects(
-    () => markChangeSetReady(username, accepted.changeSetId!, editing.stateRevision),
-    /still being edited/
-  )
-
-  await cancelConversationTurn(username, accepted.turnId)
-  const cancelled = await getChangeSet(username, accepted.changeSetId)
-  assert.equal(cancelled.status, 'cancelled')
-  assert.equal(cancelled.worktreePath, null)
-  assert.equal(existsSync(editing.worktreePath), false)
 })
 
 test('provider error events settle the durable turn as failed', async (t) => {

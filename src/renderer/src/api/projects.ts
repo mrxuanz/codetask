@@ -16,6 +16,16 @@ export interface CreateProjectInput {
   createIfMissing?: boolean
 }
 
+export interface ProjectWorkspaceAccess {
+  mode: 'read_write' | 'read_only'
+  blocker: {
+    kind: 'task'
+    taskId: string
+    taskTitle: string
+    status: string
+  } | null
+}
+
 export function fetchProjects(): Promise<ApiResponse<Project[]>> {
   return api<Project[]>('/api/projects')
 }
@@ -33,4 +43,10 @@ export function createProject(input: CreateProjectInput): Promise<ApiResponse<Pr
 
 export function deleteProject(projectId: string): Promise<ApiResponse<{ deleted: boolean }>> {
   return api<{ deleted: boolean }>(`/api/projects/${projectId}`, { method: 'DELETE' })
+}
+
+export function fetchProjectWorkspaceAccess(
+  projectId: string
+): Promise<ApiResponse<ProjectWorkspaceAccess>> {
+  return api<ProjectWorkspaceAccess>(`/api/projects/${projectId}/workspace-access`)
 }

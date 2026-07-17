@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, watch } from 'vue'
+import { computed, inject, onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChatComposer from '@renderer/components/home/ChatComposer.vue'
 import ChatMessages from '@renderer/components/home/ChatMessages.vue'
@@ -8,6 +8,7 @@ import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import { HomeChatKey } from '@renderer/composables/useHomeChat'
 import { isChatThread, useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
+import { fetchProjectWorkspaceAccess, type ProjectWorkspaceAccess } from '@renderer/api/projects'
 
 const { t } = useI18n()
 const workspace = useHomeWorkspace()
@@ -28,7 +29,8 @@ const streamingMessageId = computed(() => chatCtx.streamingMessageId.value)
 const awaitingAssistantReply = computed(() => chatCtx.awaitingAssistantReply.value)
 const error = computed(() => chatCtx.error.value)
 const runtimeStatus = computed(() => chatCtx.runtimeStatus.value)
-const activeChangeSet = computed(() => chatCtx.activeChangeSet.value)
+const workspaceAccess = ref<ProjectWorkspaceAccess>({ mode: 'read_write', blocker: null })
+let workspaceAccessTimer: ReturnType<typeof setInterval> | null = null
 
 const activeProject = computed(
   () =>
@@ -77,6 +79,35 @@ watch(
   { immediate: true }
 )
 
+async function refreshWorkspaceAccess(projectId: string | null): Promise<void> {
+  if (!projectId) {
+    workspaceAccess.value = { mode: 'read_write', blocker: null }
+    return
+  }
+  try {
+    const response = await fetchProjectWorkspaceAccess(projectId)
+    if (activeProject.value?.id === projectId) workspaceAccess.value = response.data
+  } catch {
+    // The backend turn preflight remains authoritative; keep the last display snapshot.
+  }
+}
+
+watch(
+  () => activeProject.value?.id ?? null,
+  (projectId) => {
+    void refreshWorkspaceAccess(projectId)
+    if (workspaceAccessTimer) clearInterval(workspaceAccessTimer)
+    workspaceAccessTimer = projectId
+      ? setInterval(() => void refreshWorkspaceAccess(projectId), 3_000)
+      : null
+  },
+  { immediate: true }
+)
+
+onScopeDispose(() => {
+  if (workspaceAccessTimer) clearInterval(workspaceAccessTimer)
+})
+
 async function handleNewThread(): Promise<void> {
   const projectId = workspace.activeProjectId.value
   if (!projectId) return
@@ -90,11 +121,7 @@ async function handleCoreChange(code: string): Promise<void> {
   if (updated) workspace.syncThread(updated)
 }
 
-async function handleSend(payload: {
-  message: string
-  files: File[]
-  allowCodeChanges?: boolean
-}): Promise<void> {
+async function handleSend(payload: { message: string; files: File[] }): Promise<void> {
   const updated = await chat.sendMessage(payload)
   if (updated) workspace.syncThread(updated)
 }
@@ -154,55 +181,13 @@ async function handleSend(payload: {
     </div>
 
     <div
-      v-if="activeChangeSet"
-      class="mx-4 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs sm:mx-6"
+      v-if="workspaceAccess.mode === 'read_only' && workspaceAccess.blocker?.kind === 'task'"
+      class="mx-4 mt-3 flex shrink-0 items-center gap-2 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 sm:mx-6"
     >
+      <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
       <span>
-        {{ t('workspace.changeSet.label') }} ·
-        {{ t(`workspace.changeSet.status.${activeChangeSet.status}`) }}
+        {{ t('workspace.taskWorkspaceReadOnly', { task: workspaceAccess.blocker.taskTitle }) }}
       </span>
-      <div class="flex items-center gap-2">
-        <Button
-          v-if="activeChangeSet.status === 'editing' && !busy"
-          type="button"
-          variant="outline"
-          size="sm"
-          class="h-7"
-          @click="chat.markActiveChangeSetReady()"
-        >
-          {{ t('workspace.changeSet.ready') }}
-        </Button>
-        <Button
-          v-if="activeChangeSet.status === 'ready_to_apply' && !busy"
-          type="button"
-          size="sm"
-          class="h-7"
-          @click="chat.applyActiveChangeSet()"
-        >
-          {{ t('workspace.changeSet.apply') }}
-        </Button>
-        <Button
-          v-if="activeChangeSet.status === 'needs_resolution' && !busy"
-          type="button"
-          variant="outline"
-          size="sm"
-          class="h-7"
-          @click="chat.rebaseActiveChangeSet()"
-        >
-          {{ t('workspace.changeSet.rebase') }}
-        </Button>
-        <Button
-          v-if="!['applied', 'cancelled', 'applying'].includes(activeChangeSet.status)"
-          type="button"
-          variant="ghost"
-          size="sm"
-          class="h-7"
-          :disabled="busy"
-          @click="chat.cancelActiveChangeSet()"
-        >
-          {{ t('workspace.changeSet.cancel') }}
-        </Button>
-      </div>
     </div>
 
     <div class="flex min-h-0 flex-1 flex-col">
@@ -217,7 +202,6 @@ async function handleSend(payload: {
         :core-code="currentCoreCode"
         :disabled="loading || coreSwitching || coreUnavailable"
         :sending="busy"
-        :allow-code-changes="!activeChangeSet"
         @core-change="handleCoreChange"
         @send="handleSend"
       />

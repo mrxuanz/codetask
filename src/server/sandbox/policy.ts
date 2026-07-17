@@ -36,9 +36,10 @@ export function policyForRole(input: {
   const allowedReadRoots = [workspaceRoot, runtimeRoot]
   const allowedWriteRoots = [runtimeRoot]
 
-  // Only the execution worker may write the real checkout. Conversation/planner changes must use
-  // an isolated Change Set worktree; their direct project access is read-only.
-  if (input.role === 'task-worker' || input.workspaceAccess === 'isolated-write') {
+  // Task workers write the checkout under their execution lease. Ordinary conversation turns may
+  // also write it only when preflight persisted exclusive-write and installed a matching lease
+  // context. Draft/planner turns remain live-read.
+  if (input.role === 'task-worker' || input.workspaceAccess === 'exclusive-write') {
     allowedWriteRoots.push(workspaceRoot)
   }
 
@@ -197,7 +198,7 @@ export function policyForRoleV2(input: {
 
   const allowedWriteRoots: string[] = [runtimeRoot]
 
-  if (input.role === 'task-worker' || input.workspaceAccess === 'isolated-write') {
+  if (input.role === 'task-worker' || input.workspaceAccess === 'exclusive-write') {
     allowedWriteRoots.push(workspaceRoot)
   }
 

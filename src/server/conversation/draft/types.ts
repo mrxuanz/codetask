@@ -130,6 +130,10 @@ export interface TaskLaunchDraftPayload {
   workspacePath: string
   status: DraftLifecycleStatus
   linkedPlanId?: string | null
+  /** Immutable execution Job produced from this draft, if it has been published. */
+  launchedJobId?: string | null
+  /** Draft-owned planning session retained independently from the published Job. */
+  designSessionId?: string | null
   lockedSections: TaskLaunchDraftLockedSections
   abilities: TaskLaunchDraftAbility[]
   references: TaskLaunchDraftReference[]

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { hydrateTurnErrorField, coercePersistedTurnError } from '../turn-errors/store'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, ne } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
 import { getAppContext } from '../bootstrap'
@@ -20,6 +20,7 @@ import {
   TITLE_SOURCE_MANUAL,
   THREAD_KIND_CHAT,
   THREAD_KIND_CREATE_TASK,
+  THREAD_KIND_TASK_SNAPSHOT,
   type ThreadDto,
   type ThreadKind,
   type TitleSource
@@ -54,7 +55,9 @@ function parseCoreRuntime(json: string): CoreRuntimeMap {
 }
 
 export function resolveThreadKind(row: Pick<Thread, 'threadKind'>): ThreadKind {
-  return row.threadKind === THREAD_KIND_CREATE_TASK ? THREAD_KIND_CREATE_TASK : THREAD_KIND_CHAT
+  if (row.threadKind === THREAD_KIND_CREATE_TASK) return THREAD_KIND_CREATE_TASK
+  if (row.threadKind === THREAD_KIND_TASK_SNAPSHOT) return THREAD_KIND_TASK_SNAPSHOT
+  return THREAD_KIND_CHAT
 }
 
 export function toThreadDto(row: Thread): ThreadDto {
@@ -110,7 +113,7 @@ export async function listThreadsForUser(username: string): Promise<ThreadDto[]>
   const rows = await db
     .select()
     .from(threads)
-    .where(eq(threads.username, username))
+    .where(and(eq(threads.username, username), ne(threads.threadKind, THREAD_KIND_TASK_SNAPSHOT)))
     .orderBy(desc(threads.updatedAt), desc(threads.createdAt))
 
   return rows.map(toThreadDto)
@@ -124,7 +127,13 @@ export async function listThreadsForProject(
   const rows = await db
     .select()
     .from(threads)
-    .where(and(eq(threads.username, username), eq(threads.projectId, projectId)))
+    .where(
+      and(
+        eq(threads.username, username),
+        eq(threads.projectId, projectId),
+        ne(threads.threadKind, THREAD_KIND_TASK_SNAPSHOT)
+      )
+    )
     .orderBy(desc(threads.updatedAt), desc(threads.createdAt))
 
   return rows.map(toThreadDto)

@@ -8,10 +8,7 @@ import type {
   CreateTurnAcceptedDto
 } from '@shared/contracts/conversation-turns'
 import type { TurnHubEvent } from '@shared/contracts/conversation-turns'
-import {
-  changeSetWorkspaceAccess,
-  conversationWorkspaceAccess
-} from '../../shared/workspace-access.ts'
+import { conversationWorkspaceAccess } from '../../shared/workspace-access.ts'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { conversationTurns } from '../db/schema'
@@ -38,7 +35,6 @@ function mapRow(row: typeof conversationTurns.$inferSelect): ConversationTurnDto
     status: row.status as ConversationTurnStatus,
     workspaceAccess: row.workspaceAccess,
     provider: row.provider,
-    changeSetId: row.changeSetId ?? null,
     messagePreview: row.messageText.slice(0, 120),
     queuePosition: null,
     stateRevision: row.stateRevision,
@@ -51,17 +47,6 @@ function mapRow(row: typeof conversationTurns.$inferSelect): ConversationTurnDto
 
 function emitTurn(topicTurnId: string, event: TurnHubEvent): void {
   getAppContext().eventBus.emit(turnTopic(topicTurnId), event)
-}
-
-async function cancelLinkedChangeSet(
-  username: string,
-  changeSetId: string | null | undefined
-): Promise<void> {
-  if (!changeSetId) return
-  const { cancelChangeSet } = await import('../change-set/service')
-  await cancelChangeSet(username, changeSetId).catch((error) => {
-    console.warn('[turn-queue] failed to cancel linked change set', changeSetId, error)
-  })
 }
 
 export async function getTurn(
@@ -110,7 +95,6 @@ export interface EnqueueTurnInput {
   idempotencyKey?: string | null
   provider?: string | null
   kind?: ConversationTurnKind
-  allowCodeChanges?: boolean
 }
 
 /**
@@ -156,10 +140,7 @@ export async function enqueueConversationTurn(
         status: dto.status,
         revision: dto.stateRevision,
         queuePosition:
-          dto.status === 'queued'
-            ? countQueuedAhead(dto.threadId, dto.createdAt, dto.id) + 1
-            : null,
-        changeSetId: dto.changeSetId
+          dto.status === 'queued' ? countQueuedAhead(dto.threadId, dto.createdAt, dto.id) + 1 : null
       }
     }
   }
@@ -169,60 +150,30 @@ export async function enqueueConversationTurn(
   const kind: ConversationTurnKind =
     input.kind ?? (input.createTaskMode || input.generateDraft ? 'create_task' : 'chat')
 
-  if (input.allowCodeChanges && (kind !== 'chat' || input.createTaskMode || input.generateDraft)) {
-    throw AppError.badRequest(
-      'Code-change mode is only available in ordinary chat turns',
-      'turn.invalid_change_mode'
-    )
-  }
-
-  let changeSetId: string | null = null
-  if (input.allowCodeChanges) {
-    const { createChangeSet } = await import('../change-set/service')
-    const accepted = await createChangeSet(input.username, {
-      projectId: thread.projectId,
-      sourceThreadId: thread.id,
-      sourceTurnId: turnId,
-      applyPolicy: 'manual'
+  getDb()
+    .insert(conversationTurns)
+    .values({
+      id: turnId,
+      threadId: input.threadId,
+      username: input.username,
+      kind,
+      status: 'queued',
+      workspaceAccess: conversationWorkspaceAccess(true),
+      provider: input.provider ?? null,
+      messageText: message,
+      generateDraft: input.generateDraft === true ? 1 : 0,
+      createTaskMode: input.createTaskMode === true ? 1 : 0,
+      attachmentIdsJson: JSON.stringify(input.attachmentIds ?? []),
+      selectedDraftSection: input.selectedDraftSection ?? null,
+      selectedPlanNodeRef: input.selectedPlanNodeRef ?? null,
+      idempotencyKey: input.idempotencyKey ?? null,
+      stateRevision: 1,
+      lastErrorJson: null,
+      createdAt: now,
+      startedAt: null,
+      completedAt: null
     })
-    changeSetId = accepted.changeSetId
-  }
-
-  try {
-    getDb()
-      .insert(conversationTurns)
-      .values({
-        id: turnId,
-        threadId: input.threadId,
-        username: input.username,
-        kind,
-        status: 'queued',
-        workspaceAccess: changeSetId
-          ? changeSetWorkspaceAccess()
-          : conversationWorkspaceAccess(true),
-        provider: input.provider ?? null,
-        messageText: message,
-        generateDraft: input.generateDraft === true ? 1 : 0,
-        createTaskMode: input.createTaskMode === true ? 1 : 0,
-        attachmentIdsJson: JSON.stringify(input.attachmentIds ?? []),
-        selectedDraftSection: input.selectedDraftSection ?? null,
-        selectedPlanNodeRef: input.selectedPlanNodeRef ?? null,
-        changeSetId,
-        idempotencyKey: input.idempotencyKey ?? null,
-        stateRevision: 1,
-        lastErrorJson: null,
-        createdAt: now,
-        startedAt: null,
-        completedAt: null
-      })
-      .run()
-  } catch (error) {
-    if (changeSetId) {
-      const { cancelChangeSet } = await import('../change-set/service')
-      await cancelChangeSet(input.username, changeSetId).catch(() => {})
-    }
-    throw error
-  }
+    .run()
 
   const queuePosition = countQueuedAhead(input.threadId, now, turnId) + 1
   const turn = await getTurn(input.username, turnId)
@@ -238,8 +189,7 @@ export async function enqueueConversationTurn(
     turnId,
     status: 'queued',
     revision: 1,
-    queuePosition,
-    changeSetId
+    queuePosition
   }
 }
 
@@ -284,9 +234,6 @@ export async function cancelConversationTurn(
 
   const updated = (await getTurn(username, turnId))!
   emitTurn(turnId, { event: 'turn_snapshot', data: { turn: updated } })
-  if (updated.status === 'cancelled') {
-    await cancelLinkedChangeSet(username, row.changeSetId)
-  }
   void advanceTurnQueue(username).catch(() => {})
   return updated
 }
@@ -391,36 +338,20 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
   activeTurnControllers.set(turnId, controller)
 
   try {
-    let workspacePathOverride: string | undefined
-    let runtimeRootOverride: string | undefined
-    if (row.changeSetId) {
-      const { getChangeSet } = await import('../change-set/service')
-      const changeSet = await getChangeSet(row.username, row.changeSetId)
-      if (changeSet.status !== 'editing' || !changeSet.worktreePath) {
-        throw AppError.badRequest(
-          `Change set is not editable (${changeSet.status})`,
-          'change_set.invalid_status'
-        )
-      }
-      workspacePathOverride = changeSet.worktreePath
-      const { changeSetRuntimePath } = await import('../change-set/paths')
-      runtimeRootOverride = changeSetRuntimePath(
-        getAppContext().dataDir,
-        changeSet.id,
-        row.provider ?? 'conversation'
-      )
-    }
-
     for await (const chunk of streamSendMessage(row.username, row.threadId, row.messageText, {
+      turnId,
       generateDraft: row.generateDraft === 1,
       createTaskMode: row.createTaskMode === 1,
       attachments,
       ...(row.selectedDraftSection ? { selectedDraftSection: row.selectedDraftSection } : {}),
       ...(row.selectedPlanNodeRef ? { selectedPlanNodeRef: row.selectedPlanNodeRef } : {}),
       signal: controller.signal,
-      ...(workspacePathOverride ? { workspacePathOverride } : {}),
-      ...(runtimeRootOverride ? { runtimeRootOverride } : {}),
-      ...(row.changeSetId ? { changeSetId: row.changeSetId } : {})
+      onWorkspaceAccessResolved: (workspaceAccess) => {
+        db.update(conversationTurns)
+          .set({ workspaceAccess })
+          .where(eq(conversationTurns.id, turnId))
+          .run()
+      }
     })) {
       const latest = db
         .select({ status: conversationTurns.status })
@@ -445,14 +376,6 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
         throw Object.assign(new Error(chunk.data.message), {
           code: chunk.data.error?.code
         })
-      }
-    }
-
-    if (row.changeSetId) {
-      const { getChangeSet, markChangeSetReady } = await import('../change-set/service')
-      const changeSet = await getChangeSet(row.username, row.changeSetId)
-      if (changeSet.status === 'editing') {
-        await markChangeSetReady(row.username, row.changeSetId, changeSet.stateRevision, turnId)
       }
     }
 
@@ -525,9 +448,6 @@ async function runAdmittedTurn(turnId: string): Promise<void> {
       .limit(1)
       .all()[0]
     if (finalRow) {
-      if (finalRow.status === 'cancelled') {
-        await cancelLinkedChangeSet(finalRow.username, finalRow.changeSetId)
-      }
       emitTurn(turnId, { event: 'turn_snapshot', data: { turn: mapRow(finalRow) } })
     }
     void advanceTurnQueue(row.username).catch(() => {})

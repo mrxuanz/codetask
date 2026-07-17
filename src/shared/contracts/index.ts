@@ -61,10 +61,4 @@ export type {
   CreateTurnAcceptedDto,
   TurnHubEvent
 } from './conversation-turns'
-export type {
-  ChangeSetDto,
-  ChangeSetStatus,
-  CreateChangeSetAcceptedDto,
-  CreateChangeSetInput
-} from './change-sets'
 export type { ThreadDto, ThreadKind, TitleSource, WizardPhase } from './threads'
