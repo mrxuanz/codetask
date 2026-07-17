@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process'
 import {
   copyFileSync,
   existsSync,
@@ -188,6 +189,101 @@ export interface MaterializeCursorResult {
   cleanup: () => void
 }
 
+/** Darwin agent CLI reads `$HOME/.cursor/auth.json` when AGENT_CLI_CREDENTIAL_STORE=file. */
+export function runtimeCursorCliAuthPath(runtimeRoot: string): string {
+  return join(runtimeCursorHome(runtimeRoot), 'auth.json')
+}
+
+function writeCursorRuntimeAuthPayload(
+  runtimeRoot: string,
+  payload: Record<string, unknown>
+): string[] {
+  const raw = `${JSON.stringify(payload)}\n`
+  const paths = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
+  const written: string[] = []
+  for (const path of paths) {
+    ensureParentDir(path)
+    writeFileSync(path, raw, { encoding: 'utf8', mode: 0o600 })
+    restrictFilePermissions(path)
+    written.push(path)
+  }
+  return written
+}
+
+function mirrorCursorAuthFiles(source: string, runtimeRoot: string): string[] {
+  const destinations = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
+  const written: string[] = []
+  for (const destination of destinations) {
+    if (destination === source) continue
+    copyAuthSnapshot(source, destination)
+    written.push(destination)
+  }
+  return written
+}
+
+function readDarwinCursorKeychainPassword(service: string): string | null {
+  const hostHome = resolveHostProfilePaths().home
+  const result = spawnSync(
+    'security',
+    ['find-generic-password', '-s', service, '-a', 'cursor-user', '-w'],
+    {
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        HOME: hostHome
+      }
+    }
+  )
+  if (result.status !== 0) return null
+  const value = (result.stdout ?? '').trim()
+  return value.length > 0 ? value : null
+}
+
+function readDarwinCursorKeychainTokens(): {
+  accessToken: string
+  refreshToken: string
+} | null {
+  if (process.platform !== 'darwin') return null
+  const accessToken = readDarwinCursorKeychainPassword('cursor-access-token')
+  const refreshToken = readDarwinCursorKeychainPassword('cursor-refresh-token')
+  if (!accessToken || !refreshToken) return null
+  return { accessToken, refreshToken }
+}
+
+/**
+ * Ensure runtime has a file-store auth.json the Cursor CLI can read under HOME=runtimeRoot.
+ * Prefer host auth.json, then macOS Keychain export (host HOME), then existing runtime copies.
+ */
+export function ensureCursorRuntimeAuth(runtimeRoot: string): boolean {
+  const cliAuthPath = runtimeCursorCliAuthPath(runtimeRoot)
+  const legacyAuthPath = runtimeCursorAuthPath(runtimeRoot)
+
+  if (existsSync(cliAuthPath)) {
+    if (!existsSync(legacyAuthPath)) copyAuthSnapshot(cliAuthPath, legacyAuthPath)
+    return true
+  }
+
+  if (existsSync(legacyAuthPath)) {
+    copyAuthSnapshot(legacyAuthPath, cliAuthPath)
+    return true
+  }
+
+  const hostAuthPath = resolveCursorHostAuthPath()
+  if (existsSync(hostAuthPath)) {
+    mirrorCursorAuthFiles(hostAuthPath, runtimeRoot)
+    return true
+  }
+
+  const tokens = readDarwinCursorKeychainTokens()
+  if (tokens) {
+    writeCursorRuntimeAuthPayload(runtimeRoot, tokens)
+    return true
+  }
+
+  return false
+}
+
 export function materializeCursorAuth(
   runtimeRoot: string,
   workspaceRoot: string
@@ -229,13 +325,6 @@ export function materializeCursorAuth(
 
   const copiedPaths: string[] = []
 
-  let authCopied = false
-  if (existsSync(hostAuthPath)) {
-    copyAuthSnapshot(hostAuthPath, runtimeAuthPath)
-    authCopied = true
-    copiedPaths.push(runtimeAuthPath)
-  }
-
   const optionalCopies: Array<{ host: string; runtime: string }> = [
     { host: join(hostCursorHome, 'cli-config.json'), runtime: join(cursorHome, 'cli-config.json') },
     {
@@ -255,9 +344,18 @@ export function materializeCursorAuth(
     copiedPaths.push(runtime)
   }
 
+  const authCopied = ensureCursorRuntimeAuth(runtimeRoot)
+  if (authCopied) {
+    for (const path of [runtimeCursorCliAuthPath(runtimeRoot), runtimeAuthPath]) {
+      if (existsSync(path)) copiedPaths.push(path)
+    }
+  }
+
   return {
     authCopied,
-    runtimeAuthPath,
+    runtimeAuthPath: existsSync(runtimeCursorCliAuthPath(runtimeRoot))
+      ? runtimeCursorCliAuthPath(runtimeRoot)
+      : runtimeAuthPath,
     hostAuthPath,
     cleanup: () => {
       for (const path of copiedPaths) {

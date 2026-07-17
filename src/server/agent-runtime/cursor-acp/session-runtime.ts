@@ -281,7 +281,29 @@ export class CursorAcpSessionRuntime {
             }
           : null
         const message = error instanceof Error ? error.message : formatAcpError(error)
-        queue.push({ type: 'error', message })
+        const detail =
+          dto?.detail && dto.detail !== message
+            ? dto.detail
+            : dto
+              ? (dto.detail ?? message)
+              : message
+        const displayMessage =
+          detail && detail !== message ? `${message}: ${detail}` : message
+        queue.push({
+          type: 'error',
+          message: displayMessage,
+          ...(dto
+            ? {
+                code: dto.code,
+                error: {
+                  code: dto.code,
+                  message: dto.message,
+                  params: dto.params,
+                  detail: dto.detail
+                }
+              }
+            : {})
+        })
         queue.close()
         if (dto) {
           throw createTurnError(dto.code as TurnErrorCode, {
@@ -298,7 +320,13 @@ export class CursorAcpSessionRuntime {
     try {
       for await (const chunk of queue.iterate()) {
         if (chunk.type === 'error') {
-          throw new Error(chunk.message)
+          throw createTurnError(
+            (chunk.code as TurnErrorCode | undefined) ?? 'provider.cursor.acp_failed',
+            {
+              detail: chunk.error?.detail ?? chunk.message,
+              message: chunk.message
+            }
+          )
         }
         yield chunk
       }

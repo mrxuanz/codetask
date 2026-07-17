@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'fs'
+import { mkdirSync } from 'fs'
 import { join } from 'path'
 import type { SupportedCoreCode } from '../../conversation/cores'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
@@ -7,6 +7,7 @@ import {
   resolveCodexHostAuthPath,
   resolveCodexInstallDirs,
   resolveCursorAgentInstallDirs,
+  resolveCursorHostCursorHome,
   resolveHostProfilePaths,
   resolveOpencodeExecutable,
   resolveOpencodeInstallDirs,
@@ -18,7 +19,6 @@ import {
 } from './paths'
 import {
   materializeCodexAuth,
-  materializeCursorAuth,
   materializeOpencodeAuth,
   opencodeRuntimeLayout
 } from './materialize'
@@ -89,6 +89,41 @@ function buildRuntimeBaseEnv(runtimeRoot: string): Record<string, string> {
   return env
 }
 
+function buildHostIdentityEnv(
+  runtimeRoot: string,
+  profile = resolveHostProfilePaths()
+): Record<string, string> {
+  const tmp = join(runtimeRoot, 'tmp')
+  mkdirSync(tmp, { recursive: true })
+
+  const env: Record<string, string> = {
+    HOME: profile.home,
+    CODETASK_RUNTIME_ROOT: runtimeRoot,
+    TMPDIR: tmp,
+    TEMP: tmp,
+    TMP: tmp,
+    CODETASK_PROVIDER_AUTH_MODE: 'host-identity' satisfies ProviderAuthMode
+  }
+
+  if (process.platform === 'win32') {
+    env.USERPROFILE = profile.home
+    env.APPDATA = profile.appData
+    env.LOCALAPPDATA = profile.localAppData
+    if (/^[A-Za-z]:/.test(profile.home)) {
+      env.HOMEDRIVE = profile.home.slice(0, 2)
+      env.HOMEPATH = profile.home.slice(2) || '\\'
+    }
+    applyWindowsCrashReporterEnv(env)
+  } else {
+    env.XDG_CONFIG_HOME = join(profile.home, '.config')
+    env.XDG_CACHE_HOME = join(profile.home, '.cache')
+    env.XDG_DATA_HOME = join(profile.home, '.local', 'share')
+  }
+
+  copyRuntimeAuthEnv(env)
+  return env
+}
+
 function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
   const hostAuth = snapshotCodexHostAuth()
   const hostAuthPath = resolveCodexHostAuthPath()
@@ -135,46 +170,47 @@ function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
   }
 }
 
-const preparedCursorRuntimeRoots = new Set<string>()
-
-function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuthPrepared {
+function prepareCursor(runtimeRoot: string, _workspaceRoot: string): ProviderAuthPrepared {
   const profile = resolveHostProfilePaths()
   const hostAuth = snapshotCursorHostAuth(profile)
-  const hasPreparedRuntime =
-    preparedCursorRuntimeRoots.has(runtimeRoot) &&
-    existsSync(join(runtimeRoot, '.cursor')) &&
-    existsSync(join(runtimeRoot, 'config', 'cursor'))
-  const materialized = hasPreparedRuntime ? null : materializeCursorAuth(runtimeRoot, workspaceRoot)
-  preparedCursorRuntimeRoots.add(runtimeRoot)
+  const cursorHome = resolveCursorHostCursorHome(profile)
+  // Keep project metadata under runtime (P5), but use host identity so macOS Keychain /
+  // seatbelt ACP can authenticate. runtime-copy HOME breaks Keychain and still fails ACP
+  // under outer sandbox even with file-store auth.
+
   const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot),
-    CODETASK_PROVIDER_AUTH_MODE: 'runtime-copy' satisfies ProviderAuthMode,
+    ...buildHostIdentityEnv(runtimeRoot, profile),
+    CODETASK_PROVIDER_AUTH_MODE: 'host-identity' satisfies ProviderAuthMode,
     CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
   }
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'cursorcli',
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     authMaterialPresent: hostAuth.present || hostAuth.sources.length > 0,
     hostAuthPath: hostAuth.authPath,
-    runtimeAuthPath:
-      materialized?.runtimeAuthPath ?? join(runtimeRoot, 'config', 'cursor', 'auth.json'),
+    runtimeAuthPath: hostAuth.authPath,
     warnings: [
       hostAuth.present || hostAuth.sources.length > 0
-        ? 'Cursor auth/config is copied into the scope runtime; host Cursor directories are read-only.'
+        ? 'Cursor uses the host profile identity (including macOS Keychain); outer sandbox allows read/write to ~/.cursor and related directories.'
         : `Host Cursor auth.json not found (macOS may use Keychain login only); set CURSOR_API_KEY.`,
       'ACP uses --force --sandbox disabled --approve-mcps --trust; temp files written to runtime.'
     ]
   }
 
-  const readRoots = uniqueRoots([...hostAuth.sources, ...resolveCursorAgentInstallDirs()])
-  const writeRoots = [join(runtimeRoot, '.cursor')]
+  const readRoots = uniqueRoots([
+    profile.home,
+    cursorHome,
+    hostAuth.configDir,
+    profile.appData,
+    profile.localAppData,
+    ...resolveCursorAgentInstallDirs()
+  ])
+  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(runtimeRoot, '.cursor')])
   return {
     envPatch,
     readRoots,
     writeRoots,
-    // Cursor ACP is intentionally long-lived. Runtime credentials are scrubbed with the runtime
-    // tree on scope close/startup janitor, not after each prompt.
     cleanupPlan: () => undefined,
     diagnostics: {
       ...diagnostics,
@@ -188,8 +224,8 @@ function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuth
       hostReadRoots: readRoots,
       hostWriteRoots: writeRoots,
       runtimeEnv: envPatch,
-      credentialSnapshots: [{ relativePath: 'config/cursor/auth.json', required: false }],
-      scrubPatterns: ['config/cursor/auth.json']
+      credentialSnapshots: [],
+      scrubPatterns: []
     }
   }
 }

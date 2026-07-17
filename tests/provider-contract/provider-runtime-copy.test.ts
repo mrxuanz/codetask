@@ -16,8 +16,7 @@ import {
 import {
   resolveClaudeHostConfigDir,
   resolveHostProfilePaths,
-  runtimeCodexHome,
-  runtimeCursorAuthPath
+  runtimeCodexHome
 } from '../../src/server/sandbox/provider-auth/paths'
 
 const RUNTIME_COPY_PROVIDERS = ['codex', 'claude-code', 'opencode'] as const
@@ -53,46 +52,26 @@ test('prepareProviderAuth defaults to runtime-copy with no host write roots', ()
   }
 })
 
-test('cursor sandbox copies auth into runtime and never exposes host write roots', () => {
+test('cursor sandbox uses host-identity and never writes outside allowed roots', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-bridge-'))
   const workspaceRoot = join(runtimeRoot, 'workspace')
-  const hostAuthRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-auth-'))
-  const hostAuthPath = join(hostAuthRoot, 'auth.json')
-  const previousAuthPath = process.env.CODETASK_CURSOR_AUTH_PATH
   mkdirSync(workspaceRoot)
-  writeFileSync(hostAuthPath, '{"token":"test"}\n')
-  process.env.CODETASK_CURSOR_AUTH_PATH = hostAuthPath
   try {
     const host = resolveHostProfilePaths()
     const prepared = prepareProviderAuth('cursorcli', runtimeRoot, { workspaceRoot })
 
-    assert.equal(prepared.diagnostics.mode, 'runtime-copy')
-    assert.equal(prepared.envPatch.CODETASK_PROVIDER_AUTH_MODE, 'runtime-copy')
-    assert.equal(prepared.envPatch.HOME, runtimeRoot)
+    assert.equal(prepared.diagnostics.mode, 'host-identity')
+    assert.equal(prepared.envPatch.CODETASK_PROVIDER_AUTH_MODE, 'host-identity')
+    assert.equal(prepared.envPatch.HOME, host.home)
     assert.equal(prepared.envPatch.CODETASK_RUNTIME_ROOT, runtimeRoot)
-    assert.equal(prepared.envPatch.CODETASK_DATA_DIR, undefined)
+    assert.equal(prepared.envPatch.CURSOR_DATA_DIR, join(runtimeRoot, '.cursor'))
     assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
     assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, prepared.writeRoots)
-    assert.equal(existsSync(runtimeCursorAuthPath(runtimeRoot)), true)
-    assert.ok(prepared.filesystemProfile.credentialSnapshots.length > 0)
-    assert.ok(prepared.filesystemProfile.scrubPatterns.length > 0)
-    assert.deepEqual(prepared.writeRoots, [join(runtimeRoot, '.cursor')])
-    assert.ok(
-      (prepared.writeRoots ?? []).every(
-        (root) => !root.toLowerCase().startsWith(host.home.toLowerCase())
-      )
-    )
-    assert.ok((prepared.readRoots ?? []).includes(hostAuthPath))
-
-    rmSync(join(runtimeRoot, '.cursor'), { recursive: true, force: true })
-    rmSync(join(runtimeRoot, 'config', 'cursor'), { recursive: true, force: true })
-    prepareProviderAuth('cursorcli', runtimeRoot, { workspaceRoot })
-    assert.equal(existsSync(runtimeCursorAuthPath(runtimeRoot)), true)
+    assert.ok((prepared.writeRoots ?? []).includes(join(runtimeRoot, '.cursor')))
+    assert.ok((prepared.writeRoots ?? []).includes(join(host.home, '.cursor')))
+    assert.ok((prepared.readRoots ?? []).includes(host.home))
   } finally {
-    if (previousAuthPath === undefined) delete process.env.CODETASK_CURSOR_AUTH_PATH
-    else process.env.CODETASK_CURSOR_AUTH_PATH = previousAuthPath
     rmSync(runtimeRoot, { recursive: true, force: true })
-    rmSync(hostAuthRoot, { recursive: true, force: true })
   }
 })
 
