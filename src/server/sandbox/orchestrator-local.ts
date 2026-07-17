@@ -24,6 +24,9 @@ import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { streamJobCursorSandboxTurn } from './job-cursor-pool'
 import { throwIfSandboxTurnAborted } from './turn-guards'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
+export { isOuterSandboxEnabled } from './outer-sandbox-flag'
+
 export interface RunSandboxedTurnInput {
   role: ConversationRole
   coreCode: SupportedCoreCode
@@ -42,6 +45,7 @@ export interface RunSandboxedTurnInput {
   jobId?: string | undefined
   idempotencyKey?: string | undefined
   workspaceAccess?: WorkspaceAccessMode | undefined
+  capabilityProfile: AgentCapabilityProfile
 }
 
 function resolveRoleWorkerPath(): string {
@@ -156,6 +160,10 @@ export async function* streamSandboxedConversationTurnLocal(
   })
 
   throwIfSandboxTurnAborted(input.signal)
+  if (process.platform === 'win32') {
+    const { ensureWindowsSandboxReady } = await import('./windows-bootstrap')
+    await ensureWindowsSandboxReady(process.env.CODETASK_DATA_DIR ?? input.runtimeRoot)
+  }
   preflightSandbox()
   throwIfSandboxTurnAborted(input.signal)
 
@@ -171,6 +179,7 @@ export async function* streamSandboxedConversationTurnLocal(
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,
     userMcpServers: input.userMcpServers,
+    capabilityProfile: input.capabilityProfile,
     jobId: input.jobId,
     idempotencyKey: input.idempotencyKey
   }
@@ -222,8 +231,7 @@ export async function* streamSandboxedConversationTurnLocal(
     process.platform !== 'win32' &&
     input.coreCode === 'cursorcli' &&
     Boolean(input.jobId?.trim()) &&
-    (input.role === 'task-worker' ||
-      (input.role === 'conversation' && input.jobId!.startsWith('conversation:')))
+    input.role === 'task-worker'
 
   try {
     if (usePersistentCursorPool) {
@@ -256,19 +264,4 @@ export async function* streamSandboxedConversationTurnLocal(
   } finally {
     authPrepared.cleanupPlan()
   }
-}
-
-export function isOuterSandboxEnabled(): boolean {
-  if (
-    process.env.CODETASK_MODE === 'server' &&
-    process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1'
-  ) {
-    console.warn(
-      '[sandbox] CODETASK_DISABLE_OUTER_SANDBOX is ignored in server mode; outer sandbox stays enabled'
-    )
-  }
-  if (process.env.CODETASK_MODE === 'server') {
-    return true
-  }
-  return process.env.CODETASK_DISABLE_OUTER_SANDBOX !== '1'
 }

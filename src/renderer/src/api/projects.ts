@@ -18,12 +18,19 @@ export interface CreateProjectInput {
 
 export interface ProjectWorkspaceAccess {
   mode: 'read_write' | 'read_only'
-  blocker: {
-    kind: 'task'
-    taskId: string
-    taskTitle: string
-    status: string
-  } | null
+  blocker:
+    | {
+        kind: 'task'
+        taskId: string
+        taskTitle: string
+        status: string
+      }
+    | {
+        kind: 'conversation'
+        turnId: string
+        threadId: string | null
+      }
+    | null
 }
 
 export function fetchProjects(): Promise<ApiResponse<Project[]>> {

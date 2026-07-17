@@ -2,6 +2,7 @@ import type { SupportedCoreCode } from '../conversation/cores'
 import type { ConversationRole } from './roles'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type { AgentCapabilityProfile } from './capabilities'
 
 export interface AgentTurnInput {
   provider: SupportedCoreCode
@@ -15,6 +16,7 @@ export interface AgentTurnInput {
   mcpUrl?: string | undefined
   mcpToolNames?: readonly string[] | undefined
   userMcpServers?: Record<string, unknown> | undefined
+  capabilityProfile?: AgentCapabilityProfile | undefined
 
   jobId?: string | undefined
   workloadRunId?: string | undefined
@@ -56,6 +58,7 @@ export interface AgentTurnRunnerInput {
   userMcpServers?: Record<string, unknown> | undefined
   mcpToken?: string | undefined
   signal?: AbortSignal | undefined
+  capabilityProfile: AgentCapabilityProfile
 
   readRoots?: string[] | undefined
   workspaceAccess?: WorkspaceAccessMode | undefined

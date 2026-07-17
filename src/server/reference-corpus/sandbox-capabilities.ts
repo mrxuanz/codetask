@@ -1,5 +1,3 @@
-import { tryLoadSandboxNative } from '../sandbox/native'
-
 export type SandboxReadRootMode = 'directory_only'
 
 export interface SandboxReadCapabilities {
@@ -17,7 +15,9 @@ let cached: SandboxReadCapabilities | null = null
 export function detectSandboxReadCapabilities(): SandboxReadCapabilities {
   if (cached) return cached
 
-  const nativeSandboxAvailable = tryLoadSandboxNative() !== null
+  // Reference projection is shared by direct Planner/create-task turns. It must
+  // never probe or load the native sandbox; execution preflight owns that check.
+  const nativeSandboxAvailable = false
   const singleFileAllowlist =
     process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST === '1' ||
     process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST === 'true'

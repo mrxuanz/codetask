@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
-import { projects, threadJobs, type Project } from '../db/schema'
+import { conversationTurns, projects, threadJobs, type Project } from '../db/schema'
 import { controlJobs } from '../infra/sqlite/control-plane/schema'
 import { findWorkspaceLeaseConflictSnapshot } from '../legacy-control-plane/workspace-lease-store'
 import { cleanDisplayPath, inferTitleFromPath, normalizeWorkspacePath } from '../fs'
@@ -115,12 +115,19 @@ export async function getProject(username: string, projectId: string): Promise<P
 
 export interface ProjectWorkspaceAccess {
   mode: 'read_write' | 'read_only'
-  blocker: {
-    kind: 'task'
-    taskId: string
-    taskTitle: string
-    status: string
-  } | null
+  blocker:
+    | {
+        kind: 'task'
+        taskId: string
+        taskTitle: string
+        status: string
+      }
+    | {
+        kind: 'conversation'
+        turnId: string
+        threadId: string | null
+      }
+    | null
 }
 
 /** Read-only UI snapshot. The lease acquisition path remains the concurrency authority. */
@@ -132,7 +139,26 @@ export async function getProjectWorkspaceAccess(
   if (!project) throw AppError.notFound('Project not found', 'project.not_found')
 
   const conflict = findWorkspaceLeaseConflictSnapshot(project.workspaceRoot)
-  if (!conflict || conflict.ownerKind !== 'thread_job') {
+  if (!conflict) {
+    return { mode: 'read_write', blocker: null }
+  }
+  if (conflict.ownerKind === 'conversation') {
+    const turn = getDb()
+      .select({ threadId: conversationTurns.threadId })
+      .from(conversationTurns)
+      .where(eq(conversationTurns.id, conflict.ownerId))
+      .limit(1)
+      .all()[0]
+    return {
+      mode: 'read_only',
+      blocker: {
+        kind: 'conversation',
+        turnId: conflict.ownerId,
+        threadId: turn?.threadId ?? null
+      }
+    }
+  }
+  if (conflict.ownerKind !== 'thread_job') {
     return { mode: 'read_write', blocker: null }
   }
 

@@ -9,6 +9,7 @@ import {
 import { buildCursorAcpMcpServers, type CursorAcpMcpServer } from '../mcp'
 import { buildCursorAcpCliArgs, resolveProviderOuterSandbox } from '../provider-policy'
 import type { AgentTurnInput } from '../types'
+import { resolveInputCapabilityProfile, type AgentCapabilityProfile } from '../capabilities'
 
 export interface CursorTurnPlan {
   role: AgentTurnInput['role']
@@ -16,6 +17,7 @@ export interface CursorTurnPlan {
   env: Record<string, string>
   mcpServers: CursorAcpMcpServer[]
   cliArgs: string[]
+  capabilityProfile: AgentCapabilityProfile
 }
 
 function buildCursorHostEnv(runtimeRoot: string, workspaceCwd?: string): Record<string, string> {
@@ -36,6 +38,7 @@ export function buildCursorTurnPlan(
   } = {}
 ): CursorTurnPlan {
   const outerSandbox = resolveProviderOuterSandbox(input.role, options.outerSandbox)
+  const capabilityProfile = resolveInputCapabilityProfile(input)
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildCursorHostEnv(input.runtimeRoot, input.cwd)
@@ -50,13 +53,18 @@ export function buildCursorTurnPlan(
   applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const mcpServers = buildCursorAcpMcpServers(input.mcpUrl, options.userMcpServers ?? {})
-  const cliArgs = buildCursorAcpCliArgs({ outerSandbox, cwd: input.cwd })
+  const cliArgs = buildCursorAcpCliArgs({
+    outerSandbox,
+    cwd: input.cwd,
+    capabilityProfile
+  })
 
   return {
     role: input.role,
     outerSandbox,
     env,
     mcpServers,
-    cliArgs
+    cliArgs,
+    capabilityProfile
   }
 }

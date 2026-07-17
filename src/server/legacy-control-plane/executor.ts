@@ -1487,6 +1487,7 @@ async function executeSingleTask(
 
     for await (const chunk of streamAgentTurn({
       role: 'task-worker',
+      capabilityProfile: 'task-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: job.workspacePath ?? '',
       runtimeRoot,

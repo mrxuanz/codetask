@@ -156,6 +156,8 @@ export default {
     switchCoreFailed: '切换 CLI 失败',
     sendFailed: '发送失败',
     taskWorkspaceReadOnly: '任务“{task}”正在执行，当前对话只读。',
+    conversationWorkspaceReadOnly: '另一个对话正在修改该目录，当前对话只读。',
+    workspaceReadOnly: '该目录当前由其他操作占用，当前对话只读。',
     relativeHours: '{n} 小时前',
     relativeMinutes: '{n} 分钟前',
     sidebar: {

@@ -1,3 +1,5 @@
+import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
+
 export type ClaudeSettingSource = 'user' | 'project' | 'local'
 
 export type ClaudeSystemPrompt =
@@ -21,6 +23,11 @@ export function resolveClaudeSystemPrompt(systemPrompt?: string): ClaudeSystemPr
   return { type: 'preset', preset: 'claude_code' }
 }
 
-export function resolveClaudeSettingSources(outerSandbox: boolean): ClaudeSettingSource[] {
-  return outerSandbox ? [] : ['user', 'project', 'local']
+export function resolveClaudeSettingSources(
+  outerSandbox: boolean,
+  capabilityProfile?: AgentCapabilityProfile
+): ClaudeSettingSource[] {
+  return outerSandbox || (capabilityProfile && capabilityProfileIsReadOnly(capabilityProfile))
+    ? []
+    : ['user', 'project', 'local']
 }

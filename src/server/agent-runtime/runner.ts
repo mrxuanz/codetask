@@ -1,12 +1,12 @@
 import { join } from 'path'
-import { isOuterSandboxEnabled, streamSandboxedConversationTurn } from '../sandbox'
 import { SandboxError } from '../sandbox/types'
+import { isOuterSandboxEnabled } from '../sandbox/outer-sandbox-flag'
 import type { SupportedCoreCode } from '../conversation/cores'
 import { dataPaths, jobTaskRuntimeDirPath } from '../data-paths'
 import { ensureIsolatedProviderDirs } from './env'
 import { getAgentTurnProvider } from './providers'
 import { isTestFakeProvider } from './providers/test-overrides'
-import { roleRequiresOuterSandbox, resolveRoleMcpToolNames, type ConversationRole } from './roles'
+import { resolveRoleMcpToolNames, type ConversationRole } from './roles'
 import { compactTurnChunkForIpc } from './chunk-ipc'
 import { resolveTurnMaxRetries, streamWithTurnRetry } from './retry'
 import { resolveUserMcpServersMap } from '../settings/mcp'
@@ -15,6 +15,13 @@ import { resolveDownstreamAbortSignal } from '../context/request-abort'
 import { getAppConfig } from '../bootstrap'
 import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
 import { isWorkspaceLeaseActive } from '../legacy-control-plane/workspace-lease-store'
+import {
+  assertCapabilityProfileMatchesRole,
+  assertProviderSupportsCapability,
+  capabilityProfileIsReadOnly,
+  capabilityProfileRequiresOuterSandbox,
+  type AgentCapabilityProfile
+} from './capabilities'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
   const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
@@ -122,6 +129,7 @@ export async function* streamConversationTurn(input: {
   mcpToolNames?: readonly string[]
   mcpToken?: string
   signal?: AbortSignal
+  capabilityProfile: AgentCapabilityProfile
 }): AsyncGenerator<AgentTurnChunk> {
   yield* streamAgentTurn({ ...input, provider: input.coreCode })
 }
@@ -130,8 +138,23 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
   const mcpToolNames = input.mcpToolNames ?? resolveRoleMcpToolNames(input.role)
   const provider = getAgentTurnProvider(input.provider)
   const useFakeInProcess = isTestFakeProvider(provider)
-  const userMcpServers =
-    input.userMcpServers ?? resolveUserMcpServersMap(input.provider, input.role)
+  assertCapabilityProfileMatchesRole(input.role, input.capabilityProfile)
+  if (!useFakeInProcess) {
+    assertProviderSupportsCapability(input.provider, input.capabilityProfile)
+  }
+  const userMcpServers = capabilityProfileIsReadOnly(input.capabilityProfile)
+    ? {}
+    : (input.userMcpServers ?? resolveUserMcpServersMap(input.provider, input.role))
+
+  if (
+    input.capabilityProfile === 'chat-write' &&
+    input.workspaceAccess !== 'exclusive-write'
+  ) {
+    throw new SandboxError(
+      'chat-write requires an exclusive workspace lease',
+      'workspace.lease_lost'
+    )
+  }
 
   if (input.workspaceAccess === 'exclusive-write') {
     const lease = input.workspaceLease ?? getWorkspaceLeaseContext()
@@ -151,13 +174,14 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
     }
   }
 
-  if (roleRequiresOuterSandbox(input.role) && !useFakeInProcess) {
+  if (capabilityProfileRequiresOuterSandbox(input.capabilityProfile) && !useFakeInProcess) {
     if (!isOuterSandboxEnabled()) {
       throw new SandboxError(
         `${input.role} must run inside the OS outer sandbox via the Agent SDK; CODETASK_DISABLE_OUTER_SANDBOX=1 is not allowed`,
         'sandbox.required'
       )
     }
+    const { streamSandboxedConversationTurn } = await import('../sandbox/orchestrator')
     const sandboxStream = streamSandboxedConversationTurn({
       role: input.role,
       coreCode: input.provider,
@@ -175,7 +199,8 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       readRoots: input.readRoots,
       jobId: input.jobId,
       idempotencyKey: input.idempotencyKey,
-      workspaceAccess: input.workspaceAccess
+      workspaceAccess: input.workspaceAccess,
+      capabilityProfile: input.capabilityProfile
     })
     if (input.workloadRunId) {
       yield* withWorkloadLeaseRefresh(sandboxStream, input.workloadRunId, input.signal)
@@ -197,13 +222,16 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
     mcpUrl: input.mcpUrl,
     mcpToolNames,
     userMcpServers,
+    capabilityProfile: input.capabilityProfile,
     jobId: input.jobId,
     workloadRunId: input.workloadRunId,
     idempotencyKey: input.idempotencyKey
   }
 
   for await (const chunk of provider.streamTurn(workerInput, {
-    outerSandbox: useFakeInProcess ? false : roleRequiresOuterSandbox(input.role),
+    outerSandbox: useFakeInProcess
+      ? false
+      : capabilityProfileRequiresOuterSandbox(input.capabilityProfile),
     signal: input.signal
   })) {
     const compact = compactTurnChunkForIpc(input.role, chunk)

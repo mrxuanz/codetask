@@ -6,6 +6,7 @@ import { getDb, type AppDatabase } from '../db'
 import { workspaceLeases } from '../db/schema'
 import { canonicalizePath } from '../sandbox/paths'
 import { workloadLeaseTtlSec } from './workload-slot-store'
+import { isAbsolute, relative, sep } from 'node:path'
 
 export type WorkspaceLeaseOwnerKind = 'conversation' | 'planner' | 'thread_job'
 
@@ -62,12 +63,11 @@ export function normalizeWorkspaceLeasePath(workspacePath: string): string {
 
 /** Same path, parent directory, or child directory counts as a conflict. */
 export function workspacePathsConflict(left: string, right: string): boolean {
-  const normLeft = left.replace(/\\/g, '/').toLowerCase()
-  const normRight = right.replace(/\\/g, '/').toLowerCase()
-  if (normLeft === normRight) return true
-  const prefixLeft = normLeft.endsWith('/') ? normLeft : `${normLeft}/`
-  const prefixRight = normRight.endsWith('/') ? normRight : `${normRight}/`
-  return prefixLeft.startsWith(prefixRight) || prefixRight.startsWith(prefixLeft)
+  const contains = (parent: string, child: string): boolean => {
+    const rel = relative(parent, child)
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+  }
+  return contains(left, right) || contains(right, left)
 }
 
 function parseActiveLeaseRows(
@@ -210,24 +210,32 @@ export function acquireWorkspaceLease(
   return acquired
 }
 
-export function refreshWorkspaceLease(leaseId: string): void {
+export function refreshWorkspaceLease(leaseId: string): boolean {
   const now = nowSec()
   const bootId = getAppContext().bootId
   const leaseExpiresAt = now + workspaceLeaseTtlSec()
-  getDb()
+  const result = getDb()
     .update(workspaceLeases)
     .set({ bootId, leaseExpiresAt })
-    .where(and(eq(workspaceLeases.id, leaseId), eq(workspaceLeases.status, 'active')))
+    .where(
+      and(
+        eq(workspaceLeases.id, leaseId),
+        eq(workspaceLeases.status, 'active'),
+        eq(workspaceLeases.bootId, bootId),
+        gt(workspaceLeases.leaseExpiresAt, now)
+      )
+    )
     .run()
+  return result.changes === 1
 }
 
 export function refreshWorkspaceLeaseForOwner(
   ownerKind: WorkspaceLeaseOwnerKind,
   ownerId: string
-): void {
+): boolean {
   const leaseId = activeLeaseByOwner.get(ownerKey(ownerKind, ownerId))
-  if (!leaseId) return
-  refreshWorkspaceLease(leaseId)
+  if (!leaseId) return false
+  return refreshWorkspaceLease(leaseId)
 }
 
 export function releaseWorkspaceLease(input: string | ReleaseWorkspaceLeaseInput): boolean {

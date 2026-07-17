@@ -1,5 +1,6 @@
 import { roleRequiresOuterSandbox, type ConversationRole } from './roles'
 import { appendCursorApiEndpointArgs } from './cursor-acp/config'
+import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from './capabilities'
 
 export type ProviderAuthMode = 'runtime-copy' | 'env-token' | 'host-identity-dev-only'
 
@@ -39,10 +40,20 @@ export function resolveProviderOuterSandbox(
   return false
 }
 
-export function buildCursorAcpCliArgs(input: { outerSandbox: boolean; cwd?: string }): string[] {
+export function buildCursorAcpCliArgs(input: {
+  outerSandbox: boolean
+  cwd?: string
+  capabilityProfile?: AgentCapabilityProfile
+}): string[] {
   if (!input.outerSandbox) {
     const args: string[] = []
-    if (process.env.CODETASK_CURSOR_APPROVE_MCPS !== '0') {
+    if (input.capabilityProfile && capabilityProfileIsReadOnly(input.capabilityProfile)) {
+      args.push('--mode', 'ask')
+    }
+    if (
+      (!input.capabilityProfile || !capabilityProfileIsReadOnly(input.capabilityProfile)) &&
+      process.env.CODETASK_CURSOR_APPROVE_MCPS !== '0'
+    ) {
       args.push('--approve-mcps')
     }
     return appendCursorApiEndpointArgs([...args, 'acp'])
