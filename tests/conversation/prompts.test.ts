@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -43,6 +43,28 @@ test('buildConversationSystemPrompt create_task mode includes MCP workflow', () 
     mcpToolsAvailable: true
   })
   assert.match(prompt, /propose_task_draft/)
+})
+
+test('ordinary chat service injects no CodeTask system or permission prompt', () => {
+  const source = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
+  assert.doesNotMatch(source, /The project workspace is writable for this turn/)
+  assert.doesNotMatch(source, /The project workspace is read-only for this turn/)
+  assert.match(
+    source,
+    /const systemPrompt = createTaskMode[\s\S]*?: undefined[\s\S]*?streamAgentTurn/
+  )
+})
+
+test('draft and Planner required MCP setup fail explicitly', () => {
+  const conversation = readFileSync(
+    join(process.cwd(), 'src/server/conversation/service.ts'),
+    'utf8'
+  )
+  const planner = readFileSync(join(process.cwd(), 'src/server/design-session/planner.ts'), 'utf8')
+  assert.match(conversation, /conversation\.mcp_unavailable/)
+  assert.match(planner, /plan\.mcp_unavailable/)
+  assert.doesNotMatch(conversation, /catch\s*\{\s*mcpUrl = undefined/)
+  assert.doesNotMatch(planner, /catch\s*\{\s*mcpUrl = undefined/)
 })
 
 test('buildWorkspaceSnapshot lists files and reads package.json', () => {

@@ -276,7 +276,10 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
 
     const accessWhileRunning = await getProjectWorkspaceAccess('user', projectId)
     assert.equal(accessWhileRunning.mode, 'read_only')
-    assert.equal(accessWhileRunning.blocker?.taskId, 'job-active')
+    assert.equal(accessWhileRunning.blocker?.kind, 'task')
+    if (accessWhileRunning.blocker?.kind === 'task') {
+      assert.equal(accessWhileRunning.blocker.taskId, 'job-active')
+    }
 
     const blocked = await prepareConversationTurn({
       username: 'user',
@@ -300,6 +303,12 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
     })
     assert.equal(writable.workspaceAccess, 'exclusive-write')
     assert.ok(writable.workspaceLeaseId)
+    const accessWhileConversationWrites = await getProjectWorkspaceAccess('user', projectId)
+    assert.equal(accessWhileConversationWrites.mode, 'read_only')
+    assert.equal(accessWhileConversationWrites.blocker?.kind, 'conversation')
+    if (accessWhileConversationWrites.blocker?.kind === 'conversation') {
+      assert.equal(accessWhileConversationWrites.blocker.turnId, 'turn-writable')
+    }
     releaseWorkspaceLease(writable.workspaceLeaseId!)
     getAppContext().runtimeRegistry.removeInflightThread('chat-writable')
 
@@ -342,6 +351,21 @@ test('queue-coordinator releases lease by leaseId on slot failure', () => {
   const source = readFileSync(queueCoordinatorPath, 'utf8')
   assert.match(source, /releaseWorkspaceLease\(\{ leaseId: workspaceLease\.leaseId \}\)/)
   assert.doesNotMatch(source, /releaseWorkspaceLeaseForOwner/)
+})
+
+test('conversation lease release advances pending task queues and snapshots resolved access', () => {
+  const conversationSource = readFileSync(
+    join(process.cwd(), 'src/server/conversation/service.ts'),
+    'utf8'
+  )
+  const turnQueueSource = readFileSync(
+    join(process.cwd(), 'src/server/conversation/turn-queue.ts'),
+    'utf8'
+  )
+  assert.match(conversationSource, /releaseWorkspaceLease\(\{ leaseId:/)
+  assert.match(conversationSource, /advanceExecutionQueue\(username\)/)
+  assert.match(turnQueueSource, /onWorkspaceAccessResolved/)
+  assert.match(turnQueueSource, /event: 'turn_snapshot'/)
 })
 
 test('planner releases its workspace lease only after runtime lifecycle completion', () => {

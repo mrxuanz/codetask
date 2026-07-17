@@ -195,6 +195,7 @@ export async function runSliceVerification(input: {
   try {
     for await (const chunk of streamAgentTurn({
       role: 'slice-verifier',
+      capabilityProfile: 'verifier-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: input.workspacePath,
       runtimeRoot,
@@ -292,6 +293,7 @@ export async function runMilestoneVerification(input: {
   try {
     for await (const chunk of streamAgentTurn({
       role: 'milestone-verifier',
+      capabilityProfile: 'verifier-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: input.workspacePath,
       runtimeRoot,

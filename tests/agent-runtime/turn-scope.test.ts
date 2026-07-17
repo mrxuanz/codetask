@@ -156,6 +156,22 @@ describe('turn-scope', () => {
     turnScope.dispose()
   })
 
+  it('aborts the provider turn when lease keepalive fails', async () => {
+    const lost = Object.assign(new Error('lease lost'), { code: 'workspace.lease_lost' })
+    const turnScope = new TurnScope({
+      role: 'conversation',
+      onKeepAlive: () => {
+        throw lost
+      }
+    })
+    turnScope.arm()
+    turnScope.recordProgress('text_delta')
+    await assert.rejects(
+      () => turnScope.race(new Promise<never>(() => {})),
+      (error: unknown) => error === lost
+    )
+  })
+
   it('progress guard reports suspected stall without cancelling the turn', async () => {
     const guard = new ProgressGuard('conversation', {
       progressWindowMs: 20,

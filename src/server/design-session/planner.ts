@@ -417,8 +417,11 @@ async function runDesignPlanner(
     let mcpUrl: string | undefined
     try {
       mcpUrl = buildPlannerMcpUrl({ sessionId: mcpSessionId, jobId: designSessionId })
-    } catch {
-      mcpUrl = undefined
+    } catch (error) {
+      unregisterPlannerMcpSession(mcpSessionId)
+      throw createTurnError('plan.mcp_unavailable', {
+        detail: error instanceof Error ? error.message : String(error)
+      })
     }
 
     try {
@@ -460,6 +463,7 @@ async function runDesignPlanner(
       await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
         for await (const chunk of streamAgentTurn({
           role: 'planner',
+          capabilityProfile: 'planner-read',
           provider: core.code as SupportedCoreCode,
           workspaceRoot: workspacePath,
           runtimeRoot,

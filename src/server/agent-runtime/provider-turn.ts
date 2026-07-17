@@ -1,4 +1,4 @@
-import { TURN_CANCELLED } from '../../shared/turn-errors.ts'
+import { createTurnError, TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
 import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
@@ -46,7 +46,9 @@ export function createProviderTurnScope(
       }
       const wctx = getWorkspaceLeaseContext()
       if (wctx) {
-        refreshWorkspaceLease(wctx.leaseId)
+        if (!refreshWorkspaceLease(wctx.leaseId)) {
+          throw createTurnError('workspace.lease_lost')
+        }
       }
     }
   })

@@ -12,7 +12,7 @@ import { getSandboxSupervisorManager } from './supervisor-manager'
 
 export type { RunSandboxedTurnInput } from './orchestrator-local'
 
-export { isOuterSandboxEnabled } from './orchestrator-local'
+export { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export function shouldUseSandboxSupervisor(): boolean {
   if (process.env.CODETASK_SANDBOX_SUPERVISOR === '0') return false

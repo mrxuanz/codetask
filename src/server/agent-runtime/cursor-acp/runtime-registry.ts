@@ -5,6 +5,7 @@ import {
   touchConversationCursorBinding,
   upsertConversationCursorBinding
 } from './conversation-cursor-directory'
+import type { AgentCapabilityProfile } from '../capabilities'
 
 export interface JobCursorRuntimeKeyInput {
   jobId: string
@@ -12,6 +13,7 @@ export interface JobCursorRuntimeKeyInput {
   workspaceRoot: string
   model?: string | undefined
   mcpProfile: string
+  capabilityProfile?: AgentCapabilityProfile | undefined
 }
 
 export interface CursorRuntimeKeyInput {
@@ -20,6 +22,7 @@ export interface CursorRuntimeKeyInput {
   workspaceRoot: string
   model?: string | undefined
   mcpProfile: string
+  capabilityProfile?: AgentCapabilityProfile | undefined
 }
 
 export type ConversationCursorKind = 'chat' | 'create_task'
@@ -48,7 +51,8 @@ export function buildCursorRuntimeKey(input: CursorRuntimeKeyInput): string {
     input.provider,
     input.workspaceRoot,
     input.model ?? '',
-    mcpProfile
+    mcpProfile,
+    input.capabilityProfile ?? ''
   ].join('\0')
   return createHash('sha256').update(raw).digest('hex').slice(0, 24)
 }
@@ -59,7 +63,8 @@ export function buildJobCursorRuntimeKey(input: JobCursorRuntimeKeyInput): strin
     provider: input.provider,
     workspaceRoot: input.workspaceRoot,
     model: input.model,
-    mcpProfile: input.mcpProfile
+    mcpProfile: input.mcpProfile,
+    capabilityProfile: input.capabilityProfile
   })
 }
 

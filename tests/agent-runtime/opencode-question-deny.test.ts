@@ -17,6 +17,15 @@ describe('OpenCode question policy', () => {
     assert.equal(resolveOpencodeToolsConfig().question, false)
   })
 
+  it('denies executable tools for read-only capability profiles', () => {
+    const permission = resolveOpencodePermissionConfig('planner-read') as Record<string, string>
+    const tools = resolveOpencodeToolsConfig('planner-read') as Record<string, boolean>
+    for (const name of ['bash', 'edit', 'write', 'patch', 'task', 'skill']) {
+      assert.equal(permission[name], 'deny', name)
+      assert.equal(tools[name], false, name)
+    }
+  })
+
   it('auto-replies with the first (recommended) option label', () => {
     const answers = buildOpencodeAutoQuestionAnswers([
       {

@@ -10,6 +10,7 @@ import {
   findWorkspaceLeaseConflict,
   normalizeWorkspaceLeasePath,
   reclaimStaleWorkspaceLeasesOnStartup,
+  refreshWorkspaceLease,
   releaseWorkspaceLeaseForOwner,
   resetWorkspaceLeaseStateForTests,
   workspacePathsConflict
@@ -38,12 +39,20 @@ async function teardown(): Promise<void> {
 }
 
 test('workspacePathsConflict treats same, parent, and child paths as conflicts', () => {
-  const root = 'C:/proj'
-  const child = 'C:/proj/src'
-  assert.equal(workspacePathsConflict(root, root), true)
-  assert.equal(workspacePathsConflict(root, child), true)
-  assert.equal(workspacePathsConflict(child, root), true)
-  assert.equal(workspacePathsConflict('C:/other', root), false)
+  const base = mkdtempSync(join(tmpdir(), 'codetask-path-conflict-'))
+  const root = join(base, 'proj')
+  const child = join(root, 'src')
+  const sibling = join(base, 'other')
+  try {
+    mkdirSync(child, { recursive: true })
+    mkdirSync(sibling)
+    assert.equal(workspacePathsConflict(root, root), true)
+    assert.equal(workspacePathsConflict(root, child), true)
+    assert.equal(workspacePathsConflict(child, root), true)
+    assert.equal(workspacePathsConflict(sibling, root), false)
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
 })
 
 test('acquireWorkspaceLease is exclusive across owners for overlapping paths', async () => {
@@ -83,6 +92,14 @@ test('acquireWorkspaceLease is exclusive across owners for overlapping paths', a
       ownerId: 'job-b'
     })
     assert.ok(afterRelease)
+    const siblingDir = join(workspaceRoot, 'other')
+    mkdirSync(siblingDir)
+    const sibling = acquireWorkspaceLease({
+      workspacePath: siblingDir,
+      ownerKind: 'conversation',
+      ownerId: 'turn-sibling'
+    })
+    assert.ok(sibling)
   } finally {
     await teardown()
   }
@@ -119,12 +136,15 @@ test('reclaimStaleWorkspaceLeasesOnStartup releases leases from prior boot', asy
     })
     assert.ok(acquired)
 
-    const client = (getDb() as ReturnType<typeof getDb> & { $client?: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }).$client
+    const client = (
+      getDb() as ReturnType<typeof getDb> & {
+        $client?: { prepare: (sql: string) => { run: (...args: unknown[]) => void } }
+      }
+    ).$client
     assert.ok(client)
-    client.prepare(`UPDATE workspace_leases SET boot_id = ? WHERE id = ?`).run(
-      'stale-boot-id',
-      acquired.leaseId
-    )
+    client
+      .prepare(`UPDATE workspace_leases SET boot_id = ? WHERE id = ?`)
+      .run('stale-boot-id', acquired.leaseId)
 
     const reclaimed = reclaimStaleWorkspaceLeasesOnStartup()
     assert.equal(reclaimed, 1)
@@ -151,6 +171,23 @@ test('BEGIN IMMEDIATE acquire path uses normalized realpath', async () => {
       .all()
     assert.equal(rows.length, 1)
     assert.equal(rows[0]?.canonicalPath, normalizeWorkspaceLeasePath(workspaceRoot))
+  } finally {
+    await teardown()
+  }
+})
+
+test('refresh fails closed after the lease expires', async () => {
+  await setup()
+  try {
+    const acquired = acquireWorkspaceLease({
+      workspacePath: workspaceRoot,
+      ownerKind: 'conversation',
+      ownerId: 'turn-expired'
+    })
+    assert.ok(acquired)
+    const { workspaceLeases } = await import('../../src/server/db/schema')
+    getDb().update(workspaceLeases).set({ leaseExpiresAt: 0 }).run()
+    assert.equal(refreshWorkspaceLease(acquired.leaseId), false)
   } finally {
     await teardown()
   }

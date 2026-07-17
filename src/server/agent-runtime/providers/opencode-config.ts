@@ -1,4 +1,5 @@
 import type { Config, QuestionAnswer } from '@opencode-ai/sdk/v2'
+import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
 
 /**
  * OpenCode interactive `question` handling for CodeTask.
@@ -44,16 +45,41 @@ export const OPENCODE_AUTO_QUESTION_GUIDANCE =
  * Prefer an explicit question deny after wildcard allow (last matching rule wins).
  * Do not rely on this alone — OpenCode may still emit `question.asked`.
  */
-export function resolveOpencodePermissionConfig(): NonNullable<Config['permission']> {
-  return {
+export function resolveOpencodePermissionConfig(
+  capabilityProfile?: AgentCapabilityProfile
+): NonNullable<Config['permission']> {
+  const base: NonNullable<Config['permission']> = {
     '*': 'allow',
     question: 'deny'
+  }
+  if (!capabilityProfile || !capabilityProfileIsReadOnly(capabilityProfile)) return base
+  return {
+    ...base,
+    bash: 'deny',
+    edit: 'deny',
+    write: 'deny',
+    patch: 'deny',
+    task: 'deny',
+    skill: 'deny'
   }
 }
 
 /** Best-effort tool disable; still pair with auto-reply on `question.asked`. */
-export function resolveOpencodeToolsConfig(): NonNullable<Config['tools']> {
-  return { question: false }
+export function resolveOpencodeToolsConfig(
+  capabilityProfile?: AgentCapabilityProfile
+): NonNullable<Config['tools']> {
+  const readOnly = capabilityProfile !== undefined && capabilityProfileIsReadOnly(capabilityProfile)
+  return readOnly
+    ? {
+        question: false,
+        bash: false,
+        edit: false,
+        write: false,
+        patch: false,
+        task: false,
+        skill: false
+      }
+    : { question: false }
 }
 
 export interface OpencodeQuestionOptionDto {

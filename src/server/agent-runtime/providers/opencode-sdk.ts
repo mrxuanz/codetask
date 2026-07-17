@@ -34,6 +34,7 @@ import {
   resolveOpencodeToolsConfig,
   type OpencodeQuestionDto
 } from './opencode-config'
+import { capabilityProfileIsReadOnly, resolveInputCapabilityProfile } from '../capabilities'
 import {
   createOpencodeLongTurnFetch,
   isTransientOpencodeTransportDetail
@@ -54,13 +55,16 @@ interface OpencodeServerHandle {
 
 function buildOpencodeConfig(input: AgentTurnInput): Config {
   const userMcpServers = input.userMcpServers ?? {}
+  const capabilityProfile = resolveInputCapabilityProfile(input)
+  const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
 
   const mcpEntries = buildOpencodeMcpServers(input.mcpUrl, userMcpServers)
   const mcp = Object.keys(mcpEntries).length > 0 ? (mcpEntries as Config['mcp']) : undefined
 
   return {
-    permission: resolveOpencodePermissionConfig(),
-    tools: resolveOpencodeToolsConfig(),
+    permission: resolveOpencodePermissionConfig(capabilityProfile),
+    tools: resolveOpencodeToolsConfig(capabilityProfile),
+    ...(readOnly ? { plugin: [], instructions: [] } : {}),
     ...(input.model !== undefined ? { model: input.model } : {}),
     ...(mcp ? { mcp } : {})
   }
@@ -381,6 +385,7 @@ export async function* streamOpencodeTurn(
     })
   }
   const { createOpencodeClient } = await import('@opencode-ai/sdk/v2/client')
+  const capabilityProfile = resolveInputCapabilityProfile(input)
   const config = buildOpencodeConfig(input)
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
@@ -445,7 +450,7 @@ export async function* streamOpencodeTurn(
         directory: input.cwd,
         // Per-prompt tools disable (session permission path). Still may be
         // ignored on older OpenCode builds — auto-reply remains the safety net.
-        tools: resolveOpencodeToolsConfig(),
+        tools: resolveOpencodeToolsConfig(capabilityProfile),
         parts: [{ type: 'text', text: input.prompt }],
         ...(input.systemPrompt !== undefined ? { system: input.systemPrompt } : {})
       },

@@ -438,52 +438,62 @@ export class WorkflowHarness {
     await this.json('PATCH', `/api/threads/${threadId}/core`, { coreCode })
   }
 
+  private async enqueueTurnAndWait(
+    threadId: string,
+    message: string,
+    options?: { createTaskMode?: boolean; generateDraft?: boolean; attachmentIds?: string[] }
+  ): Promise<Record<string, unknown>> {
+    const accepted = await this.json<{ turnId: string }>('POST', `/api/threads/${threadId}/turns`, {
+      message,
+      createTaskMode: options?.createTaskMode === true,
+      generateDraft: options?.generateDraft === true,
+      attachmentIds: options?.attachmentIds
+    })
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      const result = await this.json<{ turn: Record<string, unknown> }>(
+        'GET',
+        `/api/threads/${threadId}/turns/${accepted.turnId}`
+      )
+      const status = String(result.turn.status ?? '')
+      if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+        return result.turn
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    throw new Error(`Turn ${accepted.turnId} did not settle`)
+  }
+
   async sendMessage(
     threadId: string,
     message: string,
     options?: { createTaskMode?: boolean; generateDraft?: boolean; attachmentIds?: string[] }
   ): Promise<SseEvent[]> {
-    const events: SseEvent[] = []
-    const response = await fetch(`${this.baseUrl}/api/threads/${threadId}/messages`, {
-      method: 'POST',
-      headers: {
-        ...this.authHeaders(),
-        Accept: 'text/event-stream'
-      },
-      body: JSON.stringify({
-        message,
-        createTaskMode: options?.createTaskMode === true,
-        generateDraft: options?.generateDraft === true,
-        attachmentIds: options?.attachmentIds
-      })
-    })
-
-    if (!response.ok || !response.body) {
-      const text = await response.text()
-      throw new Error(`SSE failed: ${response.status} ${text}`)
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const chunks = buffer.split('\n\n')
-      buffer = chunks.pop() ?? ''
-      for (const chunk of chunks) {
-        const parsed = parseSseChunk(chunk)
-        if (parsed) {
-          events.push(parsed)
-          if (parsed.event === 'done' || parsed.event === 'error') {
-            await reader.cancel()
-            return events
+    const beforeIds = new Set((await this.listMessages(threadId)).map((item) => String(item.id)))
+    const turn = await this.enqueueTurnAndWait(threadId, message, options)
+    if (turn.status === 'failed' || turn.status === 'cancelled') {
+      const error = (turn.lastError ?? {}) as Record<string, unknown>
+      return [
+        {
+          event: 'error',
+          data: {
+            message: String(error.message ?? 'turn failed'),
+            error
           }
         }
+      ]
+    }
+
+    const events: SseEvent[] = []
+    for (const item of await this.listMessages(threadId)) {
+      if (beforeIds.has(String(item.id))) continue
+      if (item.role === 'user') {
+        events.push({ event: 'user_message', data: { message: item } })
+      } else if (item.role === 'assistant') {
+        events.push({ event: 'assistant_message', data: { message: item } })
       }
     }
+    events.push({ event: 'done', data: { turnId: turn.id } })
     return events
   }
 
@@ -506,24 +516,12 @@ export class WorkflowHarness {
     message: string,
     options?: { createTaskMode?: boolean; generateDraft?: boolean }
   ): Promise<{ httpStatus: number; code: string | null }> {
-    const response = await fetch(`${this.baseUrl}/api/threads/${threadId}/messages`, {
-      method: 'POST',
-      headers: {
-        ...this.authHeaders(),
-        Accept: 'text/event-stream'
-      },
-      body: JSON.stringify({
-        message,
-        createTaskMode: options?.createTaskMode === true,
-        generateDraft: options?.generateDraft === true
-      })
-    })
-    const payload = (await response.json()) as {
-      data?: { turnErrorCode?: string }
-    }
+    const turn = await this.enqueueTurnAndWait(threadId, message, options)
+    const lastError = (turn.lastError ?? {}) as Record<string, unknown>
+    const code = typeof lastError.code === 'string' ? lastError.code : null
     return {
-      httpStatus: response.status,
-      code: payload.data?.turnErrorCode ?? null
+      httpStatus: code === 'conversation.mode_mismatch' ? 409 : 500,
+      code
     }
   }
 
@@ -750,22 +748,6 @@ export class WorkflowHarness {
     const seeded = await this.seedPlanReady()
     const { job } = await this.confirmPlan(seeded.threadId, seeded.jobId)
     return this.waitForJob(String(job.id), (job) => job.status === 'completed', 120_000)
-  }
-}
-
-function parseSseChunk(chunk: string): SseEvent | null {
-  const lines = chunk.split('\n')
-  let event = 'message'
-  let data = ''
-  for (const line of lines) {
-    if (line.startsWith('event:')) event = line.slice(6).trim()
-    if (line.startsWith('data:')) data += line.slice(5).trim()
-  }
-  if (!data) return null
-  try {
-    return { event, data: JSON.parse(data) as Record<string, unknown> }
-  } catch {
-    return { event, data: { raw: data } }
   }
 }
 

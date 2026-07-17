@@ -29,6 +29,7 @@ const streamingMessageId = computed(() => chatCtx.streamingMessageId.value)
 const awaitingAssistantReply = computed(() => chatCtx.awaitingAssistantReply.value)
 const error = computed(() => chatCtx.error.value)
 const runtimeStatus = computed(() => chatCtx.runtimeStatus.value)
+const activeWorkspaceAccess = computed(() => chatCtx.activeWorkspaceAccess.value)
 const workspaceAccess = ref<ProjectWorkspaceAccess>({ mode: 'read_write', blocker: null })
 let workspaceAccessTimer: ReturnType<typeof setInterval> | null = null
 
@@ -181,12 +182,28 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
     </div>
 
     <div
-      v-if="workspaceAccess.mode === 'read_only' && workspaceAccess.blocker?.kind === 'task'"
+      v-if="
+        activeWorkspaceAccess === 'live-read' ||
+        (workspaceAccess.mode === 'read_only' &&
+          workspaceAccess.blocker &&
+          !(
+            workspaceAccess.blocker.kind === 'conversation' &&
+            workspaceAccess.blocker.threadId === activeThread.id
+          ))
+      "
       class="mx-4 mt-3 flex shrink-0 items-center gap-2 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 sm:mx-6"
     >
       <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
       <span>
-        {{ t('workspace.taskWorkspaceReadOnly', { task: workspaceAccess.blocker.taskTitle }) }}
+        {{
+          workspaceAccess.blocker?.kind === 'task'
+            ? t('workspace.taskWorkspaceReadOnly', {
+                task: workspaceAccess.blocker.taskTitle
+              })
+            : workspaceAccess.blocker?.kind === 'conversation'
+              ? t('workspace.conversationWorkspaceReadOnly')
+              : t('workspace.workspaceReadOnly')
+        }}
       </span>
     </div>
 
