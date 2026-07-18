@@ -5,33 +5,30 @@
  * Prefer type guards or schema validators instead of double casts.
  */
 
-import { execSync } from 'child_process'
+import { resolve } from 'node:path'
 import { exit } from 'process'
+
+import { scanSourcePatterns } from './ci/source-pattern-scan.mjs'
 
 const SCAN_DIRS = ['src']
 
 const PATTERN = 'as unknown as'
 
-function checkDirectory(dir) {
-  try {
-    const result = execSync(`rg -n "${PATTERN}" ${dir}`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
-    return result.trim()
-  } catch (e) {
-    if (e.status === 1) return ''
-    throw e
-  }
-}
+const repositoryRoot = resolve(import.meta.dirname, '..')
 
 let hasErrors = false
 
 for (const dir of SCAN_DIRS) {
-  const matches = checkDirectory(dir)
-  if (matches) {
+  const matches = scanSourcePatterns({
+    repositoryRoot,
+    scanPaths: [dir],
+    patterns: [PATTERN]
+  })
+  if (matches.length > 0) {
     console.error(`\nDouble assertion found in ${dir}:`)
-    console.error(matches)
+    for (const match of matches) {
+      console.error(`${match.file}:${match.line}:${match.text}`)
+    }
     hasErrors = true
   }
 }
