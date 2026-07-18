@@ -23,6 +23,7 @@ jobs:
       - run: npm run lint:ci
       - run: npm run typecheck
       - run: npm run typecheck:control-plane:ci
+      - run: npm run test:ci-scripts
       - run: npm run check:control-plane-types
       - run: npm run check:legacy-write-guard
       - run: npm run check:no-double-assertions
