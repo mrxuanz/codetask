@@ -59,7 +59,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
   const options = [{ optionId: 'deny-once' }, { optionId: 'allow-once' }]
 
   const denied = await handler({
-    params: { options, toolCall: { kind: 'shell', title: 'Run terminal command' } }
+    params: { options, toolCall: { kind: 'execute', title: 'Run terminal command' } }
   })
   assert.deepEqual(denied, {
     outcome: { outcome: 'selected', optionId: 'deny-once' }
@@ -73,17 +73,69 @@ test('permission handler denies shell/write for read-only profiles and permits r
   })
 
   const userMcp = await handler({
-    params: { options, toolCall: { kind: 'mcp', title: 'untrusted-local-server' } }
+    params: { options, toolCall: { kind: 'other', title: 'untrusted-local-server' } }
   })
   assert.deepEqual(userMcp, {
     outcome: { outcome: 'selected', optionId: 'deny-once' }
   })
 
   const systemMcp = await handler({
-    params: { options, toolCall: { kind: 'mcp', title: 'codeteam-manager' } }
+    params: {
+      options,
+      toolCall: { kind: 'other', title: 'codeteam-manager propose_task_draft' }
+    }
   })
   assert.deepEqual(systemMcp, {
     outcome: { outcome: 'selected', optionId: 'allow-once' }
+  })
+
+  // Real Cursor ACP title: server and tool are hyphen-joined, then repeated after ":".
+  for (const title of [
+    'codeteam-manager-register_plan_outline: register_plan_outline',
+    'codeteam-manager-finalize_plan: finalize_plan',
+    'codeteam-manager_register_task_context'
+  ] as const) {
+    const plannerMcp = await handler({
+      params: { options, toolCall: { kind: 'other', title } }
+    })
+    assert.deepEqual(
+      plannerMcp,
+      { outcome: { outcome: 'selected', optionId: 'allow-once' } },
+      title
+    )
+  }
+
+  const toolNameWithoutServer = await handler({
+    params: {
+      options,
+      toolCall: { kind: 'other', title: 'register_plan_outline' }
+    }
+  })
+  assert.deepEqual(toolNameWithoutServer, {
+    outcome: { outcome: 'selected', optionId: 'deny-once' }
+  })
+
+  const deceptiveShell = await handler({
+    params: {
+      options,
+      toolCall: { kind: 'execute', title: 'Read package.json with cat' }
+    }
+  })
+  assert.deepEqual(deceptiveShell, {
+    outcome: { outcome: 'selected', optionId: 'deny-once' }
+  })
+
+  const deceptiveExecuteAsMcp = await handler({
+    params: {
+      options,
+      toolCall: {
+        kind: 'execute',
+        title: 'codeteam-manager-register_plan_outline: register_plan_outline'
+      }
+    }
+  })
+  assert.deepEqual(deceptiveExecuteAsMcp, {
+    outcome: { outcome: 'selected', optionId: 'deny-once' }
   })
 })
 

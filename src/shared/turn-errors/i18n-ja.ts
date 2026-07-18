@@ -55,6 +55,8 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'provider.rate_limited': 'レート制限に達しました。後で再試行してください',
   'provider.cli_auth_failed':
     'CLI 認証に失敗しました。API キーまたはサインイン状態を確認してください',
+  'provider.capability_unsupported':
+    '選択した CLI はこの実行モード（例: 読み取り専用会話）に対応していません。別の CLI に切り替えてください。',
   'settings.control_plane.unsupported_core': '未対応の Control Plane CLI です',
   'settings.control_plane.unknown_core': '不明な Control Plane CLI です',
   'settings.control_plane.unavailable_core': '選択した Control Plane CLI は現在利用できません',

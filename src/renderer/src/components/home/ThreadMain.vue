@@ -47,15 +47,32 @@ const activeThread = computed(() => {
 })
 
 const threadTitle = computed(() => activeThread.value?.title || t('workspace.newThread'))
+const workspaceReadOnly = computed(
+  () =>
+    activeWorkspaceAccess.value === 'live-read' ||
+    (workspaceAccess.value.mode === 'read_only' &&
+      Boolean(workspaceAccess.value.blocker) &&
+      !(
+        workspaceAccess.value.blocker?.kind === 'conversation' &&
+        workspaceAccess.value.blocker.threadId === activeThread.value?.id
+      ))
+)
+const composerCores = computed(() =>
+  workspaceReadOnly.value
+    ? cores.value.filter((core) => core.readOnlyCapable !== false)
+    : cores.value
+)
 
 const currentCoreCode = computed(() => {
   const fromThread = activeCoreCode.value ?? activeThread.value?.coreCode
-  if (fromThread) return fromThread
+  if (fromThread && composerCores.value.some((core) => core.code === fromThread)) return fromThread
   const preferred = getPreferredCoreCode()
-  if (preferred && cores.value.some((core) => core.code === preferred)) {
+  if (preferred && composerCores.value.some((core) => core.code === preferred && core.available)) {
     return preferred
   }
-  return cores.value[0]?.code ?? ''
+  return (
+    composerCores.value.find((core) => core.available)?.code ?? composerCores.value[0]?.code ?? ''
+  )
 })
 
 const selectedCore = computed(() => cores.value.find((core) => core.code === currentCoreCode.value))
@@ -215,8 +232,9 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
         :pending-reply="awaitingAssistantReply && !streamingMessageId"
       />
       <ChatComposer
-        :cores="cores"
+        :cores="composerCores"
         :core-code="currentCoreCode"
+        :require-read-only-core="workspaceReadOnly"
         :disabled="loading || coreSwitching || coreUnavailable"
         :sending="busy"
         @core-change="handleCoreChange"

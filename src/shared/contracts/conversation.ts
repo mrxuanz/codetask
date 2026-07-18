@@ -32,6 +32,7 @@ export interface ConversationCoreDto {
   label: string
   description: string
   available: boolean
+  readOnlyCapable?: boolean | undefined
   reason?: string | null | undefined
   detectedCommand?: string | null | undefined
   launchCommand?: string | null | undefined

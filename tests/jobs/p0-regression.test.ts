@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
@@ -11,7 +11,6 @@ import { updateJobRow, isStaleExecutionLeaseOwner, executionLeaseOwner } from '.
 import { cleanupJobRuntimeTree, jobRuntimeDir } from '../../src/server/runtime/cleanup'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { readRetentionSettings } from '../../src/server/retention/settings'
-import { getExecutionRunContext } from '../../src/server/legacy-control-plane/execution-run-context'
 import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'txn-test-user'
@@ -267,7 +266,14 @@ describe('keepalive cross-process awareness', () => {
     assert.equal(ctxInside, 'test-run-id', 'should have runId inside context')
   })
 
-  it('documents that role-worker keepalive is broken by design', () => {
-    assert.equal(getExecutionRunContext(), undefined)
+  it('keeps role-worker leases in the parent runner instead of relying on child context', () => {
+    const runnerSource = readFileSync(
+      join(process.cwd(), 'src/server/agent-runtime/runner.ts'),
+      'utf8'
+    )
+    assert.match(runnerSource, /withSandboxLeaseRefresh/)
+    assert.match(runnerSource, /refreshWorkspaceLease/)
+    assert.match(runnerSource, /refreshWorkloadLease/)
+    assert.match(runnerSource, /controller\.abort/)
   })
 })

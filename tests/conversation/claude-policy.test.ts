@@ -5,12 +5,21 @@ import {
   resolveClaudeSystemPrompt
 } from '../../src/server/agent-runtime/providers/claude-policy'
 
-test('resolveClaudeSettingSources clears sources in outer sandbox', () => {
+test('resolveClaudeSettingSources clears only for outer sandbox', () => {
   assert.deepEqual(resolveClaudeSettingSources(true), [])
   assert.deepEqual(resolveClaudeSettingSources(false), ['user', 'project', 'local'])
-  assert.deepEqual(resolveClaudeSettingSources(false, 'chat-read'), [])
-  assert.deepEqual(resolveClaudeSettingSources(false, 'create-task-read'), [])
-  assert.deepEqual(resolveClaudeSettingSources(false, 'planner-read'), [])
+  // Read-only conversation still loads host settings (auth/model); MCP/skills overridden elsewhere.
+  assert.deepEqual(resolveClaudeSettingSources(false, 'chat-read'), ['user', 'project', 'local'])
+  assert.deepEqual(resolveClaudeSettingSources(false, 'create-task-read'), [
+    'user',
+    'project',
+    'local'
+  ])
+  assert.deepEqual(resolveClaudeSettingSources(false, 'planner-read'), [
+    'user',
+    'project',
+    'local'
+  ])
   assert.deepEqual(resolveClaudeSettingSources(false, 'chat-write'), ['user', 'project', 'local'])
 })
 

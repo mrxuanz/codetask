@@ -20,10 +20,15 @@ describe('OpenCode question policy', () => {
   it('denies executable tools for read-only capability profiles', () => {
     const permission = resolveOpencodePermissionConfig('planner-read') as Record<string, string>
     const tools = resolveOpencodeToolsConfig('planner-read') as Record<string, boolean>
+    assert.equal(permission['*'], 'deny')
+    for (const name of ['read', 'glob', 'grep', 'list', 'lsp']) {
+      assert.equal(permission[name], 'allow', name)
+      assert.equal(tools[name], true, name)
+    }
     for (const name of ['bash', 'edit', 'write', 'patch', 'task', 'skill']) {
-      assert.equal(permission[name], 'deny', name)
       assert.equal(tools[name], false, name)
     }
+    assert.equal(permission['codeteam-manager_propose_task_draft'], 'allow')
   })
 
   it('auto-replies with the first (recommended) option label', () => {

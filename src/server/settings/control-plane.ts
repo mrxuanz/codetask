@@ -5,6 +5,10 @@ import {
   type SupportedCoreCode
 } from '../conversation/cores'
 import { createTurnError } from '../../shared/turn-errors.ts'
+import {
+  providerSupportsCapability,
+  type AgentCapabilityProfile
+} from '../agent-runtime/capabilities'
 import { patchSettingsFile, readSettingsFile } from './store'
 
 export interface ControlPlanePolicies {
@@ -26,9 +30,15 @@ const POLICY_FIELDS = [
   'milestoneVerifierCoreCode'
 ] as const
 
-async function defaultCoreCode(): Promise<SupportedCoreCode> {
+async function defaultCoreCode(
+  capabilityProfile?: AgentCapabilityProfile
+): Promise<SupportedCoreCode> {
   const cores = await listChatCores()
-  const firstAvailable = cores.find((core) => core.available)?.code
+  const firstAvailable = cores.find(
+    (core) =>
+      core.available &&
+      (!capabilityProfile || providerSupportsCapability(core.code, capabilityProfile))
+  )?.code
   if (firstAvailable) return firstAvailable
   return 'cursorcli'
 }
@@ -43,11 +53,14 @@ function parsePolicyCore(value: unknown, fallback: SupportedCoreCode): Supported
 }
 
 export async function defaultControlPlanePolicies(): Promise<ControlPlanePolicies> {
-  const core = await defaultCoreCode()
+  const [plannerCore, sandboxCore] = await Promise.all([
+    defaultCoreCode('planner-read'),
+    defaultCoreCode()
+  ])
   return {
-    plannerCoreCode: core,
-    sliceVerifierCoreCode: core,
-    milestoneVerifierCoreCode: core,
+    plannerCoreCode: plannerCore,
+    sliceVerifierCoreCode: sandboxCore,
+    milestoneVerifierCoreCode: sandboxCore,
     updatedAt: Math.floor(Date.now() / 1000)
   }
 }
@@ -58,8 +71,11 @@ export async function loadControlPlanePolicies(): Promise<ControlPlanePolicies> 
   if (!raw || typeof raw !== 'object') return defaults
 
   const object = raw as Record<string, unknown>
+  const parsedPlanner = parsePolicyCore(object.plannerCoreCode, defaults.plannerCoreCode)
   return {
-    plannerCoreCode: parsePolicyCore(object.plannerCoreCode, defaults.plannerCoreCode),
+    // Do not silently replace an unsupported planner CLI; save validates and
+    // planner startup fails closed via providerSupportsCapability checks.
+    plannerCoreCode: parsedPlanner,
     sliceVerifierCoreCode: parsePolicyCore(
       object.sliceVerifierCoreCode,
       defaults.sliceVerifierCoreCode
@@ -83,7 +99,8 @@ export async function loadControlPlaneSettings(): Promise<ControlPlaneSettingsPa
 function validatePolicyInput(
   field: string,
   value: string,
-  cores: AgentCoreAvailability[]
+  cores: AgentCoreAvailability[],
+  capabilityProfile?: AgentCapabilityProfile
 ): SupportedCoreCode {
   let code: SupportedCoreCode
   try {
@@ -104,6 +121,11 @@ function validatePolicyInput(
       detail: `${field} selected CLI (${core.label}) is currently unavailable`
     })
   }
+  if (capabilityProfile && !providerSupportsCapability(code, capabilityProfile)) {
+    throw createTurnError('settings.control_plane.unsupported_core', {
+      detail: `${field} selected CLI (${core.label}) cannot enforce ${capabilityProfile}`
+    })
+  }
   return code
 }
 
@@ -114,7 +136,12 @@ export async function saveControlPlanePolicies(input: {
 }): Promise<ControlPlanePolicies> {
   const cores = await listChatCores()
   const policies: ControlPlanePolicies = {
-    plannerCoreCode: validatePolicyInput('plannerCoreCode', input.plannerCoreCode, cores),
+    plannerCoreCode: validatePolicyInput(
+      'plannerCoreCode',
+      input.plannerCoreCode,
+      cores,
+      'planner-read'
+    ),
     sliceVerifierCoreCode: validatePolicyInput(
       'sliceVerifierCoreCode',
       input.sliceVerifierCoreCode,

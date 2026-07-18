@@ -178,7 +178,9 @@ export async function* streamJobCursorSandboxTurn(
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,
     userMcpServers: input.userMcpServers,
-    jobId
+    capabilityProfile: input.capabilityProfile,
+    jobId,
+    idempotencyKey: input.idempotencyKey
   }
 
   const turnLine = JSON.stringify(workerInput)

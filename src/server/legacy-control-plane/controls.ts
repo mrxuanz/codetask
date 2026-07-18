@@ -20,7 +20,6 @@ import {
 } from './repository'
 import { prepareInterruptedExecutionResume } from './execution-recovery'
 import { prepareContinueFailedExecution } from './continue-failed-job'
-import { cancelJobSandboxTurns } from '../sandbox'
 import { getControlPlaneServices } from '../application/control-plane-services'
 import { isV3Authoritative } from '../application/cutover-state'
 import { authorizeUncertainTaskAttemptReplayForJob } from './task-attempts'
@@ -36,6 +35,12 @@ import { JobExecutionRuntimeRegistry } from '../context/job-execution-runtime'
 
 function executionRuntime(): JobExecutionRuntimeRegistry {
   return getAppContext().executionRuntime
+}
+
+function cancelJobSandboxTurns(jobId: string): void {
+  void import('../sandbox/orchestrator')
+    .then(({ cancelJobSandboxTurns: cancel }) => cancel(jobId))
+    .catch(() => {})
 }
 
 export function getJobRuntime(jobId: string): ReturnType<JobExecutionRuntimeRegistry['get']> {

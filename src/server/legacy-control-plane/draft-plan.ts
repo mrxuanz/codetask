@@ -64,7 +64,6 @@ import {
 import { isDraftWorkspaceLocked } from '../wizard/edit-guard'
 import { isCollectingDraftPayload } from '../conversation/draft/collecting'
 import {
-  WIZARD_PHASE_COLLECT,
   WIZARD_PHASE_DRAFT_REVIEW,
   WIZARD_PHASE_PLAN_EDIT,
   WIZARD_PHASE_PLAN_GENERATING,
@@ -1038,83 +1037,6 @@ export async function confirmDraftAndStartPlanning(
 }
 
 const EMPTY_SAVED_PLAN: SavedJobPlan = { milestones: [], tasks: [] }
-
-/**
- * After a job is deleted, clear stale draft locks (linkedPlanId / confirmed status)
- * and ensure the wizard is back on draft review. DB triggers already null activePlanId.
- */
-export async function releaseDraftAfterJobDeleted(
-  username: string,
-  threadId: string,
-  jobId: string,
-  draftMessageId?: string | null
-): Promise<void> {
-  const row = await getThreadRow(username, threadId)
-  if (!row) return
-
-  const messages = await listMessages(username, threadId, 200, { signAssets: false })
-  const drafts = messages.filter((message) => message.kind === 'task-launch-draft')
-  let unlockedDraftId: string | null = null
-  let archivedDraftDetached = false
-
-  for (const draft of drafts) {
-    const payload = draft.payload as TaskLaunchDraftPayload | undefined
-    if (!payload?.draftId) continue
-    const linked = payload.linkedPlanId?.trim()
-    const isLinkedJob = linked === jobId
-    const isJobDraft =
-      Boolean(draftMessageId) && draft.id === draftMessageId && !isDraftEditable(payload)
-    if (!isLinkedJob && !isJobDraft) continue
-
-    if (normalizeDraftStatus(payload.status) === 'archived') {
-      await persistDraftPayload(username, threadId, draft.id, {
-        ...payload,
-        status: 'archived',
-        linkedPlanId: null
-      })
-      archivedDraftDetached = true
-      continue
-    }
-
-    await persistDraftPayload(username, threadId, draft.id, buildUnlockedDraftPayload(payload))
-    unlockedDraftId = draft.id
-  }
-
-  const phase = resolveWizardPhase(row)
-  const stillOnPlanPhase =
-    phase === WIZARD_PHASE_PLAN_GENERATING ||
-    phase === WIZARD_PHASE_PLAN_EDIT ||
-    phase === WIZARD_PHASE_READY_TO_LAUNCH
-  const shouldResetPhase =
-    row.activePlanId === jobId ||
-    stillOnPlanPhase ||
-    Boolean(unlockedDraftId) ||
-    archivedDraftDetached
-
-  if (!shouldResetPhase) return
-
-  const latest = await getThreadRow(username, threadId)
-  if (!latest) return
-
-  const targetPhase = archivedDraftDetached ? WIZARD_PHASE_COLLECT : WIZARD_PHASE_DRAFT_REVIEW
-
-  await advanceWizardPhase(username, threadId, {
-    to: targetPhase,
-    coreCode: latest.coreCode,
-    activeDraftId: archivedDraftDetached
-      ? null
-      : (unlockedDraftId ?? latest.activeDraftId ?? draftMessageId ?? null),
-    activePlanId: null,
-    handoff: buildRollbackHandoff({
-      from: resolveWizardPhase(latest),
-      to: targetPhase,
-      reason: 'Linked job deleted; draft unlocked for editing',
-      draftMessageId: archivedDraftDetached
-        ? undefined
-        : (unlockedDraftId ?? latest.activeDraftId ?? draftMessageId ?? undefined)
-    })
-  })
-}
 
 export async function unlockDraftForEdit(
   username: string,

@@ -49,17 +49,15 @@ test('only task and verifier profiles require the outer sandbox', () => {
   assert.equal(capabilityProfileRequiresOuterSandbox('verifier-sandbox'), true)
 })
 
-test('strict read-only provider support fails closed', () => {
+test('strict read-only provider support includes Codex', () => {
   assert.equal(capabilityProfileIsReadOnly('planner-read'), true)
   assert.equal(providerSupportsCapability('claude-code', 'planner-read'), true)
   assert.equal(providerSupportsCapability('cursorcli', 'chat-read'), true)
   assert.equal(providerSupportsCapability('opencode', 'create-task-read'), true)
-  assert.equal(providerSupportsCapability('codex', 'planner-read'), false)
-  assert.throws(
-    () => assertProviderSupportsCapability('codex', 'planner-read'),
-    (error: unknown) =>
-      error instanceof Error && 'code' in error && error.code === 'provider.capability_unsupported'
-  )
+  assert.equal(providerSupportsCapability('codex', 'planner-read'), true)
+  assert.equal(providerSupportsCapability('codex', 'chat-read'), true)
+  assert.equal(providerSupportsCapability('codex', 'create-task-read'), true)
+  assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'planner-read'))
   assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'chat-write'))
   assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'task-sandbox'))
 })
