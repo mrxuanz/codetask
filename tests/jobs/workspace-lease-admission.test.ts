@@ -94,7 +94,7 @@ async function seedPendingJob(jobId: string, workspacePath: string): Promise<voi
     title: 'T',
     status: 'draft',
     conversationId: 'conv-1',
-    coreCode: 'cursor',
+    coreCode: 'cursorcli',
     runtimeStatus: 'idle',
     coreRuntimeJson: '{}',
     createdAt: now,
@@ -107,7 +107,7 @@ async function seedPendingJob(jobId: string, workspacePath: string): Promise<voi
     role: 'assistant',
     kind: 'task-launch-draft',
     content: '{}',
-    coreCode: 'cursor',
+    coreCode: 'cursorcli',
     conversationId: 'conv-1',
     createdAt: String(now)
   })
@@ -258,7 +258,7 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
           title: threadId,
           status: 'draft',
           conversationId: `conv-${threadId}`,
-          coreCode: 'cursor',
+          coreCode: 'cursorcli',
           runtimeStatus: 'idle',
           coreRuntimeJson: '{}',
           threadKind,
