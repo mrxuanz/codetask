@@ -611,6 +611,8 @@ export default {
           'This path is managed by CLI or environment configuration and cannot be changed here.',
         phase: 'Migration phase: {phase}',
         restart: 'Restart into new data root',
+        restartServerRequired:
+          'Ask an administrator to restart the codetask-server service to use the new data root.',
         deleteOld: 'Delete old data root',
         migrationFailed: 'Storage migration failed',
         deleteOldFailed: 'Failed to delete old storage'

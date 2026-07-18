@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseCliArgs } from '../../src/main/cli'
+import { parseCliArgs, parseServerCliArgs } from '../../src/main/cli'
 
 test('packaged smoke mode uses the headless loopback server', () => {
   assert.deepEqual(parseCliArgs(['codetask', '--smoke-test']), {
@@ -36,4 +36,13 @@ test('data directory can be selected explicitly for a Linux service deployment',
   })
   assert.throws(() => parseCliArgs(['codetask', '--data-dir']), /Invalid data directory/)
   assert.throws(() => parseCliArgs(['codetask', '--data-dir', '--serve']), /Invalid data directory/)
+})
+
+test('dedicated Node entry is always server mode without requiring --serve', () => {
+  assert.deepEqual(parseServerCliArgs(['codetask-server', '--port', '9091']), {
+    mode: 'server',
+    host: '127.0.0.1',
+    port: 9091,
+    smokeTest: false
+  })
 })
