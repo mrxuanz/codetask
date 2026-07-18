@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process'
 import {
   copyFileSync,
   existsSync,
@@ -24,6 +25,10 @@ import {
   runtimeCursorConfigDir,
   runtimeCursorHome
 } from './paths'
+import {
+  scrubCredentialSnapshotManifest,
+  writeCredentialSnapshotManifest
+} from './snapshot-manifest'
 
 const CODEX_TOP_LEVEL_ALLOW_KEYS = new Set([
   'model',
@@ -93,7 +98,7 @@ export function filterCodexConfigToml(raw: string): string {
     const trimmed = line.trim()
     const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/)
     if (sectionMatch) {
-      const section = sectionMatch[1].toLowerCase()
+      const section = (sectionMatch[1] ?? '').toLowerCase()
       currentSection = section
       skipSection = !shouldKeepCodexSection(section)
       if (!skipSection) kept.push(line)
@@ -110,7 +115,7 @@ export function filterCodexConfigToml(raw: string): string {
 
     const keyMatch = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=/)
     if (!inSection && keyMatch) {
-      const key = keyMatch[1].toLowerCase()
+      const key = (keyMatch[1] ?? '').toLowerCase()
       if (CODEX_TOP_LEVEL_ALLOW_KEYS.has(key) || key.endsWith('_url') || key.includes('model')) {
         kept.push(line)
       }
@@ -138,13 +143,9 @@ export function materializeCodexAuth(runtimeRoot: string): MaterializeCodexResul
   const codexHome = runtimeCodexHome(runtimeRoot)
   const runtimeAuthPath = join(codexHome, 'auth.json')
 
-  if (existsSync(codexHome)) {
-    try {
-      rmSync(codexHome, { recursive: true, force: true })
-    } catch {
-      // ignore
-    }
-  }
+  // Preserve existing CODEX_HOME contents across turns. Codex stores thread
+  // rollouts under this directory; wiping it makes resumeThread fail with
+  // "no rollout found for thread id" on the second message.
   mkdirSync(codexHome, { recursive: true })
 
   const cleanupPaths: string[] = []
@@ -168,19 +169,15 @@ export function materializeCodexAuth(runtimeRoot: string): MaterializeCodexResul
     cleanupPaths.push(runtimeConfigPath)
   }
 
+  writeCredentialSnapshotManifest(runtimeRoot, 'codex', cleanupPaths)
+
   return {
     authCopied,
     configCopied,
     runtimeAuthPath,
     hostAuthPath,
     cleanup: () => {
-      for (const path of cleanupPaths) {
-        try {
-          if (existsSync(path)) unlinkSync(path)
-        } catch {
-          // ignore
-        }
-      }
+      scrubCredentialSnapshotManifest(runtimeRoot)
     }
   }
 }
@@ -190,6 +187,101 @@ export interface MaterializeCursorResult {
   runtimeAuthPath: string
   hostAuthPath: string
   cleanup: () => void
+}
+
+/** Darwin agent CLI reads `$HOME/.cursor/auth.json` when AGENT_CLI_CREDENTIAL_STORE=file. */
+export function runtimeCursorCliAuthPath(runtimeRoot: string): string {
+  return join(runtimeCursorHome(runtimeRoot), 'auth.json')
+}
+
+function writeCursorRuntimeAuthPayload(
+  runtimeRoot: string,
+  payload: Record<string, unknown>
+): string[] {
+  const raw = `${JSON.stringify(payload)}\n`
+  const paths = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
+  const written: string[] = []
+  for (const path of paths) {
+    ensureParentDir(path)
+    writeFileSync(path, raw, { encoding: 'utf8', mode: 0o600 })
+    restrictFilePermissions(path)
+    written.push(path)
+  }
+  return written
+}
+
+function mirrorCursorAuthFiles(source: string, runtimeRoot: string): string[] {
+  const destinations = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
+  const written: string[] = []
+  for (const destination of destinations) {
+    if (destination === source) continue
+    copyAuthSnapshot(source, destination)
+    written.push(destination)
+  }
+  return written
+}
+
+function readDarwinCursorKeychainPassword(service: string): string | null {
+  const hostHome = resolveHostProfilePaths().home
+  const result = spawnSync(
+    'security',
+    ['find-generic-password', '-s', service, '-a', 'cursor-user', '-w'],
+    {
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        HOME: hostHome
+      }
+    }
+  )
+  if (result.status !== 0) return null
+  const value = (result.stdout ?? '').trim()
+  return value.length > 0 ? value : null
+}
+
+function readDarwinCursorKeychainTokens(): {
+  accessToken: string
+  refreshToken: string
+} | null {
+  if (process.platform !== 'darwin') return null
+  const accessToken = readDarwinCursorKeychainPassword('cursor-access-token')
+  const refreshToken = readDarwinCursorKeychainPassword('cursor-refresh-token')
+  if (!accessToken || !refreshToken) return null
+  return { accessToken, refreshToken }
+}
+
+/**
+ * Ensure runtime has a file-store auth.json the Cursor CLI can read under HOME=runtimeRoot.
+ * Prefer host auth.json, then macOS Keychain export (host HOME), then existing runtime copies.
+ */
+export function ensureCursorRuntimeAuth(runtimeRoot: string): boolean {
+  const cliAuthPath = runtimeCursorCliAuthPath(runtimeRoot)
+  const legacyAuthPath = runtimeCursorAuthPath(runtimeRoot)
+
+  if (existsSync(cliAuthPath)) {
+    if (!existsSync(legacyAuthPath)) copyAuthSnapshot(cliAuthPath, legacyAuthPath)
+    return true
+  }
+
+  if (existsSync(legacyAuthPath)) {
+    copyAuthSnapshot(legacyAuthPath, cliAuthPath)
+    return true
+  }
+
+  const hostAuthPath = resolveCursorHostAuthPath()
+  if (existsSync(hostAuthPath)) {
+    mirrorCursorAuthFiles(hostAuthPath, runtimeRoot)
+    return true
+  }
+
+  const tokens = readDarwinCursorKeychainTokens()
+  if (tokens) {
+    writeCursorRuntimeAuthPayload(runtimeRoot, tokens)
+    return true
+  }
+
+  return false
 }
 
 export function materializeCursorAuth(
@@ -233,13 +325,6 @@ export function materializeCursorAuth(
 
   const copiedPaths: string[] = []
 
-  let authCopied = false
-  if (existsSync(hostAuthPath)) {
-    copyAuthSnapshot(hostAuthPath, runtimeAuthPath)
-    authCopied = true
-    copiedPaths.push(runtimeAuthPath)
-  }
-
   const optionalCopies: Array<{ host: string; runtime: string }> = [
     { host: join(hostCursorHome, 'cli-config.json'), runtime: join(cursorHome, 'cli-config.json') },
     {
@@ -259,9 +344,18 @@ export function materializeCursorAuth(
     copiedPaths.push(runtime)
   }
 
+  const authCopied = ensureCursorRuntimeAuth(runtimeRoot)
+  if (authCopied) {
+    for (const path of [runtimeCursorCliAuthPath(runtimeRoot), runtimeAuthPath]) {
+      if (existsSync(path)) copiedPaths.push(path)
+    }
+  }
+
   return {
     authCopied,
-    runtimeAuthPath,
+    runtimeAuthPath: existsSync(runtimeCursorCliAuthPath(runtimeRoot))
+      ? runtimeCursorCliAuthPath(runtimeRoot)
+      : runtimeAuthPath,
     hostAuthPath,
     cleanup: () => {
       for (const path of copiedPaths) {
@@ -328,19 +422,15 @@ export function materializeOpencodeAuth(runtimeRoot: string): MaterializeOpencod
     copied.push(dest)
   }
 
+  writeCredentialSnapshotManifest(runtimeRoot, 'opencode', copied)
+
   return {
     configCopied: copied.length > 0,
     runtimeConfigDir,
     runtimeDataDir,
     hostConfigDir,
     cleanup: () => {
-      for (const path of copied) {
-        try {
-          if (existsSync(path)) unlinkSync(path)
-        } catch {
-          // ignore
-        }
-      }
+      scrubCredentialSnapshotManifest(runtimeRoot)
     }
   }
 }

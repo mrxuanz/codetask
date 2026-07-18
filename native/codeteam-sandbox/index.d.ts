@@ -31,13 +31,7 @@ export declare function resolveHelperPath(): string
 export declare function helperVersion(): string
 export declare function runSelfTest(): void
 export declare function windowsSetupStatus(sandboxHome?: string | undefined | null): boolean
-export declare function windowsSetup(
-  nodeExe: string,
-  setupScript: string,
-  runnerScript: string,
-  sandboxHome: string,
-  policyCwd: string
-): void
+export declare function windowsSetup(nodeExe: string, setupScript: string, runnerScript: string, sandboxHome: string, policyCwd: string): void
 export declare function runSetupHelper(payloadB64: string): void
 export declare function runCommandRunner(args: Array<string>): void
 export declare function launchSandboxedWorker(options: LaunchSandboxOptions): SandboxChild

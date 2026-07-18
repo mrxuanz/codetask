@@ -100,7 +100,7 @@ test('buildUnifiedProgressTree marks milestone completed only after slice verifi
   assert.equal(tree.milestones[0]?.status, 'completed')
 })
 
-test('buildUnifiedProgressTree marks currentTaskId as in_progress while job is paused', () => {
+test('buildUnifiedProgressTree marks currentTaskId as paused while job is paused', () => {
   const tree = buildUnifiedProgressTree({
     jobId: 'job-1',
     title: 'Job',
@@ -114,10 +114,66 @@ test('buildUnifiedProgressTree marks currentTaskId as in_progress while job is p
         status: 'queued',
         executionStatus: 'queued'
       }
-    ]
+    ],
+    verification: {
+      slices: [{ id: 'm1-s1', runtimeStatus: 'running', verificationStatus: null }]
+    }
   })
 
   const task = tree.milestones[0]?.slices[0]?.tasks[0]
-  assert.equal(task?.status, 'in_progress')
-  assert.equal(task?.executionStatus, 'running')
+  assert.equal(task?.status, 'paused')
+  assert.equal(task?.executionStatus, 'paused')
+  assert.equal(tree.milestones[0]?.status, 'paused')
+  assert.equal(tree.milestones[0]?.slices[0]?.status, 'paused')
+  assert.notEqual(tree.milestones[0]?.slices[0]?.runtimeStatus, 'running')
+})
+
+test('buildUnifiedProgressTree pauses running task when job paused and currentTaskId is null', () => {
+  const tree = buildUnifiedProgressTree({
+    jobId: 'job-1',
+    title: 'Job',
+    jobStatus: 'paused',
+    plan: minimalPlan,
+    currentTaskId: null,
+    taskProgressItems: [
+      {
+        id: 'm1-s1-t1',
+        title: 'T1',
+        status: 'running',
+        executionStatus: 'running'
+      }
+    ],
+    verification: {
+      slices: [{ id: 'm1-s1', runtimeStatus: 'running', verificationStatus: null }]
+    }
+  })
+
+  const task = tree.milestones[0]?.slices[0]?.tasks[0]
+  assert.equal(task?.status, 'paused')
+  assert.equal(task?.executionStatus, 'paused')
+  assert.equal(tree.milestones[0]?.status, 'paused')
+  assert.notEqual(tree.milestones[0]?.slices[0]?.runtimeStatus, 'running')
+})
+
+test('planning status follows exact task context instead of completed count order', () => {
+  const plan = structuredClone(minimalPlan)
+  plan.milestones[0]!.slices[0]!.tasks.push({ title: 'T2', abilityCode: 'scaffolding' })
+  plan.tasks[0]!.contextMarkdown = ''
+  plan.tasks.push({
+    ...plan.tasks[0]!,
+    id: 'm1-s1-t2',
+    taskIndex: 1,
+    title: 'T2',
+    contextMarkdown: 'second task context'
+  })
+
+  const tree = buildUnifiedProgressTree({
+    jobId: 'job-1',
+    title: 'Job',
+    jobStatus: 'planning',
+    plan
+  })
+  const tasks = tree.milestones[0]?.slices[0]?.tasks ?? []
+  assert.equal(tasks[0]?.planStatus, 'pending')
+  assert.equal(tasks[1]?.planStatus, 'planned')
 })

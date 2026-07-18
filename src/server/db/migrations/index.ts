@@ -24,6 +24,17 @@ import { migration023WorkloadSlots } from './023_workload_slots'
 import { migration024JobPausingStatus } from './024_job_pausing_status'
 import { migration025RuntimeBytes } from './025_runtime_bytes'
 import { migration026UnifyThreadJobs } from './026_unify_thread_jobs'
+import { migration027ControlPlaneSchema } from './027_control_plane_schema'
+import { migration028ControlPlaneCorrectiveSchema } from './028_control_plane_corrective_schema'
+import { migration029JobTaskAttempts } from './029_job_task_attempts'
+import { migration030WorkspaceLeasesAndDeletion } from './030_workspace_leases_and_deletion'
+import { migration031DeletionRequestPhases } from './031_deletion_request_phases'
+import { migration032StorageSettings } from './032_storage_settings'
+import { migration033DesignPlanRevisions } from './033_design_plan_revisions'
+import { migration034JobArtifactBlob } from './034_job_artifact_blob'
+import { migration035JobSuspensionRecovery } from './035_job_suspension_recovery'
+import { migration036ConversationTurns } from './036_conversation_turns'
+import { migration039PromoteRestartInterruptedPaused } from './039_promote_restart_interrupted_paused'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -53,7 +64,18 @@ export const allMigrations = [
   migration023WorkloadSlots,
   migration024JobPausingStatus,
   migration025RuntimeBytes,
-  migration026UnifyThreadJobs
+  migration026UnifyThreadJobs,
+  migration027ControlPlaneSchema,
+  migration028ControlPlaneCorrectiveSchema,
+  migration029JobTaskAttempts,
+  migration030WorkspaceLeasesAndDeletion,
+  migration031DeletionRequestPhases,
+  migration032StorageSettings,
+  migration033DesignPlanRevisions,
+  migration034JobArtifactBlob,
+  migration035JobSuspensionRecovery,
+  migration036ConversationTurns,
+  migration039PromoteRestartInterruptedPaused
 ]
 
 export function applyMigrations(db: Database.Database): void {

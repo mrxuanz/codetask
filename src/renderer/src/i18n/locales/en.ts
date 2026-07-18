@@ -33,6 +33,7 @@ export default {
   setup: {
     title: 'Setup',
     description: 'First-time setup — create an administrator account',
+    combinedDescription: 'Choose a data directory and create an administrator account in one step',
     submit: 'Complete setup',
     submitting: 'Submitting…',
     setupTokenLabel: 'Setup token (from server console)',
@@ -41,7 +42,49 @@ export default {
       'Username: 4-32 chars, starts with a letter, letters/numbers/_/- only; reserved names like admin/root are blocked. Password: 8+ chars with upper, lower, digit, and symbol.',
     confirmPassword: 'Confirm password',
     confirmPasswordPlaceholder: 'Enter password again',
-    passwordMismatch: 'Passwords do not match'
+    passwordMismatch: 'Passwords do not match',
+    storageTitle: 'Choose data storage',
+    storageDescription:
+      'Choose where CodeTask stores its database, attachments, and isolated Provider runtimes. The default folder is created automatically if missing.',
+    storagePathLabel: 'Data directory',
+    storagePathRequired: 'Enter a data directory',
+    storageBrowse: 'Browse',
+    storageBrowseTitle: 'Choose data directory',
+    storageBrowseHint: 'Browse local folders, or create a new subfolder and select it.',
+    storageSelectDirectory: 'Use this directory',
+    storageCreateFolder: 'Create and use',
+    storageValidate: 'Validate directory',
+    storageValidating: 'Validating…',
+    storageConfirm: 'Confirm and initialize',
+    storageInitializing: 'Initializing…',
+    storageValidatedPath: 'Validated path: {path}',
+    storageRestarting: 'Storage initialized',
+    storageRecoveryTitle: 'Storage recovery required',
+    storageRecoveryDescription:
+      'The saved storage location is damaged or missing. Recover an existing CodeTask data directory, or choose an empty folder to initialize again.',
+    storageRecover: 'Use this directory',
+    storageRecovering: 'Recovering…',
+    storageRecovered: 'Storage location recovered',
+    errors: {
+      pathNotAbsolute: 'Enter an absolute path',
+      pathNotWritable: 'Directory is not writable; choose another location',
+      pathNotEmpty:
+        'Directory is not empty and is not a CodeTask data root; choose an empty folder',
+      pathForbiddenRoot: 'Cannot use the system root or home directory',
+      pathOwnedByOther: 'This directory belongs to another CodeTask installation',
+      markerMissing:
+        'Missing a valid CodeTask data marker. For first setup pick an empty folder; for recovery pick the original data directory',
+      databaseMissing: 'Database file not found in this directory',
+      locatorUnreadable: 'Saved storage location is corrupt; choose a data directory again',
+      locatorInvalid: 'Saved storage location is invalid; choose a data directory again',
+      legacyLocatorConflict:
+        'Multiple different storage locations were found; choose the original data directory to use',
+      legacyLocatorMigrationFailed:
+        'Could not migrate the original storage location; choose the original data directory again',
+      installationMismatch: 'Data directory does not match this installation',
+      validationExpired: 'Directory validation expired; try again',
+      insufficientSpace: 'Not enough disk space'
+    }
   },
   bootstrap: {
     connectionError: 'Cannot connect to service: {error}',
@@ -94,6 +137,8 @@ export default {
     addProject: 'Add local folder',
     addProjectHint: 'Add local folder…',
     loading: 'Loading…',
+    loadFailed: 'Failed to load workspace',
+    retryLoad: 'Retry',
     noThreads: 'No threads yet',
     expand: 'Expand',
     collapse: 'Collapse',
@@ -113,6 +158,10 @@ export default {
     loadThreadFailed: 'Failed to load conversation',
     switchCoreFailed: 'Failed to switch CLI',
     sendFailed: 'Failed to send message',
+    taskWorkspaceReadOnly: 'Task “{task}” is running. This conversation is read-only.',
+    conversationWorkspaceReadOnly:
+      'Another conversation is modifying this directory. This conversation is read-only.',
+    workspaceReadOnly: 'Another operation is using this directory. This conversation is read-only.',
     relativeHours: '{n}h ago',
     relativeMinutes: '{n}m ago',
     sidebar: {
@@ -186,12 +235,17 @@ export default {
         pause: 'Pause',
         resume: 'Resume',
         continue: 'Continue',
-        retryTask: 'Retry task',
-        restart: 'Restart',
+        restart: 'Clear progress and start over',
         cancel: 'Cancel',
         delete: 'Delete'
       },
       actionFailed: 'Task action failed',
+      recovery: {
+        retry: 'Continue retries from the failed checkpoint without clearing completed tasks.',
+        remediate: 'Continue runs remediation tasks first, then returns to the failed checkpoint.',
+        resume: 'Continue resumes from the latest checkpoint without clearing completed tasks.',
+        needs_attention: 'Resolve the external dependency, then continue from the checkpoint.'
+      },
       progress: {
         label: 'Completion',
         planLabel: 'Plan generation',
@@ -206,6 +260,7 @@ export default {
         planning: 'Generating plan {done}/{total}',
         planningPartial: 'Generating plan · {done} steps done',
         planningRunning: 'Generating plan…',
+        planOutlineReady: 'Plan outline locked with {total} tasks; generating task details…',
         planFinalizing: 'Plan structure ready, finalizing…',
         executionDone: 'Completed {done}/{total}',
         executionFailed: 'Execution failed',
@@ -215,6 +270,7 @@ export default {
         code: {
           'plan.pending': 'Queued, waiting for the previous task to finish or pause…',
           'plan.planning': 'Generating plan…',
+          'plan.outline_ready': 'Plan outline locked with {total} tasks; generating task details…',
           'plan.planning_partial': 'Generating plan · {done} steps done',
           'plan.planning_failed': 'Plan generation failed',
           'plan.needs_auth': 'CLI not authenticated on this machine — log in locally first',
@@ -279,6 +335,7 @@ export default {
         exec: {
           completed: 'Completed',
           in_progress: 'Running',
+          paused: 'Paused',
           failed: 'Failed',
           pending: 'Waiting',
           queued: 'Queued',
@@ -387,7 +444,7 @@ export default {
       newDraftThread: 'New task thread',
       draftListTitle: 'Draft list',
       draftListHint:
-        'All create-task drafts live here. Resume in-progress work or open completed archives.',
+        'All create-task drafts live here. Delete a draft at any stage; launched tasks stay in the task list.',
       startNew: 'New task',
       backToDraftList: 'Back to draft list',
       draftListEmpty: 'No drafts yet',
@@ -397,6 +454,12 @@ export default {
       draftFilterAll: 'All',
       draftFilterIncomplete: 'In progress',
       draftFilterComplete: 'Completed',
+      confirmDeleteDraftTitle: 'Delete draft',
+      confirmDeleteDraftMessage:
+        'Delete draft "{name}" and its generated files? This cannot be undone.',
+      confirmDeleteDraftLaunchedMessage:
+        'Remove "{name}" from the draft list? The launched task stays in the task list and will not be deleted.',
+      deleteDraftFailed: 'Failed to delete draft',
       draftStatusLaunched: 'Completed',
       draftStatusInProgress: 'In progress',
       draftStatusCollecting: 'Collecting requirements',
@@ -501,8 +564,10 @@ export default {
       save: 'Save',
       loadFailed: 'Failed to load settings',
       saveFailed: 'Failed to save settings',
+      saveSuccess: 'Settings saved',
       sections: {
         language: 'Language',
+        storage: 'Data Storage',
         sandbox: 'Sandbox',
         controlPlane: 'Control Plane',
         mcp: 'MCP',
@@ -524,6 +589,31 @@ export default {
           unavailable: 'Unavailable',
           disabled: 'Disabled'
         }
+      },
+      storage: {
+        title: 'Data Storage',
+        description:
+          'Inspect storage usage and move the complete data root through a checked, restart-based migration.',
+        loading: 'Loading storage information…',
+        loadFailed: 'Failed to load storage information',
+        currentPath: 'Current data root',
+        source: 'Source: {source}',
+        total: 'Total',
+        reclaimable: 'DB reclaimable',
+        changeTitle: 'Move data root',
+        browse: 'Browse',
+        browseTitle: 'Choose a new data directory',
+        browseHint: 'Browse local folders, or create a new subfolder and select it.',
+        selectDirectory: 'Use this directory',
+        createFolder: 'Create and use',
+        migrate: 'Validate and migrate',
+        managed:
+          'This path is managed by CLI or environment configuration and cannot be changed here.',
+        phase: 'Migration phase: {phase}',
+        restart: 'Restart into new data root',
+        deleteOld: 'Delete old data root',
+        migrationFailed: 'Storage migration failed',
+        deleteOldFailed: 'Failed to delete old storage'
       },
       languageSection: {
         title: 'Language',

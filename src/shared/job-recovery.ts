@@ -1,6 +1,6 @@
 import type { TaskProgressItemDto, ThreadJobDto } from './contracts/jobs.ts'
 import { coerceTurnErrorField } from './turn-errors/storage.ts'
-import { deriveJobRecoveryState, jobHasAction } from './job-recovery-state.ts'
+import { deriveJobRecoveryState } from './job-recovery-state.ts'
 
 export function isRecoverableWorkflowBlock(lastError: ThreadJobDto['lastError']): boolean {
   if (!lastError) return false
@@ -22,17 +22,12 @@ export function canRestartJob(status: string | null | undefined): boolean {
   return Boolean(status && ['failed', 'cancelled', 'paused', 'pausing'].includes(status))
 }
 
+/** @deprecated Retry-subtask was removed; continue covers breakpoint resume. */
 export function canRetryTaskItem(
-  job: Pick<ThreadJobDto, 'status' | 'availableActions'>,
-  task: Pick<TaskProgressItemDto, 'status' | 'executionStatus'>
+  _job: Pick<ThreadJobDto, 'status' | 'availableActions'>,
+  _task: Pick<TaskProgressItemDto, 'status' | 'executionStatus'>
 ): boolean {
-  if (jobHasAction(job, 'retry_failed_task')) {
-    if (task.status === 'failed') return true
-    return task.executionStatus === 'retry-queued' || task.executionStatus === 'waiting-on-repair'
-  }
-  if (['running', 'pending', 'planning'].includes(job.status)) return false
-  if (task.status === 'failed') return true
-  return task.executionStatus === 'retry-queued' || task.executionStatus === 'waiting-on-repair'
+  return false
 }
 
 export function findRetryableTaskId(

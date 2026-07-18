@@ -47,7 +47,7 @@ describe('validatePlanAbilityCodes', () => {
     )
   })
 
-  it('rejects register_plan when no draft abilities are configured', () => {
+  it('rejects register_plan_outline when no draft abilities are configured', () => {
     assert.throws(
       () => validatePlanAbilityCodes(samplePlan('project-setup'), []),
       /no confirmed draft abilities/

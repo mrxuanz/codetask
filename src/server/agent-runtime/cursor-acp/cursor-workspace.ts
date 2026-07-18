@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { CursorAcpMcpServer } from '../mcp'
+import { withCursorHostStateLock } from './cursor-host-state'
 
 export function slugifyCursorProjectPath(path: string): string {
   return path.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace'
@@ -83,64 +90,54 @@ function readApprovalIds(path: string): string[] {
   }
 }
 
-export function materializeCursorMcpApprovals(input: {
+function atomicWriteJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+  renameSync(tmpPath, path)
+}
+
+export async function materializeCursorMcpApprovals(input: {
   cwd: string
   servers: CursorAcpMcpServer[]
   env: Record<string, string>
-}): { approvalsPath: string } | null {
+}): Promise<{ approvalsPath: string } | null> {
   const approvalIds = input.servers
     .filter((server) => server.name.trim())
     .map((server) => cursorMcpApprovalId(server.name, resolveGitProjectRoot(input.cwd), server))
 
   if (approvalIds.length === 0) return null
 
-  const cursorDataDir = resolveCursorDataDir(input.env)
-  const projectSlug = resolveCursorWorkspaceProjectSlug(input.cwd)
-  const projectDir = join(cursorDataDir, 'projects', projectSlug)
-  const approvalsPath = join(projectDir, 'mcp-approvals.json')
+  return withCursorHostStateLock(() => {
+    const cursorDataDir = resolveCursorDataDir(input.env)
+    const projectSlug = resolveCursorWorkspaceProjectSlug(input.cwd)
+    const projectDir = join(cursorDataDir, 'projects', projectSlug)
+    const approvalsPath = join(projectDir, 'mcp-approvals.json')
 
-  mkdirSync(projectDir, { recursive: true })
+    mkdirSync(projectDir, { recursive: true })
 
-  const existing = readApprovalIds(approvalsPath)
-  const merged = [...existing]
-  const seen = new Set(existing)
-  for (const approvalId of approvalIds) {
-    if (seen.has(approvalId)) continue
-    seen.add(approvalId)
-    merged.push(approvalId)
-  }
+    const existing = readApprovalIds(approvalsPath)
+    const merged = [...existing]
+    const seen = new Set(existing)
+    for (const approvalId of approvalIds) {
+      if (seen.has(approvalId)) continue
+      seen.add(approvalId)
+      merged.push(approvalId)
+    }
 
-  writeFileSync(approvalsPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8')
-  return { approvalsPath }
+    atomicWriteJson(approvalsPath, merged)
+    return { approvalsPath }
+  })
 }
 
+/**
+ * P5: do not mutate the real project's `.cursor/cli.json`.
+ * Kept as a no-op probe so callers can still log the path if needed.
+ */
 export function removeInvalidCursorCliConfig(workspaceRoot: string): {
   cliConfigPath: string
   removed: boolean
 } {
   const cliConfigPath = join(workspaceRoot, '.cursor', 'cli.json')
-  if (!existsSync(cliConfigPath)) {
-    return { cliConfigPath, removed: false }
-  }
-
-  try {
-    const raw = readFileSync(cliConfigPath, 'utf8').trim()
-    if (!raw) {
-      unlinkSync(cliConfigPath)
-      return { cliConfigPath, removed: true }
-    }
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      unlinkSync(cliConfigPath)
-      return { cliConfigPath, removed: true }
-    }
-    return { cliConfigPath, removed: false }
-  } catch {
-    try {
-      unlinkSync(cliConfigPath)
-    } catch {
-      // best-effort, ignore errors
-    }
-    return { cliConfigPath, removed: true }
-  }
+  return { cliConfigPath, removed: false }
 }

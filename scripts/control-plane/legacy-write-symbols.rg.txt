@@ -1,0 +1,18 @@
+# Forbidden legacy write / recovery symbols (implementation guide §12.9).
+# One regex-capable token per line. Lines starting with # are comments.
+#
+# Gate script: scripts/control-plane/legacy-write-guard.mjs
+# Fails when a symbol appears outside allowed paths (migration scripts, adapters, docs).
+
+updateJobRow
+updateJobRowForSnapshot
+updateJobRowFenced
+transitionJobStatus
+exportVerificationProgress
+preflightMilestoneSliceVerdicts
+enrichJobWithRecoveryState
+startupWorkloadSlotsReconciled
+startupQueueResumed
+LoopStepAction
+tryGetControlJob
+noopRuntimeController

@@ -18,6 +18,21 @@ export interface ProviderAuthPrepared {
   writeRoots?: string[]
   cleanupPlan: () => void
   diagnostics: ProviderAuthDiagnostics
+  filesystemProfile: ProviderFilesystemProfile
+}
+
+export interface CredentialSnapshotSpec {
+  relativePath: string
+  required: boolean
+}
+
+export interface ProviderFilesystemProfile {
+  provider: SupportedCoreCode
+  hostReadRoots: string[]
+  hostWriteRoots: string[]
+  runtimeEnv: Record<string, string>
+  credentialSnapshots: CredentialSnapshotSpec[]
+  scrubPatterns: string[]
 }
 
 export interface ProviderAuthPreflightResult {

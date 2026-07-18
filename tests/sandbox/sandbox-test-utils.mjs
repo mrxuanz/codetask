@@ -358,7 +358,9 @@ export function ptraceHostCommand(hostPid) {
     return `powershell -NoProfile -Command "try { (Get-Process -Id ${hostPid}).Kill(); exit 0 } catch { exit 1 }"`
   }
   if (process.platform === 'darwin') {
-    return `lldb -p ${hostPid} -o quit 2>/dev/null`
+    // --batch propagates command failures; interactive lldb can print an attach
+    // denial yet still exit 0 after processing the explicit `quit` command.
+    return `lldb --batch -p ${hostPid} -o quit >/dev/null 2>&1`
   }
   return `gdb -p ${hostPid} -batch -ex quit 2>/dev/null`
 }

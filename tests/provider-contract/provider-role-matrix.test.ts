@@ -31,22 +31,28 @@ test('resolveProviderRunPolicy uses runtime-copy inside outer sandbox', () => {
 })
 
 test('resolveProviderOuterSandbox matrix', () => {
-  for (const role of ROLES) {
-    const outer = resolveProviderOuterSandbox(role, undefined)
-    if (role === 'conversation' || role === 'planner') {
-      assert.equal(outer, false, role)
-    } else {
-      assert.equal(outer, true, role)
-    }
+  assert.equal(resolveProviderOuterSandbox('conversation', undefined), false)
+  assert.equal(resolveProviderOuterSandbox('planner', undefined), false)
+  assert.equal(resolveProviderOuterSandbox('task-worker', undefined), true)
+  assert.equal(resolveProviderOuterSandbox('slice-verifier', undefined), true)
+  assert.equal(resolveProviderOuterSandbox('milestone-verifier', undefined), true)
+})
+
+test('resolveProviderOuterSandbox rejects disable for file roles', () => {
+  for (const role of ['task-worker', 'slice-verifier', 'milestone-verifier'] as const) {
+    assert.throws(() => resolveProviderOuterSandbox(role, false), /cannot disable outer sandbox/)
   }
+  assert.equal(resolveProviderOuterSandbox('conversation', false), false)
+  assert.equal(resolveProviderOuterSandbox('planner', false), false)
 })
 
 test('resolveRoleMcpToolNames per role', () => {
   assert.equal(resolveRoleMcpToolNames('conversation'), undefined)
   assert.deepEqual(resolveRoleMcpToolNames('planner'), [
+    'register_plan_outline',
     'register_task_context',
     'update_task_context',
-    'register_plan'
+    'finalize_plan'
   ])
   assert.deepEqual(resolveRoleMcpToolNames('task-worker'), ['report_task_result'])
   assert.deepEqual(resolveRoleMcpToolNames('slice-verifier'), ['complete_slice_verification'])

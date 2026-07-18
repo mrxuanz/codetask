@@ -30,7 +30,7 @@ import {
   reviseRequirementsContract,
   updateDraftContent,
   updateJobPlan
-} from '../../jobs/draft-plan'
+} from '../../legacy-control-plane/draft-plan'
 import {
   advanceWizardPhase,
   buildCollectToDraftHandoff,
@@ -44,7 +44,7 @@ import {
   WIZARD_PHASE_DRAFT_REVIEW,
   WIZARD_PHASE_PLAN_EDIT
 } from '../../wizard/types'
-import { mergeDraftReferences } from '../../jobs/draft-references'
+import { mergeDraftReferences } from '../../legacy-control-plane/draft-references'
 import {
   checkDraftEditAllowed,
   checkExecutionPlanEditAllowed,
@@ -819,7 +819,7 @@ async function updateReferenceCorpusItemTool(
     return { accepted: true, reference, designSessionId }
   }
 
-  const { updateDraftReferenceDescription } = await import('../../jobs/service')
+  const { updateDraftReferenceDescription } = await import('../../legacy-control-plane/service')
   const messageId = await resolveDraftMessageIdFromSession(session, args)
   if (typeof args.description !== 'string') {
     throw AppError.badRequest('description is required for draft references')
@@ -857,7 +857,7 @@ async function removeReferenceCorpusItemTool(
     return { accepted: true, referenceId, designSessionId }
   }
 
-  const { deleteDraftReference } = await import('../../jobs/service')
+  const { deleteDraftReference } = await import('../../legacy-control-plane/service')
   const messageId = await resolveDraftMessageIdFromSession(session, args)
   await deleteDraftReference(session.username, session.threadId, messageId, referenceId)
   return { accepted: true, referenceId }

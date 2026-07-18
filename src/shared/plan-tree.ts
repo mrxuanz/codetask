@@ -24,17 +24,17 @@ export interface UnifiedTaskNode {
   planStatus: PlanUnitStatus
 
   status: string
-  executionStatus?: string | null
-  evidenceStatus?: string | null
-  errorMessage?: string | null
-  error?: import('./contracts/turn-errors').TurnErrorDto | null
-  evidence?: TaskEvidenceDto | null
-  evidenceArtifactId?: string | null
-  evidenceSummary?: string | null
-  coreCode?: string | null
-  referenceIds?: string[]
-  referenceReason?: string
-  assignedReferences?: TaskAssignedReference[]
+  executionStatus?: string | null | undefined
+  evidenceStatus?: string | null | undefined
+  errorMessage?: string | null | undefined
+  error?: import('./contracts/turn-errors').TurnErrorDto | null | undefined
+  evidence?: TaskEvidenceDto | null | undefined
+  evidenceArtifactId?: string | null | undefined
+  evidenceSummary?: string | null | undefined
+  coreCode?: string | null | undefined
+  referenceIds?: string[] | undefined
+  referenceReason?: string | undefined
+  assignedReferences?: TaskAssignedReference[] | undefined
 }
 
 export interface UnifiedSliceNode {
@@ -44,8 +44,8 @@ export interface UnifiedSliceNode {
   successCriteria: string
   order: number
   status: string
-  runtimeStatus?: string | null
-  verificationStatus?: string | null
+  runtimeStatus?: string | null | undefined
+  verificationStatus?: string | null | undefined
   tasks: UnifiedTaskNode[]
 }
 
@@ -56,7 +56,7 @@ export interface UnifiedMilestoneNode {
   successCriteria: string
   order: number
   status: string
-  verificationStatus?: string | null
+  verificationStatus?: string | null | undefined
   slices: UnifiedSliceNode[]
 }
 
@@ -77,33 +77,33 @@ export interface FlatPlanTask {
   taskKind: string
   abilityCode: string
   contextMarkdown: string
-  successCriteria?: string
-  coreCode?: string
-  referenceIds?: string[]
-  referenceReason?: string
-  dependsOnTaskRefs?: string[]
-  canRunInParallel?: boolean
+  successCriteria?: string | undefined
+  coreCode?: string | undefined
+  referenceIds?: string[] | undefined
+  referenceReason?: string | undefined
+  dependsOnTaskRefs?: string[] | undefined
+  canRunInParallel?: boolean | undefined
 }
 
 export interface SavedPlanShape {
   milestones: Array<{
-    title?: string
-    description?: string
-    successCriteria?: string
+    title?: string | undefined
+    description?: string | undefined
+    successCriteria?: string | undefined
     slices: Array<{
-      title?: string
-      description?: string
-      successCriteria?: string
-      acceptanceSignals?: string[]
-      expectedArtifacts?: string[]
-      dependsOnSliceRefs?: string[]
+      title?: string | undefined
+      description?: string | undefined
+      successCriteria?: string | undefined
+      acceptanceSignals?: string[] | undefined
+      expectedArtifacts?: string[] | undefined
+      dependsOnSliceRefs?: string[] | undefined
       tasks: Array<{
-        title?: string
-        description?: string
-        taskKind?: string
-        abilityCode?: string
-        dependsOnTaskRefs?: string[]
-        canRunInParallel?: boolean
+        title?: string | undefined
+        description?: string | undefined
+        taskKind?: string | undefined
+        abilityCode?: string | undefined
+        dependsOnTaskRefs?: string[] | undefined
+        canRunInParallel?: boolean | undefined
       }>
     }>
   }>
@@ -111,9 +111,9 @@ export interface SavedPlanShape {
 }
 
 function resolveSliceSuccessCriteria(slice: {
-  successCriteria?: string
-  acceptanceSignals?: string[]
-  expectedArtifacts?: string[]
+  successCriteria?: string | undefined
+  acceptanceSignals?: string[] | undefined
+  expectedArtifacts?: string[] | undefined
 }): string {
   if (slice.successCriteria?.trim()) return slice.successCriteria.trim()
   const parts = [
@@ -127,21 +127,15 @@ export interface TaskProgressItemShape {
   id: string
   title: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped'
-  abilityCode?: string
-  executionStatus?: string | null
-  evidenceStatus?: string | null
-  errorMessage?: string | null
-  error?: import('./contracts/turn-errors').TurnErrorDto | null
-  evidence?: TaskEvidenceDto | null
-  evidenceArtifactId?: string | null
-  evidenceSummary?: string | null
-  coreCode?: string | null
-}
-
-export interface PlanProgressShape {
-  phase: string
-  contextsRegistered: number
-  contextsTotal: number
+  abilityCode?: string | undefined
+  executionStatus?: string | null | undefined
+  evidenceStatus?: string | null | undefined
+  errorMessage?: string | null | undefined
+  error?: import('./contracts/turn-errors').TurnErrorDto | null | undefined
+  evidence?: TaskEvidenceDto | null | undefined
+  evidenceArtifactId?: string | null | undefined
+  evidenceSummary?: string | null | undefined
+  coreCode?: string | null | undefined
 }
 
 export interface BuildTreeInput {
@@ -149,38 +143,38 @@ export interface BuildTreeInput {
   title: string
   jobStatus: string
   plan: SavedPlanShape | null | undefined
-  planProgress?: PlanProgressShape | null
-  taskProgressItems?: TaskProgressItemShape[] | null
+  taskProgressItems?: TaskProgressItemShape[] | null | undefined
 
-  currentTaskId?: string | null
-  verification?: {
-    slices?: Array<{
-      id: string
-      runtimeStatus?: string | null
-      verificationStatus?: string | null
-    }>
-    milestones?: Array<{ id: string; verificationStatus?: string | null }>
-  } | null
-  abilities?: Array<{ abilityCode: string; recommendedCoreCode?: string }>
-  referenceManifest?: JobReferenceManifestDto | null
+  currentTaskId?: string | null | undefined
+  verification?:
+    | {
+        slices?:
+          | Array<{
+              id: string
+              runtimeStatus?: string | null | undefined
+              verificationStatus?: string | null | undefined
+            }>
+          | undefined
+        milestones?:
+          | Array<{ id: string; verificationStatus?: string | null | undefined }>
+          | undefined
+      }
+    | null
+    | undefined
+  abilities?: Array<{ abilityCode: string; recommendedCoreCode?: string | undefined }> | undefined
+  referenceManifest?: JobReferenceManifestDto | null | undefined
 }
 
 function taskKey(mIdx: number, sIdx: number, tIdx: number): string {
   return `m${mIdx}-s${sIdx}-t${tIdx}`
 }
 
-function resolvePlanStatus(
-  jobStatus: string,
-  orderIndex: number,
-  contextsRegistered: number,
-  hasContext: boolean
-): PlanUnitStatus {
+function resolvePlanStatus(jobStatus: string, hasContext: boolean): PlanUnitStatus {
   if (jobStatus === 'plan_ready' || jobStatus === 'running' || jobStatus === 'completed') {
     return 'queued'
   }
   if (jobStatus === 'planning') {
     if (hasContext) return 'planned'
-    if (orderIndex < contextsRegistered) return 'planned'
     return 'pending'
   }
   return 'pending'
@@ -189,7 +183,7 @@ function resolvePlanStatus(
 function mapExecutionStatus(
   item: TaskProgressItemShape | undefined,
   planStatus: PlanUnitStatus,
-  options?: { isCurrentTask?: boolean; jobRunning?: boolean }
+  options?: { isCurrentTask?: boolean; jobRunning?: boolean; jobPaused?: boolean }
 ): Pick<
   UnifiedTaskNode,
   | 'status'
@@ -219,6 +213,46 @@ function mapExecutionStatus(
     options?.isCurrentTask === true &&
     options?.jobRunning === true &&
     (item.status === 'queued' || item.status === 'running' || item.executionStatus === 'running')
+  // Job paused: any incomplete/in-flight task projects as paused (even if currentTaskId is null).
+  if (
+    options?.jobPaused === true &&
+    item.status !== 'completed' &&
+    item.status !== 'skipped' &&
+    item.status !== 'failed'
+  ) {
+    const looksActive =
+      options?.isCurrentTask === true ||
+      item.status === 'running' ||
+      item.status === 'queued' ||
+      item.executionStatus === 'running' ||
+      item.executionStatus === 'retry-queued'
+    if (looksActive) {
+      return {
+        status: 'paused',
+        executionStatus: 'paused',
+        evidenceStatus: item.evidenceStatus ?? null,
+        errorMessage: item.error?.message ?? item.errorMessage ?? null,
+        error: item.error ?? null,
+        evidence: item.evidence ?? null,
+        evidenceArtifactId: item.evidenceArtifactId ?? null,
+        evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
+        coreCode: item.coreCode ?? null
+      }
+    }
+  }
+  if (options?.isCurrentTask === true && options?.jobPaused === true) {
+    return {
+      status: 'paused',
+      executionStatus: 'paused',
+      evidenceStatus: item.evidenceStatus ?? null,
+      errorMessage: item.error?.message ?? item.errorMessage ?? null,
+      error: item.error ?? null,
+      evidence: item.evidence ?? null,
+      evidenceArtifactId: item.evidenceArtifactId ?? null,
+      evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
+      coreCode: item.coreCode ?? null
+    }
+  }
   const status = treatAsRunning
     ? 'in_progress'
     : item.status === 'running'
@@ -242,6 +276,7 @@ function mapExecutionStatus(
 function sliceAggregateStatus(tasks: UnifiedTaskNode[]): string {
   if (tasks.length === 0) return 'pending'
   if (tasks.every((t) => t.status === 'completed' || t.status === 'skipped')) return 'completed'
+  if (tasks.some((t) => t.status === 'paused')) return 'paused'
   if (tasks.some((t) => t.status === 'in_progress')) return 'in_progress'
   if (tasks.some((t) => t.status === 'failed')) return 'failed'
   if (tasks.some((t) => t.status === 'completed')) return 'in_progress'
@@ -261,7 +296,10 @@ function sliceInVerification(slice: UnifiedSliceNode): boolean {
   )
 }
 
-function milestoneAggregateStatus(slices: UnifiedSliceNode[]): string {
+function milestoneAggregateStatus(
+  slices: UnifiedSliceNode[],
+  options?: { jobPaused?: boolean }
+): string {
   if (slices.length === 0) return 'pending'
   if (slices.every(sliceFullyVerified)) return 'completed'
   if (
@@ -274,6 +312,19 @@ function milestoneAggregateStatus(slices: UnifiedSliceNode[]): string {
     )
   ) {
     return 'failed'
+  }
+  if (slices.some((s) => s.status === 'paused') || options?.jobPaused === true) {
+    if (
+      slices.some(
+        (s) =>
+          s.status === 'paused' ||
+          s.status === 'in_progress' ||
+          s.runtimeStatus === 'running' ||
+          (s.status === 'completed' && !sliceFullyVerified(s))
+      )
+    ) {
+      return 'paused'
+    }
   }
   if (
     slices.some(
@@ -308,12 +359,8 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
   const sliceProgress = new Map((input.verification?.slices ?? []).map((s) => [s.id, s]))
   const milestoneProgress = new Map((input.verification?.milestones ?? []).map((m) => [m.id, m]))
 
-  const contextsRegistered = input.planProgress?.contextsRegistered ?? 0
-  let globalOrder = 0
-  const jobRunning =
-    input.jobStatus === 'running' ||
-    input.jobStatus === 'pending' ||
-    input.jobStatus === 'paused'
+  const jobPaused = input.jobStatus === 'paused' || input.jobStatus === 'pausing'
+  const jobRunning = input.jobStatus === 'running' || input.jobStatus === 'pending'
   const currentTaskId = input.currentTaskId ?? null
 
   const milestones: UnifiedMilestoneNode[] = plan.milestones.map((milestone, mIdx) => {
@@ -331,16 +378,11 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
         const flat = flatById.get(id)
         const progress = progressById.get(id)
         const hasContext = Boolean(flat?.contextMarkdown?.trim())
-        const planStatus = resolvePlanStatus(
-          input.jobStatus,
-          globalOrder,
-          contextsRegistered,
-          hasContext
-        )
-        globalOrder += 1
+        const planStatus = resolvePlanStatus(input.jobStatus, hasContext)
         const exec = mapExecutionStatus(progress, planStatus, {
           isCurrentTask: currentTaskId === id,
-          jobRunning
+          jobRunning,
+          jobPaused
         })
         const referenceIds = flat?.referenceIds ?? []
         const assignedReferences = resolveAssignedReferencesFromDto(
@@ -376,6 +418,14 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
       const sliceStatus = sliceAggregateStatus(tasks)
       const sliceRow = sliceProgress.get(sliceId)
       const allTasksDone = tasks.length > 0 && tasks.every((t) => t.status === 'completed')
+      const synthesizedRuntime =
+        allTasksDone
+          ? 'ready-for-verification'
+          : sliceStatus === 'in_progress' && !jobPaused
+            ? 'running'
+            : sliceStatus === 'paused'
+              ? null
+              : null
       return {
         id: sliceId,
         title: slice.title?.trim() || '',
@@ -383,13 +433,14 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
         successCriteria: resolveSliceSuccessCriteria(slice),
         order: sNum,
         status: sliceRow?.runtimeStatus === 'progress-ok' ? 'completed' : sliceStatus,
-        runtimeStatus:
-          sliceRow?.runtimeStatus ??
-          (allTasksDone
-            ? 'ready-for-verification'
-            : sliceStatus === 'in_progress'
-              ? 'running'
-              : null),
+        runtimeStatus: jobPaused
+          ? sliceRow?.runtimeStatus === 'progress-ok'
+            ? sliceRow.runtimeStatus
+            : sliceRow?.runtimeStatus === 'verifying' ||
+                sliceRow?.runtimeStatus === 'ready-for-verification'
+              ? sliceRow.runtimeStatus
+              : null
+          : (sliceRow?.runtimeStatus ?? synthesizedRuntime),
         verificationStatus: sliceRow?.verificationStatus ?? null,
         tasks
       }
@@ -402,7 +453,7 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
       description: milestone.description ?? '',
       successCriteria: milestone.successCriteria?.trim() ?? '',
       order: mNum,
-      status: milestoneAggregateStatus(slices),
+      status: milestoneAggregateStatus(slices, { jobPaused }),
       verificationStatus:
         milestoneRow?.verificationStatus ??
         (slices.length > 0 && slices.every((s) => s.runtimeStatus === 'progress-ok')

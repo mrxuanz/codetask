@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from 'crypto'
 import { eq } from 'drizzle-orm'
 import { AppError } from '../error'
+import { getCutoverMarker, type SchemaGeneration } from '../application/cutover-state'
 import { getDb } from '../db'
 import { authState } from '../db/schema'
 import { assertSetupCredentialsAllowed } from './credentials-policy'
@@ -18,12 +19,13 @@ import { rateLimit, LOGIN_REQUEST_RULE, LOGIN_FAILURE_RULE } from './memory-limi
 import { hashIp, bucketKeyForIp, scopeKeyForLogin } from './client-ip'
 
 const AUTH_ROW_ID = 1
-const SESSION_TTL_SEC = 12 * 60 * 60
+const SESSION_TTL_SEC = 4 * 60 * 60
 
 export interface BootstrapData {
   initialized: boolean
   authenticated: boolean
   username?: string
+  controlPlaneGeneration?: SchemaGeneration | null
 }
 
 export interface AuthData {
@@ -55,14 +57,29 @@ async function getAuthRow(): Promise<typeof authState.$inferSelect | null> {
   return rows[0] ?? null
 }
 
+function readControlPlaneGeneration(): SchemaGeneration | null {
+  try {
+    const client = (getDb() as ReturnType<typeof getDb> & { $client?: { prepare: (sql: string) => { get: () => unknown } } }).$client
+    if (!client) return null
+    const row = client
+      .prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'control_jobs'`)
+      .get() as { ok: number } | undefined
+    if (!row) return null
+    return getCutoverMarker()
+  } catch {
+    return null
+  }
+}
+
 export async function getBootstrap(token?: string): Promise<BootstrapData> {
+  const controlPlaneGeneration = readControlPlaneGeneration()
   const row = await getAuthRow()
   if (!row) {
-    return { initialized: false, authenticated: false }
+    return { initialized: false, authenticated: false, controlPlaneGeneration }
   }
 
   if (!token) {
-    return { initialized: true, authenticated: false }
+    return { initialized: true, authenticated: false, controlPlaneGeneration }
   }
 
   const sessionTokenValid =
@@ -74,13 +91,14 @@ export async function getBootstrap(token?: string): Promise<BootstrapData> {
     row.sessionExpiresAt > nowSec()
 
   if (!sessionTokenValid) {
-    return { initialized: true, authenticated: false }
+    return { initialized: true, authenticated: false, controlPlaneGeneration }
   }
 
   return {
     initialized: true,
     authenticated: true,
-    username: row.username
+    username: row.username,
+    controlPlaneGeneration
   }
 }
 

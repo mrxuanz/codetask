@@ -97,7 +97,7 @@ describe('deriveJobRecoveryState', () => {
     assert.deepEqual(state.availableActions, ['continue', 'restart', 'delete'])
   })
 
-  it('exposes recoverable infra failure with continue action at 69%', () => {
+  it('exposes recoverable infra failure with continue action', () => {
     const state = deriveJobRecoveryState(
       baseJob({
         taskProgress: {
@@ -145,19 +145,47 @@ describe('deriveJobRecoveryState', () => {
     assert.equal(state.failure.kind, 'infra_retryable')
     assert.equal(state.recovery.recoverable, true)
     assert.equal(state.recovery.reason, 'task_infra_failure')
-    assert.equal(state.recovery.nextAction, 'retry_failed_task')
+    assert.equal(state.recovery.nextAction, 'continue')
     assert.equal(state.recovery.autoRetryAttempt, 2)
-    assert.ok(state.availableActions.includes('continue'))
-    assert.ok(state.availableActions.includes('retry_failed_task'))
-    assert.ok(state.availableActions.includes('restart'))
+    assert.deepEqual(state.availableActions, ['continue', 'restart', 'delete'])
+    assert.ok(!state.availableActions.includes('retry_failed_task' as never))
   })
 
-  it('marks terminal exhausted failures as non-recoverable', () => {
+  it('keeps continue after infra auto-retry exhaustion (no retry-subtask)', () => {
     const state = deriveJobRecoveryState(baseJob())
-    assert.equal(state.failure.kind, 'terminal')
-    assert.equal(state.recovery.recoverable, false)
-    assert.equal(state.recovery.reason, 'terminal_exhausted')
-    assert.deepEqual(state.availableActions, ['retry_failed_task', 'restart', 'delete'])
+    assert.equal(state.failure.kind, 'infra_retryable')
+    assert.equal(state.recovery.recoverable, true)
+    assert.equal(state.recovery.reason, 'task_infra_failure')
+    assert.equal(state.recovery.nextAction, 'continue')
+    assert.deepEqual(state.availableActions, ['continue', 'restart', 'delete'])
+  })
+
+  it('exposes continue for slice gate failures without failed tasks', () => {
+    const state = deriveJobRecoveryState(
+      baseJob({
+        lastError: createTurnError('task.terminal_failure', {
+          params: { taskId: 'm1-s2' }
+        }).toDto(),
+        taskProgress: {
+          ...baseJob().taskProgress,
+          progressCode: 'execution.slice_blocked',
+          progressParams: { id: 'm1-s2' },
+          tasks: baseJob().taskProgress.tasks.map((task) => ({
+            ...task,
+            status: 'completed' as const,
+            executionStatus: 'completed' as const,
+            evidence: null,
+            errorMessage: null
+          }))
+        }
+      })
+    )
+
+    assert.equal(state.recovery.recoverable, true)
+    assert.equal(state.failure.kind, 'gate_blocked')
+    assert.equal(state.recovery.failedTaskId, 'm1-s2')
+    assert.equal(state.recovery.nextAction, 'continue')
+    assert.deepEqual(state.availableActions, ['continue', 'restart', 'delete'])
   })
 
   it('recovers workflow deadlock from progressCode without legacy message parsing', () => {
@@ -223,7 +251,7 @@ describe('deriveJobRecoveryState', () => {
     assert.ok(state.availableActions.includes('restart'))
   })
 
-  it('offers pause and cancel for running jobs', () => {
+  it('offers pause for running jobs without cancel', () => {
     const state = deriveJobRecoveryState(
       baseJob({
         status: 'running',
@@ -251,6 +279,50 @@ describe('deriveJobRecoveryState', () => {
     )
 
     assert.equal(state.lifecycle, 'running')
-    assert.deepEqual(state.availableActions, ['cancel', 'pause', 'delete'])
+    assert.deepEqual(state.availableActions, ['pause', 'delete'])
+  })
+
+  it('keeps continue visible for human-blocked tasks after the prerequisite is resolved', () => {
+    const state = deriveJobRecoveryState(
+      baseJob({
+        taskProgress: {
+          ...baseJob().taskProgress,
+          tasks: [
+            baseJob().taskProgress.tasks[0]!,
+            {
+              id: 'm2-s3-t2',
+              title: 'blocked',
+              status: 'failed',
+              executionStatus: 'blocked',
+              evidence: {
+                status: 'blocked',
+                summary: 'needs human approval',
+                changedFiles: [],
+                evidence: [],
+                validation: { ran: false, outcome: 'skipped' },
+                blockers: ['human'],
+                blockerKind: 'dependency-human',
+                recovery: {
+                  kind: 'dependency-human',
+                  source: 'classifier',
+                  confidence: 'high',
+                  reasons: ['human'],
+                  attempt: 1,
+                  maxAttempts: 1,
+                  action: 'pause-human'
+                }
+              },
+              errorMessage: 'Human intervention required',
+              coreCode: null
+            }
+          ]
+        }
+      })
+    )
+
+    assert.equal(state.failure.kind, 'human_blocked')
+    assert.equal(state.recovery.recoverable, true)
+    assert.equal(state.recovery.strategy, 'needs_attention')
+    assert.deepEqual(state.availableActions, ['continue', 'restart', 'delete'])
   })
 })

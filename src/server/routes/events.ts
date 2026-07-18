@@ -5,13 +5,14 @@ import type { AppContext } from '../context'
 import { requireUsername } from '../auth/session'
 import { AppError } from '../error'
 import { ok } from '../response'
-import { registerJobHubConnection } from '../events/job-event-hub'
-import { getUserJob } from '../jobs/service'
+import { getRealtimeJobSnapshot, registerJobHubConnection } from '../events/job-event-hub'
 import { getThread } from '../threads/service'
+import { assertSseClientCapacity } from '../middleware/http-limits'
 import {
   jobIdFromTopic,
   parseHubTopic,
   threadIdFromTopic,
+  turnIdFromTopic,
   type HubTopic
 } from '@shared/contracts/job-event-hub'
 
@@ -31,7 +32,7 @@ async function assertTopicsOwned(username: string, topics: HubTopic[]): Promise<
     const jobId = jobIdFromTopic(topic)
     if (jobId) {
       if (jobId === 'resync') continue
-      const job = await getUserJob(username, jobId)
+      const job = await getRealtimeJobSnapshot(username, jobId)
       if (!job) {
         throw AppError.notFound('Job not found', 'job.not_found', { jobId })
       }
@@ -43,14 +44,20 @@ async function assertTopicsOwned(username: string, topics: HubTopic[]): Promise<
       if (!thread) {
         throw AppError.notFound('Thread not found', 'thread.not_found', { threadId })
       }
+      continue
+    }
+    const turnId = turnIdFromTopic(topic)
+    if (turnId) {
+      const { getTurn } = await import('../conversation/turn-queue')
+      const turn = await getTurn(username, turnId)
+      if (!turn) {
+        throw AppError.notFound('Turn not found', 'turn.not_found', { turnId })
+      }
     }
   }
 }
 
-function parseTopicsFromBody(body: {
-  topics?: string[]
-  jobIds?: string[]
-}): HubTopic[] {
+function parseTopicsFromBody(body: { topics?: string[]; jobIds?: string[] }): HubTopic[] {
   if (Array.isArray(body.topics)) {
     const topics: HubTopic[] = []
     for (const raw of body.topics) {
@@ -96,7 +103,7 @@ async function handleSubscriptions(c: Context): Promise<Response> {
   return c.json(ok({ connectionId, topics }))
 }
 
-async function handleStream(c: Context): Promise<Response> {
+async function handleStream(c: Context, maxClientsPerUser: number): Promise<Response> {
   const username = await requireUsername(c.req.header('Authorization'))
   const connectionId =
     c.req.query('connectionId')?.trim() ||
@@ -105,6 +112,8 @@ async function handleStream(c: Context): Promise<Response> {
   const lastRaw = c.req.header('Last-Event-ID') ?? c.req.query('lastEventId')
   const parsedLast = lastRaw ? Number.parseInt(lastRaw, 10) : NaN
   const lastEventId = Number.isFinite(parsedLast) ? parsedLast : null
+
+  assertSseClientCapacity(activeHubs.keys(), username, maxClientsPerUser)
 
   const hub = registerJobHubConnection(username, connectionId, { lastEventId })
   const key = hubKey(username, hub.connectionId)
@@ -132,13 +141,13 @@ async function handleStream(c: Context): Promise<Response> {
   })
 }
 
-export function createEventsRoutes(_ctx: AppContext): Hono {
+export function createEventsRoutes(ctx: AppContext): Hono {
   const routes = new Hono()
 
   routes.put('/subscriptions', (c) => handleSubscriptions(c))
   routes.put('/jobs/subscriptions', (c) => handleSubscriptions(c))
-  routes.get('/stream', (c) => handleStream(c))
-  routes.get('/jobs/stream', (c) => handleStream(c))
+  routes.get('/stream', (c) => handleStream(c, ctx.config.http.maxSseClientsPerUser))
+  routes.get('/jobs/stream', (c) => handleStream(c, ctx.config.http.maxSseClientsPerUser))
 
   return routes
 }

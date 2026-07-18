@@ -152,17 +152,21 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
-  <Card>
-    <CardHeader>
-      <CardTitle>{{ title }}</CardTitle>
-      <CardDescription>{{ description }}</CardDescription>
-      <p v-if="enforceCredentialsPolicy" class="text-sm text-muted-foreground">
+  <Card class="w-full min-w-0 overflow-hidden">
+    <CardHeader class="space-y-2 px-4 pt-5 sm:px-6 sm:pt-6">
+      <CardTitle class="text-lg sm:text-xl">{{ title }}</CardTitle>
+      <CardDescription class="text-sm leading-relaxed break-words">{{ description }}</CardDescription>
+      <p
+        v-if="enforceCredentialsPolicy"
+        class="text-xs leading-relaxed text-muted-foreground break-words sm:text-sm"
+      >
         {{ t('setup.credentialsHint') }}
       </p>
     </CardHeader>
-    <CardContent>
-      <form class="flex flex-col gap-4" @submit.prevent="handleSubmit">
-        <div v-if="showSetupToken" class="flex flex-col gap-2">
+    <CardContent class="px-4 pb-5 sm:px-6 sm:pb-6">
+      <form class="flex min-w-0 flex-col gap-3 sm:gap-4" @submit.prevent="handleSubmit">
+        <slot name="before" :disabled="submitting || captchaLoading" />
+        <div v-if="showSetupToken" class="flex min-w-0 flex-col gap-2">
           <Label for="setupToken">{{ t('setup.setupTokenLabel') }}</Label>
           <Input
             id="setupToken"
@@ -173,7 +177,7 @@ async function handleSubmit(): Promise<void> {
             @blur="handleFieldBlur"
           />
         </div>
-        <div class="flex flex-col gap-2">
+        <div class="flex min-w-0 flex-col gap-2">
           <Label for="username">{{ t('common.username') }}</Label>
           <Input
             id="username"
@@ -184,7 +188,7 @@ async function handleSubmit(): Promise<void> {
             @blur="handleFieldBlur"
           />
         </div>
-        <div class="flex flex-col gap-2">
+        <div class="flex min-w-0 flex-col gap-2">
           <Label for="password">{{ t('common.password') }}</Label>
           <PasswordInput
             id="password"
@@ -195,7 +199,7 @@ async function handleSubmit(): Promise<void> {
             @blur="onPasswordBlur"
           />
         </div>
-        <div v-if="enforceCredentialsPolicy" class="flex flex-col gap-2">
+        <div v-if="enforceCredentialsPolicy" class="flex min-w-0 flex-col gap-2">
           <Label for="confirmPassword">{{ t('setup.confirmPassword') }}</Label>
           <PasswordInput
             id="confirmPassword"
@@ -206,12 +210,12 @@ async function handleSubmit(): Promise<void> {
             @blur="trimSetupInputs"
           />
         </div>
-        <div v-if="captchaChallenge" class="flex flex-col gap-2">
+        <div v-if="captchaChallenge" class="flex min-w-0 flex-col gap-2">
           <Label>{{ t('common.captchaLabel') }}</Label>
           <img
             :src="captchaChallenge.image"
             alt="Captcha"
-            class="border rounded h-12 w-48 cursor-pointer"
+            class="h-12 w-full max-w-48 cursor-pointer rounded border"
             @click="loadCaptcha"
           />
           <Input

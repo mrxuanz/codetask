@@ -1,12 +1,16 @@
 import { throwSdkTurnError } from '../errors'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
 import { buildCodexTurnPlan } from './codex-policy'
-import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot } from '../delta-emit'
 import { extractCodexReasoningText } from '../reasoning-text'
-import { recordCodexThreadItemActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { createProviderTurnScope } from '../provider-turn'
+import {
+  recordCodexThreadItemActivity,
+  assertRoleTurnReply,
+  partialCompletedChunk
+} from '../turn-scope'
+import { abortReason, createProviderTurnScope, forwardAbortSignal } from '../provider-turn'
 
 function extractAgentText(item: { type?: string; text?: string }): string | null {
   if (item.type === 'agent_message' && item.text) {
@@ -65,7 +69,9 @@ export async function* streamCodexTurn(
     env: plan.env,
     ...(plan.sdkConfig
       ? {
-          config: plan.sdkConfig as NonNullable<ConstructorParameters<typeof Codex>[0]>['config']
+          config: plan.sdkConfig as NonNullable<
+            NonNullable<ConstructorParameters<typeof Codex>[0]>['config']
+          >
         }
       : {})
   })
@@ -78,17 +84,12 @@ export async function* streamCodexTurn(
     ? `${input.systemPrompt}\n\n---\n\n${input.prompt}`
     : input.prompt
 
+  const turnScope = createProviderTurnScope(input.role, options, {})
   const turnAbort = new AbortController()
-  const externalSignal = options?.signal
-  if (externalSignal?.aborted) {
-    throw TURN_CANCELLED
+  if (turnScope.signal.aborted) {
+    throw abortReason(turnScope.signal)
   }
-  externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
-
-  const turnScope = createProviderTurnScope(input.role, options, {
-    onSoftCancel: () => turnAbort.abort()
-  })
-  turnScope.arm()
+  const turnAbortListener = forwardAbortSignal(turnScope.signal, turnAbort)
 
   const streamed = await thread.runStreamed(prompt, { signal: turnAbort.signal })
   let reply = ''
@@ -190,7 +191,7 @@ export async function* streamCodexTurn(
         replyChars: reply.length,
         aborted: true
       })
-      throw TURN_CANCELLED
+      throw abortReason(turnScope.signal)
     }
     sandboxTurnDebug('codex: turn error', {
       role: plan.role,
@@ -199,6 +200,7 @@ export async function* streamCodexTurn(
     })
     throwSdkTurnError(error)
   } finally {
+    turnScope.signal.removeEventListener('abort', turnAbortListener)
     turnScope.dispose()
     await eventIterator.return?.(undefined).catch(() => {})
   }

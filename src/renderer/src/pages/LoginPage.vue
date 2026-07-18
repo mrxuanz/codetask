@@ -32,15 +32,17 @@ async function onSubmit(payload: {
 </script>
 
 <template>
-  <PageShell>
-    <CredentialsForm
-      :title="t('login.title')"
-      :description="t('login.description')"
-      :submit-label="t('login.submit')"
-      :submitting-label="t('login.submitting')"
-      password-auto-complete="current-password"
-      :show-setup-token="false"
-      :on-submit="onSubmit"
-    />
-  </PageShell>
+  <div class="h-full min-h-0 min-w-0">
+    <PageShell>
+      <CredentialsForm
+        :title="t('login.title')"
+        :description="t('login.description')"
+        :submit-label="t('login.submit')"
+        :submitting-label="t('login.submitting')"
+        password-auto-complete="current-password"
+        :show-setup-token="false"
+        :on-submit="onSubmit"
+      />
+    </PageShell>
+  </div>
 </template>

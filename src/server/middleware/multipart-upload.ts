@@ -20,8 +20,10 @@ export interface MultipartUploadOptions {
   emptyErrorMessage?: string
 }
 
+type MultipartFormData = Record<string, unknown>
+
 async function collectUploadFiles(
-  form: Record<string, string | File | (string | File)[]>,
+  form: MultipartFormData,
   options: MultipartUploadOptions
 ): Promise<ParsedUploadFile[]> {
   const field = options.field ?? 'file'
@@ -30,7 +32,11 @@ async function collectUploadFiles(
   const minFiles = options.minFiles ?? 1
 
   const rawFiles = form[field]
-  const entries = Array.isArray(rawFiles) ? rawFiles : rawFiles ? [rawFiles] : []
+  const entries: unknown[] = Array.isArray(rawFiles)
+    ? rawFiles
+    : rawFiles !== undefined
+      ? [rawFiles]
+      : []
 
   if (entries.length > maxFiles) {
     throw AppError.badRequest(
@@ -42,8 +48,8 @@ async function collectUploadFiles(
   const uploadFiles: ParsedUploadFile[] = []
 
   for (const entry of entries) {
-    if (typeof entry === 'string') continue
-    const blob = entry as File
+    if (!(entry instanceof File)) continue
+    const blob = entry
     const buffer = Buffer.from(await blob.arrayBuffer())
     if (buffer.length === 0) continue
     if (buffer.length > maxFileBytes) {
@@ -78,7 +84,7 @@ export async function parseLimitedMultipartFiles(
 }
 
 export async function parseLimitedMultipartFilesFromForm(
-  form: Record<string, string | File | (string | File)[]>,
+  form: MultipartFormData,
   options: MultipartUploadOptions = {}
 ): Promise<ParsedUploadFile[]> {
   return collectUploadFiles(form, options)

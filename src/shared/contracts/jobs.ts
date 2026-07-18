@@ -4,61 +4,62 @@ import type { SliceVerificationRecordDto, TaskBlockerKind, TaskEvidenceDto } fro
 import type { TurnErrorDto } from './turn-errors'
 import type {
   ExecutionProgressDto,
-  JobAvailableAction,
   JobFailureDto,
   JobLifecycle,
   JobRecoveryDto
 } from '../job-recovery-state'
 import type { JobProgressCode, JobProgressParams } from '../progress-codes'
+import type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
 
 export type { SliceVerificationRecordDto, TaskEvidenceDto } from './evidence'
+export type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
 
 export interface PlanProgressDto {
   phase: 'idle' | 'planning' | 'plan_ready' | 'failed' | 'cleanup_failed' | 'needs_auth'
   status: 'pending' | 'running' | 'completed' | 'failed'
   contextsRegistered: number
   contextsTotal: number
-  milestones?: number
-  slices?: number
-  tasks?: number
-  message?: string | null
+  milestones?: number | undefined
+  slices?: number | undefined
+  tasks?: number | undefined
+  message?: string | null | undefined
 
-  progressCode?: JobProgressCode | null
-  progressParams?: JobProgressParams | null
+  progressCode?: JobProgressCode | null | undefined
+  progressParams?: JobProgressParams | null | undefined
 }
 
 export interface TaskProgressItemDto {
   id: string
   title: string
   status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped'
-  abilityCode?: string
-  executionStatus?: string | null
-  evidenceStatus?: string | null
-  evidence?: TaskEvidenceDto | null
+  abilityCode?: string | undefined
+  executionStatus?: string | null | undefined
+  evidenceStatus?: string | null | undefined
+  evidence?: TaskEvidenceDto | null | undefined
 
-  evidenceArtifactId?: string | null
+  evidenceArtifactId?: string | null | undefined
 
-  evidenceSummary?: string | null
-  blockerKind?: TaskBlockerKind | null
-  recoveryAction?: string | null
+  evidenceSummary?: string | null | undefined
+  blockerKind?: TaskBlockerKind | null | undefined
+  recoveryAction?: string | null | undefined
 
-  errorMessage?: string | null
-  error?: TurnErrorDto | null
-  coreCode?: string | null
+  errorMessage?: string | null | undefined
+  error?: TurnErrorDto | null | undefined
+  coreCode?: string | null | undefined
 }
 
 export interface TaskProgressSliceDto {
   id: string
-  runtimeStatus?: string | null
-  verificationStatus?: string | null
-  verdict?: SliceVerificationRecordDto | null
-  verdictArtifactId?: string | null
-  verdictSummary?: string | null
+  runtimeStatus?: string | null | undefined
+  verificationStatus?: string | null | undefined
+  verdict?: SliceVerificationRecordDto | null | undefined
+  verdictArtifactId?: string | null | undefined
+  verdictSummary?: string | null | undefined
 }
 
 export interface TaskProgressMilestoneDto {
   id: string
-  verificationStatus?: string | null
+  verificationStatus?: string | null | undefined
 }
 
 export interface TaskProgressDto {
@@ -66,23 +67,23 @@ export interface TaskProgressDto {
   status: 'pending' | 'running' | 'completed' | 'failed'
   currentIndex: number
   total: number
-  currentTaskId?: string | null
-  message?: string | null
+  currentTaskId?: string | null | undefined
+  message?: string | null | undefined
 
-  progressCode?: JobProgressCode | null
-  progressParams?: JobProgressParams | null
+  progressCode?: JobProgressCode | null | undefined
+  progressParams?: JobProgressParams | null | undefined
   tasks: TaskProgressItemDto[]
-  slices?: TaskProgressSliceDto[]
-  milestones?: TaskProgressMilestoneDto[]
-  repairGenerations?: Record<string, number>
-  verificationAttempts?: Record<string, number>
-  verificationBundleHashes?: Record<string, string>
+  slices?: TaskProgressSliceDto[] | undefined
+  milestones?: TaskProgressMilestoneDto[] | undefined
+  repairGenerations?: Record<string, number> | undefined
+  verificationAttempts?: Record<string, number> | undefined
+  verificationBundleHashes?: Record<string, string> | undefined
 }
 
 export interface ThreadJobAbilityDto {
   abilityCode: string
-  label?: string
-  recommendedCoreCode?: string
+  label?: string | undefined
+  recommendedCoreCode?: string | undefined
 }
 
 export type ThreadJobStatus =
@@ -115,34 +116,49 @@ export interface ThreadJobDto {
   planProgress: PlanProgressDto
   taskProgress: TaskProgressDto
   abilities: ThreadJobAbilityDto[]
-  plan?: SavedJobPlan | null
-  referenceManifest?: JobReferenceManifestDto | null
+  plan?: SavedJobPlan | null | undefined
+  referenceManifest?: JobReferenceManifestDto | null | undefined
 
-  referenceManifestStale?: boolean
-  workspacePath?: string
-  lastError?: TurnErrorDto | null
+  referenceManifestStale?: boolean | undefined
+  workspacePath?: string | undefined
+  lastError?: TurnErrorDto | null | undefined
 
-  lifecycle?: JobLifecycle
+  lifecycle?: JobLifecycle | undefined
 
-  execution?: ExecutionProgressDto
+  execution?: ExecutionProgressDto | undefined
 
-  failure?: JobFailureDto
+  failure?: JobFailureDto | undefined
 
-  recovery?: JobRecoveryDto
+  recovery?: JobRecoveryDto | undefined
 
-  availableActions?: JobAvailableAction[]
+  /**
+   * Server-authoritative actions. Legacy recovery may emit JobAvailableAction;
+   * control-plane jobs attach V3 JobAction values from JobQueryService.
+   */
+  availableActions?: readonly string[] | undefined
+
+  /** Present when a control_jobs row exists (V3 aggregate revision). */
+  stateRevision?: number | undefined
 
   /** Present when status is `pending` and the job is in the execution FIFO queue. */
-  queue?: ExecutionQueueDto
+  queue?: ExecutionQueueDto | undefined
 
-  planRevision?: number | null
-  draftConfirmedAt?: number | null
-  planConfirmedAt?: number | null
+  planRevision?: number | null | undefined
+  draftConfirmedAt?: number | null | undefined
+  planConfirmedAt?: number | null | undefined
 
-  designSessionId?: string | null
-  snapshotDraftRevision?: number | null
-  snapshotPlanRevision?: number | null
-  snapshotManifestRevision?: number | null
+  designSessionId?: string | null | undefined
+  snapshotDraftRevision?: number | null | undefined
+  snapshotPlanRevision?: number | null | undefined
+  snapshotManifestRevision?: number | null | undefined
+
+  /** Structured pause source; null when not paused / unclassified. */
+  suspensionKind?: SuspensionKind | undefined
+  /** Continue requested while still pausing — settle then queue a fresh run. */
+  continueAfterPause?: boolean | undefined
+  /** Why recovery is waiting (e.g. uncertain_provider_outcome). */
+  recoveryReason?: JobRecoveryReason | undefined
+
   createdAt: number
   updatedAt: number
 }

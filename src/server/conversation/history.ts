@@ -42,7 +42,8 @@ export function findLatestHandoff(
   messages: ConversationMessageDto[]
 ): ConversationMessageDto | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i].kind === 'wizard-handoff') return messages[i]
+    const message = messages[i]
+    if (message !== undefined && message.kind === 'wizard-handoff') return message
   }
   return null
 }
@@ -75,7 +76,7 @@ export function shouldSeedConversationHistory(
   priorMessages: ConversationMessageDto[],
   options?: {
     excludeMessageId?: string
-    wizardPhase?: WizardPhase
+    wizardPhase?: WizardPhase | undefined
     createTaskMode?: boolean
   }
 ): boolean {
@@ -117,7 +118,7 @@ export function buildConversationHistoryBlock(
   options?: {
     excludeMessageId?: string
     limit?: number
-    wizardPhase?: WizardPhase
+    wizardPhase?: WizardPhase | undefined
     createTaskMode?: boolean
   }
 ): string | null {

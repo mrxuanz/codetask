@@ -1,6 +1,7 @@
 export type JobProgressCode =
   | 'plan.pending'
   | 'plan.planning'
+  | 'plan.outline_ready'
   | 'plan.planning_partial'
   | 'plan.plan_ready'
   | 'plan.planning_failed'

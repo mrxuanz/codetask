@@ -81,7 +81,7 @@ describe('07 failures workflow', () => {
     )
   })
 
-  it('fails when planner does not register_plan', async () => {
+  it('fails when planner does not finalize_plan', async () => {
     const draft = await harness.seedDraftReady()
     harness.setScript('planner:0', { reply: 'no plan', mcpCalls: [] })
     const { job } = await harness.confirmDraftFinal(draft.threadId, draft.draftMessageId)

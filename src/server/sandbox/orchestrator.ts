@@ -12,7 +12,7 @@ import { getSandboxSupervisorManager } from './supervisor-manager'
 
 export type { RunSandboxedTurnInput } from './orchestrator-local'
 
-export { isOuterSandboxEnabled } from './orchestrator-local'
+export { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export function shouldUseSandboxSupervisor(): boolean {
   if (process.env.CODETASK_SANDBOX_SUPERVISOR === '0') return false
@@ -62,8 +62,12 @@ export async function releaseJobCursorResources(jobId: string): Promise<void> {
 
   if (shouldUseSandboxSupervisor()) {
     try {
-      await getSandboxSupervisorManager().ensureReady()
-      getSandboxSupervisorManager().send({ type: 'close-job-cursor', jobId: trimmed })
+      // Do not spawn the supervisor solely to close a cursor — that leaves a
+      // long-lived child process and can hang unit tests after delete drain.
+      const manager = getSandboxSupervisorManager()
+      if (manager.statusSnapshot().ready) {
+        manager.send({ type: 'close-job-cursor', jobId: trimmed })
+      }
     } catch {
       // ignore
     }

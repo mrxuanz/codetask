@@ -3,7 +3,6 @@ import type { ConversationRole } from '../agent-runtime/roles'
 import type { AgentTurnInput, AgentTurnChunk } from '../agent-runtime/types'
 import { formatSdkTurnError } from '../agent-runtime/errors'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
-import { resolveSandboxDataDir } from './data-dir'
 import { buildSandboxEnv } from './env'
 import {
   awaitSandboxWorkerAttestation,
@@ -13,13 +12,7 @@ import {
   reapSandboxChild,
   terminateSandboxTree
 } from './launcher'
-import {
-  policyForRole,
-  applyProviderWriteRoots,
-  applyProviderReadRoots,
-  collectPolicyReadRoots,
-  collectPolicyWriteRoots
-} from './policy'
+import { policyForRoleV2, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { preflightSandbox } from './preflight'
 import { prepareProviderAuth, runProviderAuthPreflight } from './provider-auth'
@@ -30,22 +23,29 @@ import { SandboxError } from './types'
 import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { streamJobCursorSandboxTurn } from './job-cursor-pool'
 import { throwIfSandboxTurnAborted } from './turn-guards'
+import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
+export { isOuterSandboxEnabled } from './outer-sandbox-flag'
+
 export interface RunSandboxedTurnInput {
   role: ConversationRole
   coreCode: SupportedCoreCode
   workspaceRoot: string
   runtimeRoot: string
   prompt: string
-  runtimeSessionId?: string | null
-  model?: string
-  systemPrompt?: string
-  mcpUrl?: string
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
-  mcpToken?: string
-  signal?: AbortSignal
-  readRoots?: string[]
-  jobId?: string
+  runtimeSessionId?: string | null | undefined
+  model?: string | undefined
+  systemPrompt?: string | undefined
+  mcpUrl?: string | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
+  mcpToken?: string | undefined
+  signal?: AbortSignal | undefined
+  readRoots?: string[] | undefined
+  jobId?: string | undefined
+  idempotencyKey?: string | undefined
+  workspaceAccess?: WorkspaceAccessMode | undefined
+  capabilityProfile: AgentCapabilityProfile
 }
 
 function resolveRoleWorkerPath(): string {
@@ -160,6 +160,10 @@ export async function* streamSandboxedConversationTurnLocal(
   })
 
   throwIfSandboxTurnAborted(input.signal)
+  if (process.platform === 'win32') {
+    const { ensureWindowsSandboxReady } = await import('./windows-bootstrap')
+    await ensureWindowsSandboxReady(process.env.CODETASK_DATA_DIR ?? input.runtimeRoot)
+  }
   preflightSandbox()
   throwIfSandboxTurnAborted(input.signal)
 
@@ -175,7 +179,9 @@ export async function* streamSandboxedConversationTurnLocal(
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,
     userMcpServers: input.userMcpServers,
-    jobId: input.jobId
+    capabilityProfile: input.capabilityProfile,
+    jobId: input.jobId,
+    idempotencyKey: input.idempotencyKey
   }
 
   const workerPath = resolveRoleWorkerPath()
@@ -187,25 +193,24 @@ export async function* streamSandboxedConversationTurnLocal(
   runProviderAuthPreflight(input.coreCode, authPrepared)
   throwIfSandboxTurnAborted(input.signal)
 
-  const dataDir = resolveSandboxDataDir()
   const providerReadRoots = mergeProviderReadRoots(resolveProviderReadRoots(input.coreCode), [
     ...authPrepared.readRoots,
-    dataDir,
     ...resolveRuntimeReadRoots(),
     ...(input.readRoots ?? [])
   ])
 
-  const policy = applyProviderReadRoots(
-    applyProviderWriteRoots(
-      policyForRole({
-        role: input.role,
-        workspaceRoot: input.workspaceRoot,
-        runtimeRoot: input.runtimeRoot
-      }),
-      authPrepared.writeRoots
-    ),
-    providerReadRoots
-  )
+  // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
+  // Conversation/planner roles can read the project and write runtime/provider state only;
+  // task-worker remains the sole role that may write the real workspace.
+  const policy = policyForRoleV2({
+    role: input.role,
+    workspaceRoot: input.workspaceRoot,
+    runtimeRoot: input.runtimeRoot,
+    providerReadRoots,
+    ...(authPrepared.writeRoots ? { providerWriteRoots: authPrepared.writeRoots } : {}),
+    ...(input.readRoots ? { attachmentReadRoots: input.readRoots } : {}),
+    ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {})
+  })
 
   sandboxTurnDebug('sandbox orchestrator: provider auth prepared', {
     provider: input.coreCode,
@@ -216,21 +221,20 @@ export async function* streamSandboxedConversationTurnLocal(
 
   const env = buildSandboxEnv({
     runtimeRoot: input.runtimeRoot,
-    dataDir,
     providerEnv: authPrepared.envPatch,
     mcpToken: input.mcpToken
   })
   const readRoots = collectPolicyReadRoots(policy)
   const writeRoots = collectPolicyWriteRoots(policy)
 
-  const useJobCursorPool =
+  const usePersistentCursorPool =
     process.platform !== 'win32' &&
     input.coreCode === 'cursorcli' &&
     Boolean(input.jobId?.trim()) &&
     input.role === 'task-worker'
 
   try {
-    if (useJobCursorPool) {
+    if (usePersistentCursorPool) {
       throwIfSandboxTurnAborted(input.signal)
       yield* streamJobCursorSandboxTurn(input.jobId!, input, {
         policy,
@@ -260,8 +264,4 @@ export async function* streamSandboxedConversationTurnLocal(
   } finally {
     authPrepared.cleanupPlan()
   }
-}
-
-export function isOuterSandboxEnabled(): boolean {
-  return process.env.CODETASK_DISABLE_OUTER_SANDBOX !== '1'
 }

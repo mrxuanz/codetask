@@ -81,10 +81,10 @@ export function buildOuterSandboxCodexConfigOverrides(): Pick<
 }
 
 export function buildCodexSdkConfig(input: {
-  mcpUrl?: string
-  outerSandbox?: boolean
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
+  mcpUrl?: string | undefined
+  outerSandbox?: boolean | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
 }): CodexSdkConfig | undefined {
   const config: CodexSdkConfig = {} as CodexSdkConfig
   const userMcpServers = input.userMcpServers ?? {}
@@ -161,9 +161,9 @@ export type CursorAcpMcpServer = {
   type: 'http' | 'stdio'
   url?: string
   command?: string
-  args?: string[]
-  env?: Record<string, string>
-  headers?: Array<{ name: string; value: string }>
+  args?: string[] | undefined
+  env?: Record<string, string> | undefined
+  headers?: Array<{ name: string; value: string }> | undefined
 }
 
 function headersFromUnknown(value: unknown): Array<{ name: string; value: string }> | undefined {

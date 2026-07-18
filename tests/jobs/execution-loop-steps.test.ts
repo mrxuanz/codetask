@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { join } from 'node:path'
 
-const executorPath = join(process.cwd(), 'src/server/jobs/executor.ts')
+const executorPath = join(process.cwd(), 'src/server/legacy-control-plane/executor.ts')
 const source = readFileSync(executorPath, 'utf8')
 
 describe('runExecutionLoop step extraction', () => {

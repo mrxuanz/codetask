@@ -3,8 +3,14 @@ import type { Context } from 'hono'
 import { hmacAuthSecret } from './secret'
 
 export function getClientIp(c: Context): string {
-  const info = getConnInfo(c)
-  return info.remote.address ?? '127.0.0.1'
+  // @hono/node-server injects { incoming, outgoing } as c.env; missing when fetch drops env.
+  if (!c.env) return '127.0.0.1'
+  try {
+    const info = getConnInfo(c)
+    return info.remote.address ?? '127.0.0.1'
+  } catch {
+    return '127.0.0.1'
+  }
 }
 
 export function hashIp(authSecret: string, ip: string): string {

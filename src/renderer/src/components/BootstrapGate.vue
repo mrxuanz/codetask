@@ -46,17 +46,19 @@ watch(
 </script>
 
 <template>
-  <PageShell v-if="loading" max-width="sm">
-    <Card>
-      <CardContent class="py-8">
-        <Spinner />
-      </CardContent>
-    </Card>
-  </PageShell>
+  <div class="h-full min-h-0 min-w-0">
+    <PageShell v-if="loading" max-width="sm">
+      <Card>
+        <CardContent class="py-8">
+          <Spinner />
+        </CardContent>
+      </Card>
+    </PageShell>
 
-  <PageShell v-else-if="error || !data" max-width="sm">
-    <ErrorAlert :message="connectionErrorMessage" />
-  </PageShell>
+    <PageShell v-else-if="error || !data" max-width="sm">
+      <ErrorAlert :message="connectionErrorMessage" />
+    </PageShell>
 
-  <RouterView v-else-if="!redirectTarget" />
+    <RouterView v-else-if="!redirectTarget" />
+  </div>
 </template>

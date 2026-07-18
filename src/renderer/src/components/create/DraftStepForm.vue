@@ -14,6 +14,7 @@ import Spinner from '@renderer/components/ui/Spinner.vue'
 import { useDraftPlanWorkspace } from '@renderer/composables/useDraftPlanWorkspace'
 import { getPlanProgressSnapshot } from '@renderer/lib/jobProgress'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
+import { toastError } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
 
 const props = defineProps<{
@@ -122,7 +123,7 @@ async function handlePlanNodeFieldSave(payload: {
     const idx = ws.plans.value.findIndex((item) => item.id === plan.id)
     if (idx >= 0) ws.plans.value[idx] = res.data.job
   } catch (err) {
-    ws.error.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     savingPlanFields.value = false
   }
@@ -150,7 +151,7 @@ async function handleTaskReferencesSave(payload: {
     const idx = ws.plans.value.findIndex((item) => item.id === plan.id)
     if (idx >= 0) ws.plans.value[idx] = res.data.job
   } catch (err) {
-    ws.error.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     savingPlanFields.value = false
   }
@@ -172,7 +173,7 @@ async function handleTaskCliChange(payload: { taskId: string; coreCode: string }
     const idx = ws.plans.value.findIndex((item) => item.id === plan.id)
     if (idx >= 0) ws.plans.value[idx] = res.data.job
   } catch (err) {
-    ws.error.value = err instanceof Error ? err.message : String(err)
+    toastError(err, String(err))
   } finally {
     savingTaskCli.value = false
     savingTaskId.value = null
@@ -203,20 +204,13 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
     <div v-if="ws.error.value" class="shrink-0 px-4 pt-3">
       <ErrorAlert :message="ws.error.value" />
     </div>
-    <div v-if="ws.successMessage.value" class="shrink-0 px-4 pt-2">
-      <p
-        class="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800"
-      >
-        {{ ws.successMessage.value }}
-      </p>
-    </div>
 
-    <div class="shrink-0 border-b border-border px-4 py-3">
-      <ol class="flex gap-2">
+    <div class="shrink-0 border-b border-border px-2 py-2 sm:px-4 sm:py-3">
+      <ol class="flex gap-1 sm:gap-2">
         <li v-for="(label, index) in stepLabels" :key="index" class="flex flex-1 items-center">
           <button
             type="button"
-            class="flex w-full items-center justify-center gap-2 rounded-md px-2 py-2 text-xs transition-colors"
+            class="flex w-full items-center justify-center gap-1 rounded-md px-1 py-2 text-xs transition-colors sm:gap-2 sm:px-2"
             :class="
               cn(
                 stepStatus(index) === 'current' && 'bg-primary/10 font-medium text-primary',
@@ -239,13 +233,13 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
             >
               {{ index + 1 }}
             </span>
-            <span class="truncate">{{ label }}</span>
+            <span class="hidden truncate sm:inline">{{ label }}</span>
           </button>
         </li>
       </ol>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+    <div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
       <div v-if="ws.currentStep.value === 0" class="mx-auto max-w-lg py-8">
         <p class="text-sm leading-relaxed text-muted-foreground">
           {{ t('workspace.create.step0Hint') }}

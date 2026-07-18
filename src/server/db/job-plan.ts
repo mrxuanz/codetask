@@ -1,6 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
 import type { getDb } from './index'
-import type { PlanProgressDto, ThreadJobAbilityDto } from '../jobs/types'
+import type { PlanProgressDto, ThreadJobAbilityDto } from '../legacy-control-plane/types'
 import { defaultPlanProgress } from '../planner/save-plan'
 import type {
   FlatTaskPlan,
@@ -14,9 +14,9 @@ import { jobAbilities, jobPlanMilestones, jobPlanSlices, jobPlanTasks, threadJob
 type AppDatabase = ReturnType<typeof getDb>
 
 type PlanCounts = {
-  milestones?: number
-  slices?: number
-  tasks?: number
+  milestones?: number | undefined
+  slices?: number | undefined
+  tasks?: number | undefined
 }
 
 function parseJsonArray(value: string | null | undefined): string[] | undefined {
@@ -125,39 +125,49 @@ function assembleMilestones(
   })
 }
 
-async function loadPlanMilestonesFromDb(
+function loadPlanMilestonesFromDbInTx(
   db: AppDatabase,
   jobId: string,
   flatTasks: FlatTaskPlan[]
-): Promise<PlannerRegisteredMilestone[] | null> {
-  const milestoneRows = await db
+): PlannerRegisteredMilestone[] | null {
+  const milestoneRows = db
     .select()
     .from(jobPlanMilestones)
     .where(eq(jobPlanMilestones.jobId, jobId))
     .orderBy(asc(jobPlanMilestones.sortOrder))
+    .all()
 
   if (milestoneRows.length === 0) return null
 
-  const sliceRows = await db
+  const sliceRows = db
     .select()
     .from(jobPlanSlices)
     .where(eq(jobPlanSlices.jobId, jobId))
     .orderBy(asc(jobPlanSlices.sortOrder))
+    .all()
 
   return assembleMilestones(milestoneRows, sliceRows, flatTasks)
+}
+
+export function loadJobAbilitiesInTx(
+  db: AppDatabase,
+  jobId: string
+): ThreadJobAbilityDto[] {
+  const rows = db
+    .select()
+    .from(jobAbilities)
+    .where(eq(jobAbilities.jobId, jobId))
+    .orderBy(asc(jobAbilities.sortOrder))
+    .all()
+
+  return rows.map(mapAbilityRow)
 }
 
 export async function loadJobAbilities(
   db: AppDatabase,
   jobId: string
 ): Promise<ThreadJobAbilityDto[]> {
-  const rows = await db
-    .select()
-    .from(jobAbilities)
-    .where(eq(jobAbilities.jobId, jobId))
-    .orderBy(asc(jobAbilities.sortOrder))
-
-  return rows.map(mapAbilityRow)
+  return loadJobAbilitiesInTx(db, jobId)
 }
 
 export async function saveJobAbilities(
@@ -178,18 +188,19 @@ export async function saveJobAbilities(
   }
 }
 
-export async function loadJobPlan(db: AppDatabase, jobId: string): Promise<SavedJobPlan | null> {
-  const jobRow = (await db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1))[0]
+export function loadJobPlanInTx(db: AppDatabase, jobId: string): SavedJobPlan | null {
+  const jobRow = db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1).all()[0]
   if (!jobRow) return null
 
-  const taskRows = await db
+  const taskRows = db
     .select()
     .from(jobPlanTasks)
     .where(eq(jobPlanTasks.jobId, jobId))
     .orderBy(asc(jobPlanTasks.sortOrder))
+    .all()
 
   const flatTasks = taskRows.map(mapPlanTaskRow)
-  const milestonesFromDb = await loadPlanMilestonesFromDb(db, jobId, flatTasks)
+  const milestonesFromDb = loadPlanMilestonesFromDbInTx(db, jobId, flatTasks)
 
   if (milestonesFromDb === null && flatTasks.length === 0) return null
 
@@ -197,6 +208,10 @@ export async function loadJobPlan(db: AppDatabase, jobId: string): Promise<Saved
     milestones: milestonesFromDb ?? [],
     tasks: flatTasks
   }
+}
+
+export async function loadJobPlan(db: AppDatabase, jobId: string): Promise<SavedJobPlan | null> {
+  return loadJobPlanInTx(db, jobId)
 }
 
 function savePlanMilestonesInTx(

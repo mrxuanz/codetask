@@ -13,23 +13,29 @@ export interface PlannerMcpSession {
 
   allowedAbilityCodes: string[]
   validReferenceIds: string[]
-  referenceManifest?: JobReferenceManifest | null
+  referenceManifest?: JobReferenceManifest | null | undefined
   taskContexts: Map<string, PlannerRegisteredTaskContext>
-  registeredPlan: PlannerRegisteredPlan | null
-  planCommitted?: boolean
-  planCommitting?: boolean
-  finalizerPromise?: Promise<void>
-  phaseAdvance?: {
-    username: string
-    threadId: string
-    coreCode: string
-    draftMessageId: string
-  }
-  planRevision?: number
-  clearConfirmed?: boolean
-  abortTurn?: () => void
-  onTaskContextRegistered?: (key: string, done: number) => void
-  onPlanRegistered?: (counts: { milestones: number; slices: number; tasks: number }) => void
+  planOutline: PlannerRegisteredPlan | null
+  planCommitted?: boolean | undefined
+  planCommitting?: boolean | undefined
+  finalizerPromise?: Promise<void> | undefined
+  finalizerError?: Error | undefined
+  operationQueue?: Promise<void> | undefined
+  phaseAdvance?:
+    | {
+        username: string
+        threadId: string
+        coreCode: string
+        draftMessageId: string
+      }
+    | undefined
+  planRevision?: number | undefined
+  clearConfirmed?: boolean | undefined
+  abortTurn?: (() => void) | undefined
+  onTaskContextRegistered?: ((key: string, done: number) => Promise<void>) | undefined
+  onPlanOutlineRegistered?:
+    | ((counts: { milestones: number; slices: number; tasks: number }) => Promise<void>)
+    | undefined
 }
 
 const sessions = new Map<string, PlannerMcpSession>()
@@ -73,10 +79,10 @@ export function authorizePlannerMcpRequest(input: {
   return input.capability?.trim() === expected
 }
 
-export function countExpectedTaskContexts(plan: PlannerRegisteredPlan | null): number {
-  if (!plan) return 0
+export function countExpectedTaskContexts(outline: PlannerRegisteredPlan | null): number {
+  if (!outline) return 0
   let total = 0
-  for (const milestone of plan.milestones) {
+  for (const milestone of outline.milestones) {
     for (const slice of milestone.slices) {
       total += slice.tasks.length
     }

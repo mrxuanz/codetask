@@ -3,10 +3,10 @@ import { RequestError, type ActiveSession, type ClientContext } from '@agentclie
 import type { ConversationRole } from '../roles'
 import type { CursorAcpMcpServer } from '../mcp'
 import type { AgentTurnChunk } from '../types'
-import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
+import { createTurnError, type TurnErrorDto } from '../../../shared/turn-errors.ts'
 import type { TurnErrorCode } from '../../../shared/turn-errors/codes.ts'
 import { classifyCursorAcpError } from './errors'
-import { createProviderTurnScope } from '../provider-turn'
+import { abortReason, createProviderTurnScope } from '../provider-turn'
 import { createAsyncQueue } from './async-queue'
 import {
   applyCursorModel,
@@ -26,22 +26,40 @@ import {
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../delta-emit'
 import { assertTaskWorkerAcpCompletion } from './turn-guards'
 import { recordAcpToolCallActivity } from '../turn-scope'
+import type { AgentCapabilityProfile } from '../capabilities'
 
 export interface CursorPromptInput {
   role: ConversationRole
   cwd: string
   prompt: string
-  systemPrompt?: string
-  model?: string
+  systemPrompt?: string | undefined
+  model?: string | undefined
   mcpServers: CursorAcpMcpServer[]
-  runtimeSessionId?: string | null
-  signal?: AbortSignal
+  runtimeSessionId?: string | null | undefined
+  signal?: AbortSignal | undefined
 }
 
 export interface CursorAcpSessionRuntimeOptions {
   cwd: string
   env: Record<string, string>
   cliArgs: string[]
+  capabilityProfile: AgentCapabilityProfile
+}
+
+type CursorAcpErrorDto = {
+  code: string
+  message: string
+  params?: Record<string, unknown>
+  detail?: string
+}
+
+function isCursorAcpErrorDto(error: unknown): error is CursorAcpErrorDto {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code.length > 0
+  )
 }
 
 export class CursorAcpSessionRuntime {
@@ -117,7 +135,7 @@ export class CursorAcpSessionRuntime {
     this.connectionDone = connectionDone
     this.releaseConnection = releaseConnection
 
-    const app = createCodetaskAcpClient(() => this.closed)
+    const app = createCodetaskAcpClient(() => this.closed, this.options.capabilityProfile)
     void app
       .connectWith(createChildAcpStream(child), async (ctx) => {
         this.ctx = ctx
@@ -158,7 +176,7 @@ export class CursorAcpSessionRuntime {
     const mcpSignature = input.mcpServers
       .map((server) => `${server.name}:${server.type}:${server.url ?? server.command ?? ''}`)
       .join('|')
-    return `${input.cwd}\0${input.runtimeSessionId ?? ''}\0${mcpSignature}`
+    return `${input.cwd}\0${input.runtimeSessionId ?? ''}\0${mcpSignature}\0${this.options.capabilityProfile}`
   }
 
   private async openTaskSession(input: CursorPromptInput): Promise<ActiveSession> {
@@ -256,26 +274,37 @@ export class CursorAcpSessionRuntime {
     const run = this.runPrompt(input, (chunk) => queue.push(chunk))
       .then(() => queue.close())
       .catch((error) => {
-        const dto =
-          error instanceof Error && 'code' in error
-            ? (
-                error as unknown as {
-                  code: string
-                  message: string
-                  params?: Record<string, unknown>
-                  detail?: string
-                }
-              ).code
-              ? {
-                  code: (error as unknown as { code: string }).code,
-                  message: error.message,
-                  params: (error as unknown as { params?: Record<string, unknown> }).params,
-                  detail: (error as unknown as { detail?: string }).detail ?? null
-                }
-              : null
-            : null
+        const dto = isCursorAcpErrorDto(error)
+          ? {
+              code: error.code,
+              message: error.message,
+              params: error.params,
+              detail: error.detail ?? null
+            }
+          : null
         const message = error instanceof Error ? error.message : formatAcpError(error)
-        queue.push({ type: 'error', message })
+        const detail =
+          dto?.detail && dto.detail !== message
+            ? dto.detail
+            : dto
+              ? (dto.detail ?? message)
+              : message
+        const displayMessage = detail && detail !== message ? `${message}: ${detail}` : message
+        queue.push({
+          type: 'error',
+          message: displayMessage,
+          ...(dto
+            ? {
+                code: dto.code as TurnErrorCode,
+                error: {
+                  code: dto.code as TurnErrorCode,
+                  message: dto.message,
+                  params: dto.params,
+                  detail: dto.detail
+                } as TurnErrorDto
+              }
+            : {})
+        })
         queue.close()
         if (dto) {
           throw createTurnError(dto.code as TurnErrorCode, {
@@ -292,7 +321,13 @@ export class CursorAcpSessionRuntime {
     try {
       for await (const chunk of queue.iterate()) {
         if (chunk.type === 'error') {
-          throw new Error(chunk.message)
+          throw createTurnError(
+            (chunk.code as TurnErrorCode | undefined) ?? 'provider.cursor.acp_failed',
+            {
+              detail: chunk.error?.detail ?? chunk.message,
+              message: chunk.message
+            }
+          )
         }
         yield chunk
       }
@@ -316,10 +351,11 @@ export class CursorAcpSessionRuntime {
     }
 
     let aborted = false
+    let cancellation: Promise<void> | null = null
     const onAbort = (): void => {
       aborted = true
       if (this.activeTaskSession) {
-        void cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
+        cancellation ??= cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
       }
     }
 
@@ -340,23 +376,18 @@ export class CursorAcpSessionRuntime {
       child.once('exit', onExit)
     })
 
-    const turnScope = createProviderTurnScope(input.role, { signal: input.signal }, {
-      processExit: exitPromise,
-      onSoftCancel: async () => {
-        if (this.activeTaskSession) {
-          await cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
-        }
-      },
-      onHardCancel: () => {
-        killChildTree(child)
+    const turnScope = createProviderTurnScope(
+      input.role,
+      { signal: input.signal },
+      {
+        processExit: exitPromise
       }
-    })
-    turnScope.arm()
-
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    if (input.signal?.aborted) {
+    )
+    turnScope.signal.addEventListener('abort', onAbort, { once: true })
+    if (turnScope.signal.aborted) {
       onAbort()
-      throw TURN_CANCELLED
+      await (cancellation as Promise<void> | null)?.catch(() => undefined)
+      throw abortReason(turnScope.signal)
     }
 
     const session = await this.openTaskSession(input)
@@ -392,10 +423,7 @@ export class CursorAcpSessionRuntime {
         if (message.kind === 'session_update') {
           turnScope.recordProgress('provider_event')
           const update = message.update
-          if (
-            update.sessionUpdate === 'tool_call' ||
-            update.sessionUpdate === 'tool_call_update'
-          ) {
+          if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
             recordAcpToolCallActivity(update, turnScope, openToolIds)
             continue
           }
@@ -451,7 +479,8 @@ export class CursorAcpSessionRuntime {
         return
       }
       if (aborted) {
-        throw TURN_CANCELLED
+        await (cancellation as Promise<void> | null)?.catch(() => undefined)
+        throw abortReason(turnScope.signal)
       }
       const dto = classifyCursorAcpError(error, {
         phase: error instanceof RequestError ? 'rpc' : 'prompt',
@@ -462,7 +491,7 @@ export class CursorAcpSessionRuntime {
       throw createTurnError(dto.code, { params: dto.params, detail: dto.detail ?? undefined })
     } finally {
       detachExitListener?.()
-      input.signal?.removeEventListener('abort', onAbort)
+      turnScope.signal.removeEventListener('abort', onAbort)
       turnScope.dispose()
     }
 
@@ -496,7 +525,6 @@ export class CursorAcpSessionRuntime {
 
   async close(): Promise<void> {
     if (this.closed) return
-    this.closed = true
     if (this.activeTaskSession) {
       try {
         this.activeTaskSession.dispose()
@@ -506,18 +534,25 @@ export class CursorAcpSessionRuntime {
       this.activeTaskSession = null
     }
     this.loadedSessionKey = null
-    this.releaseConnection?.()
-    if (this.connectionDone) {
-      await this.connectionDone.catch(() => {})
+    const releaseConnection = this.releaseConnection
+    const connectionDone = this.connectionDone
+    this.releaseConnection = null
+    this.connectionDone = null
+    releaseConnection?.()
+    if (connectionDone) {
+      await connectionDone.catch(() => {})
     }
     if (this.child) {
       const child = this.child
-      this.child = null
       killChildTree(child)
       await waitForChildExit(child, 10_000)
+      if (this.child === child) {
+        this.child = null
+      }
     }
     this.ctx = null
     this.diagnostics = null
+    this.closed = true
     debugCursor('runtime closed')
   }
 }

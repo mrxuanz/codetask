@@ -8,9 +8,13 @@ export const TITLE_SOURCE_AUTO = 'auto'
 export const TITLE_SOURCE_MANUAL = 'manual'
 export const THREAD_KIND_CHAT = 'chat'
 export const THREAD_KIND_CREATE_TASK = 'create_task'
+export const THREAD_KIND_TASK_SNAPSHOT = 'task_snapshot'
 
 export type TitleSource = typeof TITLE_SOURCE_AUTO | typeof TITLE_SOURCE_MANUAL
-export type ThreadKind = typeof THREAD_KIND_CHAT | typeof THREAD_KIND_CREATE_TASK
+export type ThreadKind =
+  | typeof THREAD_KIND_CHAT
+  | typeof THREAD_KIND_CREATE_TASK
+  | typeof THREAD_KIND_TASK_SNAPSHOT
 
 export type { ThreadDto } from '@shared/contracts/threads'
 export type { WizardPhase } from '../wizard/types'

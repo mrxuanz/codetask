@@ -3,7 +3,7 @@ import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
 import { isDraftEditable } from '../conversation/draft/status'
 import { getThreadRow } from '../threads/service'
 import type { Thread } from '../db/schema'
-import { getThreadJob } from '../jobs/service'
+import { getThreadJob } from '../legacy-control-plane/service'
 import { resolveWizardPhase } from './phase'
 import {
   WIZARD_PHASE_COLLECT,

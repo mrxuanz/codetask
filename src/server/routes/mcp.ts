@@ -5,12 +5,12 @@ import { handleConversationMcpJsonRpc, type McpDispatchResult } from '../convers
 import { authorizeConversationMcpRequest } from '../conversation/mcp/session'
 import { handlePlannerMcpJsonRpc } from '../planner/mcp/handler'
 import { authorizePlannerMcpRequest } from '../planner/mcp/session'
-import { handleTaskMcpJsonRpc } from '../jobs/mcp/task-handler'
-import { authorizeTaskMcpRequest } from '../jobs/mcp/task-session'
-import { handleSliceVerifierMcpJsonRpc } from '../jobs/mcp/slice-handler'
-import { authorizeSliceVerifierMcpRequest } from '../jobs/mcp/slice-session'
-import { handleMilestoneVerifierMcpJsonRpc } from '../jobs/mcp/milestone-handler'
-import { authorizeMilestoneVerifierMcpRequest } from '../jobs/mcp/milestone-session'
+import { handleTaskMcpJsonRpc } from '../legacy-control-plane/mcp/task-handler'
+import { authorizeTaskMcpRequest } from '../legacy-control-plane/mcp/task-session'
+import { handleSliceVerifierMcpJsonRpc } from '../legacy-control-plane/mcp/slice-handler'
+import { authorizeSliceVerifierMcpRequest } from '../legacy-control-plane/mcp/slice-session'
+import { handleMilestoneVerifierMcpJsonRpc } from '../legacy-control-plane/mcp/milestone-handler'
+import { authorizeMilestoneVerifierMcpRequest } from '../legacy-control-plane/mcp/milestone-session'
 import { requireLocalhost } from '../middleware/local-only'
 import {
   closeAllStreamableMcpTransportsForUrlSession,
@@ -160,7 +160,6 @@ function registerStreamableMcpRoute(
   })
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createMcpRoutes(_ctx: AppContext): Hono {
   const mcp = new Hono()
 
@@ -189,6 +188,7 @@ export function createMcpRoutes(_ctx: AppContext): Hono {
         role: query.role,
         jobId: query.jobId,
         taskId: query.taskId,
+        idempotencyKey: query.idem,
         capability: query.cap
       }),
     handleTaskMcpJsonRpc
