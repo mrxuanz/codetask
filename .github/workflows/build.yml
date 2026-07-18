@@ -77,7 +77,7 @@ jobs:
 
       - if: ${{ inputs.include-release-evidence }}
         name: Download release test evidence
-        uses: actions/download-artifact@ccfa4c90b373a1bba1453ddebf4731d659dd3955 # v4.1.9
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-test-evidence
           path: dist/release-evidence/test
@@ -99,7 +99,7 @@ jobs:
           --log release-evidence/${{ inputs.artifact-name }}/package-smoke.log
 
       - if: ${{ inputs.upload-artifact }}
-        uses: actions/upload-artifact@65c4c08a768d7e4a08fabdd5333d057d994bc549 # v4.6.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.artifact-name }}
           # upload-artifact does not expand bash brace globs; list patterns explicitly

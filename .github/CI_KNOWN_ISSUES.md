@@ -110,3 +110,15 @@ count to decrease but fails if it grows above that baseline.
   or suppressed.
 - Decision needed: remove or use the import when native business code is in
   scope.
+
+## BUSINESS-008: Rust cache cannot parse several native manifests
+
+- Locations: multiple `native/*/Cargo.toml` manifests
+- Finding: `Swatinem/rust-cache` reports TOML parse errors and falls back to
+  caching each entire manifest file. Several manifests contain a leading UTF-8
+  byte-order mark, which is a likely cause of the parser mismatch.
+- Impact: Rust tests and builds succeed, but cache invalidation is broader and
+  the jobs emit repeated annotations.
+- CI handling: none; cache fallback remains enabled and visible.
+- Decision needed: normalize the manifest encodings when native build files are
+  in scope, then verify the cache parser warnings disappear.
