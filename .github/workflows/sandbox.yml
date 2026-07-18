@@ -37,8 +37,8 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: native
-      - run: cargo test --manifest-path native/Cargo.toml
-      - run: cargo test --manifest-path native/Cargo.toml --release
+      - run: cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1
+      - run: cargo test --manifest-path native/Cargo.toml --release --no-fail-fast -- --test-threads=1
 
   escape-matrix:
     runs-on: ubuntu-latest
