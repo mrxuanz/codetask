@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const PRODUCT_NAME = 'codetask'
+const PACKAGE_NAME = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+).name
 const READY_MARKER = 'CODETASK_SMOKE_READY '
 
 function readArg(argv, name) {
@@ -42,9 +45,24 @@ export function findExecutable(distDir, platform = process.platform) {
     return executable
   }
 
-  const executable = join(root, platform === 'win32' ? `${PRODUCT_NAME}.exe` : PRODUCT_NAME)
-  if (!existsSync(executable)) throw new Error(`package_smoke.executable_missing:${executable}`)
-  return executable
+  const executableNames =
+    platform === 'win32'
+      ? [`${PRODUCT_NAME}.exe`]
+      : // electron-builder defaults the Linux executable to package.json#name,
+        // while productName controls the displayed product and artifact names.
+        [PACKAGE_NAME, PRODUCT_NAME]
+  const candidates = [...new Set(executableNames)]
+    .map((name) => join(root, name))
+    .filter((path) => existsSync(path))
+  if (candidates.length === 0) {
+    throw new Error(
+      `package_smoke.executable_missing:${root}:expected=${executableNames.join(',')}:available=${readdirSync(root).sort().join(',')}`
+    )
+  }
+  if (candidates.length > 1) {
+    throw new Error(`package_smoke.executable_ambiguous:${root}:${candidates.join(',')}`)
+  }
+  return candidates[0]
 }
 
 export function runPackageSmoke(argv = process.argv) {
