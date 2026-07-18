@@ -1,5 +1,13 @@
 import type { Config, QuestionAnswer } from '@opencode-ai/sdk/v2'
 import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
+import { allCreateTaskMcpToolNames } from '../../wizard/tools'
+import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
+
+const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
+  'codeteam-manager',
+  ...allCreateTaskMcpToolNames(),
+  ...PLANNER_ROLE_MCP_TOOLS
+])
 
 /**
  * OpenCode interactive `question` handling for CodeTask.
@@ -48,19 +56,31 @@ export const OPENCODE_AUTO_QUESTION_GUIDANCE =
 export function resolveOpencodePermissionConfig(
   capabilityProfile?: AgentCapabilityProfile
 ): NonNullable<Config['permission']> {
-  const base: NonNullable<Config['permission']> = {
-    '*': 'allow',
-    question: 'deny'
+  if (!capabilityProfile || !capabilityProfileIsReadOnly(capabilityProfile)) {
+    return {
+      '*': 'allow',
+      question: 'deny'
+    }
   }
-  if (!capabilityProfile || !capabilityProfileIsReadOnly(capabilityProfile)) return base
+
+  const auditedMcpRules = Object.fromEntries(
+    [...READ_ONLY_SYSTEM_MCP_TOOLS]
+      .filter((toolName) => toolName !== 'codeteam-manager')
+      .flatMap((toolName) => [
+        [toolName, 'allow' as const],
+        [`codeteam-manager_${toolName}`, 'allow' as const],
+        [`mcp__codeteam-manager__${toolName}`, 'allow' as const]
+      ])
+  )
   return {
-    ...base,
-    bash: 'deny',
-    edit: 'deny',
-    write: 'deny',
-    patch: 'deny',
-    task: 'deny',
-    skill: 'deny'
+    '*': 'deny',
+    read: 'allow',
+    glob: 'allow',
+    grep: 'allow',
+    list: 'allow',
+    lsp: 'allow',
+    ...auditedMcpRules,
+    question: 'deny'
   }
 }
 
@@ -71,6 +91,11 @@ export function resolveOpencodeToolsConfig(
   const readOnly = capabilityProfile !== undefined && capabilityProfileIsReadOnly(capabilityProfile)
   return readOnly
     ? {
+        read: true,
+        glob: true,
+        grep: true,
+        list: true,
+        lsp: true,
         question: false,
         bash: false,
         edit: false,

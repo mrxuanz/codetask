@@ -17,6 +17,7 @@ export interface PendingAttachment {
 const props = defineProps<{
   cores: ConversationCore[]
   coreCode: string
+  requireReadOnlyCore?: boolean
   disabled?: boolean
   sending?: boolean
 }>()
@@ -32,7 +33,11 @@ const open = ref(false)
 const pending = ref<PendingAttachment[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const options = computed(() => props.cores)
+const options = computed(() =>
+  props.requireReadOnlyCore
+    ? props.cores.filter((core) => core.readOnlyCapable !== false)
+    : props.cores
+)
 
 const selectedLabel = computed(() => {
   const option = options.value.find((item) => item.code === props.coreCode)

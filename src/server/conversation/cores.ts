@@ -9,6 +9,7 @@ export interface AgentCoreAvailability {
   label: string
   description: string
   available: boolean
+  readOnlyCapable?: boolean | undefined
   reason?: string | null | undefined
   detectedCommand?: string | null | undefined
   launchCommand?: string | null | undefined
@@ -131,8 +132,14 @@ export async function getAgentCore(code: string): Promise<AgentCoreAvailability 
 }
 
 export async function listChatCores(): Promise<AgentCoreAvailability[]> {
+  const { providerSupportsCapability } = await import('../agent-runtime/capabilities')
   const cores = await Promise.all(SUPPORTED_CORE_CODES.map((code) => getAgentCore(code)))
-  return cores.filter((core): core is AgentCoreAvailability => core !== null)
+  return cores
+    .filter((core): core is AgentCoreAvailability => core !== null)
+    .map((core) => ({
+      ...core,
+      readOnlyCapable: providerSupportsCapability(core.code, 'chat-read')
+    }))
 }
 
 export async function ensureCoreAvailable(code: string): Promise<AgentCoreAvailability> {

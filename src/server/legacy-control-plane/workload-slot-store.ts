@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
-import { and, eq, isNotNull, sql } from 'drizzle-orm'
+import { and, eq, gt, isNotNull, sql } from 'drizzle-orm'
+import { createTurnError } from '../../shared/turn-errors.ts'
 import { getDb } from '../db'
 import { getAppConfig, getAppContext } from '../bootstrap'
 import { threadJobs, workloadRuns, workloadSlots } from '../db/schema'
@@ -461,17 +462,47 @@ export async function refreshWorkloadLease(runId: string): Promise<void> {
   const owner = leaseOwner()
   const leaseExpiresAt = now + workloadLeaseTtlSec()
 
-  await db
-    .update(workloadRuns)
-    .set({ leaseOwner: owner, leaseExpiresAt, updatedAt: now })
-    .where(eq(workloadRuns.id, runId))
-    .run()
+  let refreshed = false
+  try {
+    refreshed = db.transaction((tx) => {
+      const runResult = tx
+        .update(workloadRuns)
+        .set({ leaseOwner: owner, leaseExpiresAt, updatedAt: now })
+        .where(
+          and(
+            eq(workloadRuns.id, runId),
+            eq(workloadRuns.status, 'active'),
+            eq(workloadRuns.leaseOwner, owner),
+            gt(workloadRuns.leaseExpiresAt, now)
+          )
+        )
+        .run()
+      if (runResult.changes !== 1) throw new Error('workload run lease is inactive')
 
-  await db
-    .update(workloadSlots)
-    .set({ leaseOwner: owner, leaseExpiresAt })
-    .where(eq(workloadSlots.runId, runId))
-    .run()
+      const slotResult = tx
+        .update(workloadSlots)
+        .set({ leaseOwner: owner, leaseExpiresAt })
+        .where(
+          and(
+            eq(workloadSlots.runId, runId),
+            eq(workloadSlots.status, 'active'),
+            eq(workloadSlots.leaseOwner, owner),
+            gt(workloadSlots.leaseExpiresAt, now)
+          )
+        )
+        .run()
+      if (slotResult.changes !== 1) throw new Error('workload slot lease is inactive')
+      return true
+    })
+  } catch {
+    refreshed = false
+  }
+
+  if (!refreshed) {
+    throw createTurnError('workspace.lease_lost', {
+      detail: `Workload lease ${runId} is no longer active`
+    })
+  }
 }
 
 export async function listActiveWorkloadSlots(

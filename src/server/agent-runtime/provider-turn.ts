@@ -33,20 +33,20 @@ export function createProviderTurnScope(
   ctx: ProviderTurnContext
 ): TurnScope {
   const turnConfig = getAppConfig().turn
+  const executionContext = getExecutionRunContext()
+  const workspaceContext = getWorkspaceLeaseContext()
   const turnScope = new TurnScope({
     role,
     externalSignal: options?.signal,
     processExit: ctx.processExit,
     noFirstSignalMs: turnConfig.noFirstSignalMs,
     progressGuard: new ProgressGuard(role, turnConfig),
-    onKeepAlive: () => {
-      const ectx = getExecutionRunContext()
-      if (ectx?.runId) {
-        void refreshWorkloadLease(ectx.runId)
+    onKeepAlive: async () => {
+      if (executionContext?.runId) {
+        await refreshWorkloadLease(executionContext.runId)
       }
-      const wctx = getWorkspaceLeaseContext()
-      if (wctx) {
-        if (!refreshWorkspaceLease(wctx.leaseId)) {
+      if (workspaceContext) {
+        if (!refreshWorkspaceLease(workspaceContext.leaseId)) {
           throw createTurnError('workspace.lease_lost')
         }
       }

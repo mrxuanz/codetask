@@ -6,6 +6,7 @@ export interface AgentCoreOption {
   label: string
   description: string
   available: boolean
+  readOnlyCapable?: boolean
   reason?: string | null
 }
 

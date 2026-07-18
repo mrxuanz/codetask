@@ -210,9 +210,11 @@ async function startOpencodeServer(options: {
   config: Config
   env: Record<string, string>
   signal?: AbortSignal | undefined
+  pure?: boolean | undefined
   timeoutMs?: number | undefined
 }): Promise<OpencodeServerHandle> {
   const args = ['serve', `--hostname=${options.hostname}`, `--port=${options.port}`]
+  if (options.pure) args.push('--pure')
   if (options.config.logLevel) args.push(`--log-level=${options.config.logLevel}`)
 
   const env = {
@@ -398,7 +400,8 @@ export async function* streamOpencodeTurn(
     cwd: input.cwd,
     config,
     env,
-    signal: options?.signal
+    signal: options?.signal,
+    pure: capabilityProfileIsReadOnly(capabilityProfile)
   })
 
   // Node undici's default 300s bodyTimeout aborts long session.prompt waits;
@@ -411,19 +414,18 @@ export async function* streamOpencodeTurn(
     fetch: longTurnFetch.fetch
   })
 
-  const eventAbort = new AbortController()
-  const promptAbort = new AbortController()
-  const abortTurn = (): void => {
-    const reason = abortReason(options?.signal)
-    eventAbort.abort(reason)
-    promptAbort.abort(reason)
-  }
-  options?.signal?.addEventListener('abort', abortTurn, { once: true })
-  if (options?.signal?.aborted) abortTurn()
-
   const turnScope = createProviderTurnScope(input.role, options, {
     processExit: server.processExit
   })
+  const eventAbort = new AbortController()
+  const promptAbort = new AbortController()
+  const abortTurn = (): void => {
+    const reason = abortReason(turnScope.signal)
+    eventAbort.abort(reason)
+    promptAbort.abort(reason)
+  }
+  turnScope.signal.addEventListener('abort', abortTurn, { once: true })
+  if (turnScope.signal.aborted) abortTurn()
 
   let sessionId = input.runtimeSessionId ?? ''
   let reply = ''
@@ -694,7 +696,7 @@ export async function* streamOpencodeTurn(
     throwOpencodeError(error)
   } finally {
     turnScope.dispose()
-    options?.signal?.removeEventListener('abort', abortTurn)
+    turnScope.signal.removeEventListener('abort', abortTurn)
     abortTurn()
     longTurnFetch.close()
     server.close()

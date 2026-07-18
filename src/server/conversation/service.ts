@@ -62,6 +62,7 @@ import { getAppContext } from '../bootstrap'
 import { assertConcurrentTurnCapacity } from '../middleware/http-limits'
 import { maybeSeedThreadTitleFromFirstMessage } from './thread-title'
 import { createTurnError } from '../../shared/turn-errors.ts'
+import { providerSupportsCapability } from '../agent-runtime/capabilities'
 
 export function initConversationService(_options: { dataDir: string }): void {
   getAppContext()
@@ -148,7 +149,7 @@ export async function prepareConversationTurn(input: {
     throw AppError.conflict('Project or thread is being deleted', undefined, 'thread.deleting')
   }
 
-  const threadRow = await getThreadRow(username, threadId)
+  let threadRow = await getThreadRow(username, threadId)
   if (!threadRow) {
     throw AppError.notFound('Thread not found', 'thread.not_found')
   }
@@ -160,13 +161,12 @@ export async function prepareConversationTurn(input: {
   const wizardPhase = resolveWizardPhase(threadRow)
   thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
   reserveThread(thread, username)
+  let workspaceLeaseId: string | null = null
+  let workspaceLeaseOwnerId: string | null = null
+  let workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode =
+    workspacePath ? 'live-read' : 'metadata'
 
   try {
-    let workspaceLeaseId: string | null = null
-    let workspaceLeaseOwnerId: string | null = null
-    let workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode =
-      workspacePath ? 'live-read' : 'metadata'
-
     // Requirements collection and draft turns are always read-only. Ordinary chat may make
     // focused edits, but only after winning the same main-workspace lease used by task workers.
     if (threadKind === THREAD_KIND_CHAT && workspacePath) {
@@ -190,6 +190,18 @@ export async function prepareConversationTurn(input: {
       }
     }
 
+    const requiredCapability = createTaskMode
+      ? ('create-task-read' as const)
+      : workspaceAccess === 'exclusive-write'
+        ? ('chat-write' as const)
+        : ('chat-read' as const)
+    if (!providerSupportsCapability(thread.coreCode as SupportedCoreCode, requiredCapability)) {
+      throw AppError.badRequest(
+        `Selected CLI (${thread.coreCode}) cannot enforce ${requiredCapability}`,
+        'provider.capability_unsupported'
+      )
+    }
+
     return {
       username,
       threadId: thread.id,
@@ -205,6 +217,11 @@ export async function prepareConversationTurn(input: {
       workspaceAccess
     }
   } catch (error) {
+    if (workspaceLeaseId) {
+      const { releaseWorkspaceLease } =
+        await import('../legacy-control-plane/workspace-lease-store')
+      releaseWorkspaceLease({ leaseId: workspaceLeaseId })
+    }
     releaseThread(threadId)
     throw error
   }
@@ -317,11 +334,22 @@ export async function switchThreadCore(
   threadId: string,
   coreCode: string
 ): Promise<ThreadDto> {
-  await closeConversationCursorRuntime(threadId)
-  await ensureCoreAvailable(coreCode).catch((error: Error) => {
+  const row = await getThreadRow(username, threadId)
+  if (!row) throw AppError.notFound('Thread not found', 'thread.not_found')
+  const core = await ensureCoreAvailable(coreCode).catch((error: Error) => {
     throw AppError.badRequest(error.message)
   })
-  return updateThreadCore(username, threadId, coreCode)
+  if (
+    resolveThreadKind(row) === THREAD_KIND_CREATE_TASK &&
+    !providerSupportsCapability(core.code, 'create-task-read')
+  ) {
+    throw AppError.badRequest(
+      'This CLI cannot enforce read-only create-task conversations',
+      'provider.capability_unsupported'
+    )
+  }
+  await closeConversationCursorRuntime(threadId)
+  return updateThreadCore(username, threadId, core.code)
 }
 
 export async function* streamSendMessage(

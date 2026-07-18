@@ -16,7 +16,9 @@ import {
   threadJobs,
   threadMessages,
   threads,
-  projects
+  projects,
+  workloadRuns,
+  workloadSlots
 } from '../../src/server/db/schema'
 import { eq } from 'drizzle-orm'
 import type { getDb as GetDb } from '../../src/server/db'
@@ -27,6 +29,7 @@ import {
   assertRunActive,
   assertRunWritable,
   markRunCancelling,
+  refreshWorkloadLease,
   workloadPoolCapacity,
   resetWorkloadRunControllersForTests
 } from '../../src/server/legacy-control-plane/workload-slot-store'
@@ -356,6 +359,48 @@ test('assertRunActive is false after release', async () => {
 
     await releaseWorkloadSlot(run.runId, { reason: 'test' })
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), false)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('refreshWorkloadLease fails closed and rolls back a partial refresh', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-refresh', 'planning')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-refresh',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    const claimed = db
+      .select({ leaseExpiresAt: workloadRuns.leaseExpiresAt })
+      .from(workloadRuns)
+      .where(eq(workloadRuns.id, run.runId))
+      .get()
+    assert.ok(claimed)
+    const shortenedExpiry = claimed.leaseExpiresAt - 60
+    db.update(workloadRuns)
+      .set({ leaseExpiresAt: shortenedExpiry })
+      .where(eq(workloadRuns.id, run.runId))
+      .run()
+    db.delete(workloadSlots).where(eq(workloadSlots.runId, run.runId)).run()
+
+    await assert.rejects(
+      () => refreshWorkloadLease(run.runId),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'workspace.lease_lost'
+    )
+    const after = db
+      .select({ leaseExpiresAt: workloadRuns.leaseExpiresAt })
+      .from(workloadRuns)
+      .where(eq(workloadRuns.id, run.runId))
+      .get()
+    assert.equal(after?.leaseExpiresAt, shortenedExpiry)
   } finally {
     await teardownDb()
   }

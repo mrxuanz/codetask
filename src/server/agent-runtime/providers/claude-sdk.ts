@@ -40,36 +40,39 @@ export async function* streamClaudeTurn(
   let thinking = ''
 
   const userMcpServers = input.userMcpServers ?? {}
-  const mcpServers =
-    input.mcpUrl || Object.keys(userMcpServers).length > 0
-      ? buildClaudeMcpServers(input.mcpUrl, userMcpServers)
-      : undefined
-  const mcpToolAllowlist = mcpServers
-    ? Object.keys(mcpServers).map((name) => `mcp__${name}__*`)
-    : []
+  // Always build the CodeTask MCP map so we can pin it with strictMcpConfig when
+  // host settingSources are loaded (overrides ~/.claude settings MCP).
+  const mcpServers = buildClaudeMcpServers(input.mcpUrl, userMcpServers)
+  const mcpServerNames = Object.keys(mcpServers)
+  const mcpToolAllowlist = mcpServerNames.map((name) => `mcp__${name}__*`)
   const allowedTools = mcpToolAllowlist.length > 0 ? [...builtins, ...mcpToolAllowlist] : builtins
 
-  const turnAbort = new AbortController()
-  const externalSignal = options?.signal
-  if (externalSignal?.aborted) {
-    throw abortReason(externalSignal)
-  }
-  forwardAbortSignal(externalSignal, turnAbort)
-
   const turnScope = createProviderTurnScope(input.role, options, {})
-  turnScope.arm()
+  const turnAbort = new AbortController()
+  if (turnScope.signal.aborted) {
+    throw abortReason(turnScope.signal)
+  }
+  const turnAbortListener = forwardAbortSignal(turnScope.signal, turnAbort)
 
   const providerEnv = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
   applyTaskIdempotencyEnv(providerEnv, input.idempotencyKey)
 
+  const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
+  // When host settings load, pin MCP to CodeTask's map (possibly empty) so user
+  // ~/.claude MCP does not leak in. Outer-sandbox turns already use empty
+  // settingSources and only need MCP when CodeTask injected servers.
+  const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
+
   const stream = query({
     prompt: input.prompt,
     options: {
       cwd: input.cwd,
       systemPrompt: resolveClaudeSystemPrompt(input.systemPrompt),
-      settingSources: resolveClaudeSettingSources(outerSandbox, capabilityProfile),
+      settingSources,
+      // Read-only: disable filesystem skills/plugins even though user settings load.
+      ...(readOnly ? { skills: [], plugins: [] } : {}),
       tools: builtins,
       allowedTools,
       disallowedTools: readOnly
@@ -79,10 +82,11 @@ export async function* streamClaudeTurn(
       persistSession: true,
       abortController: turnAbort,
       env: providerEnv,
+      // Keep Claude's inner sandbox off; OS outer sandbox (when used) is the boundary.
       sandbox: { enabled: false },
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),
-      ...(mcpServers
+      ...(pinMcpConfig
         ? {
             mcpServers: mcpServers as NonNullable<
               NonNullable<Parameters<typeof query>[0]['options']>['mcpServers']
@@ -193,11 +197,12 @@ export async function* streamClaudeTurn(
       yield partial
       return
     }
-    if (turnAbort.signal.aborted || options?.signal?.aborted) {
-      throw abortReason(options?.signal ?? turnAbort.signal)
+    if (turnAbort.signal.aborted || turnScope.signal.aborted) {
+      throw abortReason(turnScope.signal)
     }
     throwSdkTurnError(error)
   } finally {
+    turnScope.signal.removeEventListener('abort', turnAbortListener)
     turnScope.dispose()
     await messageIterator.return?.(undefined).catch(() => {})
   }

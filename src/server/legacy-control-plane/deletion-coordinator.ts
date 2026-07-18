@@ -14,7 +14,6 @@ import {
   purgeThreadFilesystemStrict,
   type ThreadPurgeTargets
 } from '../retention/purge'
-import { releaseJobCursorResources } from '../sandbox'
 import { releaseWorkspaceLeaseForOwner } from './workspace-lease-store'
 import { throwIfCurrentRequestAborted } from '../context/request-abort'
 import { assertFrozenAttachmentId, FrozenIdError } from '../../shared/frozen-ids'
@@ -50,7 +49,6 @@ export interface FrozenJobRuntimeIdentity {
 
 export interface DeletionFrozenSnapshot {
   runtime?: FrozenJobRuntimeIdentity | null
-  draftMessageId?: string | null
   deleteOwningThread?: boolean
   childJobIds?: string[]
   childThreadIds?: string[]
@@ -329,7 +327,8 @@ async function stopJobRuntimeByFrozenIdentity(
   frozen: FrozenJobRuntimeIdentity
 ): Promise<void> {
   const { isJobExecuting, abortActiveTurn, clearAbortController } = await import('./controls')
-  const { cancelJobSandboxTurns } = await import('../sandbox')
+  const { cancelJobSandboxTurns, releaseJobCursorResources } =
+    await import('../sandbox/orchestrator')
   const { JOB_CANCELLED } = await import('../../shared/turn-errors.ts')
   const { clearExecutionLease } = await import('./repository')
   const { stopRunLifecycle } = await import('./run-lifecycle')
@@ -470,18 +469,6 @@ export function setDeletionPurgeHooksForTests(input: {
 async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<void> {
   if (request.entityKind === 'thread_job') {
     const frozen = parseFrozenSnapshot(request.frozenJson)
-    if (request.threadId && frozen.draftMessageId && !frozen.deleteOwningThread) {
-      const { releaseDraftAfterJobDeleted } = await import('./draft-plan')
-      await releaseDraftAfterJobDeleted(
-        request.username,
-        request.threadId,
-        request.entityId,
-        frozen.draftMessageId
-      ).catch((error) => {
-        console.warn('[deletion] failed to release draft after job delete', request.entityId, error)
-      })
-    }
-
     if (
       request.threadId &&
       frozen.deleteOwningThread &&
@@ -605,7 +592,6 @@ export async function drainAndDeleteJob(username: string, jobId: string): Promis
     workspacePath: job.workspacePath ?? null,
     frozenJson: JSON.stringify({
       runtime: frozen,
-      draftMessageId: job.draftMessageId,
       deleteOwningThread: threadRows[0]?.threadKind === THREAD_KIND_TASK_SNAPSHOT
     }),
     cleanupTargetsJson: JSON.stringify({
@@ -681,8 +667,7 @@ export async function drainAndDeletePlanningJob(
           executionLeaseOwner: job.executionLeaseOwner ?? null,
           workspaceLeaseOwnerKind: 'thread_job',
           workspaceLeaseOwnerId: jobId
-        },
-        draftMessageId: job.draftMessageId
+        }
       } satisfies DeletionFrozenSnapshot),
       cleanupTargetsJson: JSON.stringify({
         kind: 'job',

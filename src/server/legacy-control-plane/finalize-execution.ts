@@ -2,7 +2,6 @@ import { getAppContext } from '../bootstrap'
 import { memoryDebug } from '../debug/memory'
 import { isTerminalJobStatus } from '../runtime/cleanup'
 import { scheduleRuntimeCleanup } from '../runtime/cleanup-coordinator'
-import { releaseJobCursorResources } from '../sandbox'
 import { getUserJob } from './repository'
 import { emitJobSnapshot } from './progress-emit'
 import type { ThreadJobDto } from './types'
@@ -20,6 +19,7 @@ export async function finalizeJobExecution(
   const { username, jobId, emitSnapshot = false } = input
   const ctx = getAppContext()
 
+  const { releaseJobCursorResources } = await import('../sandbox/orchestrator')
   await releaseJobCursorResources(jobId).catch((error) => {
     console.warn('[jobs] releaseJobCursorResources failed', jobId, error)
   })

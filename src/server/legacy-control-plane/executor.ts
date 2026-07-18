@@ -1504,6 +1504,13 @@ async function executeSingleTask(
       systemPrompt: TASK_EXECUTION_SYSTEM_PROMPT,
       mcpUrl,
       signal,
+      workspaceAccess: 'exclusive-write',
+      workspaceLease: {
+        leaseId: lease.leaseId,
+        ownerKind: 'thread_job',
+        ownerId: job.id
+      },
+      workloadRunId: runId ?? undefined,
       jobId: job.id,
       idempotencyKey: stableIdempotencyKey
     })) {
@@ -2831,7 +2838,10 @@ export function scheduleJobExecution(
       registerRunRuntime(slot.runId, buildCursorJobRuntimeHandle(jobId))
       await updateRunRuntimeRef(slot.runId, { kind: 'cursor-acp', scopeId: jobId })
 
-      const { preflightSandbox, isOuterSandboxEnabled } = await import('../sandbox')
+      const [{ preflightSandbox }, { isOuterSandboxEnabled }] = await Promise.all([
+        import('../sandbox/preflight'),
+        import('../sandbox/outer-sandbox-flag')
+      ])
       const { isTestFakeAgentModeActive } =
         await import('../agent-runtime/providers/test-overrides')
       if (!isTestFakeAgentModeActive()) {

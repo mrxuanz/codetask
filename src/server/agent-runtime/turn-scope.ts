@@ -25,7 +25,7 @@ export interface TurnScopeInput {
   processExit?: Promise<never> | undefined
   noFirstSignalMs?: number | null | undefined
   progressGuard?: ProgressGuard | undefined
-  onKeepAlive?: (() => void) | undefined
+  onKeepAlive?: (() => void | Promise<void>) | undefined
 }
 
 export class TurnScope {
@@ -34,11 +34,13 @@ export class TurnScope {
 
   private readonly _abort = new AbortController()
   private readonly _processExit?: Promise<never> | undefined
-  private readonly _onKeepAlive?: (() => void) | undefined
+  private readonly _onKeepAlive?: (() => void | Promise<void>) | undefined
   private readonly _progressGuard?: ProgressGuard | undefined
   private readonly _configuredNoFirstSignalMs?: number | null | undefined
 
   private _disposed = false
+  private _armed = false
+  private _keepalivePending = false
   private _sawFirstSignal = false
   private _noFirstTimer: ReturnType<typeof setTimeout> | null = null
   private _keepaliveTimer: ReturnType<typeof setInterval> | null = null
@@ -72,6 +74,8 @@ export class TurnScope {
   }
 
   arm(): void {
+    if (this._armed || this._disposed) return
+    this._armed = true
     if (!this._processExit) {
       const noFirstSignalMs =
         this._configuredNoFirstSignalMs === undefined
@@ -176,13 +180,29 @@ export class TurnScope {
   }
 
   private _tryKeepAlive(): void {
-    if (!this._onKeepAlive) return
+    if (!this._onKeepAlive || this._keepalivePending) return
     const now = Date.now()
     if (now - this._lastKeepAlive < KEEPALIVE_INTERVAL_MS) return
     this._lastKeepAlive = now
+    this._runKeepAlive()
+  }
+
+  private _runKeepAlive(): void {
+    if (!this._onKeepAlive || this._keepalivePending || this._disposed || this.signal.aborted)
+      return
+    this._keepalivePending = true
     try {
-      this._onKeepAlive()
+      void Promise.resolve(this._onKeepAlive()).then(
+        () => {
+          this._keepalivePending = false
+        },
+        (error) => {
+          this._keepalivePending = false
+          this._abortInternal(error)
+        }
+      )
     } catch (error) {
+      this._keepalivePending = false
       this._abortInternal(error)
     }
   }
@@ -197,11 +217,7 @@ export class TurnScope {
       const now = Date.now()
       if (now - this._lastKeepAlive >= KEEPALIVE_INTERVAL_MS) {
         this._lastKeepAlive = now
-        try {
-          this._onKeepAlive?.()
-        } catch (error) {
-          this._abortInternal(error)
-        }
+        this._runKeepAlive()
       }
     }, KEEPALIVE_INTERVAL_MS)
     this._keepaliveTimer?.unref?.()
@@ -239,7 +255,7 @@ export class TurnScope {
   }
 
   private _abortInternal(reason: unknown): void {
-    if (this.signal.aborted) return
+    if (this._disposed || this.signal.aborted) return
     this._abortError = reason instanceof Error ? reason : TURN_CANCELLED
     this._abort.abort(this._abortError)
     this.dispose()
