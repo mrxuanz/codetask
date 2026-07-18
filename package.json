@@ -15,6 +15,7 @@
     "typecheck:control-plane": "tsc --noEmit -p tsconfig.control-plane.json",
     "typecheck:control-plane:ci": "node scripts/ci/check-control-plane-typecheck-baseline.mjs",
     "test:control-plane": "node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/control-plane/**/*.test.ts",
+    "test:ci-scripts": "node --test scripts/ci/*.test.mjs",
     "check:control-plane-types": "node scripts/check-control-plane-types.mjs",
     "check:legacy-write-guard": "node scripts/control-plane/legacy-write-guard.mjs",
     "check:no-double-assertions": "node scripts/check-no-double-assertions.mjs",
@@ -58,7 +59,7 @@
     "test:fast": "node scripts/ensure-node-native.mjs && npm run test:unit && npm run test:provider-contract && npm run test:workflow",
     "test:live": "npm run test:providers:light",
     "test:ci": "npm run typecheck && npm run test:fast",
-    "release:test-gate": "npm run typecheck && npm run typecheck:control-plane:ci && npm run check:control-plane-types && npm run check:legacy-write-guard && npm run check:no-double-assertions && npm run lint:ci && npm run test:fast && npm run test:control-plane",
+    "release:test-gate": "npm run typecheck && npm run typecheck:control-plane:ci && npm run test:ci-scripts && npm run check:control-plane-types && npm run check:legacy-write-guard && npm run check:no-double-assertions && npm run lint:ci && npm run test:fast && npm run test:control-plane",
     "test:sandbox:all": "npm run test:sandbox:tdd && npm run test:sandbox && npm run test:sandbox:v2 && npm run test:sandbox:attachments"
   },
   "dependencies": {

@@ -6,8 +6,10 @@
  * (Avoid bare `\bany\b` — it false-positives English prose in tests.)
  */
 
-import { execSync } from 'child_process'
+import { resolve } from 'node:path'
 import { exit } from 'process'
+
+import { scanSourcePatterns } from './ci/source-pattern-scan.mjs'
 
 const CONTROL_PLANE_DIRS = [
   'src/shared/contracts/control-plane',
@@ -28,28 +30,21 @@ const PATTERNS = [
   '@ts-nocheck'
 ]
 
-function checkDirectory(dir) {
-  try {
-    const pattern = PATTERNS.join('|')
-    const result = execSync(`rg -n "${pattern}" ${dir}`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
-    return result.trim()
-  } catch (e) {
-    // rg returns exit code 1 when no matches found
-    if (e.status === 1) return ''
-    throw e
-  }
-}
+const repositoryRoot = resolve(import.meta.dirname, '..')
 
 let hasErrors = false
 
 for (const dir of CONTROL_PLANE_DIRS) {
-  const matches = checkDirectory(dir)
-  if (matches) {
+  const matches = scanSourcePatterns({
+    repositoryRoot,
+    scanPaths: [dir],
+    patterns: PATTERNS
+  })
+  if (matches.length > 0) {
     console.error(`\nUnsafe type escape found in ${dir}:`)
-    console.error(matches)
+    for (const match of matches) {
+      console.error(`${match.file}:${match.line}:${match.text}`)
+    }
     hasErrors = true
   }
 }
