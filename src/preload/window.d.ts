@@ -12,7 +12,7 @@ export interface ServerInfo {
 declare global {
   interface Window {
     electron: ElectronAPI
-    api: {
+    api?: {
       getServerInfo: () => Promise<ServerInfo | null>
       selectDataDirectory: () => Promise<string | null>
       relaunchApp: () => Promise<void>

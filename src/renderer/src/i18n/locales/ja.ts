@@ -555,6 +555,8 @@ export default {
         managed: 'このパスは CLI または環境設定で管理されているため、ここでは変更できません。',
         phase: '移行フェーズ：{phase}',
         restart: '新しいデータルートで再起動',
+        restartServerRequired:
+          '新しいデータルートへ切り替えるには、管理者が codetask-server サービスを再起動してください。',
         deleteOld: '古いデータルートを削除',
         migrationFailed: 'ストレージ移行に失敗しました',
         deleteOldFailed: '古いストレージの削除に失敗しました'
