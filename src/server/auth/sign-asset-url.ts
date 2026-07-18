@@ -35,7 +35,7 @@ function assetUrlWithToken(assetUrl: string, token: string): string {
   }
 }
 
-export function signAssetUrl(authSecret: string, assetUrl: string): string {
+export function signAssetUrl(authSecret: string, assetUrl: string, owner?: string): string {
   if (!assetUrl) return assetUrl
 
   const cleanAssetUrl = stripAssetUrlAuthTokens(assetUrl)
@@ -45,15 +45,20 @@ export function signAssetUrl(authSecret: string, assetUrl: string): string {
 
   const threadId = decodeURIComponent(match[1]!)
   const attachmentId = decodeURIComponent(match[2]!)
-  const token = generateAssetToken(authSecret, threadId, attachmentId)
+  if (!owner?.trim()) return cleanAssetUrl
+  const token = generateAssetToken(authSecret, owner.trim(), threadId, attachmentId)
   return assetUrlWithToken(cleanAssetUrl, token)
 }
 
-export function signAssetUrlsInValue(authSecret: string, value: unknown): unknown {
+export function signAssetUrlsInValue(
+  authSecret: string,
+  value: unknown,
+  owner?: string
+): unknown {
   if (value === null || value === undefined) return value
 
   if (Array.isArray(value)) {
-    return value.map((item) => signAssetUrlsInValue(authSecret, item))
+    return value.map((item) => signAssetUrlsInValue(authSecret, item, owner))
   }
 
   if (typeof value === 'object') {
@@ -61,9 +66,9 @@ export function signAssetUrlsInValue(authSecret: string, value: unknown): unknow
     const next: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(record)) {
       if ((key === 'assetUrl' || key === 'thumbnailUrl') && typeof child === 'string') {
-        next[key] = signAssetUrl(authSecret, child)
+        next[key] = signAssetUrl(authSecret, child, owner)
       } else {
-        next[key] = signAssetUrlsInValue(authSecret, child)
+        next[key] = signAssetUrlsInValue(authSecret, child, owner)
       }
     }
     return next

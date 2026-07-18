@@ -1,20 +1,10 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
-import { streamSSE } from 'hono/streaming'
 import { requireUsername } from '../auth/session'
-import { resolveThreadAttachments } from '../conversation/attachments'
-import {
-  listCores,
-  listThreadMessages,
-  loadThreadState,
-  streamSendMessage,
-  switchThreadCore
-} from '../conversation/service'
+import { listCores, listThreadMessages, loadThreadState, switchThreadCore } from '../conversation/service'
 import { AppError } from '../error'
-import { toTurnErrorDto } from '../agent-runtime/errors'
 import { ok } from '../response'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createAgentRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 
@@ -27,7 +17,6 @@ export function createAgentRoutes(_ctx: AppContext): Hono {
   return routes
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createThreadAgentRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 
@@ -44,54 +33,14 @@ export function createThreadAgentRoutes(_ctx: AppContext): Hono {
     return c.json(ok({ messages }))
   })
 
+  // P7: old per-request conversation SSE removed. Use POST /turns + /api/realtime.
   routes.post('/:threadId/messages', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{
-      message?: string
-      generateDraft?: boolean
-      createTaskMode?: boolean
-      attachmentIds?: string[]
-      selectedDraftSection?: string
-      selectedPlanNodeRef?: string
-    }>()
-    if (!body.message?.trim()) {
-      throw AppError.badRequest('Message cannot be empty', 'message.empty')
-    }
-
+    await requireUsername(c.req.header('Authorization'))
     const threadId = c.req.param('threadId')
-    const attachments = resolveThreadAttachments(threadId, body.attachmentIds ?? [])
-    const accept = c.req.header('Accept') ?? ''
-    const wantsSse = accept.includes('text/event-stream') || c.req.query('stream') === '1'
-
-    if (!wantsSse) {
-      throw AppError.badRequest(
-        'Please use SSE streaming (Accept: text/event-stream)',
-        'conversation.sse_required'
-      )
-    }
-
-    return streamSSE(c, async (stream) => {
-      try {
-        for await (const chunk of streamSendMessage(username, threadId, body.message!, {
-          generateDraft: body.generateDraft === true,
-          createTaskMode: body.createTaskMode === true,
-          attachments,
-          selectedDraftSection: body.selectedDraftSection,
-          selectedPlanNodeRef: body.selectedPlanNodeRef
-        })) {
-          await stream.writeSSE({
-            event: chunk.event,
-            data: JSON.stringify(chunk.data)
-          })
-        }
-      } catch (error) {
-        const turnError = toTurnErrorDto(error)
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ error: turnError, message: turnError.message })
-        })
-      }
-    })
+    throw AppError.gone(
+      `POST /api/threads/${threadId}/messages is gone; use POST /api/threads/${threadId}/turns and subscribe via /api/realtime`,
+      'conversation.messages_post_gone'
+    )
   })
 
   routes.patch('/:threadId/core', async (c) => {

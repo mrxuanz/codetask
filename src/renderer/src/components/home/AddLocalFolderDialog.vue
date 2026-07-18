@@ -137,7 +137,7 @@ watch(query, (value) => {
 <template>
   <Dialog :open="open" @close="open = false">
     <div class="space-y-0">
-      <div class="space-y-2 border-b border-border px-4 py-3">
+      <div class="space-y-2 border-b border-border px-3 py-3 sm:px-4">
         <div class="flex items-center gap-2">
           <Button
             type="button"
@@ -159,7 +159,7 @@ watch(query, (value) => {
         <p v-if="parentPath" class="truncate text-xs text-muted-foreground">{{ parentPath }}</p>
       </div>
 
-      <div class="max-h-72 space-y-2 overflow-y-auto px-4 py-3">
+      <div class="max-h-72 space-y-2 overflow-y-auto px-3 py-3 sm:px-4">
         <ErrorAlert v-if="error" :message="error" />
         <div class="flex items-center justify-between">
           <Button
@@ -199,7 +199,7 @@ watch(query, (value) => {
         </ul>
       </div>
 
-      <div class="space-y-3 border-t border-border px-4 py-3">
+      <div class="space-y-3 border-t border-border px-3 py-3 sm:px-4">
         <div class="flex items-center gap-2">
           <Input
             v-model="newFolderName"
@@ -217,12 +217,13 @@ watch(query, (value) => {
             {{ t('folderPicker.createAndAdd') }}
           </Button>
         </div>
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <span class="truncate text-xs text-muted-foreground">
             {{ t('folderPicker.currentDirectory', { path: currentDirectoryPath() || '—' }) }}
           </span>
           <Button
             type="button"
+            class="w-full sm:w-auto"
             :disabled="submitting || !currentDirectoryPath()"
             @click="submit(currentDirectoryPath())"
           >

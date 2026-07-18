@@ -48,6 +48,23 @@ export default defineConfig(
           varsIgnorePattern: '^_',
           caughtErrorsIgnorePattern: '^_'
         }
+      ],
+      '@typescript-eslint/no-explicit-any': 'error'
+    }
+  },
+  {
+    files: [
+      'src/shared/contracts/control-plane/**/*.{ts,tsx}',
+      'src/server/{domain,application}/**/*.{ts,tsx}',
+      'src/server/infra/sqlite/control-plane/**/*.{ts,tsx}',
+      'src/server/http/v3/**/*.{ts,tsx}',
+      'src/renderer/src/stores/**/*.{ts,tsx}',
+      'tests/control-plane/**/*.{ts,tsx}'
+    ],
+    rules: {
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        { 'ts-ignore': true, 'ts-nocheck': true, 'ts-check': false, 'ts-expect-error': 'allow-with-description' }
       ]
     }
   },

@@ -13,16 +13,36 @@ import {
 import { resolveMainSandboxScript } from './packaged-paths'
 import type { RunSandboxedTurnInput } from './orchestrator-local'
 import { safePollSandboxExit, throwIfSandboxTurnAborted } from './turn-guards'
-import { readSandboxChunks, readStderrPreview } from './stdout-reader'
+import { readSandboxChunks } from './stdout-reader'
 
 interface JobCursorSandboxSession {
   jobId: string
   spawned: SpawnedSandboxWorker
   launched: LaunchedSandbox | null
   busy: boolean
+  lastUsedAt: number
 }
 
 const jobSessions = new Map<string, JobCursorSandboxSession>()
+const CONVERSATION_IDLE_MS = 30 * 60 * 1000
+const CONVERSATION_SWEEP_MS = 5 * 60 * 1000
+let conversationSweepTimer: ReturnType<typeof setInterval> | null = null
+
+function isConversationScope(scopeId: string): boolean {
+  return scopeId.startsWith('conversation:')
+}
+
+function ensureConversationPoolReaperStarted(): void {
+  if (conversationSweepTimer) return
+  conversationSweepTimer = setInterval(() => {
+    void sweepIdleConversationCursorSandboxes().catch((error) => {
+      sandboxTurnDebug('cursor sandbox pool reaper failed', {
+        message: error instanceof Error ? error.message : String(error)
+      })
+    })
+  }, CONVERSATION_SWEEP_MS)
+  conversationSweepTimer.unref?.()
+}
 
 function resolveJobCursorWorkerPath(): string {
   const worker = resolveMainSandboxScript('role-worker-cursor-job.js')
@@ -44,8 +64,6 @@ async function* readTurnChunks(
   handle: LaunchedSandbox['handle'],
   signal?: AbortSignal
 ): AsyncGenerator<AgentTurnChunk> {
-  const streamEnded = false
-
   const abort = (): void => terminateSandboxTree(handle)
   signal?.addEventListener('abort', abort, { once: true })
 
@@ -53,30 +71,17 @@ async function* readTurnChunks(
     throwIfSandboxTurnAborted(signal)
 
     const stdoutLines = readSandboxStdoutLines(handle, {
-      keepReading: () => !streamEnded,
+      keepReading: () => true,
       pollExit: () => safePollSandboxExit(handle)
     })
 
     yield* readSandboxChunks(stdoutLines, {
       signal,
       stopOnDoneMarker: true,
+      stopOnCompleted: false,
+      bufferCompletedUntilDoneMarker: true,
       debugPrefix: 'job-cursor-pool'
     })
-
-    const lineCount = 0
-    const stderrPreview = readStderrPreview(handle)
-    if (lineCount === 0) {
-      sandboxTurnDebug('job-cursor-pool: no stdout before worker exit', {
-        stderrPreview: stderrPreview.trim().slice(0, 500) || undefined
-      })
-      if (stderrPreview.trim()) {
-        throw new SandboxError(stderrPreview.trim(), 'sandbox.sdk.error')
-      }
-      throw new SandboxError(
-        'Cursor job worker exited without output (stdin may have been closed before turn input was sent)',
-        'sandbox.sdk.error'
-      )
-    }
   } finally {
     signal?.removeEventListener('abort', abort)
   }
@@ -104,8 +109,15 @@ async function launchJobCursorSession(
     signal: bootstrap.signal
   })
 
-  const session: JobCursorSandboxSession = { jobId, spawned, launched: null, busy: false }
+  const session: JobCursorSandboxSession = {
+    jobId,
+    spawned,
+    launched: null,
+    busy: false,
+    lastUsedAt: Date.now()
+  }
   jobSessions.set(jobId, session)
+  if (isConversationScope(jobId)) ensureConversationPoolReaperStarted()
   return session
 }
 
@@ -121,7 +133,7 @@ async function ensureJobCursorWorkerStarted(
 
   const handle = session.spawned.handle
   handle.writeStdin(Buffer.from(`${firstLine}\n`, 'utf8'))
-  handle.endStdin()
+  // Keep stdin open: this worker owns the long-lived Cursor ACP scope and accepts later Turns.
   session.launched = awaitSandboxWorkerAttestation(session.spawned)
   sandboxTurnDebug('job-cursor-pool: persistent worker started', { jobId: session.jobId })
 }
@@ -152,6 +164,7 @@ export async function* streamJobCursorSandboxTurn(
     throw new SandboxError(`job ${jobId} Cursor worker is busy`, 'sandbox.worker.busy')
   }
   session.busy = true
+  session.lastUsedAt = Date.now()
 
   const workerInput = {
     provider: input.coreCode,
@@ -165,7 +178,9 @@ export async function* streamJobCursorSandboxTurn(
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,
     userMcpServers: input.userMcpServers,
-    jobId
+    capabilityProfile: input.capabilityProfile,
+    jobId,
+    idempotencyKey: input.idempotencyKey
   }
 
   const turnLine = JSON.stringify(workerInput)
@@ -180,12 +195,33 @@ export async function* streamJobCursorSandboxTurn(
     if (session.launched) {
       yield* readTurnChunks(handle, input.signal)
     }
+  } catch (error) {
+    discardJobCursorSession(jobId, session)
+    throw error
   } finally {
     session.busy = false
-    if (safePollSandboxExit(sessionHandle(session)) !== null) {
+    session.lastUsedAt = Date.now()
+    if (
+      jobSessions.get(jobId) === session &&
+      safePollSandboxExit(sessionHandle(session)) !== null
+    ) {
       jobSessions.delete(jobId)
     }
   }
+}
+
+export async function sweepIdleConversationCursorSandboxes(
+  now = Date.now(),
+  idleMs = CONVERSATION_IDLE_MS
+): Promise<number> {
+  let closed = 0
+  for (const [scopeId, session] of [...jobSessions]) {
+    if (!isConversationScope(scopeId) || session.busy) continue
+    if (now - session.lastUsedAt < idleMs) continue
+    await closeJobCursorSandbox(scopeId)
+    closed += 1
+  }
+  return closed
 }
 
 export async function closeJobCursorSandbox(jobId: string): Promise<void> {
@@ -205,6 +241,20 @@ export async function closeJobCursorSandbox(jobId: string): Promise<void> {
   sandboxTurnDebug('job-cursor-pool: closed', { jobId })
 }
 
+export async function closeAllJobCursorSandboxes(): Promise<void> {
+  for (const scopeId of [...jobSessions.keys()]) {
+    await closeJobCursorSandbox(scopeId).catch(() => {})
+  }
+  if (conversationSweepTimer) {
+    clearInterval(conversationSweepTimer)
+    conversationSweepTimer = null
+  }
+}
+
 export function resetJobCursorSandboxPoolForTests(): void {
   jobSessions.clear()
+  if (conversationSweepTimer) {
+    clearInterval(conversationSweepTimer)
+    conversationSweepTimer = null
+  }
 }

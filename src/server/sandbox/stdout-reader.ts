@@ -6,10 +6,12 @@ import type { SpawnedSandboxWorker } from './launcher'
 export const TURN_DONE_MARKER = '{"type":"_turn_done"}'
 
 export interface SandboxChunkReaderOptions {
-  signal?: AbortSignal
-  stopOnDoneMarker?: boolean
-  pollExit?: () => { code: number | null; status: string } | null
-  debugPrefix?: string
+  signal?: AbortSignal | undefined
+  stopOnDoneMarker?: boolean | undefined
+  stopOnCompleted?: boolean | undefined
+  bufferCompletedUntilDoneMarker?: boolean | undefined
+  pollExit?: (() => { code: number | null; status: string } | null) | undefined
+  debugPrefix?: string | undefined
 }
 
 export function sandboxErrorFromErrorChunk(
@@ -40,9 +42,15 @@ export async function* readSandboxChunks(
   stdoutLines: AsyncGenerator<string>,
   options: SandboxChunkReaderOptions = {}
 ): AsyncGenerator<AgentTurnChunk> {
-  const { signal, stopOnDoneMarker = false } = options
+  const {
+    signal,
+    stopOnDoneMarker = false,
+    stopOnCompleted = true,
+    bufferCompletedUntilDoneMarker = false
+  } = options
   let streamEnded = false
   let lineCount = 0
+  let bufferedCompleted: AgentTurnChunk | null = null
 
   try {
     for await (const line of stdoutLines) {
@@ -58,6 +66,7 @@ export async function* readSandboxChunks(
 
       if (stopOnDoneMarker && line === TURN_DONE_MARKER) {
         streamEnded = true
+        if (bufferedCompleted) yield bufferedCompleted
         break
       }
 
@@ -65,19 +74,25 @@ export async function* readSandboxChunks(
       if (chunk.type === 'error') {
         throw sandboxErrorFromErrorChunk(chunk)
       }
+      if (chunk.type === 'completed' && bufferCompletedUntilDoneMarker) {
+        bufferedCompleted = chunk
+        continue
+      }
       yield chunk
 
-      if (chunk.type === 'completed') {
+      if (stopOnCompleted && chunk.type === 'completed') {
         streamEnded = true
         break
       }
     }
 
+    if (!streamEnded && bufferedCompleted) {
+      yield bufferedCompleted
+      streamEnded = true
+    }
+
     if (!streamEnded && lineCount === 0) {
-      throw new SandboxError(
-        'sandbox worker exited without output',
-        'sandbox.sdk.error'
-      )
+      throw new SandboxError('sandbox worker exited without output', 'sandbox.sdk.error')
     }
   } catch (error) {
     if (error instanceof SandboxError) throw error

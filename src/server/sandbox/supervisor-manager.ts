@@ -30,7 +30,7 @@ export class SandboxSupervisorManager extends EventEmitter {
   private startPromise: Promise<void> | null = null
   private lastError: string | undefined
 
-  statusSnapshot(): { ready: boolean; starting: boolean; lastError?: string } {
+  statusSnapshot(): { ready: boolean; starting: boolean; lastError?: string | undefined } {
     return {
       ready: this.ready && Boolean(this.child && !this.child.killed),
       starting: this.starting,
@@ -193,13 +193,20 @@ export class SandboxSupervisorManager extends EventEmitter {
   async shutdown(): Promise<void> {
     this.shuttingDown = true
     if (!this.child) return
+    const child = this.child
     try {
       this.send({ type: 'shutdown' })
     } catch {
       // ignore
     }
-    this.child.kill()
-    this.child = null
+    await Promise.race([
+      new Promise<void>((resolve) => child.once('exit', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000))
+    ])
+    if (this.child === child) {
+      child.kill()
+      this.child = null
+    }
     this.ready = false
   }
 }

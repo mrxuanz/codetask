@@ -14,7 +14,7 @@ import {
 import type { ThreadJob } from '../../src/server/db/schema'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 import { AppError } from '../../src/server/error'
-import { ReferenceFileMissingError } from '../../src/server/jobs/reference-paths'
+import { ReferenceFileMissingError } from '../../src/server/legacy-control-plane/reference-paths'
 
 function samplePlan(): SavedJobPlan {
   return {

@@ -18,6 +18,7 @@ defineProps<{
   error: string | null
   showCreateFolder?: boolean
   selectCurrentLabel?: string
+  createFolderLabel?: string
   /** Hide footer (create folder + select current); host renders its own footer. */
   hideFooter?: boolean
   /** Fill available height; list scrolls while footer stays visible (dialog mode). */
@@ -38,12 +39,13 @@ const { t } = useI18n()
 
 <template>
   <div :class="cn('flex flex-col', fillHeight && 'min-h-0 flex-1')">
-    <div class="shrink-0 space-y-2 border-b border-border px-4 py-3">
-      <div class="flex items-center gap-2">
+    <div class="shrink-0 space-y-2 border-b border-border px-3 py-3 sm:px-4">
+      <div class="flex min-w-0 items-center gap-2">
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          class="shrink-0"
           :disabled="loading || !currentPath"
           :aria-label="t('folderPicker.goParent')"
           @click="emit('goParent')"
@@ -53,16 +55,40 @@ const { t } = useI18n()
         <Input
           :model-value="query"
           :placeholder="t('folderPicker.pathPlaceholder')"
-          class="border-0 px-0 shadow-none focus-visible:ring-0"
+          class="min-w-0 flex-1 border-0 px-0 font-mono shadow-none focus-visible:ring-0"
           @update:model-value="emit('update:query', $event)"
           @keydown.enter.prevent="emit('select', currentPath)"
         />
       </div>
       <p v-if="parentPath" class="truncate text-xs text-muted-foreground">{{ parentPath }}</p>
+      <!-- Keep create-folder in the sticky header so it never gets clipped by the list. -->
+      <div
+        v-if="showCreateFolder !== false && hideFooter !== true"
+        class="flex min-w-0 flex-col gap-2 md:flex-row md:items-center"
+      >
+        <Input
+          :model-value="newFolderName"
+          class="min-w-0 flex-1"
+          :placeholder="t('folderPicker.newFolderPlaceholder')"
+          @update:model-value="emit('update:newFolderName', $event)"
+          @keydown.enter.prevent="emit('createFolder')"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          class="w-full shrink-0 whitespace-nowrap md:w-auto"
+          :disabled="submitting || !newFolderName.trim()"
+          @click="emit('createFolder')"
+        >
+          {{ createFolderLabel ?? t('folderPicker.createAndAdd') }}
+        </Button>
+      </div>
     </div>
 
     <div
-      :class="cn('space-y-2 overflow-y-auto px-4 py-3', fillHeight ? 'min-h-0 flex-1' : 'max-h-72')"
+      :class="
+        cn('space-y-2 overflow-y-auto px-3 py-3 sm:px-4', fillHeight ? 'min-h-0 flex-1' : 'max-h-72')
+      "
     >
       <ErrorAlert v-if="error" :message="error" />
       <div class="flex items-center justify-between">
@@ -103,31 +129,17 @@ const { t } = useI18n()
       </ul>
     </div>
 
-    <div v-if="hideFooter !== true" class="shrink-0 space-y-3 border-t border-border px-4 py-3">
-      <div v-if="showCreateFolder !== false" class="flex items-center gap-2">
-        <Input
-          :model-value="newFolderName"
-          class="min-w-0 flex-1"
-          :placeholder="t('folderPicker.newFolderPlaceholder')"
-          @update:model-value="emit('update:newFolderName', $event)"
-          @keydown.enter.prevent="emit('createFolder')"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          class="shrink-0 whitespace-nowrap"
-          :disabled="submitting || !newFolderName.trim()"
-          @click="emit('createFolder')"
-        >
-          {{ t('folderPicker.createAndAdd') }}
-        </Button>
-      </div>
-      <div class="flex items-center justify-between gap-3">
-        <span class="truncate text-xs text-muted-foreground">
+    <div
+      v-if="hideFooter !== true"
+      class="shrink-0 space-y-3 border-t border-border px-3 py-3 sm:px-4"
+    >
+      <div class="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+        <span class="min-w-0 break-all text-xs text-muted-foreground md:truncate">
           {{ t('folderPicker.currentDirectory', { path: currentPath || '—' }) }}
         </span>
         <Button
           type="button"
+          class="w-full shrink-0 md:w-auto"
           :disabled="submitting || !currentPath"
           @click="emit('select', currentPath)"
         >

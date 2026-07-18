@@ -1,4 +1,20 @@
-import { integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import {
+  blob,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+  index
+} from 'drizzle-orm/sqlite-core'
+
+export const appSettings = sqliteTable('app_settings', {
+  namespace: text('namespace').primaryKey(),
+  valueJson: text('value_json').notNull(),
+  schemaVersion: integer('schema_version').notNull(),
+  revision: integer('revision').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
 
 export const authState = sqliteTable('auth_state', {
   id: integer('id').primaryKey(),
@@ -95,6 +111,30 @@ export const threadMessages = sqliteTable('thread_messages', {
   createdAt: text('created_at').notNull()
 })
 
+export const conversationTurns = sqliteTable('conversation_turns', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id')
+    .notNull()
+    .references(() => threads.id, { onDelete: 'cascade' }),
+  username: text('username').notNull(),
+  kind: text('kind').notNull(),
+  status: text('status').notNull(),
+  workspaceAccess: text('workspace_access').notNull().default('live-read'),
+  provider: text('provider'),
+  messageText: text('message_text').notNull().default(''),
+  generateDraft: integer('generate_draft').notNull().default(0),
+  createTaskMode: integer('create_task_mode').notNull().default(0),
+  attachmentIdsJson: text('attachment_ids_json').notNull().default('[]'),
+  selectedDraftSection: text('selected_draft_section'),
+  selectedPlanNodeRef: text('selected_plan_node_ref'),
+  idempotencyKey: text('idempotency_key'),
+  stateRevision: integer('state_revision').notNull().default(1),
+  lastErrorJson: text('last_error_json'),
+  createdAt: integer('created_at').notNull(),
+  startedAt: integer('started_at'),
+  completedAt: integer('completed_at')
+})
+
 export const threadJobs = sqliteTable(
   'thread_jobs',
   {
@@ -145,10 +185,33 @@ export const threadJobs = sqliteTable(
     planArtifactId: text('plan_artifact_id'),
     planArtifactPath: text('plan_artifact_path'),
     planSummaryJson: text('plan_summary_json'),
+    /** Structured pause source; null when not paused / not classified. */
+    suspensionKind: text('suspension_kind'),
+    /** When true, settle pausing→paused then immediately queue a fresh run. */
+    continueAfterPause: integer('continue_after_pause').notNull().default(0),
+    /** Why the job is waiting for recovery (e.g. uncertain_provider_outcome). */
+    recoveryReason: text('recovery_reason'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
   (table) => [uniqueIndex('idx_thread_jobs_thread_draft').on(table.threadId, table.draftMessageId)]
+)
+
+export const designPlanRevisions = sqliteTable(
+  'design_plan_revisions',
+  {
+    jobId: text('job_id')
+      .notNull()
+      .references(() => threadJobs.id, { onDelete: 'cascade' }),
+    planRevision: integer('plan_revision').notNull(),
+    contentGzip: blob('content_gzip', { mode: 'buffer' }).notNull(),
+    contentHash: text('content_hash').notNull(),
+    rawByteSize: integer('raw_byte_size').notNull(),
+    gzipByteSize: integer('gzip_byte_size').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at')
+  },
+  (table) => [primaryKey({ columns: [table.jobId, table.planRevision] })]
 )
 
 export const jobTasks = sqliteTable(
@@ -175,6 +238,35 @@ export const jobTasks = sqliteTable(
   (table) => [primaryKey({ columns: [table.jobId, table.taskId] })]
 )
 
+/**
+ * FIX-PLAN F3-B (§8.3): minimal crash-recovery ledger for task execution attempts.
+ * A row is created when a task attempt starts and finalised (completed/interrupted/failed) with a
+ * result hash + checkpoint in the same transaction. Startup converts stale `running` attempts to
+ * `interrupted`, then a fresh attempt is created under the same (job_id, task_id) identity.
+ */
+export const jobTaskAttempts = sqliteTable(
+  'job_task_attempts',
+  {
+    id: text('id').primaryKey(),
+    jobId: text('job_id')
+      .notNull()
+      .references(() => threadJobs.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').notNull(),
+    runId: text('run_id').references(() => workloadRuns.id, { onDelete: 'set null' }),
+    attemptNo: integer('attempt_no').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    status: text('status').notNull(),
+    resultHash: text('result_hash'),
+    errorJson: text('error_json'),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at')
+  },
+  (table) => [
+    uniqueIndex('idx_job_task_attempts_job_task_no').on(table.jobId, table.taskId, table.attemptNo),
+    uniqueIndex('idx_job_task_attempts_idempotency').on(table.idempotencyKey)
+  ]
+)
+
 export const jobArtifacts = sqliteTable('job_artifacts', {
   id: text('id').primaryKey(),
   jobId: text('job_id')
@@ -187,6 +279,7 @@ export const jobArtifacts = sqliteTable('job_artifacts', {
   byteSize: integer('byte_size').notNull(),
   storage: text('storage').notNull(),
   contentInline: text('content_inline'),
+  contentBlob: blob('content_blob', { mode: 'buffer' }),
   contentPath: text('content_path'),
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at')
@@ -373,13 +466,56 @@ export const workloadSlots = sqliteTable(
   (table) => [uniqueIndex('idx_workload_slots_run_id').on(table.runId)]
 )
 
+/** FIX-PLAN F4-A (§9.1): exclusive workspace write lease. */
+export const workspaceLeases = sqliteTable(
+  'workspace_leases',
+  {
+    id: text('id').primaryKey(),
+    canonicalPath: text('canonical_path').notNull(),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    runId: text('run_id'),
+    bootId: text('boot_id').notNull(),
+    status: text('status').notNull(),
+    leaseExpiresAt: integer('lease_expires_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    releasedAt: integer('released_at')
+  },
+  (table) => [
+    index('idx_workspace_leases_active_owner').on(table.ownerKind, table.ownerId, table.status)
+  ]
+)
+
+/** FIX-PLAN F4-B (§9.2–9.3): durable delete intent for drain coordinator + startup janitor. */
+export const deletionRequests = sqliteTable('deletion_requests', {
+  id: text('id').primaryKey(),
+  entityKind: text('entity_kind').notNull(),
+  entityId: text('entity_id').notNull(),
+  username: text('username').notNull(),
+  status: text('status').notNull(),
+  phase: text('phase').notNull().default('requested'),
+  threadId: text('thread_id'),
+  projectId: text('project_id'),
+  workspacePath: text('workspace_path'),
+  frozenJson: text('frozen_json'),
+  cleanupTargetsJson: text('cleanup_targets_json'),
+  filesystemCleanupJson: text('filesystem_cleanup_json'),
+  errorJson: text('error_json'),
+  lastError: text('last_error'),
+  retryCount: integer('retry_count').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull()
+})
+
 export type AuthState = typeof authState.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Thread = typeof threads.$inferSelect
 export type ThreadMessage = typeof threadMessages.$inferSelect
 export type ThreadJob = typeof threadJobs.$inferSelect
 export type JobTask = typeof jobTasks.$inferSelect
+export type JobTaskAttempt = typeof jobTaskAttempts.$inferSelect
 export type JobArtifact = typeof jobArtifacts.$inferSelect
+export type ConversationTurn = typeof conversationTurns.$inferSelect
 export type JobCounter = typeof jobCounters.$inferSelect
 export type JobAbility = typeof jobAbilities.$inferSelect
 export type JobPlanTask = typeof jobPlanTasks.$inferSelect
@@ -389,3 +525,5 @@ export type DraftReferenceRow = typeof draftReferences.$inferSelect
 export type DesignRun = typeof designRuns.$inferSelect
 export type WorkloadRun = typeof workloadRuns.$inferSelect
 export type WorkloadSlot = typeof workloadSlots.$inferSelect
+export type WorkspaceLease = typeof workspaceLeases.$inferSelect
+export type DeletionRequest = typeof deletionRequests.$inferSelect

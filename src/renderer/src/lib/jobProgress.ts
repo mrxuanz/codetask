@@ -14,6 +14,7 @@ import {
   resolveJobStatusDisplay
 } from '@shared/job-display'
 import { formatUnixTimestamp } from '@renderer/lib/formatDateTime'
+import { resolvePlanningPercent } from '@shared/plan-generation-progress'
 
 export { resolveJobLifecycleBucket, type JobLifecycleBucket }
 
@@ -107,11 +108,7 @@ function resolvePendingExecutionSummary(
   t: TranslateFn,
   fallback?: string | null
 ): string {
-  return (
-    formatExecutionQueueLabel(t, job.queue) ??
-    fallback ??
-    t('workspace.tasks.status.pending')
-  )
+  return formatExecutionQueueLabel(t, job.queue) ?? fallback ?? t('workspace.tasks.status.pending')
 }
 
 export function getPlanProgressSnapshot(
@@ -160,7 +157,7 @@ export function getPlanProgressSnapshot(
     return {
       kind: 'plan',
       status,
-      percent: total > 0 ? Math.round((done / total) * 100) : 8,
+      percent: total > 0 ? resolvePlanningPercent(done, total) : 8,
       stepsDone: done,
       stepsTotal: total,
       summaryLabel:
@@ -179,14 +176,7 @@ export function getPlanProgressSnapshot(
     const done = plan.contextsRegistered
     const total = plan.contextsTotal
     const allStepsRegistered = total > 0 && done >= total
-    const percent =
-      total > 0
-        ? allStepsRegistered
-          ? 99
-          : Math.min(99, Math.max(8, Math.round((done / total) * 100)))
-        : done > 0
-          ? Math.min(90, Math.max(12, Math.round((done / (done + 1)) * 100)))
-          : 10
+    const percent = resolvePlanningPercent(done, total)
     return {
       kind: 'plan',
       status,
@@ -198,10 +188,10 @@ export function getPlanProgressSnapshot(
         (allStepsRegistered
           ? plan.message || t('workspace.tasks.progress.planFinalizing')
           : total > 0
-            ? t('workspace.tasks.progress.planning', { done, total })
-            : done > 0
-              ? t('workspace.tasks.progress.planningPartial', { done })
-              : plan.message || t('workspace.tasks.progress.planningRunning')),
+            ? done > 0
+              ? t('workspace.tasks.progress.planning', { done, total })
+              : t('workspace.tasks.progress.planOutlineReady', { total })
+            : plan.message || t('workspace.tasks.progress.planningRunning')),
       tone: 'active'
     }
   }
@@ -414,7 +404,6 @@ export function buildPlanTree(
     title: job.title,
     jobStatus: job.status,
     plan: job.plan as Parameters<typeof buildUnifiedProgressTree>[0]['plan'],
-    planProgress: job.planProgress,
     taskProgressItems: job.taskProgress?.tasks,
     currentTaskId: job.taskProgress?.currentTaskId ?? null,
     verification: {
@@ -429,9 +418,22 @@ export function buildPlanTree(
 
 export function taskVisualStatus(task: UnifiedTaskNode, jobStatus: string): string {
   if (jobStatus === 'planning') return task.planStatus
+  if (jobStatus === 'paused' || jobStatus === 'pausing') {
+    if (task.status === 'completed' || task.executionStatus === 'completed') return 'completed'
+    if (task.status === 'failed' || task.executionStatus === 'failed') return 'failed'
+    if (
+      task.status === 'paused' ||
+      task.status === 'in_progress' ||
+      task.executionStatus === 'running' ||
+      task.executionStatus === 'paused'
+    ) {
+      return 'paused'
+    }
+  }
   const status = task.executionStatus ?? task.status
   if (status === 'completed') return 'completed'
   if (status === 'running' || status === 'ready') return 'in_progress'
+  if (status === 'paused') return 'paused'
   if (status === 'waiting-on-dependency' || status === 'queued') return 'pending'
   if (status === 'failed' || status === 'blocked') return 'failed'
   if (
@@ -452,6 +454,8 @@ export function nodeIcon(status: string, active = false): string {
       return '✓'
     case 'in_progress':
       return '◉'
+    case 'paused':
+      return 'Ⅱ'
     case 'failed':
       return '✕'
     case 'pending':
@@ -525,8 +529,7 @@ export function resolveJobListStatusBadge(
   }
   if (isExecutionDisplayStatus(status)) {
     const display = resolveJobStatusDisplay(status)
-    const queueLabel =
-      status === 'pending' ? formatExecutionQueueLabel(t, job?.queue) : null
+    const queueLabel = status === 'pending' ? formatExecutionQueueLabel(t, job?.queue) : null
     return {
       label: queueLabel ?? t(display.badge),
       className: resolveJobStatusBadgeClass(status)

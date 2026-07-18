@@ -1,10 +1,9 @@
 import { eq } from 'drizzle-orm'
-import type { TaskProgressSliceDto } from '../jobs/types'
+import type { TaskProgressSliceDto } from '../legacy-control-plane/types'
 import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
 import {
-  checkJobRuntimeQuota,
   cleanupJobRuntimeTreeIfTerminal,
   estimateJobRuntimeBytes,
   extractRuntimeSummary,
@@ -17,14 +16,18 @@ import { deleteJobCounters } from './counters'
 import { readRetentionSettings, artifactExpirySec } from './settings'
 import { runSqliteMaintenanceIfDue } from './maintenance'
 import {
-  enforceDataDirWatermark,
+  pruneCompletedTaskRuntimeTrees,
   pruneOrphanAttachments,
-  pruneOrphanDesignArtifactDirs,
+  pruneOrphanJobArtifactFiles,
   pruneOrphanMessageArtifactDirs,
   pruneStalePausedRuntimeTrees,
   pruneStaleThreadAttachmentDirs
 } from './janitor'
 import { pruneEmptyCreateTaskThreads } from '../threads/service'
+import {
+  deleteExpiredDesignPlanRevisions,
+  finalizeDesignPlanRevisions
+} from './design-plan-artifacts'
 
 export {
   summarizeEvidence,
@@ -45,6 +48,26 @@ export async function onJobStatusTransition(input: {
   previousStatus: string
   nextStatus: string
 }): Promise<void> {
+  if (
+    ['pending', 'running'].includes(input.nextStatus) &&
+    input.nextStatus !== input.previousStatus
+  ) {
+    const ctx = getAppContext()
+    const rows = await getDb()
+      .select({ planRevision: threadJobs.planRevision })
+      .from(threadJobs)
+      .where(eq(threadJobs.id, input.jobId))
+      .limit(1)
+    const revision = rows[0]?.planRevision ?? 0
+    if (revision > 0) {
+      finalizeDesignPlanRevisions(
+        getDb(),
+        input.jobId,
+        revision,
+        artifactExpirySec(readRetentionSettings(ctx.settings), 'working')
+      )
+    }
+  }
   if (isTerminalJobStatus(input.nextStatus) && !isTerminalJobStatus(input.previousStatus)) {
     await onJobReachedTerminal(input.jobId, input.threadId, input.nextStatus)
   }
@@ -69,6 +92,13 @@ export async function onJobReachedTerminal(
   if (expiresAt != null) {
     await scheduleJobArtifactExpiry(db, jobId, expiresAt)
   }
+  const revisionRows = await db
+    .select({ planRevision: threadJobs.planRevision })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, jobId))
+    .limit(1)
+  const revision = revisionRows[0]?.planRevision ?? 0
+  if (revision > 0) finalizeDesignPlanRevisions(db, jobId, revision, expiresAt)
 
   if (settings.compactCountersOnTerminal) {
     await deleteJobCounters(db, jobId)
@@ -105,12 +135,8 @@ export async function onJobReachedTerminal(
     try {
       const bytes = await estimateJobRuntimeBytes(ctx.dataDir, threadId, jobId)
       if (bytes > 0) {
-        await db
-          .update(threadJobs)
-          .set({ runtimeBytes: bytes })
-          .where(eq(threadJobs.id, jobId))
+        await db.update(threadJobs).set({ runtimeBytes: bytes }).where(eq(threadJobs.id, jobId))
       }
-      await checkJobRuntimeQuota(ctx.dataDir, threadId, jobId, settings.runtimeMaxBytesPerJob)
     } catch (error) {
       console.warn('[retention] runtime bytes estimate failed', jobId, error)
     }
@@ -127,19 +153,24 @@ export async function onJobReachedTerminal(
           .filter(Boolean)
           .join('\n')
         if (summaryText) {
-          await db
-            .update(threadJobs)
-            .set({ summary: summaryText })
-            .where(eq(threadJobs.id, jobId))
+          await db.update(threadJobs).set({ summary: summaryText }).where(eq(threadJobs.id, jobId))
         }
       }
     } catch (error) {
       console.warn('[retention] runtime summary extraction failed', jobId, error)
     }
 
-    await cleanupJobRuntimeTreeIfTerminal(ctx.dataDir, threadId, jobId, status).catch((error) => {
-      console.warn('[retention] terminal runtime cleanup failed', jobId, error)
-    })
+    await cleanupJobRuntimeTreeIfTerminal(ctx.dataDir, threadId, jobId, status).then(
+      (result) => {
+        if (result === 'deferred_active' || result === 'deferred_slot') {
+          // Expected while the executor is still unwinding; finalize retries after release.
+          return
+        }
+      },
+      (error) => {
+        console.warn('[retention] terminal runtime cleanup failed', jobId, error)
+      }
+    )
   }
 }
 
@@ -147,40 +178,41 @@ export async function runRetentionJanitorPass(): Promise<{
   expiredArtifacts: number
   orphanAttachments: number
   staleRuntimes: number
+  completedTaskRuntimes: number
   orphanMessageArtifacts: number
-  orphanDesignArtifacts: number
   staleAttachmentDirs: number
   orphanRuntimeTrees: number
   emptyCreateTaskThreads: number
-  watermarkCleanedBytes: number
-  watermarkCleanedJobs: number
   sqliteMaintenance: { ran: boolean; vacuumedPages: number }
+  expiredDesignRevisions: number
+  orphanJobArtifactFiles: number
 }> {
   const ctx = getAppContext()
   const db = getDb()
   const settings = readRetentionSettings(ctx.settings)
-
   const [
     artifacts,
     attachments,
     runtimes,
+    completedTaskRuntimes,
     messageArtifacts,
-    designArtifacts,
     staleAttachmentDirs,
     orphanRuntimeTrees,
-    emptyCreateTaskThreads
+    emptyCreateTaskThreads,
+    orphanJobArtifactFiles
   ] = await Promise.all([
     deleteExpiredArtifacts(db, ctx.dataDir),
     pruneOrphanAttachments(ctx.dataDir, db),
     pruneStalePausedRuntimeTrees(ctx.dataDir, db, settings.runtimePausedDays),
+    pruneCompletedTaskRuntimeTrees(ctx.dataDir, db),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
-    pruneOrphanDesignArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
     pruneOrphanRuntimeTrees(ctx.dataDir, db),
-    pruneEmptyCreateTaskThreads()
+    pruneEmptyCreateTaskThreads(),
+    pruneOrphanJobArtifactFiles(ctx.dataDir, db)
   ])
 
-  const watermark = await enforceDataDirWatermark(ctx.dataDir, db, settings.dataDirMaxBytes)
+  const expiredDesignRevisions = deleteExpiredDesignPlanRevisions(db)
 
   const sqliteMaintenance = runSqliteMaintenanceIfDue({
     db,
@@ -192,17 +224,17 @@ export async function runRetentionJanitorPass(): Promise<{
     expiredArtifacts: artifacts.deleted,
     orphanAttachments: attachments.removed,
     staleRuntimes: runtimes.removed,
+    completedTaskRuntimes: completedTaskRuntimes.removed,
     orphanMessageArtifacts: messageArtifacts.removed,
-    orphanDesignArtifacts: designArtifacts.removed,
     staleAttachmentDirs: staleAttachmentDirs.removed,
     orphanRuntimeTrees: orphanRuntimeTrees.removedPaths.length,
     emptyCreateTaskThreads: emptyCreateTaskThreads.removed,
-    watermarkCleanedBytes: watermark.cleanedBytes,
-    watermarkCleanedJobs: watermark.cleanedJobCount,
     sqliteMaintenance: {
       ran: sqliteMaintenance.ran,
       vacuumedPages: sqliteMaintenance.vacuumedPages
-    }
+    },
+    expiredDesignRevisions: expiredDesignRevisions.deleted,
+    orphanJobArtifactFiles: orphanJobArtifactFiles.removed
   }
 }
 

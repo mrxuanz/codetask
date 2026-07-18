@@ -9,8 +9,17 @@ export {
   materializeCodexAuth,
   materializeCursorAuth,
   materializeOpencodeAuth,
+  ensureCursorRuntimeAuth,
+  runtimeCursorCliAuthPath,
   opencodeRuntimeLayout
 } from './materialize'
+export {
+  CREDENTIAL_SNAPSHOT_MANIFEST,
+  credentialSnapshotManifestPath,
+  scrubCredentialSnapshotManifest,
+  scrubCredentialSnapshotsInTree,
+  writeCredentialSnapshotManifest
+} from './snapshot-manifest'
 export {
   resolveCodexHostAuthPath,
   resolveCodexInstallDirs,
@@ -30,5 +39,7 @@ export type {
   ProviderAuthDiagnostics,
   ProviderAuthMode,
   ProviderAuthPrepared,
+  ProviderFilesystemProfile,
+  CredentialSnapshotSpec,
   ProviderAuthPreflightResult
 } from './types'

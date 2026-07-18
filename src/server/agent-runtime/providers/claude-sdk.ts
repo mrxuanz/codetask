@@ -1,81 +1,101 @@
-import { buildSandboxPreparedProviderEnv, buildProviderChildEnv } from '../env'
+import {
+  applyTaskIdempotencyEnv,
+  buildSandboxPreparedProviderEnv,
+  buildProviderChildEnv
+} from '../env'
 import { throwSdkTurnError } from '../errors'
 import { buildClaudeMcpServers } from '../mcp'
 import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
-import { CLI_FULL_ACCESS_BUILTINS } from '../roles'
-import { createTurnError, TURN_CANCELLED } from '../../../shared/turn-errors.ts'
+import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '../roles'
+import {
+  CLI_READ_ONLY_BUILTINS,
+  capabilityProfileIsReadOnly,
+  resolveInputCapabilityProfile
+} from '../capabilities'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
-import { recordClaudeStreamActivity, assertRoleTurnReply, partialCompletedChunk } from '../turn-scope'
-import { createProviderTurnScope } from '../provider-turn'
+import {
+  recordClaudeStreamActivity,
+  assertRoleTurnReply,
+  partialCompletedChunk
+} from '../turn-scope'
+import { abortReason, createProviderTurnScope, forwardAbortSignal } from '../provider-turn'
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
   const outerSandbox = options?.outerSandbox ?? false
+  if (!outerSandbox && roleRequiresOuterSandbox(input.role)) {
+    throw createTurnError('sandbox.required', {
+      detail: 'Claude bypassPermissions requires OS outer sandbox'
+    })
+  }
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
-  const builtins = [...CLI_FULL_ACCESS_BUILTINS]
+  const capabilityProfile = resolveInputCapabilityProfile(input)
+  const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
+  const builtins = readOnly ? [...CLI_READ_ONLY_BUILTINS] : [...CLI_FULL_ACCESS_BUILTINS]
   let reply = ''
   let thinking = ''
 
   const userMcpServers = input.userMcpServers ?? {}
-  const mcpServers =
-    input.mcpUrl || Object.keys(userMcpServers).length > 0
-      ? buildClaudeMcpServers(input.mcpUrl, userMcpServers)
-      : undefined
-  const mcpToolAllowlist = mcpServers
-    ? Object.keys(mcpServers).map((name) => `mcp__${name}__*`)
-    : []
+  // Always build the CodeTask MCP map so we can pin it with strictMcpConfig when
+  // host settingSources are loaded (overrides ~/.claude settings MCP).
+  const mcpServers = buildClaudeMcpServers(input.mcpUrl, userMcpServers)
+  const mcpServerNames = Object.keys(mcpServers)
+  const mcpToolAllowlist = mcpServerNames.map((name) => `mcp__${name}__*`)
   const allowedTools = mcpToolAllowlist.length > 0 ? [...builtins, ...mcpToolAllowlist] : builtins
 
+  const turnScope = createProviderTurnScope(input.role, options, {})
   const turnAbort = new AbortController()
-  const externalSignal = options?.signal
-  if (externalSignal?.aborted) {
-    throw TURN_CANCELLED
+  if (turnScope.signal.aborted) {
+    throw abortReason(turnScope.signal)
   }
-  externalSignal?.addEventListener('abort', () => turnAbort.abort(), { once: true })
+  const turnAbortListener = forwardAbortSignal(turnScope.signal, turnAbort)
 
-  const turnScope = createProviderTurnScope(input.role, options, {
-    onSoftCancel: () => {
-      turnAbort.abort()
-      queryHandle?.close()
-    }
-  })
-  turnScope.arm()
+  const providerEnv = outerSandbox
+    ? buildSandboxPreparedProviderEnv()
+    : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
+  applyTaskIdempotencyEnv(providerEnv, input.idempotencyKey)
 
-  let queryHandle: ReturnType<typeof query> | null = null
+  const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
+  // When host settings load, pin MCP to CodeTask's map (possibly empty) so user
+  // ~/.claude MCP does not leak in. Outer-sandbox turns already use empty
+  // settingSources and only need MCP when CodeTask injected servers.
+  const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
 
   const stream = query({
     prompt: input.prompt,
     options: {
       cwd: input.cwd,
-      model: input.model,
-      resume: input.runtimeSessionId ?? undefined,
       systemPrompt: resolveClaudeSystemPrompt(input.systemPrompt),
-      settingSources: resolveClaudeSettingSources(outerSandbox),
+      settingSources,
+      // Read-only: disable filesystem skills/plugins even though user settings load.
+      ...(readOnly ? { skills: [], plugins: [] } : {}),
       tools: builtins,
       allowedTools,
-      disallowedTools: ['AskUserQuestion'],
+      disallowedTools: readOnly
+        ? ['AskUserQuestion', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'Agent']
+        : ['AskUserQuestion'],
       permissionMode: 'bypassPermissions',
       persistSession: true,
       abortController: turnAbort,
-      env: outerSandbox
-        ? buildSandboxPreparedProviderEnv()
-        : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true }),
+      env: providerEnv,
+      // Keep Claude's inner sandbox off; OS outer sandbox (when used) is the boundary.
       sandbox: { enabled: false },
-      ...(mcpServers
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),
+      ...(pinMcpConfig
         ? {
             mcpServers: mcpServers as NonNullable<
-              Parameters<typeof query>[0]['options']
-            >['mcpServers'],
+              NonNullable<Parameters<typeof query>[0]['options']>['mcpServers']
+            >,
             strictMcpConfig: true
           }
         : {})
     }
   })
-  queryHandle = stream
-
   let sessionId = input.runtimeSessionId ?? null
   const messageIterator = stream[Symbol.asyncIterator]()
   let streamEndedNormally = false
@@ -177,11 +197,12 @@ export async function* streamClaudeTurn(
       yield partial
       return
     }
-    if (turnAbort.signal.aborted || options?.signal?.aborted) {
-      throw TURN_CANCELLED
+    if (turnAbort.signal.aborted || turnScope.signal.aborted) {
+      throw abortReason(turnScope.signal)
     }
     throwSdkTurnError(error)
   } finally {
+    turnScope.signal.removeEventListener('abort', turnAbortListener)
     turnScope.dispose()
     await messageIterator.return?.(undefined).catch(() => {})
   }

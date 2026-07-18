@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
@@ -7,11 +7,10 @@ import { eq } from 'drizzle-orm'
 import { bootstrapRuntime, resetAppContextForTests, getAppContext } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import { jobTasks, threadJobs } from '../../src/server/db/schema'
-import { updateJobRow, isStaleExecutionLeaseOwner, executionLeaseOwner } from '../../src/server/jobs/repository'
+import { updateJobRow, isStaleExecutionLeaseOwner, executionLeaseOwner } from '../../src/server/legacy-control-plane/repository'
 import { cleanupJobRuntimeTree, jobRuntimeDir } from '../../src/server/runtime/cleanup'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { readRetentionSettings } from '../../src/server/retention/settings'
-import { getExecutionRunContext } from '../../src/server/jobs/execution-run-context'
 import { seedJobGraph } from '../helpers/seed-job-graph'
 
 const USERNAME = 'txn-test-user'
@@ -146,8 +145,40 @@ describe('terminal runtime cleanup', () => {
     assert.ok(existsSync(runtimeDir))
 
     const { cleanupJobRuntimeTreeIfTerminal } = await import('../../src/server/runtime/cleanup')
-    await cleanupJobRuntimeTreeIfTerminal(dataDir, 'thread-cleanup', 'job-cleanup-test', 'running')
+    const result = await cleanupJobRuntimeTreeIfTerminal(
+      dataDir,
+      'thread-cleanup',
+      'job-cleanup-test',
+      'running'
+    )
+    assert.equal(result, 'skipped_non_terminal')
     assert.ok(existsSync(runtimeDir), 'running job runtime should not be deleted')
+  })
+
+  it('defers cleanup while execution loop is active instead of throwing', async () => {
+    const db = getDb()
+    await db
+      .update(threadJobs)
+      .set({ status: 'failed' })
+      .where(eq(threadJobs.id, 'job-cleanup-test'))
+
+    const runtimeDir = jobRuntimeDir(dataDir, 'thread-cleanup', 'job-cleanup-test')
+    mkdirSync(runtimeDir, { recursive: true })
+    writeFileSync(join(runtimeDir, 'deferred.txt'), 'still-running')
+
+    const ctx = getAppContext()
+    assert.equal(ctx.executionRuntime.tryStartLoop('job-cleanup-test', USERNAME), true)
+    try {
+      const result = await cleanupJobRuntimeTree(dataDir, 'thread-cleanup', 'job-cleanup-test')
+      assert.equal(result, 'deferred_active')
+      assert.ok(existsSync(runtimeDir), 'runtime must remain while loop is active')
+    } finally {
+      ctx.executionRuntime.endLoop('job-cleanup-test')
+    }
+
+    const after = await cleanupJobRuntimeTree(dataDir, 'thread-cleanup', 'job-cleanup-test')
+    assert.equal(after, 'deleted')
+    assert.equal(existsSync(runtimeDir), false)
   })
 })
 
@@ -200,7 +231,7 @@ describe('evidence hydrate with large objects', () => {
   })
 
   it('evidence exceeding 5MB is truncated', async () => {
-    const { MAX_TASK_EVIDENCE_BYTES } = await import('../../src/server/jobs/evidence/store')
+    const { MAX_TASK_EVIDENCE_BYTES } = await import('../../src/server/legacy-control-plane/evidence/store')
     const largeEvidence = {
       status: 'completed' as const,
       summary: 'test',
@@ -212,7 +243,7 @@ describe('evidence hydrate with large objects', () => {
     const byteSize = Buffer.byteLength(json, 'utf8')
     assert.ok(byteSize > MAX_TASK_EVIDENCE_BYTES, 'evidence should exceed limit')
 
-    const { truncateEvidence } = await import('../../src/server/jobs/evidence/store')
+    const { truncateEvidence } = await import('../../src/server/legacy-control-plane/evidence/store')
     const truncated = truncateEvidence(largeEvidence)
     assert.ok(truncated.evidence.length <= 1000, 'evidence lines should be truncated')
   })
@@ -221,7 +252,7 @@ describe('evidence hydrate with large objects', () => {
 describe('keepalive cross-process awareness', () => {
   it('confirms getExecutionRunContext is undefined outside runWithExecutionRunContext', async () => {
     const { getExecutionRunContext, runWithExecutionRunContext } = await import(
-      '../../src/server/jobs/execution-run-context'
+      '../../src/server/legacy-control-plane/execution-run-context'
     )
     assert.equal(getExecutionRunContext(), undefined, 'should be undefined when not in context')
 
@@ -235,7 +266,14 @@ describe('keepalive cross-process awareness', () => {
     assert.equal(ctxInside, 'test-run-id', 'should have runId inside context')
   })
 
-  it('documents that role-worker keepalive is broken by design', () => {
-    assert.equal(getExecutionRunContext(), undefined)
+  it('keeps role-worker leases in the parent runner instead of relying on child context', () => {
+    const runnerSource = readFileSync(
+      join(process.cwd(), 'src/server/agent-runtime/runner.ts'),
+      'utf8'
+    )
+    assert.match(runnerSource, /withSandboxLeaseRefresh/)
+    assert.match(runnerSource, /refreshWorkspaceLease/)
+    assert.match(runnerSource, /refreshWorkloadLease/)
+    assert.match(runnerSource, /controller\.abort/)
   })
 })

@@ -2,10 +2,15 @@ import { Hono } from 'hono'
 import type { AppContext } from '../context'
 import { AppError } from '../error'
 import { requireUsername } from '../auth/session'
-import { createProject, deleteProject, getProject, listProjects } from '../projects/service'
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  getProjectWorkspaceAccess,
+  listProjects
+} from '../projects/service'
 import { ok } from '../response'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createProjectRoutes(_ctx: AppContext): Hono {
   const projectRoutes = new Hono()
 
@@ -34,6 +39,12 @@ export function createProjectRoutes(_ctx: AppContext): Hono {
       body.createIfMissing ?? true
     )
     return c.json(ok(row))
+  })
+
+  projectRoutes.get('/:projectId/workspace-access', async (c) => {
+    const username = await requireUsername(c.req.header('Authorization'))
+    const access = await getProjectWorkspaceAccess(username, c.req.param('projectId'))
+    return c.json(ok(access))
   })
 
   projectRoutes.get('/:projectId', async (c) => {

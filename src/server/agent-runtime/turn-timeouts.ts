@@ -1,39 +1,38 @@
 import type { ConversationRole } from './roles'
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from '../sandbox/session-state'
+import { DEFAULT_APP_CONFIG } from '../config/app-config'
 
-export const TASK_TURN_STALLED_MS = 60 * 60_000
-const LEGACY_NO_FIRST_SIGNAL_MS = 120_000
+/** Shared stalled threshold for every role (conversation / planner / task / verifiers). */
+export const TASK_TURN_STALLED_MS = DEFAULT_APP_CONFIG.turn.stalledMs
 
-export function usesTaskTurnTimeoutPolicy(role: ConversationRole): boolean {
-  return role === 'task-worker' || role === 'conversation'
+/**
+ * All roles share the task-worker timeout policy.
+ * Planner / verifiers / conversation also call MCP and can run long tool chains;
+ * a shorter stalled window mainly caused false kills, not better hang detection.
+ */
+export function usesTaskTurnTimeoutPolicy(_role: ConversationRole): boolean {
+  return true
 }
 
-export function stalledAfterMsForRole(role: ConversationRole): number {
-  const env = process.env.CODETASK_TURN_STALLED_MS
-  if (env) {
-    const parsed = Number(env)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  if (usesTaskTurnTimeoutPolicy(role)) return TASK_TURN_STALLED_MS
-  if (role === 'planner') return 20 * 60_000
-  if (role === 'milestone-verifier' || role === 'slice-verifier') return 15 * 60_000
-  return 20 * 60_000
+export function stalledAfterMsForRole(
+  role: ConversationRole,
+  stalledMs = TASK_TURN_STALLED_MS
+): number {
+  void role
+  return stalledMs
 }
 
-export function noFirstSignalMsForRole(role: ConversationRole): number | null {
-  const env = process.env.CODETASK_TURN_NO_FIRST_SIGNAL_MS
-  if (env) {
-    const parsed = Number(env)
-    if (Number.isFinite(parsed) && parsed <= 0) return null
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  if (usesTaskTurnTimeoutPolicy(role)) {
-    return null
-  }
-  return LEGACY_NO_FIRST_SIGNAL_MS
+/**
+ * No short "first signal" kill by default — long MCP / explore startup is normal.
+ */
+export function noFirstSignalMsForRole(
+  _role: ConversationRole,
+  noFirstSignalMs = DEFAULT_APP_CONFIG.turn.noFirstSignalMs
+): number | null {
+  return noFirstSignalMs
 }
 
-export function turnWallTimeoutMsForRole(role: ConversationRole): number | null {
-  if (!usesTaskTurnTimeoutPolicy(role)) return null
+/** Nominal wall hint (sandbox / tooling); shared across roles. */
+export function turnWallTimeoutMsForRole(_role: ConversationRole): number | null {
   return DEFAULT_SANDBOX_TURN_TIMEOUT_MS
 }

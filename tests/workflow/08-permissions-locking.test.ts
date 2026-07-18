@@ -43,7 +43,7 @@ describe('08 permissions and locking workflow', () => {
     const collectClient = new McpHttpClient(collectMcpUrl)
     await assert.rejects(async () => {
       await collectClient.initialize()
-      await collectClient.callTool('register_plan', buildProposeTaskDraftArgs())
+      await collectClient.callTool('register_plan_outline', buildProposeTaskDraftArgs())
     }, /capability|403|failed/i)
 
     const { job } = await harness.confirmDraftFinal(task.id, String(draft?.id))

@@ -31,6 +31,7 @@ import {
 } from '@renderer/lib/draftForm'
 import { buildPlanTree } from '@renderer/lib/jobProgress'
 import type { TranslateFn } from '@renderer/lib/jobProgress'
+import { toast, toastError } from '@renderer/lib/toast'
 
 export type CenterView = 'draft' | 'plan'
 
@@ -398,7 +399,7 @@ export function provideDraftPlanWorkspace(options: {
     const threadId = options.threadId.value
     if (!plan || !threadId) return
     if (plan.referenceManifestStale) {
-      error.value = options.t('workspace.draftPanel.referenceManifestStaleHint')
+      toast.warning(options.t('workspace.draftPanel.referenceManifestStaleHint'))
       return
     }
     confirmingPlan.value = true
@@ -408,8 +409,9 @@ export function provideDraftPlanWorkspace(options: {
       await launchDesignSession(threadId, plan.id)
       await loadWorkspace()
       successMessage.value = options.t('workspace.create.queuedSuccess')
+      toast.success(options.t('workspace.create.queuedSuccess'))
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      toastError(err, String(err))
     } finally {
       confirmingPlan.value = false
     }
@@ -431,7 +433,7 @@ export function provideDraftPlanWorkspace(options: {
       setStep(2)
       void watchPlan(plan.id)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      toastError(err, String(err))
     } finally {
       retryingPlan.value = false
     }
@@ -454,8 +456,9 @@ export function provideDraftPlanWorkspace(options: {
       await freezeReferenceCorpus(threadId, plan.id)
       await refreshPlan()
       successMessage.value = options.t('workspace.draftPanel.refreezeSuccess')
+      toast.success(options.t('workspace.draftPanel.refreezeSuccess'))
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
+      toastError(err, String(err))
     } finally {
       freezingCorpus.value = false
     }

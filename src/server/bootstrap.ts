@@ -1,20 +1,39 @@
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { JobEventBus, RuntimeRegistry, SettingsStore, type AppContext } from './context'
 import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
-import {
-  reconcileOrphanRunningJobsOnStartupOnce,
-  reconcileOrphanPlanningSessionsOnStartupOnce,
-  reconcileOrphanWorkloadSlotsOnStartupOnce,
-  startWorkloadReconciler,
-  stopWorkloadReconcilerForTests
-} from './jobs/reconcile'
-import { bindStartupWorkloadGate } from './jobs/workload-slot'
-import { reconcileOnStartupOnce } from './conversation/service'
-import { pruneOrphanRuntimeTrees } from './runtime/cleanup'
 import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } from './retention'
 import { getOrCreateAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
+import { SafeLoggerImpl } from './application/safe-logger'
+import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
+import { StartupError } from './application/startup-error'
+import { readSchemaGeneration } from './application/cutover-state'
+import {
+  startApplicationRuntime,
+  shutdownApplicationRuntime,
+  resetApplicationRuntimeForTests
+} from './application/application-runtime'
+import { getApplicationStartup } from './application/application-runtime'
+import type { StartupCoordinator } from './application/startup-coordinator'
+import {
+  startArtifactExpiryScheduler,
+  stopArtifactExpiryScheduler
+} from './retention/expiry-scheduler'
+import {
+  EncryptedFileMcpSecretProvider,
+  MemoryMcpSecretProvider
+} from './settings/mcp-secret-provider'
+import {
+  collectMcpSecretReferenceIds,
+  resolveProtectedMcpSensitiveValues
+} from './settings/mcp-secrets'
+import {
+  createAppConfig,
+  DEFAULT_APP_CONFIG,
+  type AppConfig,
+  type AppConfigOverrides
+} from './config/app-config'
 
 export type { AppContext } from './context'
 
@@ -23,27 +42,22 @@ export type AppMode = 'desktop' | 'server'
 export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
+  config?: AppConfigOverrides
+  authSecretPath?: string
+  authSecret?: string
+  mcpSecretPath?: string
+  storage?: {
+    bootstrapRoot: string
+    source: string
+    managed: boolean
+  }
 }
 
 let appContext: AppContext | null = null
-const startupTasks = new Set<Promise<unknown>>()
+const bootstrapLogger = new SafeLoggerImpl()
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function trackStartupTask<T>(promise: Promise<T>): Promise<T> {
-  const tracked = promise.finally(() => {
-    startupTasks.delete(tracked)
-  })
-  startupTasks.add(tracked)
-  return tracked
-}
-
-async function waitForStartupTasksForTests(): Promise<void> {
-  while (startupTasks.size > 0) {
-    await Promise.allSettled([...startupTasks])
-  }
 }
 
 async function waitForPlanningToDrainForTests(ctx: AppContext): Promise<void> {
@@ -52,7 +66,7 @@ async function waitForPlanningToDrainForTests(ctx: AppContext): Promise<void> {
     await sleep(25)
   }
   if (ctx.runtimeRegistry.hasInflightPlanning()) {
-    console.warn('[tests] reset while planning runtime is still active')
+    bootstrapLogger.warn('[tests] reset while planning runtime is still active')
   }
 }
 
@@ -63,121 +77,131 @@ export function getAppContext(): AppContext {
   return appContext
 }
 
+export function getAppConfig(): AppConfig {
+  return appContext?.config ?? DEFAULT_APP_CONFIG
+}
+
+export function getStartupCoordinator(): StartupCoordinator | null {
+  if (!appContext?.applicationRuntime) {
+    return null
+  }
+  return getApplicationStartup(appContext)
+}
+
 export function bootstrapRuntime(options: BootstrapOptions): AppContext {
   if (appContext) {
     return appContext
   }
 
+  void LEGACY_RESUME_RUNNING_DISABLED
+
   const db = createDatabase(options.dataDir)
-  const mode = options.mode ?? 'desktop'
+  try {
+    const schemaRead = readSchemaGeneration(db)
 
-  const settings = new SettingsStore(options.dataDir)
-  const authSecret = getOrCreateAuthSecret(options.dataDir)
+    // FIX-PLAN F1 / R6: fail closed before publishing global context or starting janitors.
+    if (schemaRead === 'v3_authoritative') {
+      throw new StartupError('control_plane.v3_not_release_ready')
+    }
 
-  const bootId = randomUUID()
+    const mode = options.mode ?? 'desktop'
+    const settings = new SettingsStore(options.dataDir, db)
+    const authSecret =
+      options.authSecret ??
+      (options.authSecretPath
+        ? getOrCreateAuthSecret(options.authSecretPath)
+        : randomBytes(32).toString('hex'))
+    const mcpSecrets = options.mcpSecretPath
+      ? new EncryptedFileMcpSecretProvider(options.mcpSecretPath, authSecret)
+      : new MemoryMcpSecretProvider()
+    const persistedMcp = settings.readNamespace('user_mcp')
+    if (persistedMcp.value) {
+      resolveProtectedMcpSensitiveValues(persistedMcp.value, mcpSecrets)
+      mcpSecrets.pruneExcept(collectMcpSecretReferenceIds(persistedMcp.value))
+    } else {
+      mcpSecrets.pruneExcept(new Set())
+    }
+    const bootId = randomUUID()
 
-  appContext = {
-    dataDir: options.dataDir,
-    db,
-    settings,
-    security: {
-      mode,
-      authSecret
-    },
-    eventBus: new JobEventBus(),
-    runtimeRegistry: new RuntimeRegistry(),
-    executionRuntime: new JobExecutionRuntimeRegistry(),
-    bootId
-  }
-  process.env.CODETASK_DATA_DIR = options.dataDir
+    const nextContext: AppContext = {
+      config: createAppConfig(options.config),
+      dataDir: options.dataDir,
+      db,
+      settings,
+      security: {
+        mode,
+        authSecret,
+        mcpSecrets
+      },
+      eventBus: new JobEventBus(),
+      runtimeRegistry: new RuntimeRegistry(),
+      executionRuntime: new JobExecutionRuntimeRegistry(),
+      bootId,
+      applicationRuntime: null,
+      ...(options.storage ? { storage: options.storage } : {})
+    }
+    process.env.CODETASK_DATA_DIR = options.dataDir
 
-  const ctx = appContext
-  const startupReconcile = trackStartupTask(
-    reconcileOrphanWorkloadSlotsOnStartupOnce()
-      .then(() => reconcileOrphanRunningJobsOnStartupOnce())
-      .then(() => reconcileOrphanPlanningSessionsOnStartupOnce())
-      .catch((error) => {
-        console.warn('[jobs] startup reconcile failed', error)
-      })
-  )
+    appContext = nextContext
 
-  bindStartupWorkloadGate(startupReconcile)
-  trackStartupTask(
-    reconcileOnStartupOnce().catch((error) => {
-      console.warn('[conversation] startup reconcile failed', error)
-    })
-  )
-  trackStartupTask(
-    pruneOrphanRuntimeTrees(options.dataDir, db)
-      .then((result) => {
-        if (result.removedPaths.length > 0) {
-          console.info('[runtime] pruned orphan runtime trees', result.removedPaths.length)
-        }
-      })
-      .catch((error) => {
-        console.warn('[runtime] startup prune failed', error)
-      })
-  )
+    startRetentionJanitor()
+    startArtifactExpiryScheduler(nextContext)
+    startAuthJanitor()
 
-  trackStartupTask(
-    runRetentionJanitorPass()
+    void runRetentionJanitorPass()
       .then((result) => {
         if (
           result.expiredArtifacts > 0 ||
           result.orphanAttachments > 0 ||
           result.staleRuntimes > 0 ||
-          result.orphanDesignArtifacts > 0 ||
+          result.completedTaskRuntimes > 0 ||
           result.staleAttachmentDirs > 0 ||
           result.orphanRuntimeTrees > 0 ||
           result.sqliteMaintenance.ran
         ) {
-          console.info('[retention] startup janitor pass', result)
+          bootstrapLogger.info('retention startup janitor pass', {
+            expiredArtifacts: result.expiredArtifacts,
+            orphanAttachments: result.orphanAttachments,
+            completedTaskRuntimes: result.completedTaskRuntimes
+          })
         }
       })
-      .catch((error) => {
-        console.warn('[retention] startup janitor failed', error)
-      })
-  )
-
-  startRetentionJanitor()
-  startAuthJanitor()
-  startWorkloadReconciler()
-
-  trackStartupTask(
-    import('./agent-runtime/cursor-acp/conversation-cursor-reaper')
-      .then((module) => {
-        module.configureConversationCursorReaper({
-          isThreadInflight: (threadId) => ctx.runtimeRegistry.isThreadInflight(threadId)
+      .catch((error: unknown) => {
+        bootstrapLogger.warn('retention startup janitor failed', {
+          error: error instanceof Error ? error.message : String(error)
         })
-        module.startConversationCursorReaper()
       })
-      .catch((error) => {
-        console.warn('[cursor-acp] conversation session reaper startup failed', error)
-      })
-  )
 
-  trackStartupTask(
-    import('./jobs/executor')
-      .then((module) => module.initJobExecutor(ctx))
-      .catch((error) => {
-        console.warn('[jobs] executor startup failed', error)
-      })
-  )
+    return appContext
+  } catch (error) {
+    closeDatabaseForTests()
+    throw error
+  }
+}
 
-  return appContext
+/** Fail-closed readiness barrier used before HTTP bind/listen. */
+export async function ensureRuntimeReady(ctx: AppContext = getAppContext()): Promise<void> {
+  await startApplicationRuntime(ctx)
+}
+
+export async function shutdownRuntime(
+  reason: 'app_shutdown' | 'user_quit' | 'signal' = 'app_shutdown'
+): Promise<void> {
+  const ctx = appContext
+  if (!ctx) return
+  await shutdownApplicationRuntime(ctx, reason)
 }
 
 export async function resetAppContextForTests(): Promise<void> {
   stopAuthJanitor()
   stopRetentionJanitor()
-  stopWorkloadReconcilerForTests()
+  stopArtifactExpiryScheduler()
 
   const ctx = appContext
   if (ctx) {
     await waitForPlanningToDrainForTests(ctx)
+    await resetApplicationRuntimeForTests(ctx)
   }
-
-  await waitForStartupTasksForTests()
 
   const { stopConversationCursorReaperForTests } =
     await import('./agent-runtime/cursor-acp/conversation-cursor-reaper')
@@ -185,6 +209,7 @@ export async function resetAppContextForTests(): Promise<void> {
 
   if (appContext) {
     await Promise.allSettled([runRetentionJanitorPass(), runAuthJanitorPass()])
+    appContext.settings.close()
   }
 
   appContext = null

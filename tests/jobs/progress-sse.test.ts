@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { slimJobForSse, slimTaskProgressForSse } from '../../src/server/jobs/progress-sse'
-import type { TaskProgressDto, ThreadJobDto } from '../../src/server/jobs/types'
+import { slimJobForSse, slimTaskProgressForSse } from '../../src/server/legacy-control-plane/progress-sse'
+import type { TaskProgressDto, ThreadJobDto } from '../../src/server/legacy-control-plane/types'
 
 test('slimTaskProgressForSse strips evidence lines and verdict traces', () => {
   const progress: TaskProgressDto = {

@@ -33,6 +33,7 @@ export default {
   setup: {
     title: '初始化',
     description: '首次使用，请创建管理员账号',
+    combinedDescription: '选择数据目录并创建管理员账号，一次完成初始化',
     submit: '完成初始化',
     submitting: '提交中…',
     setupTokenLabel: '初始化令牌（来自服务端控制台）',
@@ -41,7 +42,46 @@ export default {
       '用户名 4-32 位，字母开头，仅含字母/数字/下划线/连字符；不可使用 admin、root 等保留名。密码至少 8 位，须含大小写字母、数字和符号。',
     confirmPassword: '确认密码',
     confirmPasswordPlaceholder: '请再次输入密码',
-    passwordMismatch: '两次输入的密码不一致'
+    passwordMismatch: '两次输入的密码不一致',
+    storageTitle: '选择数据存储目录',
+    storageDescription:
+      '选择 CodeTask 存放数据库、附件和隔离 Provider 运行时的位置。默认目录不存在时会自动创建。',
+    storagePathLabel: '数据目录',
+    storagePathRequired: '请填写数据目录',
+    storageBrowse: '浏览',
+    storageBrowseTitle: '选择数据目录',
+    storageBrowseHint: '浏览本机文件夹，也可新建子目录后选择。',
+    storageSelectDirectory: '选择此目录',
+    storageCreateFolder: '创建并选择',
+    storageValidate: '校验目录',
+    storageValidating: '正在校验…',
+    storageConfirm: '确认并初始化',
+    storageInitializing: '正在初始化…',
+    storageValidatedPath: '已校验路径：{path}',
+    storageRestarting: '存储已初始化',
+    storageRecoveryTitle: '需要恢复数据存储',
+    storageRecoveryDescription:
+      '已保存的数据位置损坏或丢失。可选择原先的 CodeTask 数据目录恢复，也可选择空目录重新初始化。',
+    storageRecover: '使用此目录',
+    storageRecovering: '正在恢复…',
+    storageRecovered: '数据位置已恢复',
+    errors: {
+      pathNotAbsolute: '请填写绝对路径',
+      pathNotWritable: '目录不可写，请换一个有写权限的位置',
+      pathNotEmpty: '目录非空且不是 CodeTask 数据目录，请选择空目录',
+      pathForbiddenRoot: '不能使用系统根目录或用户主目录',
+      pathOwnedByOther: '该目录已属于另一个 CodeTask 安装',
+      markerMissing:
+        '目录缺少有效的 CodeTask 数据标记。首次安装请选空目录；恢复时请选原先的数据目录',
+      databaseMissing: '目录中找不到数据库文件',
+      locatorUnreadable: '已保存的数据位置配置损坏，请重新选择数据目录',
+      locatorInvalid: '已保存的数据位置配置无效，请重新选择数据目录',
+      legacyLocatorConflict: '检测到多份不同的数据位置配置，请选择要使用的原数据目录',
+      legacyLocatorMigrationFailed: '迁移原数据位置配置失败，请重新选择原数据目录',
+      installationMismatch: '数据目录与当前安装不匹配',
+      validationExpired: '目录校验已过期，请重试',
+      insufficientSpace: '磁盘空间不足'
+    }
   },
   bootstrap: {
     connectionError: '无法连接服务：{error}',
@@ -94,6 +134,8 @@ export default {
     addProject: '添加本地文件夹',
     addProjectHint: '添加本地文件夹…',
     loading: '加载中…',
+    loadFailed: '工作区加载失败',
+    retryLoad: '重试',
     noThreads: '暂无对话',
     expand: '展开',
     collapse: '折叠',
@@ -113,6 +155,9 @@ export default {
     loadThreadFailed: '加载对话失败',
     switchCoreFailed: '切换 CLI 失败',
     sendFailed: '发送失败',
+    taskWorkspaceReadOnly: '任务“{task}”正在执行，当前对话只读。',
+    conversationWorkspaceReadOnly: '另一个对话正在修改该目录，当前对话只读。',
+    workspaceReadOnly: '该目录当前由其他操作占用，当前对话只读。',
     relativeHours: '{n} 小时前',
     relativeMinutes: '{n} 分钟前',
     sidebar: {
@@ -185,12 +230,17 @@ export default {
         pause: '暂停',
         resume: '恢复',
         continue: '继续',
-        retryTask: '重试子任务',
-        restart: '重启',
+        restart: '清空进度从头执行',
         cancel: '取消',
         delete: '删除'
       },
       actionFailed: '任务操作失败',
+      recovery: {
+        retry: '点击继续将从失败断点重试，已完成任务不会清空。',
+        remediate: '点击继续将先执行补救任务，再回到失败断点。',
+        resume: '点击继续将从最近断点恢复，已完成任务不会清空。',
+        needs_attention: '请先处理外部依赖或人工条件，完成后点击继续从断点重试。'
+      },
       progress: {
         label: '占用百分比',
         planLabel: '计划生成',
@@ -204,6 +254,7 @@ export default {
         planning: '正在生成计划 {done}/{total}',
         planningPartial: '正在生成计划 · 已完成 {done} 步',
         planningRunning: '正在生成计划…',
+        planOutlineReady: '计划骨架已锁定，共 {total} 个小任务，正在逐项生成内容…',
         planFinalizing: '计划结构已就绪，正在收尾…',
         executionDone: '执行完成 {done}/{total}',
         executionFailed: '执行失败',
@@ -213,6 +264,7 @@ export default {
         code: {
           'plan.pending': '排队中，等待前序任务完成或暂停…',
           'plan.planning': '正在生成计划…',
+          'plan.outline_ready': '计划骨架已锁定，共 {total} 个小任务，正在逐项生成内容…',
           'plan.planning_partial': '正在生成计划 · 已完成 {done} 步',
           'plan.planning_failed': '计划生成失败',
           'plan.needs_auth': '本机 CLI 未登录，请先在终端完成授权',
@@ -276,6 +328,7 @@ export default {
         exec: {
           completed: '已完成',
           in_progress: '执行中',
+          paused: '已暂停',
           failed: '失败',
           pending: '等待',
           queued: '排队',
@@ -377,7 +430,8 @@ export default {
       addFolder: '添加本地文件夹',
       newDraftThread: '新建任务对话',
       draftListTitle: '草案列表',
-      draftListHint: '所有创建任务草案保存在这里。未完成可继续编辑，已完成可查看只读归档。',
+      draftListHint:
+        '所有创建任务草案保存在这里。可随时删除任意进度的草案；已启动的任务仍保留在任务列表中。',
       startNew: '新建任务',
       backToDraftList: '返回草案列表',
       draftListEmpty: '暂无草案',
@@ -387,6 +441,11 @@ export default {
       draftFilterAll: '全部',
       draftFilterIncomplete: '未完成',
       draftFilterComplete: '已完成',
+      confirmDeleteDraftTitle: '删除草案',
+      confirmDeleteDraftMessage: '确定删除草案「{name}」及其生成的文件数据吗？此操作不可恢复。',
+      confirmDeleteDraftLaunchedMessage:
+        '确定从草案列表删除「{name}」吗？已启动的任务会保留在任务列表中，不会被删除。',
+      deleteDraftFailed: '删除草案失败',
       draftStatusLaunched: '已完成',
       draftStatusInProgress: '进行中',
       draftStatusCollecting: '需求收集中',
@@ -486,8 +545,10 @@ export default {
       save: '保存',
       loadFailed: '加载设置失败',
       saveFailed: '保存设置失败',
+      saveSuccess: '设置已保存',
       sections: {
         language: '语言',
+        storage: '数据存储',
         sandbox: '沙箱',
         controlPlane: '控制平面',
         mcp: 'MCP',
@@ -509,6 +570,29 @@ export default {
           unavailable: '不可用',
           disabled: '已禁用'
         }
+      },
+      storage: {
+        title: '数据存储',
+        description: '查看存储占用，并通过校验、迁移和重启安全搬移完整数据根目录。',
+        loading: '正在加载存储信息…',
+        loadFailed: '加载存储信息失败',
+        currentPath: '当前数据根目录',
+        source: '来源：{source}',
+        total: '总量',
+        reclaimable: 'DB 可回收',
+        changeTitle: '搬移数据根目录',
+        browse: '浏览',
+        browseTitle: '选择新的数据目录',
+        browseHint: '浏览本机文件夹，也可新建子目录后选择。',
+        selectDirectory: '选择此目录',
+        createFolder: '创建并选择',
+        migrate: '校验并迁移',
+        managed: '该路径由 CLI 或环境变量管理，不能在此处更改。',
+        phase: '迁移阶段：{phase}',
+        restart: '重启并切换到新目录',
+        deleteOld: '删除旧数据目录',
+        migrationFailed: '数据存储迁移失败',
+        deleteOldFailed: '删除旧数据目录失败'
       },
       languageSection: {
         title: '语言',

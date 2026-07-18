@@ -44,7 +44,9 @@ const fields = computed(() => [
           v-for="core in cores"
           :key="core.code"
           :value="core.code"
-          :disabled="!core.available"
+          :disabled="
+            !core.available || (field.key === 'plannerCoreCode' && core.readOnlyCapable === false)
+          "
         >
           {{ core.label
           }}{{ core.available ? '' : ` (${t('workspace.settings.controlPlane.unavailable')})` }}

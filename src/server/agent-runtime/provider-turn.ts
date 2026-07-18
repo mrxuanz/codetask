@@ -1,15 +1,30 @@
+import { createTurnError, TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
-import { getExecutionRunContext } from '../jobs/execution-run-context'
-import { refreshWorkloadLease } from '../jobs/workload-slot-store'
+import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
+import { refreshWorkloadLease } from '../legacy-control-plane/workload-slot-store'
+import { refreshWorkspaceLease } from '../legacy-control-plane/workspace-lease-store'
+import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
 import { ProgressGuard } from './progress-guard'
 import { TurnScope } from './turn-scope'
+import { getAppConfig } from '../bootstrap'
 
 export interface ProviderTurnContext {
-  signal?: AbortSignal
-  onSoftCancel?: () => void
-  onHardCancel?: () => void
   processExit?: Promise<never>
+}
+
+export function abortReason(signal?: AbortSignal): Error {
+  return signal?.reason instanceof Error ? signal.reason : TURN_CANCELLED
+}
+
+export function forwardAbortSignal(
+  signal: AbortSignal | undefined,
+  controller: AbortController
+): () => void {
+  const abort = (): void => controller.abort(abortReason(signal))
+  signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted) abort()
+  return abort
 }
 
 export function createProviderTurnScope(
@@ -17,22 +32,23 @@ export function createProviderTurnScope(
   options: AgentTurnOptions | undefined,
   ctx: ProviderTurnContext
 ): TurnScope {
+  const turnConfig = getAppConfig().turn
+  const executionContext = getExecutionRunContext()
+  const workspaceContext = getWorkspaceLeaseContext()
   const turnScope = new TurnScope({
     role,
     externalSignal: options?.signal,
     processExit: ctx.processExit,
-    progressGuard: new ProgressGuard(role),
-    onKeepAlive: () => {
-      const ectx = getExecutionRunContext()
-      if (ectx?.runId) {
-        void refreshWorkloadLease(ectx.runId)
+    noFirstSignalMs: turnConfig.noFirstSignalMs,
+    progressGuard: new ProgressGuard(role, turnConfig),
+    onKeepAlive: async () => {
+      if (executionContext?.runId) {
+        await refreshWorkloadLease(executionContext.runId)
       }
-    },
-    onCancel: async (mode) => {
-      if (mode === 'soft') {
-        ctx.onSoftCancel?.()
-      } else {
-        ctx.onHardCancel?.()
+      if (workspaceContext) {
+        if (!refreshWorkspaceLease(workspaceContext.leaseId)) {
+          throw createTurnError('workspace.lease_lost')
+        }
       }
     }
   })

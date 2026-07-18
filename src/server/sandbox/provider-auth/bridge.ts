@@ -17,7 +17,11 @@ import {
   snapshotCursorHostAuth,
   snapshotOpencodeHostAuth
 } from './paths'
-import { materializeCodexAuth, materializeOpencodeAuth, opencodeRuntimeLayout } from './materialize'
+import {
+  materializeCodexAuth,
+  materializeOpencodeAuth,
+  opencodeRuntimeLayout
+} from './materialize'
 import type { ProviderAuthDiagnostics, ProviderAuthMode, ProviderAuthPrepared } from './types'
 
 const RUNTIME_AUTH_ENV_KEYS = [
@@ -145,22 +149,39 @@ function prepareCodex(runtimeRoot: string): ProviderAuthPrepared {
         : [`Host Codex auth file not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`]
   }
 
+  const readRoots = uniqueRoots([...resolveCodexInstallDirs()])
   return {
     envPatch,
-    readRoots: uniqueRoots([...resolveCodexInstallDirs()]),
+    readRoots,
     writeRoots: [],
     cleanupPlan: () => materialized.cleanup(),
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'codex',
+      hostReadRoots: readRoots,
+      hostWriteRoots: [],
+      runtimeEnv: envPatch,
+      credentialSnapshots: [
+        { relativePath: '.codex/auth.json', required: false },
+        { relativePath: '.codex/config.toml', required: false }
+      ],
+      scrubPatterns: ['.codex/auth.json', '.codex/config.toml']
+    }
   }
 }
 
-function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuthPrepared {
+function prepareCursor(runtimeRoot: string, _workspaceRoot: string): ProviderAuthPrepared {
   const profile = resolveHostProfilePaths()
   const hostAuth = snapshotCursorHostAuth(profile)
   const cursorHome = resolveCursorHostCursorHome(profile)
+  // Keep project metadata under runtime (P5), but use host identity so macOS Keychain /
+  // seatbelt ACP can authenticate. runtime-copy HOME breaks Keychain and still fails ACP
+  // under outer sandbox even with file-store auth.
+
   const envPatch = {
     ...buildHostIdentityEnv(runtimeRoot, profile),
-    CODETASK_PROVIDER_AUTH_MODE: 'host-identity' satisfies ProviderAuthMode
+    CODETASK_PROVIDER_AUTH_MODE: 'host-identity' satisfies ProviderAuthMode,
+    CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
   }
 
   const diagnostics: ProviderAuthDiagnostics = {
@@ -177,19 +198,35 @@ function prepareCursor(runtimeRoot: string, workspaceRoot: string): ProviderAuth
     ]
   }
 
+  const readRoots = uniqueRoots([
+    profile.home,
+    cursorHome,
+    hostAuth.configDir,
+    profile.appData,
+    profile.localAppData,
+    ...resolveCursorAgentInstallDirs()
+  ])
+  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(runtimeRoot, '.cursor')])
   return {
     envPatch,
-    readRoots: uniqueRoots([
-      profile.home,
-      cursorHome,
-      hostAuth.configDir,
-      profile.appData,
-      profile.localAppData,
-      ...resolveCursorAgentInstallDirs()
-    ]),
-    writeRoots: uniqueRoots([cursorHome, hostAuth.configDir, join(workspaceRoot, '.cursor')]),
+    readRoots,
+    writeRoots,
     cleanupPlan: () => undefined,
-    diagnostics
+    diagnostics: {
+      ...diagnostics,
+      warnings: [
+        ...diagnostics.warnings,
+        'P5: workspace .cursor is not writable; Cursor project metadata uses runtimeRoot CURSOR_DATA_DIR.'
+      ]
+    },
+    filesystemProfile: {
+      provider: 'cursorcli',
+      hostReadRoots: readRoots,
+      hostWriteRoots: writeRoots,
+      runtimeEnv: envPatch,
+      credentialSnapshots: [],
+      scrubPatterns: []
+    }
   }
 }
 
@@ -225,12 +262,21 @@ function prepareClaude(runtimeRoot: string): ProviderAuthPrepared {
     ]
   }
 
+  const readRoots = uniqueRoots([...resolveClaudeInstallDirs()])
   return {
     envPatch,
-    readRoots: uniqueRoots([...resolveClaudeInstallDirs()]),
+    readRoots,
     writeRoots: [],
     cleanupPlan: () => undefined,
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'claude-code',
+      hostReadRoots: readRoots,
+      hostWriteRoots: [],
+      runtimeEnv: envPatch,
+      credentialSnapshots: [],
+      scrubPatterns: []
+    }
   }
 }
 
@@ -255,17 +301,34 @@ function prepareOpencode(runtimeRoot: string): ProviderAuthPrepared {
     runtimeAuthPath: materialized.runtimeConfigDir,
     warnings: materialized.configCopied
       ? [
-          'OpenCode config/auth snapshotted to runtime XDG directories; inner permission=allow; MCP injected via OPENCODE_CONFIG_CONTENT.'
+          'OpenCode config/auth snapshotted to runtime XDG directories; question denied + auto-replied if asked; MCP injected via OPENCODE_CONFIG_CONTENT.'
         ]
       : ['OpenCode config directory is empty (will rely on environment variable API key)']
   }
 
+  const readRoots = uniqueRoots([...resolveOpencodeInstallDirs()])
   return {
     envPatch,
-    readRoots: uniqueRoots([...resolveOpencodeInstallDirs()]),
+    readRoots,
     writeRoots: [],
     cleanupPlan: () => materialized.cleanup(),
-    diagnostics
+    diagnostics,
+    filesystemProfile: {
+      provider: 'opencode',
+      hostReadRoots: readRoots,
+      hostWriteRoots: [],
+      runtimeEnv: envPatch,
+      credentialSnapshots: [
+        { relativePath: '.config/opencode/auth.json', required: false },
+        { relativePath: '.local/share/opencode/auth.json', required: false }
+      ],
+      scrubPatterns: [
+        '.config/opencode/auth.json',
+        '.config/opencode/credentials.json',
+        '.local/share/opencode/auth.json',
+        '.local/share/opencode/credentials.json'
+      ]
+    }
   }
 }
 
@@ -276,13 +339,13 @@ export interface PrepareProviderAuthOptions {
 export function prepareProviderAuth(
   provider: SupportedCoreCode,
   runtimeRoot: string,
-  options?: PrepareProviderAuthOptions
+  _options?: PrepareProviderAuthOptions
 ): ProviderAuthPrepared {
   switch (provider) {
     case 'codex':
       return prepareCodex(runtimeRoot)
     case 'cursorcli':
-      return prepareCursor(runtimeRoot, options?.workspaceRoot ?? runtimeRoot)
+      return prepareCursor(runtimeRoot, _options?.workspaceRoot ?? runtimeRoot)
     case 'claude-code':
       return prepareClaude(runtimeRoot)
     case 'opencode':

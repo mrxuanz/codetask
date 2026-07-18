@@ -16,8 +16,11 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
       - id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -25,11 +28,49 @@ jobs:
           else
             TAG="${{ github.ref_name }}"
           fi
+          SHA="$(git rev-list -n 1 "$TAG")"
+          if [ -z "$SHA" ]; then
+            echo "Could not resolve commit for tag: $TAG" >&2
+            exit 1
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-  build:
+  test-gate:
     needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NODE_VERSION: '22'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Run and record Legacy release test gate
+        run: node scripts/run-and-record.mjs --out release-evidence/test/test-gate.log -- npm run release:test-gate
+      - name: Create test evidence manifest
+        run: >-
+          node scripts/release-evidence.mjs create-test
+          --commit ${{ needs.prepare.outputs.sha }}
+          --lockfile package-lock.json
+          --evidence-root dist
+          --out dist/release-evidence/test/test-gate.manifest.json
+          --log release-evidence/test/test-gate.log
+      - name: Upload release test evidence
+        uses: actions/upload-artifact@65c4c08a768d7e4a08fabdd5333d057d994bc549 # v4.6.0
+        with:
+          name: release-test-evidence
+          path: dist/release-evidence/test/*
+          if-no-files-found: error
+
+  build:
+    needs: [prepare, test-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -45,28 +86,58 @@ jobs:
             name: windows-x64
     uses: ./.github/workflows/build.yml
     with:
+      ref: ${{ needs.prepare.outputs.sha }}
       runner: ${{ matrix.runner }}
       builder-args: ${{ matrix.args }}
+      smoke-unpacked: true
+      include-release-evidence: true
       upload-artifact: true
       artifact-name: ${{ matrix.name }}
 
   publish:
-    needs: [prepare, build]
+    needs: [prepare, test-gate, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/download-artifact@ccfa4c90b373a1bba1453ddebf4731d659dd3955 # v4.1.9
+        with:
+          name: linux-x64
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@ccfa4c90b373a1bba1453ddebf4731d659dd3955 # v4.1.9
+        with:
+          name: macos-arm64
+          path: dist
+      - uses: actions/download-artifact@ccfa4c90b373a1bba1453ddebf4731d659dd3955 # v4.1.9
+        with:
+          name: windows-x64
+          path: dist
+
+      - name: Verify evidence chain and create Legacy release report
+        run: >-
+          node scripts/release-evidence.mjs verify
+          --root dist
+          --commit ${{ needs.prepare.outputs.sha }}
+          --lockfile package-lock.json
+          --report dist/legacy-release-report.json
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@0508763985e9303a802fc2637ea176567cb4f220 # v2.2.1
         with:
           name: ${{ needs.prepare.outputs.tag }}
           tag_name: ${{ needs.prepare.outputs.tag }}
-          files: dist/*
+          files: |
+            dist/*.exe
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.dmg
+            dist/*.zip
+            dist/legacy-release-report.json
+            dist/release-evidence/**/*.manifest.json
+            dist/release-evidence/**/*.log
           draft: false
           prerelease: false
           generate_release_notes: true

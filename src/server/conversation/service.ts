@@ -20,6 +20,7 @@ import {
   THREAD_KIND_CHAT,
   THREAD_KIND_CREATE_TASK
 } from '../threads/types'
+import type { ThreadKind } from '../threads/types'
 import { ensureCoreAvailable, getAgentCore, listChatCores, type SupportedCoreCode } from './cores'
 import { buildConversationMcpUrl } from './mcp/url'
 import {
@@ -46,7 +47,7 @@ import { buildWorkspaceSnapshot } from './workspace-snapshot'
 import type { TaskLaunchDraftPayload } from './draft/types'
 import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
-import { ensureRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { ensureConversationRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
 import { buildConversationCursorRuntimeScope } from '../agent-runtime/cursor-acp/runtime-registry'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
@@ -58,11 +59,172 @@ import type {
 } from './types'
 import { buildAttachmentReferenceMarkdown, resolveTurnAttachmentReadRoots } from './attachments'
 import { getAppContext } from '../bootstrap'
+import { assertConcurrentTurnCapacity } from '../middleware/http-limits'
 import { maybeSeedThreadTitleFromFirstMessage } from './thread-title'
+import { createTurnError } from '../../shared/turn-errors.ts'
+import { providerSupportsCapability } from '../agent-runtime/capabilities'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function initConversationService(_options: { dataDir: string }): void {
   getAppContext()
+}
+
+/**
+ * Server-side mode truth (FIX-PLAN §1.2). `threadKind` from the database is
+ * the only authority; client-supplied booleans (generateDraft, createTaskMode)
+ * are requests that must be validated against it, never trusted directly.
+ */
+export type ConversationMode =
+  | { kind: typeof THREAD_KIND_CHAT; generateDraft: false }
+  | { kind: typeof THREAD_KIND_CREATE_TASK; generateDraft: boolean }
+
+export function assertConversationMode(input: {
+  threadKind: ThreadKind
+  requestedCreateTaskMode: boolean
+  requestedDraft: boolean
+}): void {
+  const requestIsCreateTask = input.requestedCreateTaskMode || input.requestedDraft
+  const threadIsCreateTask = input.threadKind === THREAD_KIND_CREATE_TASK
+
+  if (requestIsCreateTask !== threadIsCreateTask) {
+    throw AppError.conflict(
+      'Conversation mode does not match thread kind',
+      {
+        expected: input.threadKind,
+        requested: requestIsCreateTask ? THREAD_KIND_CREATE_TASK : THREAD_KIND_CHAT
+      },
+      'conversation.mode_mismatch'
+    )
+  }
+}
+
+export function resolveConversationMode(input: {
+  threadKind: ThreadKind
+  requestedDraft: boolean
+}): ConversationMode {
+  if (input.threadKind === THREAD_KIND_CHAT && input.requestedDraft) {
+    throw AppError.conflict(
+      'Chat threads cannot start draft turns',
+      { threadKind: input.threadKind },
+      'conversation.mode_mismatch',
+      { threadKind: input.threadKind }
+    )
+  }
+  return input.threadKind === THREAD_KIND_CHAT
+    ? { kind: THREAD_KIND_CHAT, generateDraft: false }
+    : { kind: THREAD_KIND_CREATE_TASK, generateDraft: input.requestedDraft }
+}
+
+export interface PreparedConversationTurn {
+  username: string
+  threadId: string
+  thread: ThreadDto
+  threadRow: NonNullable<Awaited<ReturnType<typeof getThreadRow>>>
+  workspacePath: string
+  threadKind: ThreadKind
+  createTaskMode: boolean
+  conversationMode: ConversationMode
+  wizardPhase: WizardPhase
+  /** Null when conversation uses read-only access and does not hold an exclusive lease. */
+  workspaceLeaseId: string | null
+  workspaceLeaseOwnerId: string | null
+  workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
+}
+
+export async function prepareConversationTurn(input: {
+  username: string
+  threadId: string
+  requestedCreateTaskMode: boolean
+  requestedDraft: boolean
+  turnId?: string
+}): Promise<PreparedConversationTurn> {
+  const { username, threadId, requestedCreateTaskMode, requestedDraft } = input
+
+  const resolved = await loadThreadProject(username, threadId)
+  let thread = resolved.thread
+  const workspacePath = resolved.workspacePath
+
+  const { isThreadProjectDeletionBlocked } =
+    await import('../legacy-control-plane/deletion-coordinator')
+  if (await isThreadProjectDeletionBlocked(threadId)) {
+    throw AppError.conflict('Project or thread is being deleted', undefined, 'thread.deleting')
+  }
+
+  let threadRow = await getThreadRow(username, threadId)
+  if (!threadRow) {
+    throw AppError.notFound('Thread not found', 'thread.not_found')
+  }
+
+  const threadKind = resolveThreadKind(threadRow)
+  assertConversationMode({ threadKind, requestedCreateTaskMode, requestedDraft })
+  const conversationMode = resolveConversationMode({ threadKind, requestedDraft })
+  const createTaskMode = threadKind === THREAD_KIND_CREATE_TASK
+  const wizardPhase = resolveWizardPhase(threadRow)
+  thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
+  reserveThread(thread, username)
+  let workspaceLeaseId: string | null = null
+  let workspaceLeaseOwnerId: string | null = null
+  let workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode =
+    workspacePath ? 'live-read' : 'metadata'
+
+  try {
+    // Requirements collection and draft turns are always read-only. Ordinary chat may make
+    // focused edits, but only after winning the same main-workspace lease used by task workers.
+    if (threadKind === THREAD_KIND_CHAT && workspacePath) {
+      if (!input.turnId) {
+        throw AppError.internal('Conversation write admission requires a turn id', 'turn.unknown')
+      }
+      const { acquireWorkspaceLease } =
+        await import('../legacy-control-plane/workspace-lease-store')
+      workspaceLeaseOwnerId = input.turnId
+      const lease = acquireWorkspaceLease({
+        workspacePath,
+        ownerKind: 'conversation',
+        ownerId: workspaceLeaseOwnerId,
+        runId: input.turnId
+      })
+      if (lease) {
+        workspaceLeaseId = lease.leaseId
+        workspaceAccess = 'exclusive-write'
+      } else {
+        workspaceLeaseOwnerId = null
+      }
+    }
+
+    const requiredCapability = createTaskMode
+      ? ('create-task-read' as const)
+      : workspaceAccess === 'exclusive-write'
+        ? ('chat-write' as const)
+        : ('chat-read' as const)
+    if (!providerSupportsCapability(thread.coreCode as SupportedCoreCode, requiredCapability)) {
+      throw AppError.badRequest(
+        `Selected CLI (${thread.coreCode}) cannot enforce ${requiredCapability}`,
+        'provider.capability_unsupported'
+      )
+    }
+
+    return {
+      username,
+      threadId: thread.id,
+      thread,
+      threadRow,
+      workspacePath,
+      threadKind,
+      createTaskMode,
+      conversationMode,
+      wizardPhase,
+      workspaceLeaseId,
+      workspaceLeaseOwnerId,
+      workspaceAccess
+    }
+  } catch (error) {
+    if (workspaceLeaseId) {
+      const { releaseWorkspaceLease } =
+        await import('../legacy-control-plane/workspace-lease-store')
+      releaseWorkspaceLease({ leaseId: workspaceLeaseId })
+    }
+    releaseThread(threadId)
+    throw error
+  }
 }
 
 function isThreadInflight(threadId: string): boolean {
@@ -120,15 +282,20 @@ async function loadThreadProject(
   return { thread: toThreadDto(row), workspacePath: project.workspaceRoot }
 }
 
-function reserveThread(thread: ThreadDto): void {
-  const registry = getAppContext().runtimeRegistry
+function reserveThread(thread: ThreadDto, username: string): void {
+  const ctx = getAppContext()
+  const registry = ctx.runtimeRegistry
+  assertConcurrentTurnCapacity(
+    registry.countInflightForUser(username),
+    ctx.config.http.maxConcurrentTurnsPerUser
+  )
   if (registry.isThreadInflight(thread.id)) {
     throw AppError.badRequest('Thread is busy; wait for the reply to finish', 'thread.busy')
   }
   if (thread.runtimeStatus === RUNTIME_STATUS_RUNNING) {
     throw AppError.badRequest('Thread is busy; wait for the reply to finish', 'thread.busy')
   }
-  registry.addInflightThread(thread.id)
+  registry.addInflightThread(thread.id, username)
 }
 
 function releaseThread(threadId: string): void {
@@ -167,13 +334,22 @@ export async function switchThreadCore(
   threadId: string,
   coreCode: string
 ): Promise<ThreadDto> {
-  await closeConversationCursorRuntime(threadId).catch((error) => {
-    console.warn('[conversation] failed to close cursor runtime on core switch', threadId, error)
-  })
-  await ensureCoreAvailable(coreCode).catch((error: Error) => {
+  const row = await getThreadRow(username, threadId)
+  if (!row) throw AppError.notFound('Thread not found', 'thread.not_found')
+  const core = await ensureCoreAvailable(coreCode).catch((error: Error) => {
     throw AppError.badRequest(error.message)
   })
-  return updateThreadCore(username, threadId, coreCode)
+  if (
+    resolveThreadKind(row) === THREAD_KIND_CREATE_TASK &&
+    !providerSupportsCapability(core.code, 'create-task-read')
+  ) {
+    throw AppError.badRequest(
+      'This CLI cannot enforce read-only create-task conversations',
+      'provider.capability_unsupported'
+    )
+  }
+  await closeConversationCursorRuntime(threadId)
+  return updateThreadCore(username, threadId, core.code)
 }
 
 export async function* streamSendMessage(
@@ -186,6 +362,32 @@ export async function* streamSendMessage(
     attachments?: MessageAttachment[]
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
+    signal?: AbortSignal
+    turnId?: string
+    onWorkspaceAccessResolved?: (
+      workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
+    ) => void
+  }
+): AsyncGenerator<ChatSseEvent> {
+  const prepared = await prepareConversationTurn({
+    username,
+    threadId,
+    requestedCreateTaskMode: options?.createTaskMode === true,
+    requestedDraft: options?.generateDraft === true,
+    turnId: options?.turnId
+  })
+  options?.onWorkspaceAccessResolved?.(prepared.workspaceAccess)
+  yield* executePreparedTurn(prepared, message, options)
+}
+
+export async function* executePreparedTurn(
+  prepared: PreparedConversationTurn,
+  message: string,
+  options?: {
+    attachments?: MessageAttachment[]
+    selectedDraftSection?: string
+    selectedPlanNodeRef?: string
+    signal?: AbortSignal
   }
 ): AsyncGenerator<ChatSseEvent> {
   const trimmed = message.trim()
@@ -193,30 +395,21 @@ export async function* streamSendMessage(
     throw AppError.badRequest('Message cannot be empty', 'message.empty')
   }
 
-  const resolved = await loadThreadProject(username, threadId)
-  let thread = resolved.thread
-  const workspacePath = resolved.workspacePath
-  const threadRow = await getThreadRow(username, threadId)
-  if (!threadRow) throw AppError.notFound('Thread not found', 'thread.not_found')
-  const threadKind = resolveThreadKind(threadRow)
-  const createTaskMode = options?.createTaskMode === true
-  if (createTaskMode && threadKind !== THREAD_KIND_CREATE_TASK) {
-    throw AppError.badRequest(
-      'Start a task conversation from the Create Task entry',
-      'thread.kind_mismatch',
-      { expected: 'create_task', actual: threadKind }
-    )
+  const { username, threadId, workspacePath, threadKind, createTaskMode, conversationMode } =
+    prepared
+  let thread = prepared.thread
+  const threadRow = prepared.threadRow
+  const wizardPhase = prepared.wizardPhase
+
+  const { enterWorkspaceLeaseContext } =
+    await import('../legacy-control-plane/workspace-lease-context')
+  if (prepared.workspaceLeaseId && prepared.workspaceLeaseOwnerId) {
+    enterWorkspaceLeaseContext({
+      leaseId: prepared.workspaceLeaseId,
+      ownerKind: 'conversation',
+      ownerId: prepared.workspaceLeaseOwnerId
+    })
   }
-  if (!createTaskMode && threadKind === THREAD_KIND_CREATE_TASK) {
-    throw AppError.badRequest(
-      'This conversation belongs to a task creation flow; continue in Create Task',
-      'thread.kind_mismatch',
-      { expected: 'chat', actual: threadKind }
-    )
-  }
-  const wizardPhase = resolveWizardPhase(threadRow)
-  thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
-  reserveThread(thread)
 
   try {
     const core = await ensureCoreAvailable(thread.coreCode).catch((error: Error) => {
@@ -235,7 +428,7 @@ export async function* streamSendMessage(
       conversationId: thread.conversationId,
       runtimeSessionId: thread.runtimeSessionId,
       attachments: turnAttachments,
-      wizardPhase: options?.createTaskMode ? wizardPhase : null
+      wizardPhase: createTaskMode ? wizardPhase : null
     })
 
     yield { event: 'user_message', data: { message: userMessage } }
@@ -286,18 +479,25 @@ export async function* streamSendMessage(
       null
     )
 
-    const runtimeRoot = ensureRuntimeRoot(
+    const conversationKind = createTaskMode ? 'create_task' : 'chat'
+    const capabilityProfile = createTaskMode
+      ? ('create-task-read' as const)
+      : prepared.workspaceAccess === 'exclusive-write'
+        ? ('chat-write' as const)
+        : ('chat-read' as const)
+    const runtimeRoot = ensureConversationRuntimeRoot(
       getAppContext().dataDir,
       thread.id,
+      conversationKind,
       core.code as SupportedCoreCode
     )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
-    const turnRole: ConversationTurnRole = options?.generateDraft ? 'draft' : 'chat'
+    const turnRole: ConversationTurnRole = conversationMode.generateDraft ? 'draft' : 'chat'
     const wizardStage: WizardPhase | null = createTaskMode ? wizardPhase : null
     const mcpWizardStage = wizardStage ?? 'general'
     const phaseRuntimeId = createTaskMode
       ? (getThreadPhaseRuntime(threadRow) ?? thread.runtimeSessionId)
-      : thread.runtimeSessionId
+      : null
     const priorMessages = await listMessages(username, thread.id, 50, { signAssets: false })
 
     const draftEvents: ChatSseEvent[] = []
@@ -333,8 +533,11 @@ export async function* streamSendMessage(
           threadId: thread.id,
           wizardStage: mcpWizardStage
         })
-      } catch {
-        mcpUrl = undefined
+      } catch (error) {
+        unregisterConversationMcpSession(mcpSessionId)
+        throw createTurnError('conversation.mcp_unavailable', {
+          detail: error instanceof Error ? error.message : String(error)
+        })
       }
     }
 
@@ -351,10 +554,7 @@ export async function* streamSendMessage(
       ? phasePrompt
         ? `${systemPromptBase}\n\n${phasePrompt}`
         : systemPromptBase
-      : buildConversationSystemPrompt('CodeTask Conversation', {
-          mode: 'chat',
-          mcpToolsAvailable: false
-        })
+      : undefined
 
     let draftRevision: number | null = null
     let planRevision: number | null = null
@@ -432,8 +632,8 @@ export async function* streamSendMessage(
     const mcpToolNames =
       createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
     const cursorRuntimeScope =
-      core.code === 'cursorcli'
-        ? buildConversationCursorRuntimeScope(thread.id, createTaskMode ? 'create_task' : 'chat')
+      core.code === 'cursorcli' && createTaskMode
+        ? buildConversationCursorRuntimeScope(thread.id, conversationKind)
         : undefined
 
     const attachmentReadRoots = resolveTurnAttachmentReadRoots({
@@ -452,6 +652,7 @@ export async function* streamSendMessage(
     try {
       for await (const chunk of streamAgentTurn({
         role: 'conversation',
+        capabilityProfile,
         provider: core.code as SupportedCoreCode,
         workspaceRoot: workspacePath,
         runtimeRoot,
@@ -462,7 +663,17 @@ export async function* streamSendMessage(
         mcpUrl,
         mcpToolNames,
         readRoots: attachmentReadRoots.length > 0 ? attachmentReadRoots : undefined,
-        jobId: cursorRuntimeScope
+        jobId: cursorRuntimeScope,
+        signal: options?.signal,
+        workspaceAccess: prepared.workspaceAccess,
+        workspaceLease:
+          prepared.workspaceLeaseId && prepared.workspaceLeaseOwnerId
+            ? {
+                leaseId: prepared.workspaceLeaseId,
+                ownerKind: 'conversation',
+                ownerId: prepared.workspaceLeaseOwnerId
+              }
+            : undefined
       })) {
         while (draftEvents.length > 0) {
           const draftEvent = draftEvents.shift()
@@ -471,7 +682,9 @@ export async function* streamSendMessage(
 
         if (chunk.type === 'thinking_delta') {
           if (thinkingStartedAt == null) thinkingStartedAt = Date.now()
-          const advanced = appendTextPiece(thinking, chunk.content, { maxChars: MAX_TURN_TEXT_CHARS })
+          const advanced = appendTextPiece(thinking, chunk.content, {
+            maxChars: MAX_TURN_TEXT_CHARS
+          })
           thinking = advanced.text
           if (advanced.delta) {
             yield { event: 'thinking_delta', data: { content: advanced.delta } }
@@ -582,6 +795,16 @@ export async function* streamSendMessage(
     }
     yield { event: 'error', data: { message: errMessage, error: turnError } }
   } finally {
+    const { releaseWorkspaceLease } = await import('../legacy-control-plane/workspace-lease-store')
+    if (prepared.workspaceLeaseId) {
+      const released = releaseWorkspaceLease({ leaseId: prepared.workspaceLeaseId })
+      if (released) {
+        const { advanceExecutionQueue } = await import('../legacy-control-plane/queue-coordinator')
+        await advanceExecutionQueue(username).catch((error) => {
+          console.warn('[conversation] failed to advance task queue after lease release', error)
+        })
+      }
+    }
     releaseThread(threadId)
   }
 }
@@ -603,8 +826,24 @@ export async function reconcileOnStartup(): Promise<void> {
 }
 
 let startupReconciled = false
+let startupReconcilePromise: Promise<void> | null = null
+
 export async function reconcileOnStartupOnce(): Promise<void> {
   if (startupReconciled) return
-  startupReconciled = true
-  await reconcileOnStartup()
+  if (startupReconcilePromise) return startupReconcilePromise
+
+  startupReconcilePromise = reconcileOnStartup()
+    .then(() => {
+      startupReconciled = true
+    })
+    .finally(() => {
+      startupReconcilePromise = null
+    })
+
+  return startupReconcilePromise
+}
+
+export function resetConversationReconcileForTests(): void {
+  startupReconciled = false
+  startupReconcilePromise = null
 }

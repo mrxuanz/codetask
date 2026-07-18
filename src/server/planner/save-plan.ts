@@ -2,87 +2,12 @@ import type { PlanProgressDto, TaskProgressDto } from '@shared/contracts/jobs'
 import type {
   PlannerRegisteredPlan,
   PlannerRegisteredTaskContext,
-  PlannerRegisteredSlice,
   SavedJobPlan
 } from './plan-types'
-
-function parseContextKey(key: string): { m: number; s: number; t: number } | null {
-  const match = /^m(\d+)-s(\d+)-t(\d+)$/i.exec(key.trim())
-  if (!match) return null
-  return { m: Number(match[1]), s: Number(match[2]), t: Number(match[3]) }
-}
 
 function taskSuccessCriteria(taskSuccess: string | undefined, sliceSuccess: string): string {
   const trimmed = taskSuccess?.trim()
   return trimmed || sliceSuccess
-}
-
-export function buildPartialPlanFromContexts(
-  contexts: Map<string, PlannerRegisteredTaskContext>
-): SavedJobPlan {
-  const entries = [...contexts.entries()]
-    .map(([key, ctx]) => {
-      const coords = parseContextKey(key)
-      if (!coords) return null
-      return { key, coords, ctx }
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .sort((a, b) => {
-      if (a.coords.m !== b.coords.m) return a.coords.m - b.coords.m
-      if (a.coords.s !== b.coords.s) return a.coords.s - b.coords.s
-      return a.coords.t - b.coords.t
-    })
-
-  const tasks: SavedJobPlan['tasks'] = entries.map(({ key, coords, ctx }) => ({
-    id: key,
-    milestoneIndex: coords.m,
-    sliceIndex: coords.s,
-    taskIndex: coords.t,
-    title: ctx.taskTitle,
-    description: '',
-    taskKind: 'general-implementation',
-    abilityCode: 'general-implementation',
-    contextMarkdown: ctx.content,
-    successCriteria: ''
-  }))
-
-  const milestoneMap = new Map<number, Map<number, SavedJobPlan['tasks']>>()
-  for (const task of tasks) {
-    if (!milestoneMap.has(task.milestoneIndex)) {
-      milestoneMap.set(task.milestoneIndex, new Map())
-    }
-    const sliceMap = milestoneMap.get(task.milestoneIndex)!
-    if (!sliceMap.has(task.sliceIndex)) {
-      sliceMap.set(task.sliceIndex, [])
-    }
-    sliceMap.get(task.sliceIndex)!.push(task)
-  }
-
-  const milestones = [...milestoneMap.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([, sliceMap]) => ({
-      title: '',
-      successCriteria: '',
-      slices: [...sliceMap.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([, sliceTasks]) => {
-          const slice: PlannerRegisteredSlice = {
-            title: '',
-            successCriteria: '',
-            tasks: sliceTasks
-              .sort((a, b) => a.taskIndex - b.taskIndex)
-              .map((task) => ({
-                title: task.title,
-                description: task.description,
-                taskKind: task.taskKind,
-                abilityCode: task.abilityCode
-              }))
-          }
-          return slice
-        })
-    }))
-
-  return { milestones, tasks }
 }
 
 export function flattenRegisteredPlan(

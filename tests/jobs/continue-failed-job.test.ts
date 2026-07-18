@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { prepareContinueFailedExecution } from '../../src/server/jobs/continue-failed-job.ts'
+import { prepareContinueFailedExecution } from '../../src/server/legacy-control-plane/continue-failed-job.ts'
 import type { ThreadJobDto } from '../../src/shared/contracts/jobs.ts'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types.ts'
 import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'
@@ -197,4 +197,99 @@ test('prepareContinueFailedExecution resets infra retry tasks to retry-queued', 
   const task = prepared.taskProgress.tasks.find((item) => item.id === 'm2-s3-t2')
   assert.equal(task?.status, 'queued')
   assert.equal(task?.executionStatus, 'retry-queued')
+})
+
+test('prepareContinueFailedExecution resumes slice gate failures without restart', () => {
+  const job = failedJob()
+  job.lastError = createTurnError('task.terminal_failure', {
+    params: { taskId: 'm1-s1' }
+  }).toDto()
+  job.taskProgress = {
+    ...job.taskProgress,
+    progressCode: 'execution.slice_blocked',
+    progressParams: { id: 'm1-s1' },
+    slices: [
+      {
+        id: 'm1-s1',
+        runtimeStatus: 'verification-blocked',
+        verificationStatus: 'blocked'
+      }
+    ],
+    tasks: job.taskProgress.tasks.map((task) => ({
+      ...task,
+      status: 'completed' as const,
+      executionStatus: 'completed' as const,
+      evidence: null,
+      errorMessage: null
+    })),
+    repairGenerations: {
+      'slice:m1-s1': 3
+    }
+  }
+
+  const prepared = prepareContinueFailedExecution(job, plan)
+  assert.equal(prepared.taskProgress.phase, 'running')
+  assert.equal(prepared.taskProgress.status, 'running')
+  assert.equal(prepared.taskProgress.progressCode, 'execution.resuming')
+  const slice = prepared.taskProgress.slices?.find((item) => item.id === 'm1-s1')
+  assert.equal(slice?.verificationStatus, 'ready-for-verification')
+  assert.equal(prepared.taskProgress.repairGenerations?.['slice:m1-s1'], undefined)
+})
+
+test('prepareContinueFailedExecution re-queues human-blocked task after manual resolution', () => {
+  const job = failedJob()
+  job.taskProgress.tasks[1] = {
+    ...job.taskProgress.tasks[1]!,
+    status: 'failed',
+    executionStatus: 'blocked',
+    evidence: {
+      status: 'blocked',
+      summary: 'needs approval',
+      changedFiles: [],
+      evidence: [],
+      validation: { ran: false, outcome: 'skipped' },
+      blockers: ['human approval'],
+      blockerKind: 'dependency-human',
+      recovery: {
+        kind: 'dependency-human',
+        source: 'classifier',
+        confidence: 'high',
+        reasons: ['human approval'],
+        attempt: 1,
+        maxAttempts: 1,
+        action: 'pause-human'
+      }
+    }
+  }
+
+  const prepared = prepareContinueFailedExecution(job, plan)
+  const task = prepared.taskProgress.tasks.find((item) => item.id === 'm2-s3-t2')
+  assert.equal(task?.status, 'queued')
+  assert.equal(task?.executionStatus, 'queued')
+  assert.equal(prepared.taskProgress.progressCode, 'execution.continuing_task')
+})
+
+test('prepareContinueFailedExecution resumes unknown job failure without clearing completion', () => {
+  const job = failedJob()
+  job.lastError = createTurnError('turn.unknown', {
+    detail: 'unexpected control-plane error'
+  }).toDto()
+  job.taskProgress = {
+    ...job.taskProgress,
+    progressCode: 'execution.failed',
+    progressParams: null,
+    currentTaskId: null,
+    tasks: job.taskProgress.tasks.map((task) => ({
+      ...task,
+      status: 'completed' as const,
+      executionStatus: 'completed',
+      evidence: null,
+      errorMessage: null
+    }))
+  }
+
+  const prepared = prepareContinueFailedExecution(job, plan)
+  assert.equal(prepared.taskProgress.phase, 'running')
+  assert.equal(prepared.taskProgress.progressCode, 'execution.resuming')
+  assert.ok(prepared.taskProgress.tasks.every((task) => task.status === 'completed'))
 })

@@ -7,7 +7,7 @@ export type { ThreadDto as Thread } from '@shared/contracts/threads'
 export interface CreateThreadInput {
   title?: string
   coreCode?: string
-  threadKind?: 'chat' | 'create_task'
+  threadKind?: 'chat' | 'create_task' | 'task_snapshot'
 }
 
 export function fetchThreads(): Promise<ApiResponse<ThreadDto[]>> {

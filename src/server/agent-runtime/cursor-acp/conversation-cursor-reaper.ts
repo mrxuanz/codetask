@@ -14,7 +14,7 @@ export const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 export interface ConversationCursorReaperOptions {
   inactivityThresholdMs?: number
-  isThreadInflight?: (threadId: string) => boolean
+  isThreadInflight?: ((threadId: string) => boolean) | undefined
 }
 
 let defaultIsThreadInflight: ((threadId: string) => boolean) | null = null
@@ -120,11 +120,16 @@ export function startConversationCursorReaper(
   })
 }
 
-export function stopConversationCursorReaperForTests(): void {
+/** Stop the idle reaper timer (production shutdown / tests). */
+export function stopConversationCursorReaper(): void {
   if (reaperTimer) {
     clearInterval(reaperTimer)
     reaperTimer = null
   }
+}
+
+export function stopConversationCursorReaperForTests(): void {
+  stopConversationCursorReaper()
   defaultIsThreadInflight = null
   resetConversationCursorDirectoryForTests()
   resetCursorProviderRuntimeRegistryForTests()

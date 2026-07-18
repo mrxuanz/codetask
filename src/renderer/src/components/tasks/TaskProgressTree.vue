@@ -51,6 +51,8 @@ function nodeTone(status: string): string {
       return 'text-emerald-600'
     case 'in_progress':
       return 'text-sky-600'
+    case 'paused':
+      return 'text-zinc-600'
     case 'failed':
       return 'text-red-600'
     default:
@@ -69,6 +71,8 @@ function badgeClass(status: string): string {
     case 'verifying':
     case 'ready-for-verification':
       return 'bg-sky-50 text-sky-700'
+    case 'paused':
+      return 'bg-zinc-100 text-zinc-700'
     case 'failed':
     case 'verification-blocked':
     case 'blocked':
@@ -107,6 +111,9 @@ function milestoneBadgeTone(milestone: UnifiedMilestoneNode): string {
     milestone.status === 'in_progress'
   ) {
     return 'in_progress'
+  }
+  if (milestone.status === 'paused' || label === 'paused') {
+    return 'paused'
   }
   if (label === 'progress-ok' || label === 'passed' || milestone.status === 'completed') {
     return 'completed'
@@ -190,10 +197,27 @@ function milestoneBadgeTone(milestone: UnifiedMilestoneNode): string {
               v-if="!hideStatus && !isPlanning && (slice.runtimeStatus || slice.status)"
               class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
               :class="
-                badgeClass(slice.runtimeStatus === 'progress-ok' ? 'completed' : slice.status)
+                badgeClass(
+                  slice.runtimeStatus === 'progress-ok'
+                    ? 'completed'
+                    : slice.runtimeStatus === 'verifying' ||
+                        slice.runtimeStatus === 'ready-for-verification'
+                      ? 'in_progress'
+                      : slice.status
+                )
               "
             >
-              {{ slice.runtimeStatus || slice.status }}
+              {{
+                statusBadgeLabel(
+                  slice.runtimeStatus === 'progress-ok'
+                    ? 'completed'
+                    : slice.runtimeStatus && slice.runtimeStatus !== 'running'
+                      ? slice.runtimeStatus
+                      : slice.status,
+                  t,
+                  'execution'
+                )
+              }}
             </span>
           </button>
 

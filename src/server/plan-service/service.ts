@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto'
 import { and, eq } from 'drizzle-orm'
 import { AppError } from '../error'
-import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { loadJobAbilities, loadJobPlan } from '../db/job-plan'
 import { designRuns, threadJobs } from '../db/schema'
@@ -10,7 +9,7 @@ import {
   loadDesignReferenceManifest
 } from '../design-session/service'
 import { scheduleDesignSessionPlanRegeneration } from '../design-session/planner'
-import { emitJobEvent, getThreadJob, updateJobRow } from '../jobs/service'
+import { emitJobEvent, getThreadJob, updateJobRow } from '../legacy-control-plane/service'
 import type { PlannerRegisteredPlan } from '../planner/plan-types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import {
@@ -22,8 +21,7 @@ import {
 } from '../planner/mcp/normalize'
 import { validatePlanAbilityCodes } from '../planner/plan-ability-validation'
 import { flattenRegisteredPlan } from '../planner/save-plan'
-import { putDesignPlanArtifact } from '../retention/design-plan-artifacts'
-import type { ThreadJobDto } from '../jobs/types'
+import type { ThreadJobDto } from '../legacy-control-plane/types'
 import {
   assertThreadWizardPhase,
   assertActivePlan,
@@ -143,33 +141,11 @@ async function persistPlanMutation(input: {
 }): Promise<ThreadJobDto> {
   const cleared = clearPlanConfirmedFlags(input.nextPlan)
   const nextRevision = input.session.planRevision + 1
-  const { dataDir } = getAppContext()
-  const artifact = await putDesignPlanArtifact({
-    dataDir,
-    designSessionId: input.designSessionId,
-    planRevision: nextRevision,
-    plan: cleared
-  })
-
   const counts = buildPlanSummary(cleared)
   const phasePatch =
     input.session.phase === WIZARD_PHASE_READY_TO_LAUNCH
       ? { phase: 'plan_edit' as const, status: 'plan_editing' as const }
       : {}
-
-  const db = getDb()
-  await db
-    .update(threadJobs)
-    .set({
-      planRevision: nextRevision,
-      planArtifactId: artifact.artifactId,
-      planArtifactPath: artifact.contentPath,
-      planSummaryJson: artifact.summaryJson,
-      planCountsJson: JSON.stringify(counts),
-      ...phasePatch,
-      updatedAt: nowSec()
-    })
-    .where(eq(threadJobs.id, input.designSessionId))
 
   const updated = await updateJobRow(input.designSessionId, {
     plan: cleared,
@@ -177,6 +153,12 @@ async function persistPlanMutation(input: {
     ...phasePatch
   })
   if (!updated) throw AppError.internal('Failed to update execution plan', 'turn.unknown')
+
+  const db = getDb()
+  await db
+    .update(threadJobs)
+    .set({ planCountsJson: JSON.stringify(counts), updatedAt: nowSec() })
+    .where(eq(threadJobs.id, input.designSessionId))
 
   await createDesignRun({
     designSessionId: input.designSessionId,

@@ -2,6 +2,12 @@ import type { TurnErrorCode, TurnErrorParams } from './codes.ts'
 import { TURN_ERROR_DEFAULT_MESSAGES } from './codes.ts'
 import type { TurnErrorDto } from './types.ts'
 
+export interface TurnErrorOptions {
+  params?: TurnErrorParams | undefined
+  detail?: string | undefined
+  message?: string | undefined
+}
+
 function interpolate(template: string, params?: TurnErrorParams): string {
   if (!params) return template
   return template.replace(/\{(\w+)\}/g, (_, key: string) => {
@@ -16,13 +22,10 @@ export function formatTurnErrorMessage(code: TurnErrorCode, params?: TurnErrorPa
 
 export class TurnError extends Error {
   readonly code: TurnErrorCode
-  readonly params?: TurnErrorParams
-  readonly detail?: string
+  readonly params?: TurnErrorParams | undefined
+  readonly detail?: string | undefined
 
-  constructor(
-    code: TurnErrorCode,
-    options?: { params?: TurnErrorParams; detail?: string; message?: string }
-  ) {
+  constructor(code: TurnErrorCode, options?: TurnErrorOptions) {
     const message = options?.message?.trim() || formatTurnErrorMessage(code, options?.params)
     super(message)
     this.name = 'TurnError'
@@ -41,10 +44,7 @@ export class TurnError extends Error {
   }
 }
 
-export function createTurnError(
-  code: TurnErrorCode,
-  options?: { params?: TurnErrorParams; detail?: string; message?: string }
-): TurnError {
+export function createTurnError(code: TurnErrorCode, options?: TurnErrorOptions): TurnError {
   return new TurnError(code, options)
 }
 

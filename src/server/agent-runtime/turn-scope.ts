@@ -19,19 +19,13 @@ export type TurnActivityKind =
 
 const KEEPALIVE_INTERVAL_MS = 60_000
 
-function softGraceMs(): number {
-  const parsed = Number(process.env.CODETASK_TURN_SOFT_GRACE_MS)
-  if (Number.isFinite(parsed) && parsed > 0) return parsed
-  return 30_000
-}
-
 export interface TurnScopeInput {
   role: ConversationRole
-  externalSignal?: AbortSignal
-  processExit?: Promise<never>
-  progressGuard?: ProgressGuard
-  onKeepAlive?: () => void
-  onCancel?: (mode: 'soft' | 'hard') => Promise<void> | void
+  externalSignal?: AbortSignal | undefined
+  processExit?: Promise<never> | undefined
+  noFirstSignalMs?: number | null | undefined
+  progressGuard?: ProgressGuard | undefined
+  onKeepAlive?: (() => void | Promise<void>) | undefined
 }
 
 export class TurnScope {
@@ -39,12 +33,14 @@ export class TurnScope {
   readonly signal: AbortSignal
 
   private readonly _abort = new AbortController()
-  private readonly _processExit?: Promise<never>
-  private readonly _onKeepAlive?: () => void
-  private readonly _onCancel?: (mode: 'soft' | 'hard') => Promise<void> | void
-  private readonly _progressGuard?: ProgressGuard
+  private readonly _processExit?: Promise<never> | undefined
+  private readonly _onKeepAlive?: (() => void | Promise<void>) | undefined
+  private readonly _progressGuard?: ProgressGuard | undefined
+  private readonly _configuredNoFirstSignalMs?: number | null | undefined
 
   private _disposed = false
+  private _armed = false
+  private _keepalivePending = false
   private _sawFirstSignal = false
   private _noFirstTimer: ReturnType<typeof setTimeout> | null = null
   private _keepaliveTimer: ReturnType<typeof setInterval> | null = null
@@ -52,19 +48,24 @@ export class TurnScope {
   private _noFirstSignalMs: number | null = null
   private _abortError: Error | null = null
   private _graceCancelled = false
+  private _suspectedStall = false
 
   constructor(input: TurnScopeInput) {
     this.role = input.role
     this.signal = this._abort.signal
     this._processExit = input.processExit
     this._onKeepAlive = input.onKeepAlive
-    this._onCancel = input.onCancel
     this._progressGuard = input.progressGuard
+    this._configuredNoFirstSignalMs = input.noFirstSignalMs
 
     if (input.externalSignal?.aborted) {
-      this._abortExternal()
+      this._abortExternal(input.externalSignal.reason)
     } else if (input.externalSignal) {
-      input.externalSignal.addEventListener('abort', () => this._abortExternal(), { once: true })
+      input.externalSignal.addEventListener(
+        'abort',
+        () => this._abortExternal(input.externalSignal?.reason),
+        { once: true }
+      )
     }
 
     if (this._processExit) {
@@ -73,8 +74,13 @@ export class TurnScope {
   }
 
   arm(): void {
+    if (this._armed || this._disposed) return
+    this._armed = true
     if (!this._processExit) {
-      const noFirstSignalMs = noFirstSignalMsForRole(this.role)
+      const noFirstSignalMs =
+        this._configuredNoFirstSignalMs === undefined
+          ? noFirstSignalMsForRole(this.role)
+          : this._configuredNoFirstSignalMs
       if (noFirstSignalMs != null) {
         this._noFirstSignalMs = noFirstSignalMs
         this._scheduleNoFirstSignal()
@@ -85,7 +91,7 @@ export class TurnScope {
 
     if (this._progressGuard) {
       this._progressGuard.on('stalled', () => {
-        void this._failWithGrace('stalled')
+        this._markSuspectedStall('stalled')
       })
     }
   }
@@ -125,6 +131,10 @@ export class TurnScope {
 
   get graceCancelled(): boolean {
     return this._graceCancelled
+  }
+
+  get suspectedStall(): boolean {
+    return this._suspectedStall
   }
 
   private _raceImpl<T>(prompt: Promise<T>): Promise<T> {
@@ -170,19 +180,35 @@ export class TurnScope {
   }
 
   private _tryKeepAlive(): void {
-    if (!this._onKeepAlive) return
+    if (!this._onKeepAlive || this._keepalivePending) return
     const now = Date.now()
     if (now - this._lastKeepAlive < KEEPALIVE_INTERVAL_MS) return
     this._lastKeepAlive = now
+    this._runKeepAlive()
+  }
+
+  private _runKeepAlive(): void {
+    if (!this._onKeepAlive || this._keepalivePending || this._disposed || this.signal.aborted)
+      return
+    this._keepalivePending = true
     try {
-      this._onKeepAlive()
-    } catch {
-      // best-effort
+      void Promise.resolve(this._onKeepAlive()).then(
+        () => {
+          this._keepalivePending = false
+        },
+        (error) => {
+          this._keepalivePending = false
+          this._abortInternal(error)
+        }
+      )
+    } catch (error) {
+      this._keepalivePending = false
+      this._abortInternal(error)
     }
   }
 
   private _startKeepalive(): void {
-    if (!this._onKeepAlive || !this._processExit) return
+    if (!this._onKeepAlive) return
     this._keepaliveTimer = setInterval(() => {
       if (this._disposed || this.signal.aborted) {
         this._stopKeepalive()
@@ -191,11 +217,7 @@ export class TurnScope {
       const now = Date.now()
       if (now - this._lastKeepAlive >= KEEPALIVE_INTERVAL_MS) {
         this._lastKeepAlive = now
-        try {
-          this._onKeepAlive?.()
-        } catch {
-          // best-effort
-        }
+        this._runKeepAlive()
       }
     }, KEEPALIVE_INTERVAL_MS)
     this._keepaliveTimer?.unref?.()
@@ -214,7 +236,7 @@ export class TurnScope {
     this._clearNoFirstSignalTimer()
     this._noFirstTimer = setTimeout(() => {
       if (!this._sawFirstSignal) {
-        void this._failWithGrace('no_first_signal')
+        this._markSuspectedStall('no_first_signal')
       }
     }, timeoutMs)
   }
@@ -225,50 +247,32 @@ export class TurnScope {
     this._noFirstTimer = null
   }
 
-  private _abortExternal(): void {
+  private _abortExternal(reason?: unknown): void {
     if (this.signal.aborted) return
-    this._abortError = TURN_CANCELLED
-    this._abort.abort()
+    this._abortError = reason instanceof Error ? reason : TURN_CANCELLED
+    this._abort.abort(this._abortError)
     this.dispose()
   }
 
-  private async _failWithGrace(reason: 'no_first_signal' | 'stalled'): Promise<void> {
+  private _abortInternal(reason: unknown): void {
     if (this._disposed || this.signal.aborted) return
-    this._graceCancelled = true
+    this._abortError = reason instanceof Error ? reason : TURN_CANCELLED
+    this._abort.abort(this._abortError)
+    this.dispose()
+  }
 
-    sandboxTurnDebug('turn-scope: soft cancel', { reason })
-
-    this._abortError =
-      reason === 'no_first_signal'
-        ? createTurnError('turn.watchdog_no_signal', {
-            params: {
-              seconds: Math.max(1, Math.round((this._noFirstSignalMs ?? 0) / 1000))
-            }
-          })
-        : createTurnError('turn.timed_out')
-
-    if (this._onCancel) {
-      try {
-        await this._onCancel('soft')
-      } catch {
-        // best-effort
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, softGraceMs()))
-
-    if (!this._disposed && !this.signal.aborted) {
-      sandboxTurnDebug('turn-scope: hard cancel', { reason })
-      if (this._onCancel) {
-        try {
-          await this._onCancel('hard')
-        } catch {
-          // best-effort
-        }
-      }
-      this._abort.abort()
-      this.dispose()
-    }
+  private _markSuspectedStall(reason: 'no_first_signal' | 'stalled'): void {
+    if (this._disposed || this.signal.aborted || this._suspectedStall) return
+    this._suspectedStall = true
+    sandboxTurnDebug('turn-scope: suspected stall (observe only)', {
+      reason,
+      role: this.role,
+      noFirstSignalMs: this._noFirstSignalMs
+    })
+    // A heuristic inactivity signal is not proof that the agent is dead. Keep
+    // the turn alive; only explicit cancellation or deterministic provider /
+    // process failure may terminate it.
+    this._tryKeepAlive()
   }
 }
 
@@ -368,7 +372,13 @@ export function recordCodexThreadItemActivity(
     scope.recordProgress('mcp_call')
     if (item.status === 'in_progress') {
       scope.recordProgress('tool_started')
+      const label =
+        [item.server, item.tool]
+          .filter((part) => typeof part === 'string' && part.trim())
+          .join('/') || 'mcp'
+      scope.enterLongRunningTool(label)
     } else {
+      scope.exitLongRunningTool()
       scope.recordProgress('tool_completed')
     }
   }
@@ -424,7 +434,11 @@ export function recordOpencodeToolPartActivity(
     if (!openToolIds.has(id)) {
       openToolIds.add(id)
       scope.recordProgress('tool_started')
-      scope.enterLongRunningTool(extractOpencodeToolCommand(part))
+      // Interactive question hangs the turn with no UI; do not grant stall grace.
+      const command = extractOpencodeToolCommand(part)
+      if (command !== 'question' && part.tool !== 'question') {
+        scope.enterLongRunningTool(command)
+      }
     } else {
       scope.recordProgress('tool_updated')
     }
@@ -453,10 +467,7 @@ export function recordAcpToolCallActivity(
   scope: TurnScope,
   openToolIds: Set<string>
 ): void {
-  if (
-    update.sessionUpdate !== 'tool_call' &&
-    update.sessionUpdate !== 'tool_call_update'
-  ) {
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
     return
   }
 

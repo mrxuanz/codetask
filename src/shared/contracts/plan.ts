@@ -1,31 +1,31 @@
 export interface PlannerRegisteredTask {
-  title?: string
-  description?: string
+  title?: string | undefined
+  description?: string | undefined
   taskKind: string
-  abilityCode?: string
-  referenceIds?: string[]
-  referenceReason?: string
-  dependsOnTaskRefs?: string[]
-  requiredInputs?: string[]
-  successCriteria?: string
-  canRunInParallel?: boolean
-  confirmed?: boolean
+  abilityCode?: string | undefined
+  referenceIds?: string[] | undefined
+  referenceReason?: string | undefined
+  dependsOnTaskRefs?: string[] | undefined
+  requiredInputs?: string[] | undefined
+  successCriteria?: string | undefined
+  canRunInParallel?: boolean | undefined
+  confirmed?: boolean | undefined
 }
 
 export interface PlannerRegisteredSlice {
-  title?: string
-  description?: string
+  title?: string | undefined
+  description?: string | undefined
   successCriteria: string
-  dependsOnSliceRefs?: string[]
-  confirmed?: boolean
+  dependsOnSliceRefs?: string[] | undefined
+  confirmed?: boolean | undefined
   tasks: PlannerRegisteredTask[]
 }
 
 export interface PlannerRegisteredMilestone {
-  title?: string
-  description?: string
-  successCriteria?: string
-  confirmed?: boolean
+  title?: string | undefined
+  description?: string | undefined
+  successCriteria?: string | undefined
+  confirmed?: boolean | undefined
   slices: PlannerRegisteredSlice[]
 }
 
@@ -39,13 +39,13 @@ export interface FlatTaskPlan {
   taskKind: string
   abilityCode: string
   contextMarkdown: string
-  coreCode?: string
+  coreCode?: string | undefined
   successCriteria: string
-  referenceIds?: string[]
-  referenceReason?: string
-  dependsOnTaskRefs?: string[]
-  canRunInParallel?: boolean
-  confirmed?: boolean
+  referenceIds?: string[] | undefined
+  referenceReason?: string | undefined
+  dependsOnTaskRefs?: string[] | undefined
+  canRunInParallel?: boolean | undefined
+  confirmed?: boolean | undefined
 }
 
 export interface SavedJobPlan {

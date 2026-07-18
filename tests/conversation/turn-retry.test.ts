@@ -59,6 +59,16 @@ test('isRetryableTurnError treats OpenCode session_error as non-retryable', () =
   assert.equal(isRetryableTurnError(createTurnError('provider.opencode.server_exited')), true)
 })
 
+test('isRetryableTurnError treats OpenCode stream_disconnected / fetch failed as retryable', () => {
+  assert.equal(
+    isRetryableTurnError(
+      createTurnError('provider.opencode.stream_disconnected', { detail: 'fetch failed' })
+    ),
+    true
+  )
+  assert.equal(isInfraTurnError(createTurnError('provider.opencode.stream_disconnected')), true)
+})
+
 test('isRetryableTurnError does not retry session_error preserved on SandboxError', () => {
   const err = new SandboxError('OpenCode session error', 'provider.opencode.session_error')
   assert.equal(isRetryableTurnError(err), false)

@@ -13,8 +13,14 @@ function isLoopbackAddress(address: string): boolean {
 
 export async function requireLocalhost(c: Context, next: Next): Promise<Response | void> {
   // Do not trust x-forwarded-for — clients can spoof it. Only the real peer address counts.
-  const remote = getConnInfo(c).remote
-  const address = remote.address
+  let address: string | undefined
+  try {
+    if (c.env) {
+      address = getConnInfo(c).remote.address
+    }
+  } catch {
+    address = undefined
+  }
   if (!address || !isLoopbackAddress(address)) {
     return c.json(
       {

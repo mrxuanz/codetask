@@ -1,14 +1,12 @@
-import { authHeaders } from '@renderer/auth/token'
 import type {
-  ChatSseEvent,
   ConversationCoreDto,
   ConversationMessageDto,
-  ConversationStateDto
+  ConversationStateDto,
+  ConversationTurnDto,
+  CreateTurnAcceptedDto
 } from '@shared/contracts'
-import { api, ApiError } from './client'
+import { api } from './client'
 import type { ApiResponse } from './types'
-import { throwIfNotSseResponse } from './sse'
-import { parseSseBlock, readSseWithTimeout } from '@shared/sse'
 
 export type {
   ChatSseEvent,
@@ -35,83 +33,44 @@ export function fetchThreadMessages(
   return api<{ messages: ConversationMessageDto[] }>(`/api/threads/${threadId}/messages?${params}`)
 }
 
-export async function streamThreadMessage(
+export function createThreadTurn(
   threadId: string,
   message: string,
-  onEvent: (event: ChatSseEvent) => void,
   options?: {
     generateDraft?: boolean
     createTaskMode?: boolean
     attachmentIds?: string[]
     selectedDraftSection?: string
     selectedPlanNodeRef?: string
-    signal?: AbortSignal
+    idempotencyKey?: string
   }
-): Promise<void> {
-  const signal = options?.signal
-  if (signal?.aborted) {
-    throw new DOMException('The operation was aborted.', 'AbortError')
-  }
-
-  const res = await fetch(`/api/threads/${threadId}/messages`, {
+): Promise<ApiResponse<CreateTurnAcceptedDto>> {
+  return api<CreateTurnAcceptedDto>(`/api/threads/${threadId}/turns`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      ...authHeaders()
-    },
     body: JSON.stringify({
       message,
       generateDraft: options?.generateDraft === true,
       createTaskMode: options?.createTaskMode === true,
       attachmentIds: options?.attachmentIds ?? [],
       selectedDraftSection: options?.selectedDraftSection,
-      selectedPlanNodeRef: options?.selectedPlanNodeRef
-    }),
-    signal
+      selectedPlanNodeRef: options?.selectedPlanNodeRef,
+      idempotencyKey: options?.idempotencyKey
+    })
   })
-
-  await throwIfNotSseResponse(res)
-
-  const reader = res.body?.getReader()
-  if (!reader) {
-    throw new ApiError('SSE 响应无 body', res.status, null)
-  }
-
-  const cancelReader = (): void => {
-    void reader.cancel().catch(() => {})
-  }
-  signal?.addEventListener('abort', cancelReader, { once: true })
-
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  try {
-    while (true) {
-      if (signal?.aborted) break
-      const { done, value } = await readSseWithTimeout(reader)
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() ?? ''
-
-      for (const part of parts) {
-        if (signal?.aborted) break
-        const parsed = parseSseBlock(part)
-        if (!parsed) continue
-        onEvent({
-          event: parsed.event as ChatSseEvent['event'],
-          data: JSON.parse(parsed.data)
-        } as ChatSseEvent)
-      }
-    }
-  } finally {
-    signal?.removeEventListener('abort', cancelReader)
-  }
-
-  if (signal?.aborted) {
-    throw new DOMException('The operation was aborted.', 'AbortError')
-  }
 }
 
+export function fetchThreadTurn(
+  threadId: string,
+  turnId: string
+): Promise<ApiResponse<{ turn: ConversationTurnDto }>> {
+  return api<{ turn: ConversationTurnDto }>(`/api/threads/${threadId}/turns/${turnId}`)
+}
+
+export function cancelThreadTurn(
+  threadId: string,
+  turnId: string
+): Promise<ApiResponse<{ turn: ConversationTurnDto }>> {
+  return api<{ turn: ConversationTurnDto }>(`/api/threads/${threadId}/turns/${turnId}/cancel`, {
+    method: 'POST'
+  })
+}

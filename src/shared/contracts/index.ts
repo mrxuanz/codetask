@@ -7,6 +7,7 @@ export type {
   JobLifecycle,
   JobNextAction,
   JobRecoveryDto,
+  JobRecoveryStrategy,
   JobRecoveryStateFields
 } from '../job-recovery-state'
 export type {
@@ -49,6 +50,15 @@ export {
   jobTopic,
   parseHubTopic,
   threadIdFromTopic,
-  threadTopic
+  threadTopic,
+  turnIdFromTopic,
+  turnTopic
 } from './job-event-hub'
+export type {
+  ConversationTurnDto,
+  ConversationTurnKind,
+  ConversationTurnStatus,
+  CreateTurnAcceptedDto,
+  TurnHubEvent
+} from './conversation-turns'
 export type { ThreadDto, ThreadKind, TitleSource, WizardPhase } from './threads'

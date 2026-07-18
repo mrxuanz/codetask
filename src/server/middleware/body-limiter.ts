@@ -1,12 +1,16 @@
 import type { MiddlewareHandler } from 'hono'
 
-const MAX_BODY_SIZE = 32 * 1024 * 1024
+export const MAX_JSON_BODY_BYTES = 1 * 1024 * 1024
+export const MAX_FORM_BODY_BYTES = 32 * 1024 * 1024
+export const MAX_DEFAULT_BODY_BYTES = MAX_JSON_BODY_BYTES
+
+const PAYLOAD_TOO_LARGE_STATUS = 41301
 
 function payloadTooLarge(): Response {
   return new Response(
     JSON.stringify({
       data: null,
-      status: 41301,
+      status: PAYLOAD_TOO_LARGE_STATUS,
       extra: {},
       message: 'Request body too large',
       success: false
@@ -46,10 +50,29 @@ async function readBodyWithLimit(
   return { body: merged, tooLarge: false }
 }
 
-export function bodySizeLimit(maxBytes?: number): MiddlewareHandler {
-  const limit = maxBytes ?? MAX_BODY_SIZE
+export function resolveBodyLimit(contentType: string | undefined, explicitLimit?: number): number {
+  if (explicitLimit !== undefined) return explicitLimit
+  const normalized = contentType?.split(';')[0]?.trim().toLowerCase() ?? ''
+  if (normalized === 'multipart/form-data') {
+    return MAX_FORM_BODY_BYTES
+  }
+  if (normalized === 'application/x-www-form-urlencoded') {
+    return MAX_FORM_BODY_BYTES
+  }
+  if (normalized === 'application/json' || normalized === 'application/problem+json') {
+    return MAX_JSON_BODY_BYTES
+  }
+  return MAX_DEFAULT_BODY_BYTES
+}
 
+export function bodySizeLimit(maxBytes?: number): MiddlewareHandler {
   return async (c, next) => {
+    const method = c.req.method
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      return next()
+    }
+
+    const limit = resolveBodyLimit(c.req.header('Content-Type'), maxBytes)
     const contentLength = c.req.header('Content-Length')
     if (contentLength) {
       const size = Number.parseInt(contentLength, 10)
@@ -58,21 +81,18 @@ export function bodySizeLimit(maxBytes?: number): MiddlewareHandler {
       }
     }
 
-    const method = c.req.method
-    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && !contentLength) {
-      const rawBody = c.req.raw.body
-      if (rawBody) {
-        const { body, tooLarge } = await readBodyWithLimit(rawBody, limit)
-        if (tooLarge) {
-          return payloadTooLarge()
-        }
-
-        c.req.raw = new Request(c.req.raw.url, {
-          method: c.req.raw.method,
-          headers: c.req.raw.headers,
-          body: body.byteLength > 0 ? Buffer.from(body) : null
-        })
+    const rawBody = c.req.raw.body
+    if (rawBody) {
+      const { body, tooLarge } = await readBodyWithLimit(rawBody, limit)
+      if (tooLarge) {
+        return payloadTooLarge()
       }
+
+      c.req.raw = new Request(c.req.raw.url, {
+        method: c.req.raw.method,
+        headers: c.req.raw.headers,
+        body: body.byteLength > 0 ? Buffer.from(body) : null
+      })
     }
 
     return next()

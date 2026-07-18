@@ -13,6 +13,9 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'sandbox.turn.cancelled': 'サンドボックスのターンがキャンセルされました',
   'sandbox.child_closed': 'サンドボックス worker が異常終了しました',
   'sandbox.worker.busy': 'サンドボックス worker がビジーです',
+  'workspace.busy': 'ワークスペースは他のタスクが使用中です。しばらくしてから再試行してください',
+  'workspace.lease_lost': 'ワークスペースリースが無効です。単一ライター許可なしでは実行できません',
+  'runtime.draining': 'ランタイムはシャットダウン中です。再起動後に再試行してください',
   'sandbox.worker.missing': 'サンドボックス worker を利用できません',
   'sandbox.required': 'この操作にはサンドボックスが必要です',
   'sandbox.turn.timed_out': 'サンドボックスタスクがタイムアウトしました',
@@ -46,10 +49,14 @@ const jaMessages: Record<TurnErrorCode, string> = {
     'OpenCode が認証されていません。認証を構成するか API key 環境変数を設定してください。',
   'provider.opencode.server_timeout': 'OpenCode server の起動待ちがタイムアウトしました',
   'provider.opencode.server_exited': 'OpenCode server が異常終了しました',
+  'provider.opencode.stream_disconnected':
+    'OpenCode ストリームが完了前に切断されました（ネットワークまたは HTTP タイムアウト）',
   'provider.opencode.session_error': 'OpenCode セッションエラー',
   'provider.rate_limited': 'レート制限に達しました。後で再試行してください',
   'provider.cli_auth_failed':
     'CLI 認証に失敗しました。API キーまたはサインイン状態を確認してください',
+  'provider.capability_unsupported':
+    '選択した CLI はこの実行モード（例: 読み取り専用会話）に対応していません。別の CLI に切り替えてください。',
   'settings.control_plane.unsupported_core': '未対応の Control Plane CLI です',
   'settings.control_plane.unknown_core': '不明な Control Plane CLI です',
   'settings.control_plane.unavailable_core': '選択した Control Plane CLI は現在利用できません',
@@ -59,7 +66,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'settings.mcp.invalid_root_key': 'MCP 設定のルートキーが無効です',
   'settings.mcp.save_failed': 'MCP 設定の保存に失敗しました',
   'task.execution_failed': 'タスク実行に失敗しました',
-  'task.evidence_timeout': 'タスク証跡の待機がタイムアウトしました',
+  'task.evidence_timeout': 'ターン完了後の証跡提出待機がタイムアウトしました',
   'task.evidence_missing': '構造化証跡パッケージがありません',
   'task.infra_retry': 'ツール層のインフラ障害。自動再試行 ({attempt}/{maxAttempts})',
   'task.infra_retry_exhausted': 'ツール層インフラの再試行上限に達しました',
@@ -90,6 +97,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'auth.password_invalid_chars': 'パスワードには印字可能な ASCII 文字のみ使用できます',
   'thread.not_found': 'スレッドが見つかりません',
   'thread.busy': 'スレッドが実行中です。現在のターンが終了するまでお待ちください。',
+  'thread.deleting': 'この会話は削除処理中です',
   'thread.title_empty': 'スレッドのタイトルを空にできません。',
   'thread.kind_mismatch': 'スレッドの種類が一致しません。期待: {expected}、実際: {actual}',
   'thread.read_failed': '更新後のスレッド読み取りに失敗しました。',
@@ -117,6 +125,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'workflow.failed_block': '失敗したサブタスクがあります。ワークフローがブロックされています',
   'message.empty': 'メッセージを空にできません。',
   'conversation.sse_required': 'SSE ストリーミングを使用してください（Accept: text/event-stream）',
+  'conversation.mode_mismatch': 'このスレッドモード({threadKind})ではこの操作は許可されていません',
   'job.not_found': 'ジョブが見つかりません',
   'job.invalid_status': '現在の状態 {status} ではこの操作を実行できません',
   'job.already_finished': 'ジョブは既に終了しています',
@@ -152,6 +161,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'draft.local_corpus.invalid_path': 'ローカルコーパスパスが無効です',
   'draft.local_corpus.file_not_allowed': '単一ファイルのローカルコーパスは許可されていません',
   'plan.cancelled': '計画生成がキャンセルされました',
+  'plan.confirm_conflict': '確認中に計画が変更されました',
   'plan.sandbox_timeout':
     'サンドボックスタスクがタイムアウトしました。後で再試行するか、より高速な Planner CLI に変更してください',
   'plan.sandbox_cleanup_failed':

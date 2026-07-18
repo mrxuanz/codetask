@@ -15,6 +15,9 @@ export type TurnErrorCode =
   | 'sandbox.turn.cancelled'
   | 'sandbox.child_closed'
   | 'sandbox.worker.busy'
+  | 'workspace.busy'
+  | 'workspace.lease_lost'
+  | 'runtime.draining'
   | 'sandbox.worker.missing'
   | 'sandbox.required'
   | 'sandbox.turn.timed_out'
@@ -39,8 +42,10 @@ export type TurnErrorCode =
   | 'provider.opencode.not_authenticated'
   | 'provider.opencode.server_timeout'
   | 'provider.opencode.server_exited'
+  | 'provider.opencode.stream_disconnected'
   | 'provider.opencode.session_error'
   | 'provider.rate_limited'
+  | 'provider.capability_unsupported'
   | 'provider.cli_auth_failed'
   | 'settings.control_plane.unsupported_core'
   | 'settings.control_plane.unknown_core'
@@ -75,6 +80,7 @@ export type TurnErrorCode =
   | 'auth.password_invalid_chars'
   | 'thread.not_found'
   | 'thread.busy'
+  | 'thread.deleting'
   | 'thread.title_empty'
   | 'thread.kind_mismatch'
   | 'thread.read_failed'
@@ -101,6 +107,8 @@ export type TurnErrorCode =
   | 'workflow.failed_block'
   | 'message.empty'
   | 'conversation.sse_required'
+  | 'conversation.mode_mismatch'
+  | 'conversation.mcp_unavailable'
   | 'job.not_found'
   | 'job.invalid_status'
   | 'job.already_finished'
@@ -136,6 +144,8 @@ export type TurnErrorCode =
   | 'draft.local_corpus.invalid_path'
   | 'draft.local_corpus.file_not_allowed'
   | 'plan.cancelled'
+  | 'plan.mcp_unavailable'
+  | 'plan.confirm_conflict'
   | 'plan.sandbox_timeout'
   | 'plan.sandbox_cleanup_failed'
   | 'wizard.invalid_phase'
@@ -162,6 +172,10 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'sandbox.turn.cancelled': 'Sandbox turn cancelled',
   'sandbox.child_closed': 'Sandbox worker exited unexpectedly',
   'sandbox.worker.busy': 'Sandbox worker is busy',
+  'workspace.busy': 'Workspace is busy; another task is using this project folder',
+  'workspace.lease_lost':
+    'Workspace lease is not held by this run; cannot execute without single-writer admission',
+  'runtime.draining': 'Runtime is shutting down; try again after restart',
   'sandbox.worker.missing': 'Sandbox worker not available',
   'sandbox.required': 'Sandbox is required for this operation',
   'sandbox.turn.timed_out': 'Sandbox task timed out',
@@ -195,8 +209,12 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
     'OpenCode is not authenticated. Configure authentication or set an API key environment variable.',
   'provider.opencode.server_timeout': 'Timed out waiting for OpenCode server to start',
   'provider.opencode.server_exited': 'OpenCode server exited unexpectedly',
+  'provider.opencode.stream_disconnected':
+    'OpenCode stream disconnected before completion (network or HTTP timeout)',
   'provider.opencode.session_error': 'OpenCode session error',
   'provider.rate_limited': 'Rate limited; retry later',
+  'provider.capability_unsupported':
+    'Selected provider does not support the required capability profile',
   'provider.cli_auth_failed': 'CLI authentication failed; check API key or sign-in status',
   'settings.control_plane.unsupported_core': 'Unsupported control plane CLI',
   'settings.control_plane.unknown_core': 'Unknown control plane CLI',
@@ -207,7 +225,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'settings.mcp.invalid_root_key': 'Invalid MCP config root key',
   'settings.mcp.save_failed': 'Failed to save MCP settings',
   'task.execution_failed': 'Task execution failed',
-  'task.evidence_timeout': 'Timed out waiting for task evidence',
+  'task.evidence_timeout': 'Timed out waiting for report_task_result after turn completed',
   'task.evidence_missing': 'Structured evidence package missing',
   'task.verifier_evidence_timeout': 'Timed out waiting for verifier completion signal',
   'task.infra_retry':
@@ -234,6 +252,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'auth.password_invalid_chars': 'Password may only contain printable ASCII characters',
   'thread.not_found': 'Thread not found',
   'thread.busy': 'Thread is busy; please wait for the current turn to finish',
+  'thread.deleting': 'This conversation is being deleted',
   'thread.title_empty': 'Thread title cannot be empty',
   'thread.kind_mismatch': 'Thread kind mismatch: expected {expected}, got {actual}',
   'thread.read_failed': 'Failed to read thread after update',
@@ -261,6 +280,9 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'workflow.failed_block': 'Failed subtasks present; workflow blocked',
   'message.empty': 'Message cannot be empty',
   'conversation.sse_required': 'Please use SSE streaming (Accept: text/event-stream)',
+  'conversation.mode_mismatch':
+    'This thread mode does not support the requested operation ({threadKind})',
+  'conversation.mcp_unavailable': 'Task draft tools are unavailable',
   'job.not_found': 'Job not found',
   'job.invalid_status': 'Job status {status} does not allow this action',
   'job.already_finished': 'Job already finished',
@@ -296,6 +318,8 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'draft.local_corpus.invalid_path': 'Invalid local corpus path',
   'draft.local_corpus.file_not_allowed': 'Single-file local corpus not allowed',
   'plan.cancelled': 'Plan generation cancelled',
+  'plan.mcp_unavailable': 'Planner tools are unavailable',
+  'plan.confirm_conflict': 'Plan changed while it was being confirmed',
   'plan.sandbox_timeout': 'Plan sandbox task timed out',
   'plan.sandbox_cleanup_failed':
     'Sandbox process exited abnormally. Fully quit the app and restart, then retry plan generation.',

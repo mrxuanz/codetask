@@ -19,6 +19,7 @@ import { sandboxTurnDebug } from '../../debug/sandbox-turn'
 import { resolveCursorAgentBin, appendCursorApiEndpointArgs } from './config'
 import { spawnCursorAgent } from './command'
 import { createCursorPermissionHandler } from './permissions'
+import type { AgentCapabilityProfile } from '../capabilities'
 import { classifyCursorAcpError } from './errors'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 
@@ -148,12 +149,14 @@ export function waitForChildExit(child: ChildProcess, timeoutMs = 10_000): Promi
   })
 }
 
-type AttachableClientContext = {
-  attachSession(response: NewSessionResponse): ActiveSession
-}
-
 export function attachAcpSession(ctx: ClientContext, response: NewSessionResponse): ActiveSession {
-  return (ctx as unknown as AttachableClientContext).attachSession(response)
+  const attachSession = Reflect.get(ctx, 'attachSession')
+  if (typeof attachSession !== 'function') {
+    throw createTurnError('provider.cursor.acp_failed', {
+      detail: 'Cursor ACP client does not support attaching an existing session'
+    })
+  }
+  return Reflect.apply(attachSession, ctx, [response])
 }
 
 export function spawnCursorAcpProcess(
@@ -184,8 +187,11 @@ function parseExtensionParams<Params>(params: unknown): Params {
   return params as Params
 }
 
-export function createCodetaskAcpClient(isAborted: () => boolean): ClientApp {
-  const approvePermission = createCursorPermissionHandler()
+export function createCodetaskAcpClient(
+  isAborted: () => boolean,
+  capabilityProfile: AgentCapabilityProfile
+): ClientApp {
+  const approvePermission = createCursorPermissionHandler(capabilityProfile)
   return client({ name: 'codetask' })
     .onRequest(methods.client.session.requestPermission, async (ctx) => {
       if (isAborted()) {
@@ -194,7 +200,15 @@ export function createCodetaskAcpClient(isAborted: () => boolean): ClientApp {
       debugCursor('requestPermission', {
         toolCall: ctx.params.toolCall?.title ?? ctx.params.toolCall?.kind
       })
-      return approvePermission({ params: { options: ctx.params.options } })
+      return approvePermission({
+        params: {
+          options: ctx.params.options,
+          toolCall: {
+            title: ctx.params.toolCall?.title ?? undefined,
+            kind: ctx.params.toolCall?.kind ?? undefined
+          }
+        }
+      })
     })
     .onRequest(
       'cursor/ask_question',

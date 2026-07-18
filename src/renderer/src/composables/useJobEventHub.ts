@@ -23,11 +23,13 @@ export interface JobEventHub {
   watchTopic: (topic: HubTopic, listener: TopicHubListener) => () => void
   watchJob: (jobId: string, listener: JobHubListener) => () => void
   onAnyEvent: (listener: TopicHubListener) => () => void
+  /** Force PUT subscriptions now (turn watch must not wait for debounce). */
+  flushSubscriptionsNow: () => Promise<void>
   /** @deprecated Prefer onAnyEvent */
   onAnyJobEvent: (listener: TopicHubListener) => () => void
 }
 
-const JobEventHubKey: InjectionKey<JobEventHub> = Symbol('jobEventHub')
+export const JobEventHubKey: InjectionKey<JobEventHub> = Symbol('jobEventHub')
 
 function newConnectionId(): string {
   return `conn-${Math.random().toString(36).slice(2, 10)}`
@@ -55,6 +57,14 @@ export function provideJobEventHub(): JobEventHub {
   function recomputeDesiredTopics(): void {
     desiredTopics = [...refCounts.keys()].filter((topic) => (refCounts.get(topic) ?? 0) > 0)
     void flushSubscriptions()
+  }
+
+  async function flushSubscriptionsNow(): Promise<void> {
+    try {
+      await putHubSubscriptions(connectionId, desiredTopics)
+    } catch (error) {
+      console.warn('[event-hub] subscription flush failed', error)
+    }
   }
 
   function dispatch(envelope: HubEnvelope): void {
@@ -109,6 +119,7 @@ export function provideJobEventHub(): JobEventHub {
   const hub: JobEventHub = {
     connected,
     connectionId,
+    flushSubscriptionsNow,
     watchTopic(topic: HubTopic, listener: TopicHubListener) {
       const set = listenersByTopic.get(topic) ?? new Set()
       set.add(listener)

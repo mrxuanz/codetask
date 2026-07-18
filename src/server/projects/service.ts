@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import { AppError } from '../error'
 import { getDb } from '../db'
-import { projects, type Project } from '../db/schema'
+import { conversationTurns, projects, threadJobs, type Project } from '../db/schema'
+import { controlJobs } from '../infra/sqlite/control-plane/schema'
+import { findWorkspaceLeaseConflictSnapshot } from '../legacy-control-plane/workspace-lease-store'
 import { cleanDisplayPath, inferTitleFromPath, normalizeWorkspacePath } from '../fs'
 
 function nowSec(): number {
@@ -111,6 +113,91 @@ export async function getProject(username: string, projectId: string): Promise<P
   return row ? sanitizeProject(row) : null
 }
 
+export interface ProjectWorkspaceAccess {
+  mode: 'read_write' | 'read_only'
+  blocker:
+    | {
+        kind: 'task'
+        taskId: string
+        taskTitle: string
+        status: string
+      }
+    | {
+        kind: 'conversation'
+        turnId: string
+        threadId: string | null
+      }
+    | null
+}
+
+/** Read-only UI snapshot. The lease acquisition path remains the concurrency authority. */
+export async function getProjectWorkspaceAccess(
+  username: string,
+  projectId: string
+): Promise<ProjectWorkspaceAccess> {
+  const project = await getProject(username, projectId)
+  if (!project) throw AppError.notFound('Project not found', 'project.not_found')
+
+  const conflict = findWorkspaceLeaseConflictSnapshot(project.workspaceRoot)
+  if (!conflict) {
+    return { mode: 'read_write', blocker: null }
+  }
+  if (conflict.ownerKind === 'conversation') {
+    const turn = getDb()
+      .select({ threadId: conversationTurns.threadId })
+      .from(conversationTurns)
+      .where(eq(conversationTurns.id, conflict.ownerId))
+      .limit(1)
+      .all()[0]
+    return {
+      mode: 'read_only',
+      blocker: {
+        kind: 'conversation',
+        turnId: conflict.ownerId,
+        threadId: turn?.threadId ?? null
+      }
+    }
+  }
+  if (conflict.ownerKind !== 'thread_job') {
+    return { mode: 'read_write', blocker: null }
+  }
+
+  const legacyJob = getDb()
+    .select({ title: threadJobs.title, status: threadJobs.status })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.id, conflict.ownerId), eq(threadJobs.username, username)))
+    .limit(1)
+    .all()[0]
+  if (legacyJob) {
+    return {
+      mode: 'read_only',
+      blocker: {
+        kind: 'task',
+        taskId: conflict.ownerId,
+        taskTitle: legacyJob.title,
+        status: legacyJob.status
+      }
+    }
+  }
+
+  const controlJob = getDb()
+    .select({ title: controlJobs.title, state: controlJobs.state })
+    .from(controlJobs)
+    .where(and(eq(controlJobs.id, conflict.ownerId), eq(controlJobs.projectId, projectId)))
+    .limit(1)
+    .all()[0]
+
+  return {
+    mode: 'read_only',
+    blocker: {
+      kind: 'task',
+      taskId: conflict.ownerId,
+      taskTitle: controlJob?.title ?? '正在执行的任务',
+      status: controlJob?.state ?? 'running'
+    }
+  }
+}
+
 export async function touchProject(username: string, projectId: string): Promise<void> {
   const db = getDb()
   await db
@@ -120,15 +207,6 @@ export async function touchProject(username: string, projectId: string): Promise
 }
 
 export async function deleteProject(username: string, projectId: string): Promise<void> {
-  const existing = await getProject(username, projectId)
-  if (!existing) {
-    throw AppError.notFound('Project not found', 'project.not_found')
-  }
-
-  const db = getDb()
-  db.transaction((tx) => {
-    tx.delete(projects)
-      .where(and(eq(projects.username, username), eq(projects.id, projectId)))
-      .run()
-  })
+  const { drainAndDeleteProject } = await import('../legacy-control-plane/deletion-coordinator')
+  await drainAndDeleteProject(username, projectId)
 }

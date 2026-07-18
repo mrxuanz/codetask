@@ -3,7 +3,9 @@ import {
   jobIdFromTopic,
   jobTopic,
   threadIdFromTopic,
-  threadTopic
+  threadTopic,
+  turnIdFromTopic,
+  turnTopic
 } from '@shared/contracts/job-event-hub'
 import { jobHubTerminalStatus } from '@shared/job-realtime'
 import { getAppContext } from '../bootstrap'
@@ -54,10 +56,7 @@ function saveLinger(conn: HubConnection): void {
   })
 }
 
-function takeLinger(
-  username: string,
-  connectionId: string
-): LingerBuffer | undefined {
+function takeLinger(username: string, connectionId: string): LingerBuffer | undefined {
   pruneLinger()
   const key = connectionKey(username, connectionId)
   const buf = lingerByKey.get(key)
@@ -127,8 +126,7 @@ async function pushJobSnapshots(
   topic: HubTopic,
   jobId: string
 ): Promise<'live' | 'terminal' | 'missing'> {
-  const { getUserJob } = await import('../jobs/service')
-  const job = await getUserJob(conn.username, jobId)
+  const job = await getRealtimeJobSnapshot(conn.username, jobId)
   if (!job) return 'missing'
 
   pushEnvelope(conn, topic, { event: 'job_snapshot', data: { job } })
@@ -148,6 +146,21 @@ async function pushJobSnapshots(
     return 'terminal'
   }
   return 'live'
+}
+
+/** Resolve the authoritative snapshot for both Legacy and V3 control-plane generations. */
+export async function getRealtimeJobSnapshot(
+  username: string,
+  jobId: string
+): Promise<import('../../shared/contracts/jobs.ts').ThreadJobDto | null> {
+  const ctx = getAppContext()
+  const { isV3Authoritative } = await import('../application/cutover-state')
+  if (isV3Authoritative(ctx.db)) {
+    const { getControlPlaneRuntime } = await import('../application/control-plane-runtime')
+    return getControlPlaneRuntime(ctx).queryService.getTaskJob(jobId, { username })
+  }
+  const { getUserJob } = await import('../legacy-control-plane/service')
+  return getUserJob(username, jobId)
 }
 
 async function pushThreadSnapshot(
@@ -218,9 +231,7 @@ export function registerJobHubConnection(
   const prior = userMap.get(connId)
   const linger = takeLinger(username, connId)
   const replaySource =
-    prior && !prior.closed
-      ? { recent: prior.recent, nextSeq: prior.nextSeq }
-      : linger
+    prior && !prior.closed ? { recent: prior.recent, nextSeq: prior.nextSeq } : linger
 
   const conn: HubConnection = {
     username,
@@ -298,6 +309,20 @@ export function registerJobHubConnection(
           pushEnvelope(conn, topic, payload)
         })
         conn.unsubByTopic.set(topic, unsub)
+        continue
+      }
+
+      const turnId = turnIdFromTopic(topic)
+      if (turnId) {
+        const { getTurn } = await import('../conversation/turn-queue')
+        const turn = await getTurn(conn.username, turnId)
+        if (!turn) continue
+        pushEnvelope(conn, topic, { event: 'turn_snapshot', data: { turn } })
+        conn.subscribedTopics.add(topic)
+        const unsub = bus.subscribe(topic, (payload) => {
+          pushEnvelope(conn, topic, payload)
+        })
+        conn.unsubByTopic.set(topic, unsub)
       }
     }
   }
@@ -326,4 +351,4 @@ export function registerJobHubConnection(
   }
 }
 
-export { jobTopic, threadTopic }
+export { jobTopic, threadTopic, turnTopic }
