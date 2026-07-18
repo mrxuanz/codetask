@@ -5,7 +5,9 @@ import eslintPluginVue from 'eslint-plugin-vue'
 import vueParser from 'vue-eslint-parser'
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out'] },
+  {
+    ignores: ['**/node_modules', '**/dist', '**/out', 'data/**', 'scripts/tmp-query-m1s2.cjs']
+  },
   tseslint.configs.recommended,
   eslintPluginVue.configs['flat/recommended'],
   {
@@ -64,7 +66,12 @@ export default defineConfig(
     rules: {
       '@typescript-eslint/ban-ts-comment': [
         'error',
-        { 'ts-ignore': true, 'ts-nocheck': true, 'ts-check': false, 'ts-expect-error': 'allow-with-description' }
+        {
+          'ts-ignore': true,
+          'ts-nocheck': true,
+          'ts-check': false,
+          'ts-expect-error': 'allow-with-description'
+        }
       ]
     }
   },
