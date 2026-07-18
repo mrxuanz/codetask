@@ -122,3 +122,22 @@ count to decrease but fails if it grows above that baseline.
 - CI handling: none; cache fallback remains enabled and visible.
 - Decision needed: normalize the manifest encodings when native build files are
   in scope, then verify the cache parser warnings disappear.
+
+## BUSINESS-009: Linux sandbox integration tests use contention-sensitive timeouts
+
+- Location: `native/codeteam-linux-sandbox/tests/suite/landlock.rs:20-34`
+- Finding: the Linux sandbox integration suite launches many Bubblewrap and
+  network subprocesses in parallel with 5-second command timeouts. Source
+  comments already note CI timeouts, and the nominal ARM64 timeout values are
+  currently identical to the non-ARM64 values despite the adjacent note that
+  ARM64 needs longer timeouts. CI run 25 failed the unchanged Rust suite after
+  run 24 passed it, so runner contention is the leading explanation; the public
+  unauthenticated Actions view does not expose the individual failing test log.
+- Impact: the full native workspace test can fail nondeterministically without a
+  Rust source change.
+- CI handling: Rust workspace tests run serially and with `--no-fail-fast` so
+  every test still executes while avoiding subprocess contention and retaining
+  complete failure diagnostics. No test is skipped or baselined.
+- Decision needed: use a future authenticated failure log to identify the exact
+  test, then choose platform-aware per-test timeouts or explicit test-level
+  serialization in native test code.

@@ -71,7 +71,14 @@ jobs:
         name: Package unpacked app for smoke test
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-unpacked.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --dir --publish never
 
-      - if: ${{ inputs.smoke-unpacked }}
+      - if: ${{ inputs.smoke-unpacked && runner.os == 'Linux' }}
+        name: Smoke unpacked app (Linux)
+        # Electron still needs an X server while initializing in headless server
+        # mode. ubuntu-latest provides xvfb; keep the application assertion in
+        # package-smoke.mjs and supply only the CI display environment here.
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-smoke.log -- xvfb-run --auto-servernum node scripts/package-smoke.mjs --dist dist
+
+      - if: ${{ inputs.smoke-unpacked && runner.os != 'Linux' }}
         name: Smoke unpacked app
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-smoke.log -- node scripts/package-smoke.mjs --dist dist
 
