@@ -62,7 +62,10 @@ jobs:
           workspaces: native
       - run: npm ci
       - name: Rust tests
-        run: cargo test --manifest-path native/Cargo.toml
+        # The native suite launches many short-lived sandbox/network processes.
+        # Serial execution avoids runner resource contention; no-fail-fast keeps
+        # complete diagnostics when a real regression affects multiple crates.
+        run: cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1
       - name: Rust build check
         run: cargo check --manifest-path native/Cargo.toml --release
 
