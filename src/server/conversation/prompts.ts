@@ -4,7 +4,7 @@ import { TASK_LAUNCH_ABILITY_CATALOG, THREAD_WORKSPACE_BINDING_POLICY } from './
 export type ConversationPromptMode = 'chat' | 'create_task'
 
 export const PRODUCTION_LANDING_QUALITY_BAR =
-  'I explicitly reject lightweight or partial implementations. Reference existing patterns and deliver a fully landed, production-grade solution that gives operators a sense of security — not a prototype that leaves behind many problems to fix one by one.'
+  'Within the stated task boundary, reject lightweight or partial implementations: land that slice of work fully and production-grade so operators can trust it — not a prototype that leaves cleanup debt. Do not enlarge the task to swallow unrelated concerns.'
 
 function describeSupportedCoreCodes(): string {
   return SUPPORTED_CORE_CODES.join(', ')
@@ -22,7 +22,7 @@ export function buildChatConversationBody(agentName: string): string {
     'Work in the project workspace bound to this thread.',
     'Handle small, focused requests directly: answer questions, read and edit files, run short commands, and make incremental changes the user can review.',
     'Keep scope tight to what was asked; prefer minimal diffs unless the user wants a broader change.',
-    'If the request is ambiguous, ask briefly before acting.',
+    'If the request is ambiguous, make a reasonable assumption and state it briefly — never use interactive question / ask-user tools. Prefer acting over waiting for confirmation.',
     'This is a general chat thread — do not create task launch drafts, do not mention REQUIREMENTS CONTRACT, and do not use task-creation MCP tools.'
   ].join('\n')
 }
@@ -50,13 +50,13 @@ export function buildCreateTaskConversationBody(
       '## Discussion Workflow (MUST follow this order)',
       "1) Reflect: restate the user's goal, constraints, and unknowns in 3-6 lines. On the first turn of requirements collection, a workspace snapshot of the bound project folder is attached — summarize what already exists there and how it relates to the user's goal before asking follow-ups.",
       '2) Gather requirements: clarify user flow, technical stack, acceptance scenarios, constraints, and out-of-scope items through focused follow-ups.',
-      '3) Gate check: if critical information is still missing, ask focused follow-up questions before draft proposal.',
+      '3) Gate check: if critical information is still missing, make the best assumption, state it briefly, and proceed toward draft proposal. Never use interactive question / ask-user tools; do not block waiting for confirmation.',
       '4) Draft proposal: call propose_task_draft when title, summary, user flow, tech stack, acceptance, and abilities are reasonably complete.',
       '5) Requirements gate: after draft appears, ask user to confirm the REQUIREMENTS CONTRACT first, then proceed to final draft confirmation.',
       '',
       '## Production quality bar (for downstream planner and workers)',
       PRODUCTION_LANDING_QUALITY_BAR,
-      '- Downstream planner should produce small tasks (~10 minutes each). Multiple milestones, slices, and tasks are fine.',
+      '- Downstream planner should decompose into short worker sessions (~10–15 minutes each), usually with multiple slices and multiple small tasks under each slice; use as few milestones as the work truly needs.',
       '',
       '## Skill: propose_task_draft (MCP tool)',
       'When the user asks to build, implement, create, develop, fix, refactor, or plan a concrete piece of work,',

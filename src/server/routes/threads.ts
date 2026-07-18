@@ -16,7 +16,6 @@ import {
 import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../threads/types'
 import { reconcileThreadsForUser } from '../conversation/service'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createThreadRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 
@@ -103,7 +102,6 @@ export function createThreadRoutes(_ctx: AppContext): Hono {
   return routes
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function createProjectThreadRoutes(_ctx: AppContext): Hono {
   const routes = new Hono()
 

@@ -3,6 +3,10 @@ name: Build (reusable)
 on:
   workflow_call:
     inputs:
+      ref:
+        description: 'Immutable git commit SHA to build'
+        required: true
+        type: string
       runner:
         description: 'Runner OS (ubuntu-latest / macos-latest / windows-latest)'
         required: true
@@ -21,38 +25,81 @@ on:
         required: false
         default: 'package'
         type: string
+      smoke-unpacked:
+        description: 'Build and launch-check a native unpacked package before publishing artifacts'
+        required: false
+        default: false
+        type: boolean
+      include-release-evidence:
+        description: 'Bind build logs and artifacts to the release test-gate manifest'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@3c2a84e9cad3969901890dbc98083c3ad8e21e6d # v2.7.7
         with:
           workspaces: native
 
       - run: npm ci
 
       - name: Build sandbox (native)
-        run: npm run build:sandbox
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/build-sandbox.log -- npm run build:sandbox
 
       - name: Build app
-        run: npm run build
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/build-app.log -- npm run build
 
       - name: Package ${{ inputs.builder-args }}
         # --publish never: packaging only; Release workflow publishes via softprops/action-gh-release
-        run: node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --publish never
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --publish never
+
+      - if: ${{ inputs.smoke-unpacked }}
+        name: Package unpacked app for smoke test
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-unpacked.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --dir --publish never
+
+      - if: ${{ inputs.smoke-unpacked }}
+        name: Smoke unpacked app
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-smoke.log -- node scripts/package-smoke.mjs --dist dist
+
+      - if: ${{ inputs.include-release-evidence }}
+        name: Download release test evidence
+        uses: actions/download-artifact@ccfa4c90b373a1bba1453ddebf4731d659dd3955 # v4.1.9
+        with:
+          name: release-test-evidence
+          path: dist/release-evidence/test
+
+      - if: ${{ inputs.include-release-evidence }}
+        name: Create platform evidence manifest
+        run: >-
+          node scripts/release-evidence.mjs create-build
+          --commit ${{ inputs.ref }}
+          --platform ${{ inputs.artifact-name }}
+          --dist dist
+          --lockfile package-lock.json
+          --evidence-root dist
+          --out dist/release-evidence/${{ inputs.artifact-name }}/build.manifest.json
+          --log release-evidence/${{ inputs.artifact-name }}/build-sandbox.log
+          --log release-evidence/${{ inputs.artifact-name }}/build-app.log
+          --log release-evidence/${{ inputs.artifact-name }}/package.log
+          --log release-evidence/${{ inputs.artifact-name }}/package-unpacked.log
+          --log release-evidence/${{ inputs.artifact-name }}/package-smoke.log
 
       - if: ${{ inputs.upload-artifact }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@65c4c08a768d7e4a08fabdd5333d057d994bc549 # v4.6.0
         with:
           name: ${{ inputs.artifact-name }}
           # upload-artifact does not expand bash brace globs; list patterns explicitly
@@ -62,4 +109,5 @@ jobs:
             dist/*.AppImage
             dist/*.dmg
             dist/*.zip
+            dist/release-evidence/**
           if-no-files-found: error

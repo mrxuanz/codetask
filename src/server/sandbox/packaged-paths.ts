@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 
 function packagedAppPath(): string | null {
-  const resourcesPath = process.resourcesPath
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
   if (!resourcesPath) return null
   const asarPath = join(resourcesPath, 'app.asar')
   return existsSync(asarPath) ? asarPath : null

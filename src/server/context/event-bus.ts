@@ -1,5 +1,5 @@
 import type { HubEvent, HubTopic } from '@shared/contracts/job-event-hub'
-import type { JobSseEvent } from '../jobs/types'
+import type { JobSseEvent } from '@shared/contracts/sse'
 
 const MAX_QUEUE_EVENTS = 64
 
@@ -16,7 +16,8 @@ export function enqueueJobSseEvent(queue: JobSseEvent[], event: JobSseEvent): vo
 export function enqueueHubEvent(queue: HubEvent[], event: HubEvent): void {
   if (isCoalescableTaskProgress(event)) {
     for (let i = queue.length - 1; i >= 0; i -= 1) {
-      if (isCoalescableTaskProgress(queue[i])) {
+      const existing = queue[i]
+      if (existing !== undefined && isCoalescableTaskProgress(existing)) {
         queue[i] = event
         return
       }

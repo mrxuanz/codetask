@@ -19,8 +19,10 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 function getClient(): Database.Database {
   const db = getDb()
-  const client = (db as unknown as { $client: Database.Database }).$client
-  return client
+  if (!('$client' in db) || !(db.$client instanceof Database)) {
+    throw new Error('Database client is not available')
+  }
+  return db.$client
 }
 
 export function startAuthJanitor(): void {

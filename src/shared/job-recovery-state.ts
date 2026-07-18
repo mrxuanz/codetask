@@ -13,22 +13,13 @@ export type FailureKind =
   | 'dependency_missing'
   | 'human_blocked'
   | 'terminal'
+  | 'gate_blocked'
 
-export type JobNextAction =
-  | 'continue'
-  | 'retry_failed_task'
-  | 'restart'
-  | 'cancel'
-  | 'delete'
-  | 'pause'
+export type JobNextAction = 'continue' | 'restart' | 'delete' | 'pause'
 
-export type JobAvailableAction =
-  | 'continue'
-  | 'retry_failed_task'
-  | 'restart'
-  | 'cancel'
-  | 'delete'
-  | 'pause'
+export type JobAvailableAction = 'continue' | 'restart' | 'delete' | 'pause'
+
+export type JobRecoveryStrategy = 'retry' | 'remediate' | 'resume' | 'needs_attention'
 
 export interface ExecutionProgressDto {
   completedCount: number
@@ -48,6 +39,7 @@ export interface JobFailureDto {
 
 export interface JobRecoveryDto {
   recoverable: boolean
+  strategy: JobRecoveryStrategy | null
   reason: string | null
   nextAction: JobNextAction | null
   failedTaskId: string | null
@@ -72,6 +64,13 @@ const WORKFLOW_PROGRESS_BY_TURN_CODE = {
   'workflow.deadlock': 'execution.workflow_deadlock',
   'workflow.failed_block': 'execution.workflow_failed_block'
 } as const
+
+const GATE_FAILURE_PROGRESS_CODES = new Set([
+  'execution.slice_blocked',
+  'execution.milestone_blocked',
+  'execution.slice_inconclusive_exhausted',
+  'execution.milestone_inconclusive_exhausted'
+])
 
 function matchesWorkflowCode(
   input: TurnErrorDto | string | null | undefined,
@@ -108,8 +107,24 @@ function isWorkflowDeadlockOnly(job: Pick<ThreadJobDto, 'taskProgress' | 'lastEr
   return matchesWorkflowProgressCode(job.taskProgress.progressCode, 'workflow.deadlock')
 }
 
-function isTerminalTask(task: TaskProgressItemDto): boolean {
-  return task.evidence?.recovery?.action === 'terminal-fail'
+function readGateFailureId(job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>): string | null {
+  const fromParams = job.taskProgress.progressParams?.id
+  if (typeof fromParams === 'string' && fromParams.trim()) return fromParams
+  const lastErrorDto =
+    typeof job.lastError === 'object' && job.lastError
+      ? job.lastError
+      : coerceTurnErrorField(job.lastError)
+  const fromError = lastErrorDto?.params?.taskId
+  if (typeof fromError === 'string' && fromError.trim()) return fromError
+  return null
+}
+
+export function isGateFailureProgressCode(progressCode: string | null | undefined): boolean {
+  return Boolean(progressCode && GATE_FAILURE_PROGRESS_CODES.has(progressCode))
+}
+
+function isGateFailureRecoverable(job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>): boolean {
+  return isGateFailureProgressCode(job.taskProgress.progressCode)
 }
 
 function isHumanBlockedTask(task: TaskProgressItemDto): boolean {
@@ -119,7 +134,11 @@ function isHumanBlockedTask(task: TaskProgressItemDto): boolean {
 
 function isRecoverableTask(task: TaskProgressItemDto, job?: Pick<ThreadJobDto, 'status'>): boolean {
   if (job && isInterruptedFailedJobTask(job, task)) return true
-  if (isTerminalTask(task) || isHumanBlockedTask(task)) return false
+  // Human blockers cannot continue from the breakpoint; restart/delete only.
+  if (isHumanBlockedTask(task)) return false
+  // Class A (timeout/infra/cancel) and Class B (prep/repair) both remain continuable,
+  // including after auto-retry / generation exhaustion (terminal-fail). Manual continue
+  // re-queues or re-injects; restart is the destructive escape hatch.
   if (task.executionStatus === 'retry-queued') return true
   if (task.executionStatus === 'waiting-on-repair') return true
   if (task.executionStatus === 'waiting-on-dependency') return true
@@ -133,7 +152,7 @@ function isInterruptedFailedJobTask(
 ): boolean {
   if (job.status !== 'failed') return false
   if (task.status === 'completed' || task.status === 'skipped') return false
-  if (isTerminalTask(task) || isHumanBlockedTask(task)) return false
+  if (isHumanBlockedTask(task)) return false
   if (task.status !== 'running' && task.executionStatus !== 'running') return false
   return Boolean(task.errorMessage || task.error)
 }
@@ -149,33 +168,28 @@ function findPrimaryRecoverableTask(
   return null
 }
 
-function findRetryableTask(
-  tasks: TaskProgressItemDto[],
-  job?: Pick<ThreadJobDto, 'status'>
-): TaskProgressItemDto | null {
-  if (job?.status === 'failed') {
-    for (const task of tasks) {
-      if (isInterruptedFailedJobTask(job, task)) return task
-    }
-  }
-  for (const task of tasks) {
-    if (task.status === 'failed') return task
-    if (task.executionStatus === 'retry-queued' || task.executionStatus === 'waiting-on-repair') {
-      return task
-    }
-  }
-  return null
-}
-
 function mapBlockerToFailureKind(
   kind: TaskBlockerKind | undefined,
   task: TaskProgressItemDto
 ): FailureKind {
-  if (isTerminalTask(task)) return 'terminal'
   if (isHumanBlockedTask(task)) return 'human_blocked'
   if (task.executionStatus === 'retry-queued') return 'infra_retryable'
   if (task.executionStatus === 'waiting-on-dependency') return 'dependency_missing'
   if (task.executionStatus === 'waiting-on-repair') return 'task_repairable'
+  if (task.evidence?.recovery?.action === 'terminal-fail') {
+    switch (kind) {
+      case 'infra':
+        return 'infra_retryable'
+      case 'dependency-prep':
+        return 'dependency_missing'
+      case 'implementation':
+        return 'task_repairable'
+      case 'dependency-human':
+        return 'human_blocked'
+      default:
+        return 'infra_retryable'
+    }
+  }
   switch (kind) {
     case 'infra':
       return 'infra_retryable'
@@ -186,8 +200,19 @@ function mapBlockerToFailureKind(
     case 'dependency-human':
       return 'human_blocked'
     default:
-      return 'terminal'
+      // Unknown / unclassified — let continue re-run classifier (prep/repair/infra).
+      return 'task_repairable'
   }
+}
+
+function mapGateProgressToFailureKind(progressCode: string | null | undefined): FailureKind {
+  if (
+    progressCode === 'execution.slice_inconclusive_exhausted' ||
+    progressCode === 'execution.milestone_inconclusive_exhausted'
+  ) {
+    return 'task_repairable'
+  }
+  return 'gate_blocked'
 }
 
 function readTaskInfraAttempt(job: Pick<ThreadJobDto, 'taskProgress'>, taskId: string): number {
@@ -205,9 +230,16 @@ function readTaskRepairAttempt(
       max: MAX_TASK_PREP_GENERATIONS
     }
   }
-  if (failureKind === 'task_repairable') {
+  if (failureKind === 'task_repairable' || failureKind === 'gate_blocked') {
+    const sliceKey = `slice:${taskId}`
+    const milestoneKey = `milestone:${taskId}`
+    const gateAttempt =
+      job.taskProgress.repairGenerations?.[sliceKey] ??
+      job.taskProgress.repairGenerations?.[milestoneKey] ??
+      job.taskProgress.repairGenerations?.[`task-repair:${taskId}`] ??
+      0
     return {
-      attempt: job.taskProgress.repairGenerations?.[`task-repair:${taskId}`] ?? 0,
+      attempt: gateAttempt,
       max: MAX_TASK_REPAIR_GENERATIONS
     }
   }
@@ -224,12 +256,27 @@ function resolveRecoveryReason(input: {
   task: TaskProgressItemDto | null
   failureKind: FailureKind | null
   workflowDeadlock: boolean
+  gateFailure: boolean
+  progressCode: string | null | undefined
 }): string | null {
   if (input.lifecycle === 'paused') return 'user_paused'
   if (input.workflowDeadlock) return 'workflow_deadlock'
+  if (input.gateFailure) {
+    if (input.progressCode === 'execution.slice_blocked') return 'slice_verification_blocked'
+    if (input.progressCode === 'execution.milestone_blocked') {
+      return 'milestone_verification_blocked'
+    }
+    if (
+      input.progressCode === 'execution.slice_inconclusive_exhausted' ||
+      input.progressCode === 'execution.milestone_inconclusive_exhausted'
+    ) {
+      return 'gate_repair_exhausted'
+    }
+    return 'gate_verification_failed'
+  }
   if (!input.task) {
     if (input.lifecycle === 'failed') {
-      return input.failureKind === 'terminal' ? 'terminal_exhausted' : 'job_failed'
+      return input.failureKind === 'human_blocked' ? 'human_dependency_blocked' : 'job_failed'
     }
     return null
   }
@@ -245,7 +292,6 @@ function resolveRecoveryReason(input: {
     return 'task_implementation_failed'
   }
   if (input.failureKind === 'human_blocked') return 'human_dependency_blocked'
-  if (input.failureKind === 'terminal') return 'terminal_exhausted'
 
   const code = readTaskErrorCode(input.task)
   if (code === 'task.evidence_timeout' || code === 'task.evidence_missing') {
@@ -258,19 +304,13 @@ function resolveRecoveryReason(input: {
 function resolveNextAction(input: {
   lifecycle: JobLifecycle
   recoverable: boolean
-  failureKind: FailureKind | null
-  retryableTaskId: string | null
 }): JobNextAction | null {
   if (input.lifecycle === 'paused' && input.recoverable) return 'continue'
-  if (input.lifecycle === 'failed' && input.recoverable) {
-    if (input.failureKind === 'infra_retryable' && input.retryableTaskId) {
-      return 'retry_failed_task'
-    }
+  if (input.lifecycle === 'failed') {
     return 'continue'
   }
-  if (input.retryableTaskId) return 'retry_failed_task'
   if (input.lifecycle === 'running' || input.lifecycle === 'pending') return null
-  if (input.lifecycle === 'failed' || input.lifecycle === 'cancelled') return 'restart'
+  if (input.lifecycle === 'cancelled') return 'restart'
   return null
 }
 
@@ -278,12 +318,10 @@ function deriveAvailableActions(input: {
   lifecycle: JobLifecycle
   status: ThreadJobStatus
   recoverable: boolean
-  retryableTaskId: string | null
 }): JobAvailableAction[] {
   const actions: JobAvailableAction[] = []
 
   if (input.lifecycle === 'running' || input.lifecycle === 'pending') {
-    actions.push('cancel')
     if (input.status === 'running' || input.status === 'pending') {
       actions.push('pause')
     }
@@ -296,9 +334,9 @@ function deriveAvailableActions(input: {
   }
 
   if (input.lifecycle === 'failed') {
-    if (input.recoverable) actions.push('continue')
-    if (input.retryableTaskId) actions.push('retry_failed_task')
-    actions.push('restart', 'delete')
+    // Every execution failure has one recovery entry point. The backend owns
+    // the breakpoint strategy; the UI must not infer it from task/gate shape.
+    actions.push('continue', 'restart', 'delete')
     return actions
   }
 
@@ -316,13 +354,25 @@ function deriveAvailableActions(input: {
   return actions
 }
 
-function isJobRecoverable(
-  job: Pick<ThreadJobDto, 'status' | 'taskProgress' | 'lastError'>
-): boolean {
+function isJobRecoverable(job: Pick<ThreadJobDto, 'status'>): boolean {
   if (job.status === 'paused') return true
-  if (job.status !== 'failed') return false
-  if (isWorkflowDeadlockOnly(job)) return true
-  return findPrimaryRecoverableTask(job.taskProgress.tasks, job) !== null
+  return job.status === 'failed'
+}
+
+function resolveRecoveryStrategy(input: {
+  lifecycle: JobLifecycle
+  failureKind: FailureKind | null
+  workflowDeadlock: boolean
+}): JobRecoveryStrategy | null {
+  if (input.lifecycle === 'paused' || input.workflowDeadlock) return 'resume'
+  if (input.lifecycle !== 'failed') return null
+  if (input.failureKind === 'dependency_missing' || input.failureKind === 'task_repairable') {
+    return 'remediate'
+  }
+  if (input.failureKind === 'gate_blocked') return 'remediate'
+  if (input.failureKind === 'human_blocked') return 'needs_attention'
+  if (input.failureKind === 'infra_retryable') return 'retry'
+  return 'resume'
 }
 
 export function deriveJobRecoveryState(
@@ -334,22 +384,28 @@ export function deriveJobRecoveryState(
   const total = job.taskProgress.total || tasks.length
   const percentage = total > 0 ? Math.round((completedCount / total) * 100) : 0
   const workflowDeadlock = isWorkflowDeadlockOnly(job)
+  const gateFailure = isGateFailureRecoverable(job)
   const recoverableTask = findPrimaryRecoverableTask(tasks, job)
-  const retryableTask = findRetryableTask(tasks, job)
+  const humanBlockedTask = tasks.find((task) => isHumanBlockedTask(task)) ?? null
   const recoverable = isJobRecoverable(job)
+  const gateId = gateFailure ? readGateFailureId(job) : null
 
-  const failedTaskId = recoverableTask?.id ?? retryableTask?.id ?? null
+  const failedTaskId = recoverableTask?.id ?? gateId ?? humanBlockedTask?.id ?? null
   const blockerKind =
     recoverableTask?.evidence?.recovery?.kind ?? recoverableTask?.evidence?.blockerKind
   const failureKind: FailureKind | null =
     lifecycle === 'failed' || lifecycle === 'paused'
       ? workflowDeadlock
         ? 'infra_retryable'
-        : recoverableTask
-          ? mapBlockerToFailureKind(blockerKind, recoverableTask)
-          : lifecycle === 'failed'
-            ? 'terminal'
-            : null
+        : gateFailure
+          ? mapGateProgressToFailureKind(job.taskProgress.progressCode)
+          : recoverableTask
+            ? mapBlockerToFailureKind(blockerKind, recoverableTask)
+            : humanBlockedTask
+              ? 'human_blocked'
+              : lifecycle === 'failed'
+                ? 'terminal'
+                : null
       : null
 
   const repairCounters = failedTaskId
@@ -358,20 +414,21 @@ export function deriveJobRecoveryState(
 
   const recovery: JobRecoveryDto = {
     recoverable,
+    strategy: resolveRecoveryStrategy({ lifecycle, failureKind, workflowDeadlock }),
     reason: resolveRecoveryReason({
       lifecycle,
       task: recoverableTask,
       failureKind,
-      workflowDeadlock
+      workflowDeadlock,
+      gateFailure,
+      progressCode: job.taskProgress.progressCode
     }),
     nextAction: resolveNextAction({
       lifecycle,
-      recoverable,
-      failureKind,
-      retryableTaskId: retryableTask?.id ?? null
+      recoverable
     }),
     failedTaskId,
-    autoRetryAttempt: failedTaskId ? readTaskInfraAttempt(job, failedTaskId) : 0,
+    autoRetryAttempt: recoverableTask ? readTaskInfraAttempt(job, recoverableTask.id) : 0,
     maxAutoRetryAttempts: MAX_INFRA_RETRIES,
     repairGeneration: repairCounters.attempt,
     maxRepairGenerations: repairCounters.max
@@ -405,9 +462,7 @@ export function deriveJobRecoveryState(
   const availableActions = deriveAvailableActions({
     lifecycle,
     status: job.status,
-    recoverable,
-    retryableTaskId:
-      lifecycle === 'failed' || lifecycle === 'paused' ? (retryableTask?.id ?? null) : null
+    recoverable
   })
 
   return {

@@ -13,7 +13,7 @@ import {
   assertManifestReferenceFilesExist,
   ReferenceFileMissingError,
   resolveAssignedReferenceLocalPaths
-} from '../../src/server/jobs/reference-paths.ts'
+} from '../../src/server/legacy-control-plane/reference-paths.ts'
 
 test('validateReferenceCoverage requires image references to be assigned', () => {
   const manifest = buildJobReferenceManifest({

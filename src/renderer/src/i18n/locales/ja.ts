@@ -31,6 +31,7 @@ export default {
   setup: {
     title: '初期設定',
     description: '初回利用時は管理者アカウントを作成してください',
+    combinedDescription: 'データディレクトリの選択と管理者アカウントの作成を一度に完了します',
     submit: '初期設定を完了',
     submitting: '送信中…',
     setupTokenLabel: 'セットアップトークン（サーバーコンソールから）',
@@ -39,7 +40,49 @@ export default {
       'ユーザー名は 4〜32 文字、英字で始まり、英数字・アンダースコア・ハイフンのみ。admin/root などの予約名は不可。パスワードは 8 文字以上で、大文字・小文字・数字・記号を含めてください。',
     confirmPassword: 'パスワード確認',
     confirmPasswordPlaceholder: 'もう一度パスワードを入力',
-    passwordMismatch: 'パスワードが一致しません'
+    passwordMismatch: 'パスワードが一致しません',
+    storageTitle: 'データ保存先を選択',
+    storageDescription:
+      'CodeTask のデータベース、添付ファイル、分離された Provider ランタイムの保存先を選択します。デフォルトフォルダが無い場合は自動作成します。',
+    storagePathLabel: 'データディレクトリ',
+    storagePathRequired: 'データディレクトリを入力してください',
+    storageBrowse: '参照',
+    storageBrowseTitle: 'データディレクトリを選択',
+    storageBrowseHint: 'ローカルフォルダを参照するか、新しいサブフォルダを作成して選択できます。',
+    storageSelectDirectory: 'このディレクトリを使用',
+    storageCreateFolder: '作成して選択',
+    storageValidate: 'ディレクトリを検証',
+    storageValidating: '検証中…',
+    storageConfirm: '確認して初期化',
+    storageInitializing: '初期化中…',
+    storageValidatedPath: '検証済みパス：{path}',
+    storageRestarting: 'ストレージを初期化しました',
+    storageRecoveryTitle: 'ストレージの復旧が必要です',
+    storageRecoveryDescription:
+      '保存先が破損しているか見つかりません。既存の CodeTask データディレクトリを復旧するか、空のフォルダを選んで再初期化できます。',
+    storageRecover: 'このディレクトリを使用',
+    storageRecovering: '復旧中…',
+    storageRecovered: '保存先を復旧しました',
+    errors: {
+      pathNotAbsolute: '絶対パスを入力してください',
+      pathNotWritable: '書き込みできません。別の場所を選んでください',
+      pathNotEmpty:
+        '空でないディレクトリで、CodeTask データルートでもありません。空のフォルダを選んでください',
+      pathForbiddenRoot: 'システムルートやホームディレクトリは使用できません',
+      pathOwnedByOther: 'このディレクトリは別の CodeTask インストールに属しています',
+      markerMissing:
+        '有効な CodeTask データマーカーがありません。初回は空フォルダを、復旧時は元のデータディレクトリを選んでください',
+      databaseMissing: 'このディレクトリにデータベースがありません',
+      locatorUnreadable: '保存された保存先設定が壊れています。再度選択してください',
+      locatorInvalid: '保存された保存先設定が無効です。再度選択してください',
+      legacyLocatorConflict:
+        '異なる保存先設定が複数見つかりました。使用する元のデータディレクトリを選択してください',
+      legacyLocatorMigrationFailed:
+        '元の保存先設定を移行できませんでした。元のデータディレクトリを再度選択してください',
+      installationMismatch: 'データディレクトリがこのインストールと一致しません',
+      validationExpired: 'ディレクトリ検証の期限が切れました。再試行してください',
+      insufficientSpace: 'ディスク容量が不足しています'
+    }
   },
   bootstrap: {
     connectionError: 'サービスに接続できません：{error}',
@@ -111,6 +154,10 @@ export default {
     loadThreadFailed: 'スレッドの読み込みに失敗しました',
     switchCoreFailed: 'CLI の切り替えに失敗しました',
     sendFailed: '送信に失敗しました',
+    taskWorkspaceReadOnly: 'タスク「{task}」を実行中です。この会話は読み取り専用です。',
+    conversationWorkspaceReadOnly:
+      '別の会話がこのディレクトリを変更中です。この会話は読み取り専用です。',
+    workspaceReadOnly: '別の操作がこのディレクトリを使用中です。この会話は読み取り専用です。',
     relativeHours: '{n} 時間前',
     relativeMinutes: '{n} 分前',
     composer: {
@@ -164,12 +211,17 @@ export default {
         pause: '一時停止',
         resume: '再開',
         continue: '続行',
-        retryTask: 'サブタスクを再試行',
-        restart: '再起動',
+        restart: '進捗を消去して最初から実行',
         cancel: 'キャンセル',
         delete: '削除'
       },
       actionFailed: 'タスク操作に失敗しました',
+      recovery: {
+        retry: '続行すると、完了済みタスクを保持したまま失敗地点から再試行します。',
+        remediate: '続行すると、補修タスクを先に実行してから失敗地点に戻ります。',
+        resume: '続行すると、完了済みタスクを保持したまま最新の中断地点から再開します。',
+        needs_attention: '外部依存または手動条件を解決してから、中断地点より続行してください。'
+      },
       progress: {
         label: '完了率',
         planLabel: '計画生成',
@@ -184,6 +236,7 @@ export default {
         planning: '計画生成中 {done}/{total}',
         planningPartial: '計画生成中 · {done} ステップ完了',
         planningRunning: '計画を生成中…',
+        planOutlineReady: '計画の骨格をロックしました（{total} タスク）。詳細を生成中…',
         planFinalizing: '計画構造は準備完了、仕上げ中…',
         executionDone: '実行完了 {done}/{total}',
         executionFailed: '実行失敗',
@@ -194,6 +247,7 @@ export default {
           'plan.pending':
             'キューに入っています。前のタスクが完了または一時停止するのを待っています…',
           'plan.planning': '計画を生成中…',
+          'plan.outline_ready': '計画の骨格をロックしました（{total} タスク）。詳細を生成中…',
           'plan.planning_partial': '計画生成中 · {done} ステップ完了',
           'plan.planning_failed': '計画生成に失敗しました',
           'plan.needs_auth': 'CLI が未ログインです。端末で先にログインしてください',
@@ -262,6 +316,7 @@ export default {
         exec: {
           completed: '完了',
           in_progress: '実行中',
+          paused: '一時停止',
           failed: '失敗',
           pending: '待機',
           queued: 'キュー',
@@ -364,11 +419,17 @@ export default {
       newDraftThread: '新しいタスク会話',
       draftListTitle: '草案リスト',
       draftListHint:
-        '未完了の草案はここに保存されます。クリックして続行できます。新規作成は「新規タスク」を押してください。',
+        '作成中の草案はここに保存されます。進捗に関係なく削除できます。起動済みタスクはタスクリストに残ります。',
       startNew: '新規タスク',
       backToDraftList: '草案リストに戻る',
       draftListEmpty: '未完了の草案はありません',
       draftIncompleteEmpty: '進行中の草案はありません',
+      confirmDeleteDraftTitle: '草案を削除',
+      confirmDeleteDraftMessage:
+        '草案「{name}」と生成済みファイルデータを削除しますか？この操作は取り消せません。',
+      confirmDeleteDraftLaunchedMessage:
+        '草案リストから「{name}」を削除しますか？起動済みタスクはタスクリストに残り、削除されません。',
+      deleteDraftFailed: '草案の削除に失敗しました',
       draftStatusLaunched: '完了',
       draftStatusInProgress: '進行中',
       draftStatusPlanningFailed: '計画失敗',
@@ -448,8 +509,10 @@ export default {
       save: '保存',
       loadFailed: '設定の読み込みに失敗しました',
       saveFailed: '設定の保存に失敗しました',
+      saveSuccess: '設定を保存しました',
       sections: {
         language: '言語',
+        storage: 'データストレージ',
         sandbox: 'サンドボックス',
         controlPlane: 'Control Plane',
         mcp: 'MCP',
@@ -471,6 +534,30 @@ export default {
           unavailable: '利用不可',
           disabled: '無効'
         }
+      },
+      storage: {
+        title: 'データストレージ',
+        description:
+          '使用量を確認し、検証・移行・再起動を通じてデータルート全体を安全に移動します。',
+        loading: 'ストレージ情報を読み込み中…',
+        loadFailed: 'ストレージ情報の読み込みに失敗しました',
+        currentPath: '現在のデータルート',
+        source: 'ソース：{source}',
+        total: '合計',
+        reclaimable: 'DB 回収可能',
+        changeTitle: 'データルートを移動',
+        browse: '参照',
+        browseTitle: '新しいデータディレクトリを選択',
+        browseHint: 'ローカルフォルダを参照するか、新しいサブフォルダを作成して選択できます。',
+        selectDirectory: 'このディレクトリを使用',
+        createFolder: '作成して選択',
+        migrate: '検証して移行',
+        managed: 'このパスは CLI または環境設定で管理されているため、ここでは変更できません。',
+        phase: '移行フェーズ：{phase}',
+        restart: '新しいデータルートで再起動',
+        deleteOld: '古いデータルートを削除',
+        migrationFailed: 'ストレージ移行に失敗しました',
+        deleteOldFailed: '古いストレージの削除に失敗しました'
       },
       languageSection: {
         title: '言語',

@@ -77,7 +77,7 @@ export const FIXTURE_TASK_CONTEXTS = [
   }
 ] as const
 
-export function buildRegisterPlanArgs(referenceIds: string[] = []): {
+export function buildPlanOutlineArgs(referenceIds: string[] = []): {
   milestones: {
     title: string
     description: string

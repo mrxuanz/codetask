@@ -5,21 +5,24 @@ import {
   touchConversationCursorBinding,
   upsertConversationCursorBinding
 } from './conversation-cursor-directory'
+import type { AgentCapabilityProfile } from '../capabilities'
 
 export interface JobCursorRuntimeKeyInput {
   jobId: string
   provider: string
   workspaceRoot: string
-  model?: string
+  model?: string | undefined
   mcpProfile: string
+  capabilityProfile?: AgentCapabilityProfile | undefined
 }
 
 export interface CursorRuntimeKeyInput {
   scopeId: string
   provider: string
   workspaceRoot: string
-  model?: string
+  model?: string | undefined
   mcpProfile: string
+  capabilityProfile?: AgentCapabilityProfile | undefined
 }
 
 export type ConversationCursorKind = 'chat' | 'create_task'
@@ -48,7 +51,8 @@ export function buildCursorRuntimeKey(input: CursorRuntimeKeyInput): string {
     input.provider,
     input.workspaceRoot,
     input.model ?? '',
-    mcpProfile
+    mcpProfile,
+    input.capabilityProfile ?? ''
   ].join('\0')
   return createHash('sha256').update(raw).digest('hex').slice(0, 24)
 }
@@ -59,7 +63,8 @@ export function buildJobCursorRuntimeKey(input: JobCursorRuntimeKeyInput): strin
     provider: input.provider,
     workspaceRoot: input.workspaceRoot,
     model: input.model,
-    mcpProfile: input.mcpProfile
+    mcpProfile: input.mcpProfile,
+    capabilityProfile: input.capabilityProfile
   })
 }
 
@@ -131,7 +136,7 @@ export class CursorProviderRuntimeRegistry {
       return existing.runtime
     }
     if (existing) {
-      await existing.runtime.close().catch(() => {})
+      await existing.runtime.close()
       this.entries.delete(key)
       if (isConversationCursorScope(scopeId)) {
         markConversationCursorBindingStopped(scopeId)
@@ -148,8 +153,10 @@ export class CursorProviderRuntimeRegistry {
   async invalidate(key: string): Promise<void> {
     const entry = this.entries.get(key)
     if (!entry) return
-    this.entries.delete(key)
-    await entry.runtime.close().catch(() => {})
+    await entry.runtime.close()
+    if (this.entries.get(key) === entry) {
+      this.entries.delete(key)
+    }
     if (isConversationCursorScope(entry.scopeId)) {
       markConversationCursorBindingStopped(entry.scopeId)
     }
@@ -158,8 +165,10 @@ export class CursorProviderRuntimeRegistry {
   async invalidateScope(scopeId: string): Promise<void> {
     const targets = [...this.entries.values()].filter((entry) => entry.scopeId === scopeId)
     for (const entry of targets) {
-      this.entries.delete(entry.key)
-      await entry.runtime.close().catch(() => {})
+      await entry.runtime.close()
+      if (this.entries.get(entry.key) === entry) {
+        this.entries.delete(entry.key)
+      }
     }
     if (isConversationCursorScope(scopeId)) {
       markConversationCursorBindingStopped(scopeId)
@@ -172,12 +181,24 @@ export class CursorProviderRuntimeRegistry {
 
   async closeAll(): Promise<void> {
     const entries = [...this.entries.values()]
-    this.entries.clear()
-    await Promise.all(entries.map((entry) => entry.runtime.close().catch(() => {})))
+    const errors: unknown[] = []
     for (const entry of entries) {
-      if (isConversationCursorScope(entry.scopeId)) {
-        markConversationCursorBindingStopped(entry.scopeId)
+      try {
+        await entry.runtime.close()
+        if (this.entries.get(entry.key) === entry) {
+          this.entries.delete(entry.key)
+        }
+      } catch (error) {
+        errors.push(error)
       }
+      if (isConversationCursorScope(entry.scopeId)) {
+        if (!this.entries.has(entry.key)) {
+          markConversationCursorBindingStopped(entry.scopeId)
+        }
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Failed to close one or more Cursor ACP runtimes')
     }
   }
 }

@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useDebounceFn } from '@vueuse/core'
-import { retryTaskJob, type ThreadJob } from '@renderer/api/jobs'
+import { type ThreadJob } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import TaskParameterPanel from '@renderer/components/tasks/TaskParameterPanel.vue'
@@ -25,16 +24,15 @@ import {
   type JobProgressSnapshot,
   type UnifiedTaskNode
 } from '@renderer/lib/jobProgress'
-import { jobHasAction } from '@shared/job-recovery-state'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
-import { useJobsStore } from '@renderer/composables/useJobsStore'
+import { useControlPlaneJobsStore } from '@renderer/composables/useControlPlaneJobsStore'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
 const selectedJobId = computed(() => (route.params.jobId as string) || null)
-const store = useJobsStore({ selectedJobId })
+const store = useControlPlaneJobsStore({ selectedJobId })
 
 const {
   statusFilter,
@@ -44,9 +42,14 @@ const {
   loadingList,
   loadingDetail,
   error,
-  actionError,
   runningAction,
-  selectedJob
+  selectedJob,
+  canPause,
+  canContinue,
+  canRestart,
+  canCancelAction,
+  canDeleteAction,
+  pauseButtonText
 } = store
 
 const selectedTask = ref<UnifiedTaskNode | null>(null)
@@ -54,8 +57,6 @@ const taskParametersOpen = ref(false)
 
 const statusFilters = computed(() => [
   { value: 'all', label: t('workspace.tasks.filters.all') },
-  { value: 'planning', label: t('workspace.tasks.filters.planning') },
-  { value: 'plan_editing', label: t('workspace.tasks.filters.planEditing') },
   { value: 'running', label: t('workspace.tasks.filters.running') },
   { value: 'paused', label: t('workspace.tasks.filters.paused') },
   { value: 'failed', label: t('workspace.tasks.filters.failed') },
@@ -78,9 +79,7 @@ const showExecutionProgress = computed(
     selectedJob.value?.status === 'paused'
 )
 const showPlanProgress = computed(
-  () =>
-    selectedJob.value?.status === 'planning' ||
-    selectedJob.value?.status === 'plan_editing'
+  () => selectedJob.value?.status === 'planning' || selectedJob.value?.status === 'plan_editing'
 )
 
 const standaloneLastError = computed(() => {
@@ -95,20 +94,8 @@ const standaloneLastError = computed(() => {
 const planTree = computed(() => buildPlanTree(selectedJob.value, t))
 const activeTaskId = computed(() => selectedJob.value?.taskProgress?.currentTaskId ?? null)
 
-const hasAction = (action: string): boolean => jobHasAction(selectedJob.value, action as never)
-
-const canPause = computed(() => hasAction('pause'))
-const canContinue = computed(() => hasAction('continue'))
-const canRetryTask = computed(() => {
-  if (!hasAction('retry_failed_task')) return false
-  const task = selectedTask.value
-  if (!task) return false
-  const failedTaskId = selectedJob.value?.recovery?.failedTaskId
-  return !failedTaskId || task.id === failedTaskId
-})
-const canCancel = computed(() => hasAction('cancel'))
-const canRestart = computed(() => hasAction('restart'))
-const canDelete = computed(() => hasAction('delete'))
+const canDelete = canDeleteAction
+const canCancel = canCancelAction
 
 function selectJob(jobId: string): void {
   selectedTask.value = null
@@ -125,22 +112,6 @@ function closeTaskParameters(): void {
   taskParametersOpen.value = false
 }
 
-async function handleRetryTask(): Promise<void> {
-  const job = selectedJob.value
-  const task = selectedTask.value
-  if (!job || !task) return
-  runningAction.value = 'retry_task'
-  actionError.value = null
-  try {
-    await retryTaskJob(job.id, task.id)
-    await store.loadDetail(job.id)
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : 'Failed to retry task'
-  } finally {
-    runningAction.value = null
-  }
-}
-
 onMounted(() => {
   void store.loadJobs()
   store.startHubPolling()
@@ -149,11 +120,6 @@ onMounted(() => {
 onUnmounted(() => {
   store.stopHubPolling()
 })
-
-watch(statusFilter, () => void store.loadJobs())
-
-const debouncedSearch = useDebounceFn(() => void store.loadJobs(), 300)
-watch(searchQuery, () => void debouncedSearch())
 </script>
 
 <template>
@@ -251,9 +217,8 @@ watch(searchQuery, () => void debouncedSearch())
       class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       :class="!selectedJobId ? 'max-lg:hidden' : ''"
     >
-      <div v-if="error || actionError" class="shrink-0 space-y-2 px-4 pt-4 sm:px-6">
-        <ErrorAlert v-if="error" :message="error" />
-        <ErrorAlert v-if="actionError" :message="actionError" />
+      <div v-if="error" class="shrink-0 space-y-2 px-4 pt-4 sm:px-6">
+        <ErrorAlert :message="error" />
       </div>
 
       <div
@@ -291,6 +256,12 @@ watch(searchQuery, () => void debouncedSearch())
                   >
                     {{ jobStatusLabel(selectedJob.status, t, selectedJob) }}
                   </span>
+                  <span
+                    v-if="pauseButtonText"
+                    class="rounded-md px-2.5 py-1 text-xs text-muted-foreground"
+                  >
+                    {{ pauseButtonText }}
+                  </span>
                   <Button
                     v-if="canPause"
                     size="sm"
@@ -310,13 +281,13 @@ watch(searchQuery, () => void debouncedSearch())
                     {{ t('workspace.tasks.actions.continue') }}
                   </Button>
                   <Button
-                    v-if="canRetryTask"
+                    v-if="canCancel"
                     size="sm"
                     variant="outline"
-                    :disabled="runningAction === 'retry_task'"
-                    @click="handleRetryTask()"
+                    :disabled="runningAction === 'cancel'"
+                    @click="store.handleCancel()"
                   >
-                    {{ t('workspace.tasks.actions.retryTask') }}
+                    {{ t('workspace.tasks.actions.cancel', 'Cancel') }}
                   </Button>
                   <Button
                     v-if="canRestart"
@@ -326,15 +297,6 @@ watch(searchQuery, () => void debouncedSearch())
                     @click="store.handleRestart()"
                   >
                     {{ t('workspace.tasks.actions.restart') }}
-                  </Button>
-                  <Button
-                    v-if="canCancel"
-                    size="sm"
-                    variant="outline"
-                    :disabled="runningAction === 'cancel'"
-                    @click="store.handleCancel()"
-                  >
-                    {{ t('workspace.tasks.actions.cancel') }}
                   </Button>
                   <Button
                     v-if="canDelete"

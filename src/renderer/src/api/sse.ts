@@ -29,14 +29,14 @@ export async function throwIfNotSseResponse(res: Response): Promise<void> {
     }
     if (typeof body.success === 'boolean') {
       if (!res.ok || !body.success) {
-        const status = body.status || res.status
+        const apiStatus = typeof body.status === 'number' ? body.status : res.status
         const message = body.message || `request failed with HTTP ${res.status}`
-        if (shouldClearSessionOnApiError(res.status, status, message, body.data)) {
+        if (shouldClearSessionOnApiError(res.status, apiStatus, message, body.data)) {
           handleUnauthorizedApiError()
         }
-        throw new ApiError(message, status, body.data)
+        throw new ApiError(message, res.status, body.data, message)
       }
-      throw new ApiError(body.message || 'SSE 响应无效', body.status || res.status, body.data)
+      throw new ApiError(body.message || 'SSE 响应无效', res.status, body.data, body.message)
     }
   } catch (err) {
     if (err instanceof ApiError) throw err

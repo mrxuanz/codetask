@@ -36,9 +36,9 @@ export async function launchSandboxedWorker(input: {
   command: string
   args: string[]
   env: Record<string, string>
-  readRoots?: string[]
-  writeRoots?: string[]
-  signal?: AbortSignal
+  readRoots?: string[] | undefined
+  writeRoots?: string[] | undefined
+  signal?: AbortSignal | undefined
 }): Promise<SpawnedSandboxWorker> {
   sandboxTurnDebug('sandbox launcher: load native + spawn', {
     command: input.command,
@@ -125,7 +125,7 @@ export interface ReapSandboxChildResult {
 
 export async function reapSandboxChild(
   handle: SandboxChild,
-  options?: { pollMs?: number; maxWaitMs?: number; signal?: AbortSignal }
+  options?: { pollMs?: number; maxWaitMs?: number; signal?: AbortSignal | undefined }
 ): Promise<ReapSandboxChildResult> {
   const pollMs = options?.pollMs ?? SANDBOX_REAP_POLL_MS
   const maxWaitMs = options?.maxWaitMs ?? 0

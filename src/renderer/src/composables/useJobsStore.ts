@@ -1,9 +1,11 @@
+/**
+ * @deprecated Prefer `useControlPlaneJobsStore` for production Tasks UI (C13).
+ */
 import { computed, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
 import {
-  cancelJob,
   continueJob,
   deleteJob,
   fetchJob,
@@ -15,8 +17,8 @@ import {
 } from '@renderer/api/jobs'
 import type { JobSseEvent } from '@shared/contracts/sse'
 import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
-import { enrichJobWithRecoveryState } from '@shared/job-recovery-state'
 import { useJobEventHub } from '@renderer/composables/useJobEventHub'
+import { toastError } from '@renderer/lib/toast'
 
 export interface UseJobsStoreOptions {
   selectedJobId: Ref<string | null>
@@ -42,7 +44,6 @@ export function useJobsStore(options: UseJobsStoreOptions): {
   stopHubPolling: () => void
   handlePause: () => Promise<void>
   handleContinue: () => Promise<void>
-  handleCancel: () => Promise<void>
   handleRestart: () => Promise<void>
   handleDelete: () => Promise<void>
 } {
@@ -63,11 +64,13 @@ export function useJobsStore(options: UseJobsStoreOptions): {
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let hubRelease: (() => void) | null = null
-  let hubListRelease: (() => void) | null = null
+  const hubListReleases = new Map<string, () => void>()
   let loadDetailToken = 0
 
   const selectedJob = computed(() =>
-    selectedJobId.value ? detail.value ?? jobs.value.find((j) => j.id === selectedJobId.value) ?? null : null
+    selectedJobId.value
+      ? (detail.value ?? jobs.value.find((j) => j.id === selectedJobId.value) ?? null)
+      : null
   )
 
   function mergeJobPatch(existing: ThreadJob | null | undefined, job: ThreadJob): ThreadJob {
@@ -80,7 +83,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       planProgress: has('planProgress') ? job.planProgress : existing?.planProgress,
       taskProgress: has('taskProgress') ? job.taskProgress : existing?.taskProgress
     } as ThreadJob
-    return job.availableActions?.length ? merged : enrichJobWithRecoveryState(merged)
+    return merged
   }
 
   function applyJobPatch(job: ThreadJob): void {
@@ -122,6 +125,29 @@ export function useJobsStore(options: UseJobsStoreOptions): {
     }
   }
 
+  function syncListHubWatches(): void {
+    const desired = new Set(
+      jobs.value.filter((job) => jobNeedsRealtimeWatch(job.status)).map((job) => job.id)
+    )
+    for (const [jobId, release] of hubListReleases) {
+      if (desired.has(jobId)) continue
+      release()
+      hubListReleases.delete(jobId)
+    }
+    for (const jobId of desired) {
+      if (hubListReleases.has(jobId)) continue
+      hubListReleases.set(
+        jobId,
+        hub.watchJob(jobId, () => {
+          void loadJobs({ silent: true })
+          if (selectedJobId.value === jobId) {
+            void loadDetail(jobId, { silent: true })
+          }
+        })
+      )
+    }
+  }
+
   async function loadJobs(options?: { silent?: boolean }): Promise<void> {
     const silent = options?.silent ?? false
     if (!silent) loadingList.value = true
@@ -130,6 +156,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       const res = await fetchJobs(statusFilter.value, 1, 50, searchQuery.value)
       jobs.value = res.data.jobs
       total.value = res.data.total
+      syncListHubWatches()
       const currentId = selectedJobId.value
       const stillExists = currentId ? res.data.jobs.some((job) => job.id === currentId) : false
       if (currentId && !stillExists) {
@@ -165,10 +192,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
   }
 
   function startHubPolling(): void {
-    hubListRelease = hub.onAnyJobEvent((envelope) => {
-      if (!envelope.topic.startsWith('job:')) return
-      void loadJobs({ silent: true })
-    })
+    syncListHubWatches()
     pollTimer = setInterval(() => {
       if (!hub.connected.value) {
         void loadJobs({ silent: true })
@@ -179,9 +203,9 @@ export function useJobsStore(options: UseJobsStoreOptions): {
   }
 
   function stopHubPolling(): void {
-    hubListRelease?.()
+    for (const release of hubListReleases.values()) release()
+    hubListReleases.clear()
     hubRelease?.()
-    hubListRelease = null
     hubRelease = null
     if (pollTimer) {
       clearInterval(pollTimer)
@@ -195,24 +219,28 @@ export function useJobsStore(options: UseJobsStoreOptions): {
 
   watch(searchQuery, () => void debouncedSearch())
 
-  watch(selectedJobId, (jobId, prevJobId) => {
-    if (jobId !== prevJobId) {
-      hubRelease?.()
-      hubRelease = null
-    }
-    if (!jobId) {
-      detail.value = null
-      return
-    }
-    void loadDetail(jobId)
-  }, { immediate: true })
+  watch(
+    selectedJobId,
+    (jobId, prevJobId) => {
+      if (jobId !== prevJobId) {
+        hubRelease?.()
+        hubRelease = null
+      }
+      if (!jobId) {
+        detail.value = null
+        return
+      }
+      void loadDetail(jobId)
+    },
+    { immediate: true }
+  )
 
-  watch(() => selectedJob.value?.status, () => syncHubWatch())
+  watch(
+    () => selectedJob.value?.status,
+    () => syncHubWatch()
+  )
 
-  async function runAction(
-    action: string,
-    fn: (jobId: string) => Promise<unknown>
-  ): Promise<void> {
+  async function runAction(action: string, fn: (jobId: string) => Promise<unknown>): Promise<void> {
     const job = selectedJob.value
     if (!job) return
     runningAction.value = action
@@ -221,7 +249,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       await fn(job.id)
       await loadDetail(job.id)
     } catch (err) {
-      actionError.value = err instanceof Error ? err.message : 'Action failed'
+      toastError(err, 'Action failed')
     } finally {
       runningAction.value = null
     }
@@ -236,7 +264,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       await pauseJob(job.id)
       await loadDetail(job.id)
     } catch (err) {
-      actionError.value = err instanceof Error ? err.message : 'Failed to pause'
+      toastError(err, 'Failed to pause')
     } finally {
       runningAction.value = null
     }
@@ -250,10 +278,6 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       return
     }
     await runAction('continue', continueJob)
-  }
-
-  async function handleCancel(): Promise<void> {
-    await runAction('cancel', cancelJob)
   }
 
   async function handleRestart(): Promise<void> {
@@ -271,7 +295,7 @@ export function useJobsStore(options: UseJobsStoreOptions): {
       await router.replace({ name: 'tasks' })
       await loadJobs()
     } catch (err) {
-      actionError.value = err instanceof Error ? err.message : 'Failed to delete'
+      toastError(err, 'Failed to delete')
     } finally {
       runningAction.value = null
     }
@@ -297,7 +321,6 @@ export function useJobsStore(options: UseJobsStoreOptions): {
     stopHubPolling,
     handlePause,
     handleContinue,
-    handleCancel,
     handleRestart,
     handleDelete
   }

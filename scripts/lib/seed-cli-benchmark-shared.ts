@@ -16,7 +16,7 @@ import {
   saveDesignPlanProgress
 } from '../../src/server/db/design-plan'
 import { buildManifestFromCorpus } from '../../src/server/reference-corpus/service'
-import { serializeJobReferenceManifest } from '../../src/server/jobs/reference-manifest'
+import { serializeJobReferenceManifest } from '../../src/server/legacy-control-plane/reference-manifest'
 import { defaultTaskProgress } from '../../src/server/planner/save-plan'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
 import type { SupportedCoreCode } from '../../src/server/conversation/cores'

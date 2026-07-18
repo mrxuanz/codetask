@@ -181,7 +181,7 @@ watch(query, (value) => {
     class="flex h-[min(85vh,720px)] min-h-0 max-h-[min(85vh,720px)] max-w-2xl flex-col"
     @close="emit('close')"
   >
-    <div class="shrink-0 border-b border-border px-4 py-4">
+    <div class="shrink-0 border-b border-border px-3 py-3 sm:px-4 sm:py-4">
       <h2 class="text-base font-semibold">{{ t('workspace.create.projectDialogTitle') }}</h2>
       <p class="mt-1 text-sm text-muted-foreground">
         {{ t('workspace.create.projectDialogHint') }}
@@ -224,7 +224,7 @@ watch(query, (value) => {
         @select="submitFolder"
       />
 
-      <div v-else class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div v-else class="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
         <p
           v-if="recentProjects.length === 0"
           class="rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"
@@ -252,7 +252,10 @@ watch(query, (value) => {
       </div>
     </div>
 
-    <div v-if="activeTab === 'browse'" class="shrink-0 space-y-3 border-t border-border px-4 py-3">
+    <div
+      v-if="activeTab === 'browse'"
+      class="shrink-0 space-y-3 border-t border-border px-3 py-3 sm:px-4"
+    >
       <div class="flex items-center gap-2">
         <Input
           v-model="newFolderName"
@@ -270,12 +273,13 @@ watch(query, (value) => {
           {{ t('folderPicker.createAndAdd') }}
         </Button>
       </div>
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <span class="truncate text-xs text-muted-foreground">
           {{ t('folderPicker.currentDirectory', { path: currentDirectoryPath() || '—' }) }}
         </span>
         <Button
           type="button"
+          class="w-full sm:w-auto"
           :disabled="submitting || loading || !currentDirectoryPath()"
           @click="submitFolder(currentDirectoryPath())"
         >
@@ -284,7 +288,7 @@ watch(query, (value) => {
       </div>
     </div>
 
-    <div class="shrink-0 flex justify-end border-t border-border px-4 py-3">
+    <div class="flex shrink-0 justify-end border-t border-border px-3 py-3 sm:px-4">
       <Button type="button" variant="outline" @click="emit('close')">
         {{ t('common.cancel') }}
       </Button>

@@ -109,9 +109,9 @@ export interface TaskLaunchDraftReference {
   mimeType: string
   kind: 'image' | 'file' | 'directory'
   assetUrl: string
-  description?: string
-  source?: 'upload' | 'import' | 'message' | 'local_corpus'
-  localPath?: string
+  description?: string | undefined
+  source?: 'upload' | 'import' | 'message' | 'local_corpus' | undefined
+  localPath?: string | undefined
 }
 
 export interface TaskLaunchDraftPayload {
@@ -130,6 +130,10 @@ export interface TaskLaunchDraftPayload {
   workspacePath: string
   status: DraftLifecycleStatus
   linkedPlanId?: string | null
+  /** Immutable execution Job produced from this draft, if it has been published. */
+  launchedJobId?: string | null
+  /** Draft-owned planning session retained independently from the published Job. */
+  designSessionId?: string | null
   lockedSections: TaskLaunchDraftLockedSections
   abilities: TaskLaunchDraftAbility[]
   references: TaskLaunchDraftReference[]

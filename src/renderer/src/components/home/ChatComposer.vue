@@ -17,6 +17,7 @@ export interface PendingAttachment {
 const props = defineProps<{
   cores: ConversationCore[]
   coreCode: string
+  requireReadOnlyCore?: boolean
   disabled?: boolean
   sending?: boolean
 }>()
@@ -32,7 +33,11 @@ const open = ref(false)
 const pending = ref<PendingAttachment[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const options = computed(() => props.cores)
+const options = computed(() =>
+  props.requireReadOnlyCore
+    ? props.cores.filter((core) => core.readOnlyCapable !== false)
+    : props.cores
+)
 
 const selectedLabel = computed(() => {
   const option = options.value.find((item) => item.code === props.coreCode)
@@ -86,7 +91,7 @@ function submit(): void {
 </script>
 
 <template>
-  <div class="border-t border-border px-4 py-4 sm:px-6">
+  <div class="border-t border-border px-3 py-3 sm:px-6 sm:py-4">
     <div
       class="mx-auto w-full max-w-3xl rounded-[22px] bg-gradient-to-b from-border/70 to-border/30 p-px"
     >
@@ -131,7 +136,7 @@ function submit(): void {
           v-model="value"
           :disabled="disabled || sending"
           :placeholder="t('workspace.composer.placeholder')"
-          class="min-h-24 w-full resize-none rounded-[20px] bg-transparent px-4 pt-4 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
+          class="min-h-20 w-full resize-none rounded-[20px] bg-transparent px-4 pt-4 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60 sm:min-h-24"
           @keydown.enter.exact.prevent="submit()"
         />
         <div class="flex items-center justify-between gap-2 px-3 pb-3">
@@ -148,7 +153,7 @@ function submit(): void {
               variant="ghost"
               size="sm"
               :disabled="disabled || sending || options.length === 0"
-              class="h-8 max-w-44 shrink-0 justify-between gap-1 px-2 text-muted-foreground hover:text-foreground"
+              class="h-8 max-w-32 shrink-0 justify-between gap-1 px-2 text-muted-foreground hover:text-foreground sm:max-w-44"
               @click="open = !open"
             >
               <span class="truncate text-xs">{{ selectedLabel }}</span>

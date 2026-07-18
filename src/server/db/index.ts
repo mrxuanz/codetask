@@ -5,6 +5,8 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { dataPaths } from '../data-paths'
 import { applyMigrations } from './migrations/index'
 import {
+  appSettings,
+  designPlanRevisions,
   authState,
   authGuardState,
   authRateBucket,
@@ -17,15 +19,21 @@ import {
   jobPlanSlices,
   jobPlanTasks,
   jobTasks,
+  jobTaskAttempts,
   projects,
   threadJobs,
   threadMessages,
+  conversationTurns,
   threads,
   workloadRuns,
-  workloadSlots
+  workloadSlots,
+  workspaceLeases,
+  deletionRequests
 } from './schema'
 
 const schema = {
+  appSettings,
+  designPlanRevisions,
   authState,
   authGuardState,
   authRateBucket,
@@ -33,8 +41,10 @@ const schema = {
   projects,
   threads,
   threadMessages,
+  conversationTurns,
   threadJobs,
   jobTasks,
+  jobTaskAttempts,
   jobArtifacts,
   jobCounters,
   messageArtifacts,
@@ -43,10 +53,17 @@ const schema = {
   jobPlanMilestones,
   jobPlanSlices,
   workloadRuns,
-  workloadSlots
+  workloadSlots,
+  workspaceLeases,
+  deletionRequests
 }
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>
+
+/** Test helper for migration fixtures that already own a SQLite client. */
+export function createAppDatabaseForTests(client: Database.Database): AppDatabase {
+  return drizzle(client, { schema })
+}
 
 let db: AppDatabase | null = null
 
@@ -59,7 +76,7 @@ export function createIsolatedTestDatabase(dataDir: string): AppDatabase {
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('auto_vacuum = INCREMENTAL')
   applyMigrations(sqlite)
-  return drizzle(sqlite, { schema })
+  return createAppDatabaseForTests(sqlite)
 }
 
 export function closeIsolatedTestDatabase(database: AppDatabase): void {
@@ -78,7 +95,7 @@ export function createDatabase(dataDir: string): AppDatabase {
   sqlite.pragma('foreign_keys = ON')
   sqlite.pragma('auto_vacuum = INCREMENTAL')
   applyMigrations(sqlite)
-  db = drizzle(sqlite, { schema })
+  db = createAppDatabaseForTests(sqlite)
   return db
 }
 

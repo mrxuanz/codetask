@@ -1,16 +1,20 @@
 import { existsSync } from 'fs'
-import { readdir, rm, stat } from 'fs/promises'
+import { readdir, rm } from 'fs/promises'
 import { join } from 'path'
-import { asc, eq, or } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
+import { parseJobReferenceManifest } from '@shared/job-references'
 import type { getDb } from '../db'
 import {
   draftReferences,
+  jobArtifacts,
+  jobTasks,
   messageArtifacts,
   threadJobs,
   threadMessages,
   threads
 } from '../db/schema'
 import { dataPaths, threadAttachmentsDir } from '../data-paths'
+import { cleanupJobTaskRuntimeTree } from '../runtime/cleanup'
 
 type AppDatabase = ReturnType<typeof getDb>
 
@@ -74,6 +78,29 @@ export async function pruneStalePausedRuntimeTrees(
   return { removed }
 }
 
+export async function pruneCompletedTaskRuntimeTrees(
+  dataDir: string,
+  db: AppDatabase
+): Promise<{ removed: number }> {
+  const rows = await db
+    .select({
+      jobId: jobTasks.jobId,
+      taskId: jobTasks.taskId,
+      threadId: threadJobs.threadId
+    })
+    .from(jobTasks)
+    .innerJoin(threadJobs, eq(jobTasks.jobId, threadJobs.id))
+    .where(eq(jobTasks.status, 'completed'))
+
+  let removed = 0
+  for (const row of rows) {
+    if (await cleanupJobTaskRuntimeTree(dataDir, row.threadId, row.jobId, row.taskId)) {
+      removed += 1
+    }
+  }
+  return { removed }
+}
+
 export async function pruneOrphanMessageArtifactDirs(
   dataDir: string,
   db: AppDatabase
@@ -95,24 +122,35 @@ export async function pruneOrphanMessageArtifactDirs(
   return { removed }
 }
 
-export async function pruneOrphanDesignArtifactDirs(
+export async function pruneOrphanJobArtifactFiles(
   dataDir: string,
   db: AppDatabase
 ): Promise<{ removed: number }> {
-  const root = dataPaths(dataDir).artifactsDesigns
+  const root = dataPaths(dataDir).artifactsJobs
   if (!existsSync(root)) return { removed: 0 }
-
-  const rows = await db.select({ id: threadJobs.id }).from(threadJobs)
-  const valid = new Set(rows.map((row) => row.id))
+  const rows = await db
+    .select({ contentPath: jobArtifacts.contentPath })
+    .from(jobArtifacts)
+    .where(eq(jobArtifacts.storage, 'file'))
+  const valid = new Set(
+    rows.flatMap((row) => (row.contentPath ? [join(dataDir, row.contentPath)] : []))
+  )
   let removed = 0
 
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    if (valid.has(entry.name)) continue
-    await rm(join(root, entry.name), { recursive: true, force: true })
-    removed += 1
+  const visit = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      const path = join(dir, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        await visit(path)
+        await rm(path, { recursive: false }).catch(() => {})
+      } else if (entry.isFile() && !valid.has(path)) {
+        await rm(path, { force: true })
+        removed += 1
+      }
+    }
   }
-
+  await visit(root)
   return { removed }
 }
 
@@ -141,7 +179,7 @@ export async function pruneStaleThreadAttachmentDirs(
     const threadDir = join(attachmentsRoot, thread.id)
     if (!existsSync(threadDir)) continue
 
-    const [referenceRows, messageRows] = await Promise.all([
+    const [referenceRows, messageRows, jobRows] = await Promise.all([
       db
         .select({ attachmentId: draftReferences.attachmentId })
         .from(draftReferences)
@@ -150,7 +188,11 @@ export async function pruneStaleThreadAttachmentDirs(
       db
         .select({ attachmentsJson: threadMessages.attachmentsJson })
         .from(threadMessages)
-        .where(eq(threadMessages.threadId, thread.id))
+        .where(eq(threadMessages.threadId, thread.id)),
+      db
+        .select({ referenceManifestJson: threadJobs.referenceManifestJson })
+        .from(threadJobs)
+        .where(eq(threadJobs.threadId, thread.id))
     ])
 
     const validAttachmentIds = new Set<string>()
@@ -160,6 +202,14 @@ export async function pruneStaleThreadAttachmentDirs(
     for (const row of messageRows) {
       for (const attachmentId of parseMessageAttachmentIds(row.attachmentsJson)) {
         validAttachmentIds.add(attachmentId)
+      }
+    }
+    for (const row of jobRows) {
+      const manifest = parseJobReferenceManifest(row.referenceManifestJson)
+      for (const reference of manifest?.references ?? []) {
+        if (reference.storageOwner === 'job' && reference.attachmentId) {
+          validAttachmentIds.add(reference.attachmentId)
+        }
       }
     }
 
@@ -172,80 +222,4 @@ export async function pruneStaleThreadAttachmentDirs(
   }
 
   return { removed }
-}
-
-async function estimateDirSize(dirPath: string): Promise<number> {
-  if (!existsSync(dirPath)) return 0
-  let total = 0
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const full = join(dirPath, entry.name)
-      if (entry.isDirectory()) {
-        total += await estimateDirSize(full)
-      } else {
-        try {
-          const s = await stat(full)
-          total += s.size
-        } catch {
-          // skip inaccessible
-        }
-      }
-    }
-  } catch {
-    // skip inaccessible
-  }
-  return total
-}
-
-export async function enforceDataDirWatermark(
-  dataDir: string,
-  db: AppDatabase,
-  maxBytes: number
-): Promise<{ cleanedBytes: number; cleanedJobCount: number }> {
-  const totalBytes = await estimateDirSize(dataDir)
-  if (totalBytes <= maxBytes) return { cleanedBytes: 0, cleanedJobCount: 0 }
-
-  console.warn(
-    `[retention] data dir watermark exceeded: ${Math.round(totalBytes / (1024 * 1024))}MB > ${Math.round(maxBytes / (1024 * 1024))}MB, force-cleaning oldest terminal runtimes`
-  )
-
-  const terminalRows = await db
-    .select({
-      id: threadJobs.id,
-      threadId: threadJobs.threadId,
-      updatedAt: threadJobs.updatedAt
-    })
-    .from(threadJobs)
-    .where(
-      or(
-        eq(threadJobs.status, 'completed'),
-        eq(threadJobs.status, 'failed'),
-        eq(threadJobs.status, 'cancelled')
-      )
-    )
-    .orderBy(asc(threadJobs.updatedAt))
-    .limit(50)
-
-  let cleanedBytes = 0
-  let cleanedJobCount = 0
-  const remainingTarget = Math.floor(maxBytes * 0.8)
-
-  for (const row of terminalRows) {
-    if (totalBytes - cleanedBytes <= remainingTarget) break
-    const jobPath = join(dataPaths(dataDir).runtimes, row.threadId, 'jobs', row.id)
-    if (!existsSync(jobPath)) continue
-    const jobSize = await estimateDirSize(jobPath)
-    await rm(jobPath, { recursive: true, force: true })
-    cleanedBytes += jobSize
-    cleanedJobCount += 1
-  }
-
-  if (cleanedJobCount > 0) {
-    console.warn(
-      `[retention] watermark cleanup: freed ${Math.round(cleanedBytes / (1024 * 1024))}MB from ${cleanedJobCount} terminal jobs`
-    )
-  }
-
-  return { cleanedBytes, cleanedJobCount }
 }

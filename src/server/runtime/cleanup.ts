@@ -1,11 +1,12 @@
 import { existsSync } from 'fs'
 import { readdir, readFile, rm, stat } from 'fs/promises'
-import { join } from 'path'
+import { isAbsolute, join, relative, sep } from 'path'
 import type { getDb } from '../db'
 import { threadJobs, threads } from '../db/schema'
 import {
   dataPaths,
   jobRuntimeDirPath,
+  jobTaskRuntimeDirPath,
   threadRuntimeDirPath
 } from '../data-paths'
 
@@ -19,56 +20,43 @@ export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string):
   return jobRuntimeDirPath(dataDir, threadId, jobId)
 }
 
+export function jobTaskRuntimeDir(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): string {
+  return jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId)
+}
+
+async function estimateDirectoryBytes(dir: string): Promise<number> {
+  if (!existsSync(dir)) return 0
+  let total = 0
+  try {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        total += await estimateDirectoryBytes(full)
+      } else if (entry.isFile()) {
+        try {
+          total += (await stat(full)).size
+        } catch {
+          // skip files that disappear during measurement
+        }
+      }
+    }
+  } catch {
+    // skip inaccessible directories
+  }
+  return total
+}
+
 export async function estimateJobRuntimeBytes(
   dataDir: string,
   threadId: string,
   jobId: string
 ): Promise<number> {
-  const dir = jobRuntimeDir(dataDir, threadId, jobId)
-  if (!existsSync(dir)) return 0
-  let total = 0
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const entry of entries) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        const subEntries = await readdir(full, { withFileTypes: true })
-        for (const sub of subEntries) {
-          try {
-            const s = await stat(join(full, sub.name))
-            total += s.size
-          } catch {
-            // skip
-          }
-        }
-      } else {
-        try {
-          const s = await stat(full)
-          total += s.size
-        } catch {
-          // skip
-        }
-      }
-    }
-  } catch {
-    // skip
-  }
-  return total
-}
-
-export async function checkJobRuntimeQuota(
-  dataDir: string,
-  threadId: string,
-  jobId: string,
-  maxBytes: number
-): Promise<void> {
-  if (maxBytes <= 0) return
-  const size = await estimateJobRuntimeBytes(dataDir, threadId, jobId)
-  if (size > maxBytes) {
-    console.warn(
-      `[runtime] job ${jobId} runtime exceeds quota: ${Math.round(size / (1024 * 1024))}MB > ${Math.round(maxBytes / (1024 * 1024))}MB`
-    )
-  }
+  return estimateDirectoryBytes(jobRuntimeDir(dataDir, threadId, jobId))
 }
 
 export async function removeDirectoryIfExists(path: string): Promise<boolean> {
@@ -77,15 +65,92 @@ export async function removeDirectoryIfExists(path: string): Promise<boolean> {
   return true
 }
 
+export type CleanupJobRuntimeResult =
+  | 'deleted'
+  | 'absent'
+  | 'deferred_active'
+  | 'deferred_slot'
+
+/**
+ * Delete the Job runtime tree when safe.
+ * Returns deferred_* when the execution loop or workload slot is still held so callers can
+ * retry after unwind (status often flips to terminal before finally/release).
+ */
 export async function cleanupJobRuntimeTree(
   dataDir: string,
   threadId: string,
-  jobId: string
-): Promise<void> {
-  await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+  jobId: string,
+  options: { deletionDrained?: boolean } = {}
+): Promise<CleanupJobRuntimeResult> {
+  if (options.deletionDrained) {
+    const removed = await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+    return removed ? 'deleted' : 'absent'
+  }
+  try {
+    const { getAppContext } = await import('../bootstrap')
+    const ctx = getAppContext()
+    if (ctx.executionRuntime.isLoopActive(jobId)) {
+      return 'deferred_active'
+    }
+    const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
+    if ((await listActiveWorkloadSlots()).some((slot) => slot.ownerId === jobId)) {
+      return 'deferred_slot'
+    }
+  } catch {
+    // Standalone retention tests may not have a bootstrapped application context.
+  }
+  const removed = await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+  return removed ? 'deleted' : 'absent'
 }
 
-export async function cleanupThreadRuntimeTree(dataDir: string, threadId: string): Promise<void> {
+export function isDeferredCleanupResult(
+  result: CleanupJobRuntimeResult | 'skipped_non_terminal'
+): result is 'deferred_active' | 'deferred_slot' {
+  return result === 'deferred_active' || result === 'deferred_slot'
+}
+
+/**
+ * Completed task checkpoints and evidence are durable in SQLite/blob artifacts. Their Provider
+ * runtime is disposable even while later tasks in the same Job are still running.
+ */
+export async function cleanupJobTaskRuntimeTree(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): Promise<boolean> {
+  const tasksRoot = join(jobRuntimeDir(dataDir, threadId, jobId), 'tasks')
+  const taskRuntime = jobTaskRuntimeDir(dataDir, threadId, jobId, taskId)
+  const relativeTaskPath = relative(tasksRoot, taskRuntime)
+  if (
+    !relativeTaskPath ||
+    relativeTaskPath === '..' ||
+    relativeTaskPath.startsWith(`..${sep}`) ||
+    isAbsolute(relativeTaskPath)
+  ) {
+    console.warn('[retention] refused task runtime path outside task root', jobId, taskId)
+    return false
+  }
+  return removeDirectoryIfExists(taskRuntime)
+}
+
+export async function cleanupThreadRuntimeTree(
+  dataDir: string,
+  threadId: string,
+  options: { deletionDrained?: boolean } = {}
+): Promise<void> {
+  try {
+    if (options.deletionDrained) {
+      await removeDirectoryIfExists(threadRuntimeDir(dataDir, threadId))
+      return
+    }
+    const { getAppContext } = await import('../bootstrap')
+    if (getAppContext().runtimeRegistry.isThreadInflight(threadId)) {
+      throw new Error(`Refusing to delete active thread runtime: ${threadId}`)
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Refusing to delete')) throw error
+  }
   await removeDirectoryIfExists(threadRuntimeDir(dataDir, threadId))
 }
 
@@ -100,9 +165,9 @@ export async function cleanupJobRuntimeTreeIfTerminal(
   threadId: string,
   jobId: string,
   status: string
-): Promise<void> {
-  if (!isTerminalJobStatus(status)) return
-  await cleanupJobRuntimeTree(dataDir, threadId, jobId)
+): Promise<CleanupJobRuntimeResult | 'skipped_non_terminal'> {
+  if (!isTerminalJobStatus(status)) return 'skipped_non_terminal'
+  return cleanupJobRuntimeTree(dataDir, threadId, jobId)
 }
 
 export async function pruneOrphanRuntimeTrees(
@@ -181,11 +246,7 @@ export async function extractRuntimeSummary(
       }
     }
 
-    const logPaths = [
-      join(dir, 'stderr.log'),
-      join(dir, 'stdout.log'),
-      join(dir, 'agent.log')
-    ]
+    const logPaths = [join(dir, 'stderr.log'), join(dir, 'stdout.log'), join(dir, 'agent.log')]
     for (const logPath of logPaths) {
       if (existsSync(logPath)) {
         try {

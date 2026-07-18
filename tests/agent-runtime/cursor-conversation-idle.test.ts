@@ -62,6 +62,18 @@ test('buildCursorRuntimeKey ignores mcpProfile for conversation scopes', () => {
       mcpProfile: 'none'
     })
   )
+  assert.notEqual(
+    buildCursorRuntimeKey({
+      ...base,
+      mcpProfile: 'none',
+      capabilityProfile: 'chat-write'
+    }),
+    buildCursorRuntimeKey({
+      ...base,
+      mcpProfile: 'none',
+      capabilityProfile: 'chat-read'
+    })
+  )
 })
 
 test('sweepConversationCursorSessions reaps idle bindings like t3code reaper', async () => {

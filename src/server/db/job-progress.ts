@@ -5,7 +5,7 @@ import type {
   TaskProgressItemDto,
   TaskProgressMilestoneDto,
   TaskProgressSliceDto
-} from '../jobs/types'
+} from '../legacy-control-plane/types'
 import type { TaskEvidenceDto } from '@shared/contracts/evidence'
 import {
   parseStoredTurnError,
@@ -19,7 +19,7 @@ import { getAppContext } from '../bootstrap'
 import {
   externalizeTaskProgressEvidence,
   hydrateTaskProgressEvidence
-} from '../jobs/evidence/store'
+} from '../legacy-control-plane/evidence/store'
 import {
   loadJobCountersIntoProgress,
   syncJobCountersFromProgressInTx,
@@ -29,12 +29,12 @@ import { readRetentionSettings } from '../retention/settings'
 import { jobTasks, threadJobs } from './schema'
 
 type TaskMeta = {
-  slices?: TaskProgressSliceDto[]
-  milestones?: TaskProgressMilestoneDto[]
+  slices?: TaskProgressSliceDto[] | undefined
+  milestones?: TaskProgressMilestoneDto[] | undefined
 
-  repairGenerations?: Record<string, number>
-  verificationAttempts?: Record<string, number>
-  verificationBundleHashes?: Record<string, string>
+  repairGenerations?: Record<string, number> | undefined
+  verificationAttempts?: Record<string, number> | undefined
+  verificationBundleHashes?: Record<string, string> | undefined
 }
 
 type AppDatabase = ReturnType<typeof getDb>

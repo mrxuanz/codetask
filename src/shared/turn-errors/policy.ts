@@ -3,10 +3,7 @@ import type { TurnErrorDto } from './types.ts'
 import { isTurnError } from './turn-error.ts'
 import { isUserTurnCancellation, normalizeTurnError } from './normalize.ts'
 
-const GENERIC_SANDBOX_WRAPPER_CODES = new Set<string>([
-  'sandbox.sdk.error',
-  'sandbox.worker.exit'
-])
+const GENERIC_SANDBOX_WRAPPER_CODES = new Set<string>(['sandbox.sdk.error', 'sandbox.worker.exit'])
 
 const SANDBOX_NATIVE_NON_RETRY = new Set<string>([
   'sandbox.turn.cancelled',
@@ -76,6 +73,7 @@ const RETRYABLE_TURN_CODES = new Set<TurnErrorCode>([
   'provider.cursor.acp_stdio_unavailable',
   'provider.opencode.server_timeout',
   'provider.opencode.server_exited',
+  'provider.opencode.stream_disconnected',
   'turn.timed_out',
   'turn.empty_reply',
   'turn.incomplete',

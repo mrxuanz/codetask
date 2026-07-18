@@ -25,9 +25,9 @@ export interface TaskLaunchDraftReference {
   mimeType: string
   kind: 'image' | 'file' | 'directory'
   assetUrl: string
-  description?: string
-  source?: 'upload' | 'import' | 'message' | 'local_corpus'
-  localPath?: string
+  description?: string | undefined
+  source?: 'upload' | 'import' | 'message' | 'local_corpus' | undefined
+  localPath?: string | undefined
 }
 
 export interface TaskLaunchDraftPayload {
@@ -39,6 +39,7 @@ export interface TaskLaunchDraftPayload {
   status?: 'editing' | 'confirmed' | 'archived' | 'pending' | 'launched' | string
   linkedPlanId?: string | null
   designSessionId?: string | null
+  launchedJobId?: string | null
   lockedSections?: Record<string, boolean>
   requirementsContract?: {
     markdown?: string

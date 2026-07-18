@@ -36,8 +36,22 @@
     @apply h-full overflow-hidden;
   }
 
+  #app {
+    height: 100dvh;
+    min-width: 0;
+  }
+
   body {
     @apply bg-background font-sans text-foreground antialiased;
+    min-width: 320px;
+    overscroll-behavior: none;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
   }
 }
 

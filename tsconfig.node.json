@@ -7,16 +7,21 @@
     "src/server/**/*",
     "src/sandbox/**/*",
     "src/shared/**/*",
+    "scripts/control-plane/**/*",
     "native/codeteam-sandbox/index.d.ts"
   ],
   "compilerOptions": {
     "composite": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "useUnknownInCatchVariables": true,
     "allowImportingTsExtensions": true,
     "types": ["electron-vite/node"],
     "baseUrl": ".",
     "paths": {
       "@shared/turn-errors": ["src/shared/turn-errors.ts"],
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["src/shared/*"],
+      "@server/*": ["src/server/*"]
     }
   }
 }

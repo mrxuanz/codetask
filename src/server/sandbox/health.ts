@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { spawnSync } from 'child_process'
 import { SandboxError } from './types'
 import type { SandboxBackend, SandboxBootstrapInfo } from './types'
-import { isOuterSandboxEnabled } from './orchestrator-local'
+import { isOuterSandboxEnabled } from './outer-sandbox-flag'
 import { getSandboxSupervisorManager } from './supervisor-manager'
 import { tryLoadSandboxNative } from './native'
 import { fixedSandboxHome, sandboxSetupIsComplete } from './windows-bootstrap'
@@ -11,25 +11,25 @@ export type SandboxHealthStatus = 'ready' | 'degraded' | 'unavailable' | 'disabl
 
 export interface SandboxHealthCheck {
   ok: boolean
-  code?: string
-  message?: string
-  requirement?: string
+  code?: string | undefined
+  message?: string | undefined
+  requirement?: string | undefined
 }
 
 export interface SandboxHealthReport {
   status: SandboxHealthStatus
   platform: NodeJS.Platform
   outerSandboxEnabled: boolean
-  backend?: SandboxBackend
+  backend?: SandboxBackend | undefined
   native: SandboxHealthCheck
-  platformRuntime?: SandboxHealthCheck
-  windowsSetup?: SandboxHealthCheck
-  supervisor?: SandboxHealthCheck
-  helperVersion?: string
+  platformRuntime?: SandboxHealthCheck | undefined
+  windowsSetup?: SandboxHealthCheck | undefined
+  supervisor?: SandboxHealthCheck | undefined
+  helperVersion?: string | undefined
   warnings: string[]
 }
 
-function checkNative(): SandboxHealthCheck & { helperVersion?: string } {
+function checkNative(): SandboxHealthCheck & { helperVersion?: string | undefined } {
   const native = tryLoadSandboxNative()
   if (!native) {
     return {
@@ -154,8 +154,8 @@ export function getSandboxHealth(dataDir?: string): SandboxHealthReport {
       status: 'disabled',
       platform: process.platform,
       outerSandboxEnabled: false,
-      native: { ok: true, message: 'CODETASK_DISABLE_OUTER_SANDBOX=1' },
-      warnings: ['Outer sandbox is disabled; task execution will be rejected']
+      native: { ok: true, message: 'CODETASK_DISABLE_OUTER_SANDBOX=1 (desktop only)' },
+      warnings: ['Outer sandbox is disabled; file-role execution will be rejected']
     }
   }
 

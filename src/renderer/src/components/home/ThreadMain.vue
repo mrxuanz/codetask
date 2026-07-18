@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, watch } from 'vue'
+import { computed, inject, onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChatComposer from '@renderer/components/home/ChatComposer.vue'
 import ChatMessages from '@renderer/components/home/ChatMessages.vue'
@@ -8,6 +8,7 @@ import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import { HomeChatKey } from '@renderer/composables/useHomeChat'
 import { isChatThread, useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
+import { fetchProjectWorkspaceAccess, type ProjectWorkspaceAccess } from '@renderer/api/projects'
 
 const { t } = useI18n()
 const workspace = useHomeWorkspace()
@@ -28,6 +29,9 @@ const streamingMessageId = computed(() => chatCtx.streamingMessageId.value)
 const awaitingAssistantReply = computed(() => chatCtx.awaitingAssistantReply.value)
 const error = computed(() => chatCtx.error.value)
 const runtimeStatus = computed(() => chatCtx.runtimeStatus.value)
+const activeWorkspaceAccess = computed(() => chatCtx.activeWorkspaceAccess.value)
+const workspaceAccess = ref<ProjectWorkspaceAccess>({ mode: 'read_write', blocker: null })
+let workspaceAccessTimer: ReturnType<typeof setInterval> | null = null
 
 const activeProject = computed(
   () =>
@@ -43,15 +47,32 @@ const activeThread = computed(() => {
 })
 
 const threadTitle = computed(() => activeThread.value?.title || t('workspace.newThread'))
+const workspaceReadOnly = computed(
+  () =>
+    activeWorkspaceAccess.value === 'live-read' ||
+    (workspaceAccess.value.mode === 'read_only' &&
+      Boolean(workspaceAccess.value.blocker) &&
+      !(
+        workspaceAccess.value.blocker?.kind === 'conversation' &&
+        workspaceAccess.value.blocker.threadId === activeThread.value?.id
+      ))
+)
+const composerCores = computed(() =>
+  workspaceReadOnly.value
+    ? cores.value.filter((core) => core.readOnlyCapable !== false)
+    : cores.value
+)
 
 const currentCoreCode = computed(() => {
   const fromThread = activeCoreCode.value ?? activeThread.value?.coreCode
-  if (fromThread) return fromThread
+  if (fromThread && composerCores.value.some((core) => core.code === fromThread)) return fromThread
   const preferred = getPreferredCoreCode()
-  if (preferred && cores.value.some((core) => core.code === preferred)) {
+  if (preferred && composerCores.value.some((core) => core.code === preferred && core.available)) {
     return preferred
   }
-  return cores.value[0]?.code ?? ''
+  return (
+    composerCores.value.find((core) => core.available)?.code ?? composerCores.value[0]?.code ?? ''
+  )
 })
 
 const selectedCore = computed(() => cores.value.find((core) => core.code === currentCoreCode.value))
@@ -63,8 +84,8 @@ const busy = computed(
 )
 
 // Multi-source watch compares each id; a getter that returns `[id, id]` would
-  // allocate a new array every run and re-open on syncThread() (blank flash).
-  watch(
+// allocate a new array every run and re-open on syncThread() (blank flash).
+watch(
   [() => activeProject.value?.id, () => activeThread.value?.id],
   ([projectId, threadId]) => {
     if (!projectId || !threadId || !activeThread.value) {
@@ -75,6 +96,35 @@ const busy = computed(
   },
   { immediate: true }
 )
+
+async function refreshWorkspaceAccess(projectId: string | null): Promise<void> {
+  if (!projectId) {
+    workspaceAccess.value = { mode: 'read_write', blocker: null }
+    return
+  }
+  try {
+    const response = await fetchProjectWorkspaceAccess(projectId)
+    if (activeProject.value?.id === projectId) workspaceAccess.value = response.data
+  } catch {
+    // The backend turn preflight remains authoritative; keep the last display snapshot.
+  }
+}
+
+watch(
+  () => activeProject.value?.id ?? null,
+  (projectId) => {
+    void refreshWorkspaceAccess(projectId)
+    if (workspaceAccessTimer) clearInterval(workspaceAccessTimer)
+    workspaceAccessTimer = projectId
+      ? setInterval(() => void refreshWorkspaceAccess(projectId), 3_000)
+      : null
+  },
+  { immediate: true }
+)
+
+onScopeDispose(() => {
+  if (workspaceAccessTimer) clearInterval(workspaceAccessTimer)
+})
 
 async function handleNewThread(): Promise<void> {
   const projectId = workspace.activeProjectId.value
@@ -104,7 +154,9 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
   </div>
 
   <div v-else-if="!activeThread" class="flex h-full min-h-0 flex-1 flex-col">
-    <header class="flex h-12 items-center justify-between border-b border-border px-4">
+    <header
+      class="flex h-12 items-center justify-between gap-2 border-b border-border px-3 sm:px-4"
+    >
       <h1 class="text-sm font-medium">{{ activeProject.title }}</h1>
       <Button type="button" variant="outline" size="sm" @click="handleNewThread">
         {{ t('workspace.newThread') }}
@@ -117,11 +169,13 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
 
   <div v-else class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
     <header
-      class="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4"
+      class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3 sm:px-4"
     >
       <div class="flex min-w-0 items-center gap-2">
         <h1 class="truncate text-sm font-medium">{{ threadTitle }}</h1>
-        <span class="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+        <span
+          class="hidden shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground sm:inline"
+        >
           {{ activeProject.title }}
         </span>
         <span v-if="coreSwitching" class="text-xs text-muted-foreground">
@@ -144,6 +198,32 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
       <ErrorAlert :message="selectedCore?.reason ?? t('workspace.coreUnavailable')" />
     </div>
 
+    <div
+      v-if="
+        activeWorkspaceAccess === 'live-read' ||
+        (workspaceAccess.mode === 'read_only' &&
+          workspaceAccess.blocker &&
+          !(
+            workspaceAccess.blocker.kind === 'conversation' &&
+            workspaceAccess.blocker.threadId === activeThread.id
+          ))
+      "
+      class="mx-4 mt-3 flex shrink-0 items-center gap-2 rounded-lg border border-amber-400/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 sm:mx-6"
+    >
+      <span class="size-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+      <span>
+        {{
+          workspaceAccess.blocker?.kind === 'task'
+            ? t('workspace.taskWorkspaceReadOnly', {
+                task: workspaceAccess.blocker.taskTitle
+              })
+            : workspaceAccess.blocker?.kind === 'conversation'
+              ? t('workspace.conversationWorkspaceReadOnly')
+              : t('workspace.workspaceReadOnly')
+        }}
+      </span>
+    </div>
+
     <div class="flex min-h-0 flex-1 flex-col">
       <ChatMessages
         :messages="messages"
@@ -152,8 +232,9 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
         :pending-reply="awaitingAssistantReply && !streamingMessageId"
       />
       <ChatComposer
-        :cores="cores"
+        :cores="composerCores"
         :core-code="currentCoreCode"
+        :require-read-only-core="workspaceReadOnly"
         :disabled="loading || coreSwitching || coreUnavailable"
         :sending="busy"
         @core-change="handleCoreChange"

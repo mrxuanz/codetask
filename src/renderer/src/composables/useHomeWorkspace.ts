@@ -1,4 +1,13 @@
-import { inject, onMounted, onScopeDispose, provide, ref, watch, type InjectionKey, type Ref } from 'vue'
+import {
+  inject,
+  onMounted,
+  onScopeDispose,
+  provide,
+  ref,
+  watch,
+  type InjectionKey,
+  type Ref
+} from 'vue'
 import { createProject, deleteProject, fetchProjects, type Project } from '@renderer/api/projects'
 import {
   createThread,
@@ -40,6 +49,8 @@ export interface HomeWorkspaceContext {
   toggleProjectExpanded: (id: string) => void
   setAddProjectOpen: (open: boolean) => void
   loadWorkspace: () => Promise<void>
+  loadError: Ref<string | null>
+  retryLoadWorkspace: () => Promise<void>
   addLocalProject: (
     workspaceRoot: string,
     options?: { threadKind?: ThreadKind }
@@ -92,6 +103,7 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
   const activeThreadId = ref<string | null>(null)
   const expandedProjectIds = ref<Record<string, boolean>>({})
   const loading = ref(false)
+  const loadError = ref<string | null>(null)
   const addProjectOpen = ref(false)
 
   function setActiveProjectId(id: string): void {
@@ -139,6 +151,7 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
 
   async function loadWorkspace(): Promise<void> {
     loading.value = true
+    loadError.value = null
     try {
       const [projectsRes, threadsRes] = await Promise.all([fetchProjects(), fetchThreads()])
       const nextProjects = projectsRes.data.map(mapProject)
@@ -166,11 +179,15 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
           : keptProjectId
             ? (pickLatestThread(nextThreads, keptProjectId)?.id ?? null)
             : null
-    } catch {
-      // ignore
+    } catch (err) {
+      loadError.value = err instanceof Error ? err.message : 'workspace.load_failed'
     } finally {
       loading.value = false
     }
+  }
+
+  async function retryLoadWorkspace(): Promise<void> {
+    await loadWorkspace()
   }
 
   async function addLocalProject(
@@ -222,7 +239,7 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
     )
     projects.value = projects.value.filter((item) => item.id !== projectId)
     threads.value = threads.value.filter((item) => item.projectId !== projectId)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     const { [projectId]: _removed, ...restExpanded } = expandedProjectIds.value
     expandedProjectIds.value = restExpanded
 
@@ -290,12 +307,14 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
     activeThreadId,
     expandedProjectIds,
     loading,
+    loadError,
     addProjectOpen,
     setActiveProjectId,
     setActiveThreadId,
     toggleProjectExpanded,
     setAddProjectOpen,
     loadWorkspace,
+    retryLoadWorkspace,
     addLocalProject,
     createNewThread,
     removeProject,

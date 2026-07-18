@@ -7,7 +7,10 @@ import { compactTurnChunkForIpc } from '../server/agent-runtime/chunk-ipc'
 import { streamSandboxedConversationTurnLocal } from '../server/sandbox/orchestrator-local'
 import { SandboxError } from '../server/sandbox/types'
 import { sandboxErrorFromErrorChunk } from '../server/sandbox/stdout-reader'
-import { closeJobCursorSandbox } from '../server/sandbox/job-cursor-pool'
+import {
+  closeAllJobCursorSandboxes,
+  closeJobCursorSandbox
+} from '../server/sandbox/job-cursor-pool'
 import { sandboxTurnDebug } from '../server/debug/sandbox-turn'
 
 interface ActiveTurn {
@@ -33,7 +36,7 @@ function handleCommand(command: SupervisorCommand): void {
         active.controller.abort()
       }
       activeSessions.clear()
-      process.exit(0)
+      void closeAllJobCursorSandboxes().finally(() => process.exit(0))
       break
     case 'cancel': {
       const active = activeSessions.get(command.sessionId)
@@ -108,7 +111,6 @@ async function runTurn(
       if (ipcChunk) {
         send({ type: 'chunk', sessionId, chunk: ipcChunk })
       }
-      if (chunk.type === 'completed') break
       if (chunk.type === 'error') {
         throw sandboxErrorFromErrorChunk(chunk)
       }

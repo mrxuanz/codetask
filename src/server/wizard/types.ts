@@ -17,14 +17,14 @@ export type WizardPhase = (typeof WIZARD_PHASES)[number]
 export interface WizardHandoffPayload {
   from: WizardPhase
   to: WizardPhase
-  reason?: string
-  requirementsSummary?: string
-  openQuestions?: string[]
-  constraints?: string[]
-  sourceMessageIds?: string[]
-  draftMessageId?: string | null
-  draftRevision?: number | null
-  planId?: string | null
+  reason?: string | undefined
+  requirementsSummary?: string | undefined
+  openQuestions?: string[] | undefined
+  constraints?: string[] | undefined
+  sourceMessageIds?: string[] | undefined
+  draftMessageId?: string | null | undefined
+  draftRevision?: number | null | undefined
+  planId?: string | null | undefined
 }
 
 export function isWizardPhase(value: unknown): value is WizardPhase {

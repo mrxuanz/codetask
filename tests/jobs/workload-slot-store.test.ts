@@ -5,15 +5,20 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
-import { resetJobReconcileForTests, stopWorkloadReconcilerForTests } from '../../src/server/jobs/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/jobs/workload-slot'
+import {
+  resetJobReconcileForTests,
+  stopWorkloadReconcilerForTests
+} from '../../src/server/legacy-control-plane/reconcile'
+import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
 import {
   jobArtifacts,
   jobTasks,
   threadJobs,
   threadMessages,
   threads,
-  projects
+  projects,
+  workloadRuns,
+  workloadSlots
 } from '../../src/server/db/schema'
 import { eq } from 'drizzle-orm'
 import type { getDb as GetDb } from '../../src/server/db'
@@ -24,12 +29,13 @@ import {
   assertRunActive,
   assertRunWritable,
   markRunCancelling,
+  refreshWorkloadLease,
   workloadPoolCapacity,
   resetWorkloadRunControllersForTests
-} from '../../src/server/jobs/workload-slot-store'
-import { updateJobRowFenced } from '../../src/server/jobs/repository'
-import { hydrateTaskEvidenceSync } from '../../src/server/jobs/evidence/store'
-import type { TaskProgressDto } from '../../src/server/jobs/types'
+} from '../../src/server/legacy-control-plane/workload-slot-store'
+import { updateJobRowFenced } from '../../src/server/legacy-control-plane/repository'
+import { hydrateTaskEvidenceSync } from '../../src/server/legacy-control-plane/evidence/store'
+import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
 import {
   registerPlannerMcpSession,
   unregisterPlannerMcpSession,
@@ -60,11 +66,7 @@ async function teardownDb(): Promise<void> {
   }
 }
 
-async function seedJob(
-  db: ReturnType<typeof GetDb>,
-  jobId: string,
-  status: string
-): Promise<void> {
+async function seedJob(db: ReturnType<typeof GetDb>, jobId: string, status: string): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
   const projectId = `proj-${jobId}`
   const threadId = `thread-${jobId}`
@@ -167,19 +169,21 @@ test('claim capacity=1 rejects second run', async () => {
     })
     assert.equal(second, null)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
-test('capacity=N allows N runs', async () => {
+test('workload capacity remains fixed at 1 in TS config', () => {
+  assert.equal(workloadPoolCapacity('execution'), 1)
+  assert.equal(workloadPoolCapacity('default'), 1)
+})
+
+test('capacity 1 semantics: only one active run per pool', async () => {
   await setupDb()
-  const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '2'
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
     await seedJob(db, 'job-2', 'planning')
-    await seedJob(db, 'job-3', 'planning')
 
     const first = await claimWorkloadSlotTx({
       username: 'user',
@@ -193,27 +197,18 @@ test('capacity=N allows N runs', async () => {
       ownerId: 'job-2',
       kind: 'planning'
     })
-    const third = await claimWorkloadSlotTx({
-      username: 'user',
-      ownerKind: 'thread_job',
-      ownerId: 'job-3',
-      kind: 'planning'
-    })
 
     assert.ok(first)
-    assert.ok(second)
-    assert.equal(third, null)
-    assert.equal(workloadPoolCapacity('default'), 2)
+    assert.equal(second, null)
+    assert.equal(workloadPoolCapacity('default'), 1)
+    assert.equal(workloadPoolCapacity('execution'), 1)
   } finally {
-    process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-  await teardownDb()
+    await teardownDb()
   }
 })
 
 test('release is idempotent', async () => {
   await setupDb()
-  const previousCapacity = process.env.CODETASK_WORKLOAD_POOL_CAPACITY
-  process.env.CODETASK_WORKLOAD_POOL_CAPACITY = '1'
   try {
     const db = getDb()
     await seedJob(db, 'job-1', 'planning')
@@ -232,8 +227,7 @@ test('release is idempotent', async () => {
     assert.equal(first.released, true)
     assert.equal(second.released, false)
   } finally {
-    process.env.CODETASK_WORKLOAD_POOL_CAPACITY = previousCapacity
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -266,7 +260,7 @@ test('stale release does not clear newer active_run_id', async () => {
     const active = await getActiveRun('thread_job', 'job-1')
     assert.equal(active?.runId, newRun.runId)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -291,7 +285,7 @@ test('fenced update rejects stale run', async () => {
     const row = await db.select().from(threadJobs).where(eq(threadJobs.id, 'job-1')).limit(1)
     assert.notEqual(row[0]?.status, 'failed')
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -344,7 +338,7 @@ test('stale fenced update does not replace committed evidence artifacts', async 
     assert.equal(hydrated?.summary, 'committed evidence')
     assert.equal(hydrated?.status, 'failed')
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -366,7 +360,49 @@ test('assertRunActive is false after release', async () => {
     await releaseWorkloadSlot(run.runId, { reason: 'test' })
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), false)
   } finally {
-  await teardownDb()
+    await teardownDb()
+  }
+})
+
+test('refreshWorkloadLease fails closed and rolls back a partial refresh', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-refresh', 'planning')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-refresh',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    const claimed = db
+      .select({ leaseExpiresAt: workloadRuns.leaseExpiresAt })
+      .from(workloadRuns)
+      .where(eq(workloadRuns.id, run.runId))
+      .get()
+    assert.ok(claimed)
+    const shortenedExpiry = claimed.leaseExpiresAt - 60
+    db.update(workloadRuns)
+      .set({ leaseExpiresAt: shortenedExpiry })
+      .where(eq(workloadRuns.id, run.runId))
+      .run()
+    db.delete(workloadSlots).where(eq(workloadSlots.runId, run.runId)).run()
+
+    await assert.rejects(
+      () => refreshWorkloadLease(run.runId),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'workspace.lease_lost'
+    )
+    const after = db
+      .select({ leaseExpiresAt: workloadRuns.leaseExpiresAt })
+      .from(workloadRuns)
+      .where(eq(workloadRuns.id, run.runId))
+      .get()
+    assert.equal(after?.leaseExpiresAt, shortenedExpiry)
+  } finally {
+    await teardownDb()
   }
 })
 
@@ -390,7 +426,7 @@ test('assertRunWritable is false while run is cancelling', async () => {
     assert.equal(await assertRunActive('thread_job', 'job-1', run.runId), true)
     assert.equal(await assertRunWritable('thread_job', 'job-1', run.runId), false)
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })
 
@@ -418,7 +454,7 @@ test('MCP handler rejects stale run', async () => {
       allowedAbilityCodes: ['code'],
       validReferenceIds: [],
       taskContexts: new Map(),
-      registeredPlan: null
+      planOutline: null
     }
     registerPlannerMcpSession(session)
     try {
@@ -441,11 +477,14 @@ test('MCP handler rejects stale run', async () => {
       })
 
       assert.equal(result.kind, 'json')
-      assert.equal((result.body as { error?: { message?: string } }).error?.message, 'Plan session closed or stale run')
+      assert.equal(
+        (result.body as { error?: { message?: string } }).error?.message,
+        'Plan session closed or stale run'
+      )
     } finally {
       unregisterPlannerMcpSession('plan-mcp-test')
     }
   } finally {
-  await teardownDb()
+    await teardownDb()
   }
 })

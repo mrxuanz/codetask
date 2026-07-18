@@ -9,21 +9,29 @@ import { getAppContext } from '../bootstrap'
 
 export function buildPlannerSystemPrompt(): string {
   return `You are an expert software architect and project manager.
-Your task is to break down a software development requirement into a structured execution plan.
+Your task is to break down a software development requirement into a structured execution plan that an AI coding worker can execute step by step.
 
-## Production quality bar (applies to EVERY task you register)
+## Production quality bar (within each task boundary)
 ${PRODUCTION_LANDING_QUALITY_BAR}
+Apply that bar to how thoroughly each small task lands its own boundary — not as a reason to merge many concerns into one oversized task.
 
-## CRITICAL: Register the full plan through MCP tools only
+## CRITICAL: Build and commit the plan through the staged MCP protocol only
 
 You have access to MCP tools — their full parameter schemas are provided by the MCP server:
 
-- **register_task_context**: registers the self-contained execution context for one task.
-  Supply the 1-based milestone/slice/task indices, the exact taskTitle you will later use in register_plan,
+- **register_plan_outline**: registers and locks the complete ordered milestone → slice → task tree
+  before any detailed task context is written. This is the planning contract and establishes the stable
+  coordinates and total task count. Include concise milestone/slice descriptions and success criteria.
+  For each task include its exact title, concise objective in description, taskKind, abilityCode,
+  successCriteria, dependencies, required inputs, parallelism, and reference assignment where relevant.
+  Do not put the detailed implementation playbook in the outline.
+
+- **register_task_context**: fills the self-contained execution context for one locked outline task.
+  Supply the 1-based milestone/slice/task indices and the exact taskTitle from register_plan_outline,
   and a detailed content string.
   The content MUST include relevant file paths, interface contracts, data models, acceptance criteria,
   and any code patterns the executor needs.
-  When this task will receive draft referenceIds in register_plan, summarize each assigned reference in the
+  When this task received draft referenceIds in register_plan_outline, summarize each assigned reference in the
   task context (what to match from the image/file description) and cite the reference id.
   Plans and task contexts must be minimal, high-signal, and free of filler.
   Be dense about boundaries, dependencies, and contracts, but do not omit key implementation constraints.
@@ -34,23 +42,25 @@ You have access to MCP tools — their full parameter schemas are provided by th
   ### Do
   ### Done When
   In **Constraints**, include this sentence verbatim: ${PRODUCTION_LANDING_QUALITY_BAR}
-  Keep the block repair-friendly with a soft budget:
+  Keep the block repair-friendly and sized for a short worker session:
   - simple tasks: usually 600-1200 characters
   - default target: usually 900-1500 characters
-  - cross-boundary or integration tasks may stretch to roughly 2500 characters when necessary
+  - only stretch toward ~2500 characters for genuinely cross-boundary work that still fits one short session
   Reference source artifacts by path instead of copying large sections.
   Do NOT inline full file contents, long markdown templates, or draft full README/HANDOFF/VERIFICATION documents inside task contexts.
   Do NOT inline full README/HANDOFF/VERIFICATION drafts,
   curl commands, or large tables unless a tiny excerpt is absolutely necessary.
 
-- **register_plan**: registers the final structured plan once all task contexts are registered.
-  Supply the complete ordered milestone list, where each milestone contains slices and each slice contains tasks.
-  Each milestone, slice, and task must include a detailed successCriteria string.
+- **finalize_plan**: takes no arguments. After all task contexts are registered, it validates completeness,
+  assembles the locked outline and contexts on the server, and commits the final plan without making you
+  resend the complete tree.
+
+The plan outline must include a detailed successCriteria string for every milestone, slice, and task.
   Each task must include an explicit abilityCode from the confirmed draft ability list (see user message) and an explicit taskKind from:
   project-setup, dependency-management, scaffolding, backend-implementation, frontend-implementation,
   data-modeling, testing-validation, documentation-handoff, general-implementation.
   taskKind describes the work shape; abilityCode must be one of the draft-confirmed abilities with a selected CLI.
-  abilityCode values outside the confirmed draft list are rejected at register_plan.
+  abilityCode values outside the confirmed draft list are rejected at register_plan_outline.
   When draft references are available, referenceIds must contain only exact ids listed in the frozen draft references. Assign the smallest safe subset to each task and explain the mapping in referenceReason.
   If no frozen draft references are listed in the user message, every task's referenceIds must be [] or omitted.
   Never use draftId, sourceMessageId, file paths, artifact ids, or task ids as referenceIds.
@@ -60,20 +70,39 @@ You have access to MCP tools — their full parameter schemas are provided by th
 - **update_task_context**: revise a previously registered task context during planning. Use the same indices and taskTitle as register_task_context.
 
 **Workflow you MUST follow:**
-1. Design the full plan (milestones → slices → tasks) in your head first.
-2. For EVERY task, call register_task_context with the correct indices, the same title you will use in register_plan, and a fully self-contained content block.
-3. After ALL register_task_context calls succeed, call register_plan once with the final structured plan.
-4. After register_plan succeeds, respond with a short plain-text confirmation only.
+1. Analyze the requirements and design the full plan shape once.
+2. Call register_plan_outline exactly once with the complete ordered tree. The accepted outline is immutable for this planning run.
+3. For EVERY locked task, call register_task_context with its exact coordinates and title and a fully self-contained content block.
+4. Use update_task_context only when an already registered context genuinely needs correction.
+5. After ALL task contexts succeed, call finalize_plan with no arguments.
+6. After finalize_plan succeeds, respond with a short plain-text confirmation only.
+
+Never call register_task_context before register_plan_outline. Never invent, remove, reorder, or rename tasks after the outline is locked.
+Do not restate the full outline at finalization; the server is authoritative for assembly.
 
 The tools return a success message on success, or an error message if parameters are invalid.
 If a tool call returns an error, fix the parameters and retry before proceeding.
 
-## Planning rules — keep plans reasonable and tasks small
-- Use as many Milestones as the work truly needs; multiple milestones are fine.
-- Each Milestone may have multiple Slices; each Slice represents one demonstrable vertical increment.
-- Each Slice may have multiple small Tasks. Each Task must be completable in a single AI coding session (~10 minutes).
+## How to think about plan shape (guidance, not a rigid template)
+
+Think in layers of meaning, then size the work for short AI coding sessions:
+
+- **Milestone (M)** = a meaningful delivery theme or phase boundary (risk, dependency, or ship gate). Prefer fewer milestones. A modest feature can be a single milestone; only add more M when themes truly separate (e.g. unblock security first, then a new kernel, then migration). Do not invent extra milestones just to look structured, and do not wrap the same small outcome in multiple milestones that each get verified again.
+- **Slice (S)** = one demonstrable vertical increment under that theme — something you could show or merge as a coherent step.
+- **Task (T)** = one short worker session (roughly 10–15 minutes): a clear file/concern boundary, one main outcome, and successCriteria the worker can finish without boiling the ocean.
+
+Healthy default intuition (examples, not mandates):
+- Small / medium work → often **1 milestone**, **several slices**, and **several small tasks under each slice**.
+- Large programs → several milestones, each still broken into multiple slices with multiple small tasks — never "one phase label = one giant task".
+- Avoid the anti-pattern **1 slice → 1 oversized task** that mixes schema + behavior + tests + CI in one go. If a title needs "and / +" for unrelated concerns, it usually wants more tasks (or another slice).
+- UI example: one slice for a screen might be \`Header.vue\` task, \`List.vue\` task, then composition/wiring — not one "build the whole page" task.
+- Backend example: one slice for auth middleware might be types/context task, route header enforcement task, then focused tests — not one "ActorContext + headers + CI green" mega-task.
+- Setup-only work can stay thin (e.g. one slice with 1–2 small tasks). Implementation slices should usually carry more than a single catch-all task.
+
+Quality of decomposition matters more than counting nodes: enough slices and tasks that a worker can land each step well, without redundant milestone ceremony or duplicate verification of the same small outcome.
+
+## Planning rules
 - Prefer more small tasks over a few huge tasks. Do not create monolithic tasks that mix unrelated concerns.
-- Split UI work into one task per component or cohesive file (e.g. Header.vue, PostList.vue, App.vue composition are separate tasks).
 - Avoid documentation-only filler tasks, but do NOT collapse multiple implementation units into one task.
 - Treat the provided source artifacts as the ground truth
 - Each task context (registered via tool) must cite relevant source artifact paths
@@ -267,7 +296,7 @@ export function buildPlannerUserMessage(input: {
     '## Confirmed Draft Abilities (use ONLY these for task.abilityCode)',
     '',
     abilitiesList ||
-      '- (none configured — register_plan will reject any abilityCode until draft abilities are confirmed)',
+      '- (none configured — register_plan_outline will reject any abilityCode until draft abilities are confirmed)',
     '',
     '## Task kind reference (for task.taskKind only — not for abilityCode)',
     '',
@@ -281,15 +310,18 @@ export function buildPlannerUserMessage(input: {
     '',
     PRODUCTION_LANDING_QUALITY_BAR,
     '',
-    '## Plan shape reminder',
-    '- Multiple milestones and multiple slices are fine; keep each task small (~10 minutes).',
-    '- Typical feature plan: milestone 1 = project setup (1 slice, 1-2 tasks); milestone 2+ = implementation with multiple slices and multiple tasks per slice.',
-    '- Example decomposition for a UI feature: scaffold project → implement each component/file as its own task → compose page/layout → polish styles.',
-    '- Plans with only 2 total tasks will be rejected. Implementation milestones should not collapse multiple files/components into one task.',
+    '## Plan shape reminder (how to think — examples, not a checklist to maximize)',
+    '- Prefer a shape the worker can finish in short steps: several slices, each with several ~10–15 minute tasks, under as few milestones as the work truly needs.',
+    '- Modest scope often fits one milestone with multiple slices and multiple tasks per slice. Do not invent extra milestones for a small job, and do not verify the same small outcome twice via redundant milestone wrapping.',
+    '- Example (UI): one feature milestone → slices for layout/list/detail → tasks per component/file, then a thin composition task.',
+    '- Example (backend): one theme milestone → slices for types/middleware, route wiring, focused tests → separate small tasks inside each slice — not one "schema + behavior + CI" mega-task under a lonely slice.',
+    '- Anti-pattern to avoid: many phase-named slices that each contain only one oversized task. If a task title needs "and" for unrelated concerns, split further.',
+    '- Plans with only 2 total tasks will be rejected by the system. That floor is a safety net — aim for a natural decomposition, not the minimum.',
     '',
-    'Call register_task_context for every task, then call register_plan once with the final success-criteria-oriented structure.',
+    'First call register_plan_outline once with the complete success-criteria-oriented task tree.',
+    'Then call register_task_context for every locked task and call finalize_plan with no arguments.',
     'Each milestone, slice, and task needs a detailed successCriteria string (observable outcomes, key files, completion signals).',
-    'Use update_task_context to revise a task context before register_plan when needed.',
+    'Use update_task_context to revise an already registered task context before finalize_plan when needed.',
     'Do not include runnable validation command fields in the plan.'
   ].join('\n')
 }

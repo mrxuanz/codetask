@@ -16,6 +16,7 @@ export type ChatSseEvent =
   | { event: 'assistant_message'; data: { message: ConversationMessageDto } }
   | { event: 'done'; data: { thread: ThreadDto; state: ConversationStateDto } }
   | { event: 'thread_updated'; data: { thread: ThreadDto } }
+  | { event: 'heartbeat'; data: { ts: number } }
   | { event: 'error'; data: { message?: string; error?: TurnErrorDto } }
 
 export type JobSseEvent =

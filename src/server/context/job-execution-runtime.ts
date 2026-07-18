@@ -28,14 +28,22 @@ export class JobExecutionRuntimeRegistry {
     return null
   }
 
+  /** Process-global active execution loop (capacity 1). */
+  findActiveLoopJobId(exceptJobId?: string): string | null {
+    for (const jobId of this.activeLoops) {
+      if (exceptJobId && jobId === exceptJobId) continue
+      return jobId
+    }
+    return null
+  }
+
   tryStartLoop(jobId: string, username?: string): boolean {
     if (this.activeLoops.has(jobId)) {
       return false
     }
-    if (username) {
-      const occupying = this.findActiveLoopJobIdForUser(username, jobId)
-      if (occupying) return false
-    }
+    // F2: execution pool capacity is process-global 1 — any active loop blocks a new one.
+    const occupying = this.findActiveLoopJobId(jobId)
+    if (occupying) return false
     this.activeLoops.add(jobId)
     const runtime = this.ensureRuntime(jobId)
     runtime.control = 'running'
@@ -66,8 +74,8 @@ export class JobExecutionRuntimeRegistry {
     }
   }
 
-  abortActiveTurn(jobId: string): void {
-    this.runtimes.get(jobId)?.abortController?.abort()
+  abortActiveTurn(jobId: string, reason?: unknown): void {
+    this.runtimes.get(jobId)?.abortController?.abort(reason)
   }
 
   resumeExecution(jobId: string): void {

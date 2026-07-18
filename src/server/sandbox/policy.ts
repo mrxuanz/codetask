@@ -1,5 +1,6 @@
 import { resolve } from 'path'
 import type { AgentRole, AnySandboxPolicy, SandboxPolicyV2 } from './types'
+import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
 
 const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam'] as const
@@ -27,6 +28,7 @@ export function policyForRole(input: {
   workspaceRoot: string
   runtimeRoot: string
   verifierOutputRoot?: string
+  workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicyV2 {
   const workspaceRoot = resolve(input.workspaceRoot)
   const runtimeRoot = resolve(input.runtimeRoot)
@@ -34,7 +36,10 @@ export function policyForRole(input: {
   const allowedReadRoots = [workspaceRoot, runtimeRoot]
   const allowedWriteRoots = [runtimeRoot]
 
-  if (input.role === 'task-worker') {
+  // Task workers write the checkout under their execution lease. Ordinary conversation turns may
+  // also write it only when preflight persisted exclusive-write and installed a matching lease
+  // context. Draft/planner turns remain live-read.
+  if (input.role === 'task-worker' || input.workspaceAccess === 'exclusive-write') {
     allowedWriteRoots.push(workspaceRoot)
   }
 
@@ -57,6 +62,10 @@ export function policyForRole(input: {
       protectedNames: [...PROTECTED_NAMES],
       allowSystemRuntime: true
     },
+    // Agent providers need outbound HTTPS (LLM APIs). OpenCode also binds a
+    // local 127.0.0.1 serve port; Linux restricted seccomp denies bind/listen
+    // (listen EPERM). mode "none"/"restricted" collapses to Restricted in the
+    // native adapter and ignores allowLoopback on Linux.
     network: {
       mode: 'full',
       allowLoopback: true,
@@ -175,6 +184,7 @@ export function policyForRoleV2(input: {
   providerReadRoots?: string[]
   providerWriteRoots?: string[]
   attachmentReadRoots?: string[]
+  workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicyV2 {
   const workspaceRoot = resolve(input.workspaceRoot)
   const runtimeRoot = resolve(input.runtimeRoot)
@@ -188,7 +198,7 @@ export function policyForRoleV2(input: {
 
   const allowedWriteRoots: string[] = [runtimeRoot]
 
-  if (input.role === 'task-worker') {
+  if (input.role === 'task-worker' || input.workspaceAccess === 'exclusive-write') {
     allowedWriteRoots.push(workspaceRoot)
   }
 

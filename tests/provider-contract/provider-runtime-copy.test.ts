@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -9,6 +9,10 @@ import {
   materializeOpencodeAuth,
   opencodeRuntimeLayout
 } from '../../src/server/sandbox/provider-auth/materialize'
+import {
+  credentialSnapshotManifestPath,
+  scrubCredentialSnapshotsInTree
+} from '../../src/server/sandbox/provider-auth/snapshot-manifest'
 import {
   resolveClaudeHostConfigDir,
   resolveHostProfilePaths,
@@ -27,6 +31,13 @@ test('prepareProviderAuth defaults to runtime-copy with no host write roots', ()
       assert.deepEqual(prepared.writeRoots ?? [], [], provider)
       assert.equal(prepared.envPatch.CODETASK_PROVIDER_AUTH_MODE, 'runtime-copy', provider)
       assert.equal(prepared.envPatch.HOME, runtimeRoot, provider)
+      assert.equal(prepared.envPatch.CODETASK_DATA_DIR, undefined, provider)
+      assert.equal(prepared.filesystemProfile.provider, provider)
+      assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
+      assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, [])
+      assert.deepEqual(prepared.filesystemProfile.runtimeEnv, prepared.envPatch)
+      assert.ok(Array.isArray(prepared.filesystemProfile.credentialSnapshots))
+      assert.ok(Array.isArray(prepared.filesystemProfile.scrubPatterns))
 
       const host = resolveHostProfilePaths()
       for (const writeRoot of prepared.writeRoots ?? []) {
@@ -41,9 +52,10 @@ test('prepareProviderAuth defaults to runtime-copy with no host write roots', ()
   }
 })
 
-test('cursor sandbox uses host-identity with host profile read/write roots', () => {
+test('cursor sandbox uses host-identity and never writes outside allowed roots', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-bridge-'))
   const workspaceRoot = join(runtimeRoot, 'workspace')
+  mkdirSync(workspaceRoot)
   try {
     const host = resolveHostProfilePaths()
     const prepared = prepareProviderAuth('cursorcli', runtimeRoot, { workspaceRoot })
@@ -52,15 +64,12 @@ test('cursor sandbox uses host-identity with host profile read/write roots', () 
     assert.equal(prepared.envPatch.CODETASK_PROVIDER_AUTH_MODE, 'host-identity')
     assert.equal(prepared.envPatch.HOME, host.home)
     assert.equal(prepared.envPatch.CODETASK_RUNTIME_ROOT, runtimeRoot)
-    assert.ok((prepared.writeRoots ?? []).length > 0)
-    assert.ok(
-      (prepared.writeRoots ?? []).some((root) =>
-        root.toLowerCase().includes(join(host.home, '.cursor').toLowerCase())
-      )
-    )
-    assert.ok(
-      (prepared.readRoots ?? []).some((root) => root.toLowerCase() === host.home.toLowerCase())
-    )
+    assert.equal(prepared.envPatch.CURSOR_DATA_DIR, join(runtimeRoot, '.cursor'))
+    assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
+    assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, prepared.writeRoots)
+    assert.ok((prepared.writeRoots ?? []).includes(join(runtimeRoot, '.cursor')))
+    assert.ok((prepared.writeRoots ?? []).includes(join(host.home, '.cursor')))
+    assert.ok((prepared.readRoots ?? []).includes(host.home))
   } finally {
     rmSync(runtimeRoot, { recursive: true, force: true })
   }
@@ -110,6 +119,71 @@ enabled = true
     else process.env.CODETASK_CODEX_HOME = prevHome
     rmSync(hostCodexHome, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeCodexAuth preserves existing session rollouts across turns', () => {
+  const hostCodexHome = mkdtempSync(join(tmpdir(), 'codetask-codex-host-'))
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-runtime-'))
+  const prevHome = process.env.CODETASK_CODEX_HOME
+  process.env.CODETASK_CODEX_HOME = hostCodexHome
+
+  try {
+    writeFileSync(join(hostCodexHome, 'auth.json'), '{"token":"host"}', 'utf8')
+    writeFileSync(join(hostCodexHome, 'config.toml'), 'model = "gpt-test"\n', 'utf8')
+
+    materializeCodexAuth(runtimeRoot)
+
+    const codexHome = runtimeCodexHome(runtimeRoot)
+    const rolloutDir = join(codexHome, 'sessions', '019f6434-ebb9-7e10-b5e8-c97e50d202ee')
+    const rolloutPath = join(rolloutDir, 'rollout.json')
+    mkdirSync(rolloutDir, { recursive: true })
+    writeFileSync(rolloutPath, '{"thread":"preserved"}', 'utf8')
+
+    materializeCodexAuth(runtimeRoot)
+
+    assert.equal(readFileSync(rolloutPath, 'utf8'), '{"thread":"preserved"}')
+    assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), '{"token":"host"}')
+    assert.match(readFileSync(join(codexHome, 'config.toml'), 'utf8'), /model = "gpt-test"/)
+  } finally {
+    if (prevHome === undefined) delete process.env.CODETASK_CODEX_HOME
+    else process.env.CODETASK_CODEX_HOME = prevHome
+    rmSync(hostCodexHome, { recursive: true, force: true })
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('credential snapshots are manifested and startup scrub removes only recorded runtime files', () => {
+  const hostCodexHome = mkdtempSync(join(tmpdir(), 'codetask-codex-host-'))
+  const runtimeTree = mkdtempSync(join(tmpdir(), 'codetask-runtime-tree-'))
+  const runtimeRoot = join(runtimeTree, 'thread-1', 'jobs', 'job-1', 'codex')
+  const prevHome = process.env.CODETASK_CODEX_HOME
+  process.env.CODETASK_CODEX_HOME = hostCodexHome
+
+  try {
+    mkdirSync(runtimeRoot, { recursive: true })
+    writeFileSync(join(hostCodexHome, 'auth.json'), '{"token":"host"}', 'utf8')
+    writeFileSync(join(hostCodexHome, 'config.toml'), 'model = "gpt-test"\n', 'utf8')
+
+    const materialized = materializeCodexAuth(runtimeRoot)
+    const sessionPath = join(runtimeRoot, '.codex', 'sessions', 'keep.json')
+    mkdirSync(join(runtimeRoot, '.codex', 'sessions'), { recursive: true })
+    writeFileSync(sessionPath, '{"session":true}', 'utf8')
+
+    assert.equal(materialized.authCopied, true)
+    assert.ok(existsSync(credentialSnapshotManifestPath(runtimeRoot)))
+
+    const scrubbed = scrubCredentialSnapshotsInTree(runtimeTree)
+    assert.equal(scrubbed.manifests, 1)
+    assert.equal(scrubbed.files, 2)
+    assert.equal(existsSync(join(runtimeRoot, '.codex', 'auth.json')), false)
+    assert.equal(existsSync(join(runtimeRoot, '.codex', 'config.toml')), false)
+    assert.equal(readFileSync(sessionPath, 'utf8'), '{"session":true}')
+  } finally {
+    if (prevHome === undefined) delete process.env.CODETASK_CODEX_HOME
+    else process.env.CODETASK_CODEX_HOME = prevHome
+    rmSync(hostCodexHome, { recursive: true, force: true })
+    rmSync(runtimeTree, { recursive: true, force: true })
   }
 })
 

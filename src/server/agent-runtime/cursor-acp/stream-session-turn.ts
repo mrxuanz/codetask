@@ -17,7 +17,7 @@ import type { CursorPromptInput } from './session-runtime'
 import { shouldInvalidateCursorScopedRuntime } from './turn-guards'
 
 export interface StreamCursorSessionTurnInput extends AgentTurnInput {
-  jobId?: string
+  jobId?: string | undefined
 }
 
 export async function* streamCursorSessionTurn(
@@ -39,9 +39,10 @@ export async function* streamCursorSessionTurn(
     })
   }
 
+  // P5: do not mutate real-project .cursor/cli.json (probe only).
   removeInvalidCursorCliConfig(input.cwd)
   if (plan.mcpServers.length > 0) {
-    const approvals = materializeCursorMcpApprovals({
+    const approvals = await materializeCursorMcpApprovals({
       cwd: input.cwd,
       servers: plan.mcpServers,
       env: plan.env
@@ -57,7 +58,8 @@ export async function* streamCursorSessionTurn(
   const runtimeOptions = {
     cwd: input.cwd,
     env: plan.env,
-    cliArgs: plan.cliArgs
+    cliArgs: plan.cliArgs,
+    capabilityProfile: plan.capabilityProfile
   }
 
   const mcpProfile = buildTaskMcpProfile(input.mcpUrl)
@@ -74,7 +76,8 @@ export async function* streamCursorSessionTurn(
       provider: input.provider,
       workspaceRoot: input.cwd,
       model: input.model,
-      mcpProfile
+      mcpProfile,
+      capabilityProfile: plan.capabilityProfile
     })
     runtime = await getCursorProviderRuntimeRegistry().getOrCreate(
       registryKey,
@@ -103,7 +106,7 @@ export async function* streamCursorSessionTurn(
     throw error
   } finally {
     if (ephemeral) {
-      await runtime.close().catch(() => {})
+      await runtime.close()
     } else if (registryKey) {
       getCursorProviderRuntimeRegistry().touch(registryKey)
     }
@@ -119,11 +122,18 @@ export async function closeCursorRuntimeScope(scopeId: string): Promise<void> {
 }
 
 export async function closeConversationCursorRuntime(threadId: string): Promise<void> {
-  await Promise.all([
-    closeCursorRuntimeScope(buildConversationCursorRuntimeScope(threadId, 'chat')),
-    closeCursorRuntimeScope(buildConversationCursorRuntimeScope(threadId, 'create_task')),
-    closeCursorRuntimeScope(`conversation:${threadId}`)
-  ])
+  const scopes = [
+    buildConversationCursorRuntimeScope(threadId, 'chat'),
+    buildConversationCursorRuntimeScope(threadId, 'create_task'),
+    `conversation:${threadId}`
+  ]
+  const { releaseJobCursorResources } = await import('../../sandbox/orchestrator')
+  await Promise.all(
+    scopes.flatMap((scopeId) => [
+      closeCursorRuntimeScope(scopeId),
+      releaseJobCursorResources(scopeId)
+    ])
+  )
 }
 
 export async function invalidateJobCursorRuntimeKey(
@@ -139,4 +149,5 @@ export type JobCursorRuntimeKeyInput = {
   workspaceRoot: string
   model?: string
   mcpProfile: string
+  capabilityProfile?: import('../capabilities').AgentCapabilityProfile
 }

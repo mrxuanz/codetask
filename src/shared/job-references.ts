@@ -5,24 +5,31 @@ export interface JobReferenceEntry {
   mimeType: string
   description: string
 
-  relativePath?: string
+  relativePath?: string | undefined
 
-  resolvedPath?: string
-  source?: 'attachment' | 'local_corpus'
+  resolvedPath?: string | undefined
+  source?: 'attachment' | 'local_corpus' | undefined
+  /**
+   * Physical asset ownership. Draft attachments are copied to a Job-owned attachment
+   * at the execution-confirm boundary; local corpus paths always remain external.
+   */
+  storageOwner?: 'draft' | 'job' | 'external' | undefined
+  /** Physical attachment id. Kept internal and omitted from the public DTO. */
+  attachmentId?: string | undefined
   readonly: true
   requiresDescription: boolean
-  inWorkspace?: boolean
+  inWorkspace?: boolean | undefined
 
   assetUrl: string
-  excludedFromCoverage?: boolean
+  excludedFromCoverage?: boolean | undefined
 }
 
 export interface JobReferenceManifest {
   jobId: string
-  designSessionId?: string
-  draftMessageId?: string
+  designSessionId?: string | undefined
+  draftMessageId?: string | undefined
   threadId: string
-  manifestRevision?: number
+  manifestRevision?: number | undefined
   frozenAt: string
   ignoredReferenceIds: string[]
   references: JobReferenceEntry[]
@@ -39,10 +46,10 @@ export interface JobReferenceManifestDto {
     kind: 'image' | 'file' | 'directory'
     mimeType: string
     description: string
-    relativePath?: string
+    relativePath?: string | undefined
     requiresDescription: boolean
     assetUrl: string
-    excludedFromCoverage?: boolean
+    excludedFromCoverage?: boolean | undefined
   }>
 }
 
@@ -51,7 +58,7 @@ export interface TaskAssignedReference {
   name: string
   kind: 'image' | 'file' | 'directory'
   description: string
-  thumbnailUrl?: string
+  thumbnailUrl?: string | undefined
 }
 
 export function toPublicReferenceManifest(manifest: JobReferenceManifest): JobReferenceManifestDto {
@@ -77,14 +84,16 @@ export function toPublicReferenceManifest(manifest: JobReferenceManifest): JobRe
 export function buildReferenceEntryFromDraft(ref: {
   id: string
   name: string
-  mimeType?: string
-  kind?: 'image' | 'file' | 'directory'
-  assetUrl?: string
-  relativePath?: string
-  resolvedPath?: string
-  source?: 'attachment' | 'local_corpus'
-  inWorkspace?: boolean
-  description?: string
+  mimeType?: string | undefined
+  kind?: 'image' | 'file' | 'directory' | undefined
+  assetUrl?: string | undefined
+  relativePath?: string | undefined
+  resolvedPath?: string | undefined
+  source?: 'attachment' | 'local_corpus' | undefined
+  storageOwner?: 'draft' | 'job' | 'external' | undefined
+  attachmentId?: string | undefined
+  inWorkspace?: boolean | undefined
+  description?: string | undefined
   requiresDescription: boolean
 }): JobReferenceEntry {
   return {
@@ -96,6 +105,10 @@ export function buildReferenceEntryFromDraft(ref: {
     relativePath: ref.relativePath,
     resolvedPath: ref.resolvedPath,
     source: ref.source,
+    storageOwner:
+      ref.storageOwner ??
+      (ref.source === 'local_corpus' ? ('external' as const) : ('draft' as const)),
+    attachmentId: ref.attachmentId,
     inWorkspace: ref.inWorkspace,
     readonly: true,
     requiresDescription: ref.requiresDescription,
@@ -110,17 +123,19 @@ export function buildJobReferenceManifest(input: {
   references: Array<{
     id: string
     name: string
-    mimeType?: string
-    kind?: 'image' | 'file' | 'directory'
-    assetUrl?: string
-    relativePath?: string
-    resolvedPath?: string
-    source?: 'attachment' | 'local_corpus'
-    inWorkspace?: boolean
-    description?: string
+    mimeType?: string | undefined
+    kind?: 'image' | 'file' | 'directory' | undefined
+    assetUrl?: string | undefined
+    relativePath?: string | undefined
+    resolvedPath?: string | undefined
+    source?: 'attachment' | 'local_corpus' | undefined
+    storageOwner?: 'draft' | 'job' | 'external' | undefined
+    attachmentId?: string | undefined
+    inWorkspace?: boolean | undefined
+    description?: string | undefined
     requiresDescription: boolean
   }>
-  ignoredReferenceIds?: string[]
+  ignoredReferenceIds?: string[] | undefined
 }): JobReferenceManifest {
   const ignored = new Set(input.ignoredReferenceIds ?? [])
   return {
@@ -154,6 +169,10 @@ export function parseJobReferenceManifest(
         ...entry,
         kind: entry.kind ?? (entry.mimeType?.startsWith('image/') ? 'image' : 'file'),
         source: entry.source ?? 'attachment',
+        storageOwner:
+          entry.storageOwner ??
+          ((entry.source ?? 'attachment') === 'local_corpus' ? 'external' : 'draft'),
+        attachmentId: entry.attachmentId,
         readonly: true as const,
         requiresDescription: entry.requiresDescription ?? false,
         assetUrl: entry.assetUrl ?? '',
@@ -169,7 +188,7 @@ export function parseJobReferenceManifest(
 export function collectPlanReferenceIds(plan: {
   milestones: Array<{
     slices: Array<{
-      tasks: Array<{ referenceIds?: string[] }>
+      tasks: Array<{ referenceIds?: string[] | undefined }>
     }>
   }>
 }): Set<string> {
@@ -187,7 +206,7 @@ export function collectPlanReferenceIds(plan: {
 }
 
 export function collectFlatPlanReferenceIds(
-  tasks: Array<{ referenceIds?: string[] }>
+  tasks: Array<{ referenceIds?: string[] | undefined }>
 ): Set<string> {
   const used = new Set<string>()
   for (const task of tasks) {

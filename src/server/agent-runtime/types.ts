@@ -1,6 +1,8 @@
 import type { SupportedCoreCode } from '../conversation/cores'
 import type { ConversationRole } from './roles'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
+import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type { AgentCapabilityProfile } from './capabilities'
 
 export interface AgentTurnInput {
   provider: SupportedCoreCode
@@ -8,15 +10,18 @@ export interface AgentTurnInput {
   cwd: string
   runtimeRoot: string
   prompt: string
-  runtimeSessionId?: string | null
-  model?: string
-  systemPrompt?: string
-  mcpUrl?: string
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
+  runtimeSessionId?: string | null | undefined
+  model?: string | undefined
+  systemPrompt?: string | undefined
+  mcpUrl?: string | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
+  capabilityProfile?: AgentCapabilityProfile | undefined
 
-  jobId?: string
-  workloadRunId?: string
+  jobId?: string | undefined
+  workloadRunId?: string | undefined
+  /** Stable logical-task idempotency key for side-effect dedupe across retries. */
+  idempotencyKey?: string | undefined
 }
 
 export type RoleWorkerInput = AgentTurnInput
@@ -30,8 +35,8 @@ export type AgentTurnChunk =
 export type SdkTurnChunk = AgentTurnChunk
 
 export interface AgentTurnOptions {
-  outerSandbox?: boolean
-  signal?: AbortSignal
+  outerSandbox?: boolean | undefined
+  signal?: AbortSignal | undefined
 }
 
 export type { ProviderRunPolicy, ProviderAuthMode } from './provider-policy'
@@ -45,19 +50,31 @@ export interface AgentTurnRunnerInput {
   workspaceRoot: string
   runtimeRoot: string
   prompt: string
-  runtimeSessionId?: string | null
-  model?: string
-  systemPrompt?: string
-  mcpUrl?: string
-  mcpToolNames?: readonly string[]
-  userMcpServers?: Record<string, unknown>
-  mcpToken?: string
-  signal?: AbortSignal
+  runtimeSessionId?: string | null | undefined
+  model?: string | undefined
+  systemPrompt?: string | undefined
+  mcpUrl?: string | undefined
+  mcpToolNames?: readonly string[] | undefined
+  userMcpServers?: Record<string, unknown> | undefined
+  mcpToken?: string | undefined
+  signal?: AbortSignal | undefined
+  capabilityProfile: AgentCapabilityProfile
 
-  readRoots?: string[]
+  readRoots?: string[] | undefined
+  workspaceAccess?: WorkspaceAccessMode | undefined
+  /** Explicit lease identity used to fail closed before enabling main-workspace writes. */
+  workspaceLease?:
+    | {
+        leaseId: string
+        ownerKind: 'conversation' | 'planner' | 'thread_job'
+        ownerId: string
+      }
+    | undefined
 
-  jobId?: string
-  workloadRunId?: string
+  jobId?: string | undefined
+  workloadRunId?: string | undefined
+  /** Stable logical-task idempotency key for side-effect dedupe across retries. */
+  idempotencyKey?: string | undefined
 }
 
 export interface AgentTurnProvider {

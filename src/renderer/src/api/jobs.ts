@@ -84,6 +84,16 @@ export function fetchUserDrafts(options?: {
   return api<{ drafts: UserDraftListItemDto[] }>(`/api/drafts${query ? `?${query}` : ''}`)
 }
 
+export function deleteUserDraft(
+  threadId: string,
+  messageId: string
+): Promise<ApiResponse<{ mode: 'removed' | 'archived'; keptJobId: string | null }>> {
+  return api<{ mode: 'removed' | 'archived'; keptJobId: string | null }>(
+    `/api/drafts/${encodeURIComponent(threadId)}/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' }
+  )
+}
+
 export function fetchJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
   return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}`)
 }
@@ -98,19 +108,6 @@ export function resumeJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDt
 
 export function continueJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
   return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/continue`, { method: 'POST' })
-}
-
-export function retryTaskJob(
-  jobId: string,
-  taskId: string
-): Promise<ApiResponse<{ job: ThreadJobDto }>> {
-  return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/tasks/${taskId}/retry`, {
-    method: 'POST'
-  })
-}
-
-export function cancelJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {
-  return api<{ job: ThreadJobDto }>(`/api/jobs/${jobId}/cancel`, { method: 'POST' })
 }
 
 export function restartJob(jobId: string): Promise<ApiResponse<{ job: ThreadJobDto }>> {

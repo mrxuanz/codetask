@@ -6,8 +6,12 @@ import type { CodeteamSandboxNative } from './types'
 
 const require = createRequire(__filename)
 
+function getResourcesPath(): string | undefined {
+  return (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+}
+
 function packagedAppPath(): string | null {
-  const resourcesPath = process.resourcesPath
+  const resourcesPath = getResourcesPath()
   if (!resourcesPath) return null
   const asarPath = join(resourcesPath, 'app.asar')
   return existsSync(asarPath) ? asarPath : null
@@ -21,10 +25,11 @@ function resolveAddonDir(): string | null {
   }
 
   const appPath = packagedAppPath()
-  if (appPath && process.resourcesPath) {
-    paths.push(join(process.resourcesPath, 'app.asar.unpacked', 'native', 'codeteam-sandbox'))
+  const resourcesPath = getResourcesPath()
+  if (appPath && resourcesPath) {
+    paths.push(join(resourcesPath, 'app.asar.unpacked', 'native', 'codeteam-sandbox'))
     paths.push(join(appPath, 'native', 'codeteam-sandbox'))
-    paths.push(join(process.resourcesPath, 'native', 'codeteam-sandbox'))
+    paths.push(join(resourcesPath, 'native', 'codeteam-sandbox'))
   }
 
   paths.push(join(__dirname, '..', '..', '..', 'native', 'codeteam-sandbox'))

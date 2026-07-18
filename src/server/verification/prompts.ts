@@ -1,4 +1,4 @@
-import { EXECUTION_SCOPE_DISCIPLINE } from '../jobs/prompts'
+import { EXECUTION_SCOPE_DISCIPLINE } from '../legacy-control-plane/prompts'
 
 export function buildSliceVerifierSystemPrompt(): string {
   return [

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import type { ConversationCore, ConversationMessage } from '@renderer/api/conversation'
@@ -34,6 +33,7 @@ import {
   type TaskLaunchDraftPayload,
   type TaskLaunchDraftReference
 } from '@renderer/lib/draftForm'
+import { toastError } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
 
 const props = defineProps<{
@@ -51,7 +51,6 @@ const emit = defineEmits<{
   planStarted: [jobId: string]
 }>()
 
-const router = useRouter()
 const { t } = useI18n()
 
 const busy = ref(false)
@@ -212,7 +211,7 @@ async function handleUploadReferences(event: Event): Promise<void> {
     const res = await uploadDraftReferences(props.threadId, props.message.id, files)
     emit('updated', { ...props.message, payload: res.payload })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.uploadFailed')
+    toastError(err, t('workspace.draft.uploadFailed'))
   } finally {
     uploadingReferences.value = false
   }
@@ -224,7 +223,7 @@ async function handleDeleteReference(reference: TaskLaunchDraftReference): Promi
     const res = await deleteDraftReference(props.threadId, props.message.id, reference.id)
     emit('updated', { ...props.message, payload: res.data.payload })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.deleteFailed')
+    toastError(err, t('workspace.draft.deleteFailed'))
   }
 }
 
@@ -259,7 +258,7 @@ async function submitImportReferences(): Promise<void> {
     selectedImportIds.value = []
     importDescriptions.value = {}
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.importFailed')
+    toastError(err, t('workspace.draft.importFailed'))
   } finally {
     importingReferences.value = false
   }
@@ -282,7 +281,7 @@ async function saveContractMarkdown(): Promise<void> {
     })
     emit('updated', { ...props.message, payload: res.data.payload })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.contractSaveFailed')
+    toastError(err, t('workspace.draft.contractSaveFailed'))
   } finally {
     savingContract.value = false
   }
@@ -321,7 +320,7 @@ async function handleConfirmRequirements(): Promise<void> {
     const res = await confirmDraftMessage(props.threadId, props.message.id)
     emit('updated', { ...props.message, payload: res.data.payload })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.confirmFailed')
+    toastError(err, t('workspace.draft.confirmFailed'))
   } finally {
     confirmingRequirements.value = false
   }
@@ -335,7 +334,7 @@ async function handleUnlockContract(): Promise<void> {
     const res = await unlockRequirementsContract(props.threadId, props.message.id)
     emit('updated', res.data.message)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.unlockContractFailed')
+    toastError(err, t('workspace.draft.unlockContractFailed'))
   } finally {
     unlockingContract.value = false
   }
@@ -354,7 +353,7 @@ async function handleSaveReferenceDescription(reference: TaskLaunchDraftReferenc
     )
     emit('updated', { ...props.message, payload: res.data.payload })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.referenceSaveFailed')
+    toastError(err, t('workspace.draft.referenceSaveFailed'))
   } finally {
     savingReferenceId.value = null
   }
@@ -382,7 +381,7 @@ function updateLocalReferenceDescription(referenceId: string, description: strin
     ...payload.value,
     references: refs
   }
-  emit('updated', { ...props.message, payload: nextPayload as unknown as Record<string, unknown> })
+  emit('updated', { ...props.message, payload: nextPayload as Record<string, unknown> })
 }
 
 async function handleLaunch(): Promise<void> {
@@ -405,15 +404,14 @@ async function handleLaunch(): Promise<void> {
     if (res.data.draft) {
       emit('updated', res.data.draft)
     }
+    // Stay in create/draft workspace while the tree generates — task list only
+    // after the user confirms the plan (planConfirmedAt / launch).
     emit('planStarted', res.data.job.id)
-    if (!props.embedded) {
-      await router.push({ name: 'task-detail', params: { jobId: res.data.job.id } })
-    }
   } catch (err) {
     if (payload.value.status !== 'confirmed' && payload.value.status !== 'launched') {
       launchedLocally.value = false
     }
-    error.value = err instanceof Error ? err.message : t('workspace.draft.launchFailed')
+    toastError(err, t('workspace.draft.launchFailed'))
   } finally {
     busy.value = false
   }
@@ -429,7 +427,7 @@ async function handleUnlockDraft(): Promise<void> {
     unlockDialogOpen.value = false
     emit('updated', res.data.draft)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : t('workspace.draft.unlockFailed')
+    toastError(err, t('workspace.draft.unlockFailed'))
   } finally {
     unlockingDraft.value = false
   }

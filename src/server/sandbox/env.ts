@@ -65,9 +65,8 @@ function applyWindowsSandboxSystemEnv(env: Record<string, string>, runtimeRoot: 
 
 export function buildSandboxEnv(input: {
   runtimeRoot: string
-  dataDir?: string
-  providerEnv?: Record<string, string>
-  mcpToken?: string
+  providerEnv?: Record<string, string> | undefined
+  mcpToken?: string | undefined
 }): Record<string, string> {
   ensureIsolatedProviderDirs(input.runtimeRoot)
 
@@ -82,9 +81,6 @@ export function buildSandboxEnv(input: {
 
   if (!env.CODETASK_RUNTIME_ROOT) {
     env.CODETASK_RUNTIME_ROOT = input.runtimeRoot
-  }
-  if (input.dataDir) {
-    env.CODETASK_DATA_DIR = input.dataDir
   }
   if (!env.HOME) {
     env.HOME = input.runtimeRoot

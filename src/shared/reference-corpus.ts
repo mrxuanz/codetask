@@ -7,10 +7,10 @@ export interface DraftReference {
   name: string
   kind: ReferenceKind
   description: string
-  attachmentId?: string
-  assetUrl?: string
-  localPath?: string
-  mimeType?: string
+  attachmentId?: string | undefined
+  assetUrl?: string | undefined
+  localPath?: string | undefined
+  mimeType?: string | undefined
 }
 
 export interface ReferenceManifestEntry {
@@ -23,18 +23,18 @@ export interface ReferenceManifestEntry {
   readonly: true
   inWorkspace: boolean
 
-  relativePath?: string
-  mimeType?: string
-  assetUrl?: string
-  requiresDescription?: boolean
-  excludedFromCoverage?: boolean
+  relativePath?: string | undefined
+  mimeType?: string | undefined
+  assetUrl?: string | undefined
+  requiresDescription?: boolean | undefined
+  excludedFromCoverage?: boolean | undefined
 }
 
 export interface ReferenceManifest {
-  designSessionId?: string
+  designSessionId?: string | undefined
 
-  jobId?: string
-  draftMessageId?: string
+  jobId?: string | undefined
+  draftMessageId?: string | undefined
   threadId: string
   manifestRevision: number
   frozenAt: string

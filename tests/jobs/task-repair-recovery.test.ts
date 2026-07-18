@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classifyTaskOutcome } from '../../src/server/jobs/task-blocker/classify'
+import { classifyTaskOutcome } from '../../src/server/legacy-control-plane/task-blocker/classify'
 import {
   MAX_TASK_REPAIR_GENERATIONS,
   resolveTaskRecoveryAction
-} from '../../src/server/jobs/task-blocker/recovery'
-import { injectTaskImplementationRepairTask } from '../../src/server/jobs/repair-tasks'
+} from '../../src/server/legacy-control-plane/task-blocker/recovery'
+import { injectTaskImplementationRepairTask } from '../../src/server/legacy-control-plane/repair-tasks'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
-import type { TaskProgressDto } from '../../src/server/jobs/types'
-import { resolveVerifierInfraRecovery } from '../../src/server/jobs/verification-recovery'
+import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
+import { resolveVerifierInfraRecovery } from '../../src/server/legacy-control-plane/verification-recovery'
 
 const implementationPacket = {
   status: 'failed' as const,
