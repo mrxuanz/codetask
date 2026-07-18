@@ -351,10 +351,11 @@ export class CursorAcpSessionRuntime {
     }
 
     let aborted = false
+    let cancellation: Promise<void> | null = null
     const onAbort = (): void => {
       aborted = true
       if (this.activeTaskSession) {
-        void cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
+        cancellation ??= cancelCursorAcpSession(ctx, this.activeTaskSession.sessionId)
       }
     }
 
@@ -382,12 +383,11 @@ export class CursorAcpSessionRuntime {
         processExit: exitPromise
       }
     )
-    turnScope.arm()
-
-    input.signal?.addEventListener('abort', onAbort, { once: true })
-    if (input.signal?.aborted) {
+    turnScope.signal.addEventListener('abort', onAbort, { once: true })
+    if (turnScope.signal.aborted) {
       onAbort()
-      throw abortReason(input.signal)
+      await (cancellation as Promise<void> | null)?.catch(() => undefined)
+      throw abortReason(turnScope.signal)
     }
 
     const session = await this.openTaskSession(input)
@@ -479,7 +479,8 @@ export class CursorAcpSessionRuntime {
         return
       }
       if (aborted) {
-        throw abortReason(input.signal)
+        await (cancellation as Promise<void> | null)?.catch(() => undefined)
+        throw abortReason(turnScope.signal)
       }
       const dto = classifyCursorAcpError(error, {
         phase: error instanceof RequestError ? 'rpc' : 'prompt',
@@ -490,7 +491,7 @@ export class CursorAcpSessionRuntime {
       throw createTurnError(dto.code, { params: dto.params, detail: dto.detail ?? undefined })
     } finally {
       detachExitListener?.()
-      input.signal?.removeEventListener('abort', onAbort)
+      turnScope.signal.removeEventListener('abort', onAbort)
       turnScope.dispose()
     }
 

@@ -161,6 +161,7 @@ export function useHomeChat(
       awaitingAssistantReply.value = false
       sending.value = false
       messages.value = []
+      activeWorkspaceAccess.value = null
       loading.value = true
     }
     activeThreadId.value = thread.id

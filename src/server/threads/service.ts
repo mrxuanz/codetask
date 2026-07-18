@@ -8,7 +8,8 @@ import { getDb } from '../db'
 import { getAppContext } from '../bootstrap'
 import { threads, threadMessages, type Thread } from '../db/schema'
 import { getProject, touchProject } from '../projects/service'
-import { normalizeCoreCode } from '../conversation/cores'
+import { normalizeCoreCode, type SupportedCoreCode } from '../conversation/cores'
+import { providerSupportsCapability } from '../agent-runtime/capabilities'
 import {
   DEFAULT_CORE_CODE,
   DEFAULT_THREAD_TITLE,
@@ -165,7 +166,7 @@ export async function getThread(username: string, threadId: string): Promise<Thr
   return row ? toThreadDto(row) : null
 }
 
-function resolveInitialCoreCode(coreCode?: string): string {
+function resolveInitialCoreCode(coreCode?: string): SupportedCoreCode {
   if (!coreCode?.trim()) {
     return DEFAULT_CORE_CODE
   }
@@ -193,6 +194,16 @@ export async function createThread(
   }
 
   const resolvedTitle = title?.trim() || DEFAULT_THREAD_TITLE
+  const resolvedCoreCode = resolveInitialCoreCode(coreCode)
+  if (
+    threadKind === THREAD_KIND_CREATE_TASK &&
+    !providerSupportsCapability(resolvedCoreCode, 'create-task-read')
+  ) {
+    throw AppError.badRequest(
+      `Selected CLI (${resolvedCoreCode}) cannot enforce read-only create-task conversations`,
+      'provider.capability_unsupported'
+    )
+  }
   const id = randomUUID()
   const now = nowSec()
   const conversationId = defaultConversationId(now, id)
@@ -205,7 +216,7 @@ export async function createThread(
     title: resolvedTitle,
     status: THREAD_STATUS_DRAFT,
     conversationId,
-    coreCode: resolveInitialCoreCode(coreCode),
+    coreCode: resolvedCoreCode,
     runtimeStatus: RUNTIME_STATUS_IDLE,
     runtimeSessionId: null,
     coreRuntimeJson: '{}',

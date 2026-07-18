@@ -51,6 +51,9 @@ const workspaceReady = ref(false)
 
 const messages = computed(() => chat.messages.value)
 const cores = computed(() => chat.cores.value)
+const conversationCores = computed(() =>
+  cores.value.filter((core) => core.readOnlyCapable !== false)
+)
 const activeCoreCode = computed(() => chat.activeCoreCode.value)
 const loading = computed(() => chat.loading.value)
 const coreSwitching = computed(() => chat.coreSwitching.value)
@@ -73,15 +76,26 @@ const activeThread = computed(
 
 const currentCoreCode = computed(() => {
   const fromThread = activeCoreCode.value ?? activeThread.value?.coreCode
-  if (fromThread) return fromThread
+  if (fromThread && conversationCores.value.some((core) => core.code === fromThread)) {
+    return fromThread
+  }
   const preferred = getPreferredCoreCode()
-  if (preferred && cores.value.some((core) => core.code === preferred)) {
+  if (
+    preferred &&
+    conversationCores.value.some((core) => core.code === preferred && core.available)
+  ) {
     return preferred
   }
-  return cores.value[0]?.code ?? ''
+  return (
+    conversationCores.value.find((core) => core.available)?.code ??
+    conversationCores.value[0]?.code ??
+    ''
+  )
 })
 
-const selectedCore = computed(() => cores.value.find((core) => core.code === currentCoreCode.value))
+const selectedCore = computed(() =>
+  conversationCores.value.find((core) => core.code === currentCoreCode.value)
+)
 const coreUnavailable = computed(
   () => cores.value.length > 0 && (!selectedCore.value || !selectedCore.value.available)
 )
@@ -95,15 +109,11 @@ const workspaceNotReady = computed(
 )
 
 const composerDisabled = computed(
-  () =>
-    loading.value ||
-    coreSwitching.value ||
-    coreUnavailable.value ||
-    workspaceNotReady.value
+  () => loading.value || coreSwitching.value || coreUnavailable.value || workspaceNotReady.value
 )
 
 // Multi-source watch: avoid `() => [id, id]` (new array each run → blank flash on sync).
-  watch(
+watch(
   [() => phase.value, () => activeProject.value?.id, () => activeThread.value?.id],
   ([currentPhase, projectId, threadId]) => {
     if (currentPhase !== 'workspace' || !projectId || !threadId || !activeThread.value) {
@@ -312,16 +322,10 @@ function handlePlanConfirmed(payload: {
         >
           {{ activeProject.title }}
         </span>
-        <span
-          v-if="phase === 'workspace' && coreSwitching"
-          class="text-xs text-muted-foreground"
-        >
+        <span v-if="phase === 'workspace' && coreSwitching" class="text-xs text-muted-foreground">
           {{ t('workspace.switchingCore') }}
         </span>
-        <span
-          v-else-if="phase === 'workspace' && busy"
-          class="text-xs text-muted-foreground"
-        >
+        <span v-else-if="phase === 'workspace' && busy" class="text-xs text-muted-foreground">
           {{ t('workspace.running') }}
         </span>
         <span
@@ -403,8 +407,9 @@ function handlePlanConfirmed(payload: {
             :pending-reply="awaitingAssistantReply && !streamingMessageId"
           />
           <ChatComposer
-            :cores="cores"
+            :cores="conversationCores"
             :core-code="currentCoreCode"
+            require-read-only-core
             :disabled="composerDisabled"
             :sending="busy"
             @core-change="handleCoreChange"

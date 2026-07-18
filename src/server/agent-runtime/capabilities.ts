@@ -79,11 +79,12 @@ export function assertCapabilityProfileMatchesRole(
 }
 
 /**
- * Read-only support is intentionally opt-in. Codex SDK currently exposes a
- * read-only sandbox mode but not a reliable way to remove shell/process tools,
- * so it must not host strict read-only CodeTask turns.
+ * Read-only support is opt-in per provider. Codex exposes SDK `sandboxMode:
+ * "read-only"` with `approvalPolicy: "never"` for non-interactive use (and MCP
+ * tool pre-approvals), matching the official CI read-only preset.
  */
 const VERIFIED_READ_ONLY_PROVIDERS = new Set<SupportedCoreCode>([
+  'codex',
   'claude-code',
   'cursorcli',
   'opencode'

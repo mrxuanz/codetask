@@ -84,15 +84,12 @@ export async function* streamCodexTurn(
     ? `${input.systemPrompt}\n\n---\n\n${input.prompt}`
     : input.prompt
 
-  const turnAbort = new AbortController()
-  const externalSignal = options?.signal
-  if (externalSignal?.aborted) {
-    throw abortReason(externalSignal)
-  }
-  forwardAbortSignal(externalSignal, turnAbort)
-
   const turnScope = createProviderTurnScope(input.role, options, {})
-  turnScope.arm()
+  const turnAbort = new AbortController()
+  if (turnScope.signal.aborted) {
+    throw abortReason(turnScope.signal)
+  }
+  const turnAbortListener = forwardAbortSignal(turnScope.signal, turnAbort)
 
   const streamed = await thread.runStreamed(prompt, { signal: turnAbort.signal })
   let reply = ''
@@ -194,7 +191,7 @@ export async function* streamCodexTurn(
         replyChars: reply.length,
         aborted: true
       })
-      throw abortReason(externalSignal ?? turnAbort.signal)
+      throw abortReason(turnScope.signal)
     }
     sandboxTurnDebug('codex: turn error', {
       role: plan.role,
@@ -203,6 +200,7 @@ export async function* streamCodexTurn(
     })
     throwSdkTurnError(error)
   } finally {
+    turnScope.signal.removeEventListener('abort', turnAbortListener)
     turnScope.dispose()
     await eventIterator.return?.(undefined).catch(() => {})
   }

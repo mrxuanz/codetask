@@ -58,7 +58,7 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
     { outerSandbox: false }
   )
   assert.equal(conversation.outerSandbox, false)
-  assert.equal(conversation.threadOptions.sandboxMode, 'workspace-write')
+  assert.equal(conversation.threadOptions.sandboxMode, 'danger-full-access')
   assert.equal(conversation.mcpToolNames, undefined)
   assert.ok(
     conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers

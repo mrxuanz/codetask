@@ -73,7 +73,7 @@ export function buildCodexTurnPlan(
     ? 'danger-full-access'
     : readOnly
       ? 'read-only'
-      : 'workspace-write'
+      : 'danger-full-access'
 
   const threadOptions: CodexThreadOptions = {
     workingDirectory: input.cwd,

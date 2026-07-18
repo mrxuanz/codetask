@@ -127,7 +127,7 @@ export async function closeConversationCursorRuntime(threadId: string): Promise<
     buildConversationCursorRuntimeScope(threadId, 'create_task'),
     `conversation:${threadId}`
   ]
-  const { releaseJobCursorResources } = await import('../../sandbox')
+  const { releaseJobCursorResources } = await import('../../sandbox/orchestrator')
   await Promise.all(
     scopes.flatMap((scopeId) => [
       closeCursorRuntimeScope(scopeId),

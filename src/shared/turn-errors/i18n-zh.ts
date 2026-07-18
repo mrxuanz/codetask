@@ -46,6 +46,8 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'provider.opencode.session_error': 'OpenCode 会话错误',
   'provider.rate_limited': '请求过于频繁，请稍后重试',
   'provider.cli_auth_failed': 'CLI 鉴权失败，请检查 API Key 或登录状态',
+  'provider.capability_unsupported':
+    '当前所选 CLI 不支持该运行模式（例如只读对话），请更换 CLI 后重试。',
   'settings.control_plane.unsupported_core': '不支持的 Control Plane CLI',
   'settings.control_plane.unknown_core': '未知的 Control Plane CLI',
   'settings.control_plane.unavailable_core': '选中的 Control Plane CLI 当前不可用',

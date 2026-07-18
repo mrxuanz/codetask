@@ -14,7 +14,11 @@ import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './ty
 import { resolveDownstreamAbortSignal } from '../context/request-abort'
 import { getAppConfig } from '../bootstrap'
 import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
-import { isWorkspaceLeaseActive } from '../legacy-control-plane/workspace-lease-store'
+import {
+  isWorkspaceLeaseActive,
+  refreshWorkspaceLease
+} from '../legacy-control-plane/workspace-lease-store'
+import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
 import {
   assertCapabilityProfileMatchesRole,
   assertProviderSupportsCapability,
@@ -67,17 +71,41 @@ export function ensureJobTaskRuntimeRoot(
   return runtimeRoot
 }
 
-async function* withWorkloadLeaseRefresh<T>(
+async function* withSandboxLeaseRefresh<T>(
   stream: AsyncGenerator<T>,
-  workloadRunId: string,
-  signal?: AbortSignal
+  input: {
+    workloadRunId?: string
+    workspaceLease?: { leaseId: string }
+    controller: AbortController
+    externalSignal?: AbortSignal
+  }
 ): AsyncGenerator<T> {
   const KEEPALIVE_INTERVAL_MS = 60_000
   const { refreshWorkloadLease } = await import('../legacy-control-plane/workload-slot-store')
+  let refreshPending = false
+  const abortForLeaseLoss = (error: unknown): void => {
+    const cause =
+      error instanceof Error
+        ? error
+        : new SandboxError('Execution lease was lost', 'workspace.lease_lost')
+    if (!input.controller.signal.aborted) input.controller.abort(cause)
+  }
+  const refresh = async (): Promise<void> => {
+    if (refreshPending || input.controller.signal.aborted) return
+    refreshPending = true
+    try {
+      if (input.workloadRunId) await refreshWorkloadLease(input.workloadRunId)
+      if (input.workspaceLease && !refreshWorkspaceLease(input.workspaceLease.leaseId)) {
+        throw new SandboxError('Workspace lease was lost', 'workspace.lease_lost')
+      }
+    } catch (error) {
+      abortForLeaseLoss(error)
+    } finally {
+      refreshPending = false
+    }
+  }
   let timer: ReturnType<typeof setInterval> | null = setInterval(() => {
-    refreshWorkloadLease(workloadRunId).catch((error) => {
-      console.warn('[keepalive] lease refresh failed', workloadRunId, error)
-    })
+    void refresh()
   }, KEEPALIVE_INTERVAL_MS)
 
   if (timer && typeof timer.unref === 'function') {
@@ -91,16 +119,22 @@ async function* withWorkloadLeaseRefresh<T>(
     }
   }
 
-  if (signal) {
-    signal.addEventListener('abort', cleanup, { once: true })
+  if (input.externalSignal) {
+    input.externalSignal.addEventListener('abort', cleanup, { once: true })
   }
 
   try {
     for await (const chunk of stream) {
       yield chunk
     }
+    if (input.controller.signal.aborted) {
+      throw input.controller.signal.reason instanceof Error
+        ? input.controller.signal.reason
+        : new SandboxError('Sandbox turn was aborted', 'workspace.lease_lost')
+    }
   } finally {
     cleanup()
+    input.externalSignal?.removeEventListener('abort', cleanup)
   }
 }
 
@@ -138,6 +172,8 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
   const mcpToolNames = input.mcpToolNames ?? resolveRoleMcpToolNames(input.role)
   const provider = getAgentTurnProvider(input.provider)
   const useFakeInProcess = isTestFakeProvider(provider)
+  const workspaceLease = input.workspaceLease ?? getWorkspaceLeaseContext()
+  const workloadRunId = input.workloadRunId ?? getExecutionRunContext()?.runId
   assertCapabilityProfileMatchesRole(input.role, input.capabilityProfile)
   if (!useFakeInProcess) {
     assertProviderSupportsCapability(input.provider, input.capabilityProfile)
@@ -146,18 +182,22 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
     ? {}
     : (input.userMcpServers ?? resolveUserMcpServersMap(input.provider, input.role))
 
-  if (
-    input.capabilityProfile === 'chat-write' &&
-    input.workspaceAccess !== 'exclusive-write'
-  ) {
+  if (input.capabilityProfile === 'chat-write' && input.workspaceAccess !== 'exclusive-write') {
     throw new SandboxError(
       'chat-write requires an exclusive workspace lease',
       'workspace.lease_lost'
     )
   }
 
+  if (input.capabilityProfile === 'task-sandbox' && input.workspaceAccess !== 'exclusive-write') {
+    throw new SandboxError(
+      'task-worker requires an exclusive workspace lease',
+      'workspace.lease_required'
+    )
+  }
+
   if (input.workspaceAccess === 'exclusive-write') {
-    const lease = input.workspaceLease ?? getWorkspaceLeaseContext()
+    const lease = workspaceLease
     if (
       !lease ||
       !isWorkspaceLeaseActive({
@@ -182,6 +222,12 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       )
     }
     const { streamSandboxedConversationTurn } = await import('../sandbox/orchestrator')
+    const sandboxAbort = new AbortController()
+    const abortSandbox = (): void => {
+      if (!sandboxAbort.signal.aborted) sandboxAbort.abort(input.signal?.reason)
+    }
+    input.signal?.addEventListener('abort', abortSandbox, { once: true })
+    if (input.signal?.aborted) abortSandbox()
     const sandboxStream = streamSandboxedConversationTurn({
       role: input.role,
       coreCode: input.provider,
@@ -195,17 +241,22 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       mcpToolNames,
       userMcpServers,
       mcpToken: input.mcpToken,
-      signal: input.signal,
+      signal: sandboxAbort.signal,
       readRoots: input.readRoots,
       jobId: input.jobId,
       idempotencyKey: input.idempotencyKey,
       workspaceAccess: input.workspaceAccess,
       capabilityProfile: input.capabilityProfile
     })
-    if (input.workloadRunId) {
-      yield* withWorkloadLeaseRefresh(sandboxStream, input.workloadRunId, input.signal)
-    } else {
-      yield* sandboxStream
+    try {
+      yield* withSandboxLeaseRefresh(sandboxStream, {
+        workloadRunId,
+        workspaceLease,
+        controller: sandboxAbort,
+        externalSignal: input.signal
+      })
+    } finally {
+      input.signal?.removeEventListener('abort', abortSandbox)
     }
     return
   }
