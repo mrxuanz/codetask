@@ -141,6 +141,12 @@ function startFakeMcp(toolName = 'report_task_result'): Promise<{
       return
     }
 
+    if (parsed.method === 'notifications/initialized') {
+      res.writeHead(202)
+      res.end()
+      return
+    }
+
     if (parsed.method === 'tools/list') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(
@@ -249,7 +255,13 @@ async function runCodexTurn(input: {
       outerSandbox: input.outerSandbox
     }
   )
-  const env = input.env ?? plan.env
+  const env = input.env ? { ...plan.env, ...input.env } : plan.env
+  if (input.mcpUrl) {
+    // Keep the live probe tied to the production policy even when its prepared
+    // auth environment overrides the rest of the child environment.
+    env.NO_PROXY = plan.env.NO_PROXY
+    env.no_proxy = plan.env.no_proxy
+  }
   const codexHome = env.CODEX_HOME ?? ''
   if (codexHome) assertNoRuntimeCodexConfig(codexHome)
 
@@ -319,7 +331,7 @@ function expectedMcpTool(role: ConversationRole, runtimeRoot: string): string | 
     { ...turnInput(role, '/workspace', runtimeRoot), mcpUrl: 'http://127.0.0.1:1/mcp' },
     { outerSandbox: role !== 'conversation' && role !== 'planner' }
   )
-  return plan.mcpToolNames?.[0]
+  return plan.mcpToolNames?.[0] ?? (role === 'conversation' ? 'propose_task_draft' : undefined)
 }
 
 async function runStaticForRole(
@@ -339,6 +351,8 @@ async function runStaticForRole(
   mcpViaSdkOnly: boolean
   mcpToolNames: string[] | undefined
   mcpTools: string[]
+  mcpRequired: boolean
+  loopbackProxyBypass: boolean
   runtimeIsolated: boolean
 }> {
   const outerSandbox = role !== 'conversation' && role !== 'planner'
@@ -352,13 +366,16 @@ async function runStaticForRole(
     ? (prepared!.envPatch.CODEX_HOME ?? runtimeCodexHome(runtimeRoot))
     : join(process.env.CODEX_HOME ?? join(process.env.HOME ?? runtimeRoot, '.codex'))
 
-  const mcpTools = plan.sdkConfig?.mcp_servers
-    ? Object.keys(
-        (plan.sdkConfig.mcp_servers as Record<string, { tools?: Record<string, unknown> }>)[
-          'codeteam-manager'
-        ]?.tools ?? {}
-      )
-    : []
+  const systemMcp = plan.sdkConfig?.mcp_servers
+    ? (
+        plan.sdkConfig.mcp_servers as Record<
+          string,
+          { required?: boolean; tools?: Record<string, unknown> }
+        >
+      )['codeteam-manager']
+    : undefined
+  const mcpTools = Object.keys(systemMcp?.tools ?? {})
+  const noProxyEntries = new Set(plan.env.NO_PROXY.split(','))
 
   const report = {
     role,
@@ -376,6 +393,10 @@ async function runStaticForRole(
     mcpViaSdkOnly: true,
     mcpToolNames: plan.mcpToolNames,
     mcpTools,
+    mcpRequired: systemMcp?.required === true,
+    loopbackProxyBypass: ['127.0.0.1', 'localhost', '::1'].every((entry) =>
+      noProxyEntries.has(entry)
+    ),
     runtimeIsolated: outerSandbox
       ? prepared!.diagnostics.mode === 'runtime-copy' &&
         prepared!.envPatch.HOME === runtimeRoot &&
@@ -395,6 +416,12 @@ async function runStaticForRole(
   const expectedTool = expectedMcpTool(role, runtimeRoot)
   if (expectedTool && !mcpTools.includes(expectedTool)) {
     throw new Error(`[${role}] SDK config missing ${expectedTool}`)
+  }
+  if (!report.mcpRequired) {
+    throw new Error(`[${role}] internal MCP must be required`)
+  }
+  if (!report.loopbackProxyBypass) {
+    throw new Error(`[${role}] child env is missing loopback NO_PROXY entries`)
   }
 
   return report
@@ -478,10 +505,7 @@ async function main(): Promise<void> {
       }
 
       if (caseFilter === 'all' || caseFilter === 'mcp') {
-        const mcpTool =
-          buildCodexTurnPlan(turnInput(liveRole, workspace, runtimeRoot), {
-            outerSandbox: liveRole !== 'conversation' && liveRole !== 'planner'
-          }).mcpToolNames?.[0] ?? 'report_task_result'
+        const mcpTool = expectedMcpTool(liveRole, runtimeRoot) ?? 'report_task_result'
         const fake = await startFakeMcp(mcpTool)
         log('mcp', `fake server at ${fake.url} tool=${mcpTool} role=${liveRole}`)
         try {

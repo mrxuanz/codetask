@@ -174,8 +174,7 @@ async function createAndSelectStorageFolder(): Promise<void> {
     await loadStorageBrowse(storageBrowseQuery.value)
     storagePickerOpen.value = false
   } catch (err) {
-    storageBrowseError.value =
-      err instanceof Error ? err.message : t('folderPicker.browseFailed')
+    storageBrowseError.value = err instanceof Error ? err.message : t('folderPicker.browseFailed')
   } finally {
     creatingStorageFolder.value = false
   }
@@ -209,6 +208,10 @@ async function deleteOldStorage(): Promise<void> {
 }
 
 async function restartApp(): Promise<void> {
+  if (!window.api?.relaunchApp) {
+    toast.info(t('workspace.settings.storage.restartServerRequired'))
+    return
+  }
   await window.api.relaunchApp()
 }
 

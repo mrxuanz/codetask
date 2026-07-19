@@ -1,0 +1,20 @@
+{
+  "requiredFields": [
+    "title",
+    "summary",
+    "goals",
+    "nonGoals",
+    "scope",
+    "constraints",
+    "assumptions",
+    "risks",
+    "acceptanceCriteria",
+    "abilities",
+    "recommendedCore",
+    "referenceIds",
+    "revision",
+    "phase",
+    "owner"
+  ],
+  "notes": "Field names mirror the public Draft contract; Oracle compares presence and basic types from API responses."
+}

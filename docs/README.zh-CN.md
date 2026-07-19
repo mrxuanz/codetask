@@ -127,6 +127,10 @@ npm run dev:serve
 
 # 自定义 host/port（开发或打包后的应用）
 electron . --serve --host 127.0.0.1 --port 9000
+
+# 纯 Node 服务端——不依赖 Electron、DISPLAY 或 Xvfb
+npm run build:server
+npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 ```
 
 说明：
@@ -134,6 +138,7 @@ electron . --serve --host 127.0.0.1 --port 9000
 - **Server** 模式下 Electron 跳过 GPU 初始化，便于 WSL / CI / 无头环境运行。
 - 绑定 `0.0.0.0` 时，局域网内其他设备可通过 `http://<你的IP>:<端口>` 访问 UI。
 - 两种模式下 Job 执行、Planner、沙箱行为完全一致，仅外壳不同。
+- 独立 Node 入口固定为 Server 模式，因此 `start:server` 不要求额外传入 `--serve`。
 
 ## 快速开始
 
