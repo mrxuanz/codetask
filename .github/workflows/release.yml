@@ -144,7 +144,7 @@ jobs:
           --report dist/legacy-release-report.json
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@0508763985e9303a802fc2637ea176567cb4f220 # v2.2.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: ${{ needs.prepare.outputs.tag }}
           tag_name: ${{ needs.prepare.outputs.tag }}
