@@ -35,7 +35,6 @@ export const SMOKE_CASES = [
   'G3-001'
 ] as const
 
-
 const DRAFT_MUTATION_TOOLS = [
   'codetask_create_project',
   'codetask_create_thread',
@@ -244,7 +243,7 @@ function buildRecoveryAndFullManifests(): Record<string, CaseManifest> {
   out['G8-001'] = {
     caseId: 'G8-001',
     gate: 'G8',
-    title: 'fixed-opencode full end-to-end chain (scripted fake MCP path)',
+    title: 'provider-selected full end-to-end chain (scripted fake MCP path)',
     driver: 'fake',
     skills: ['common-blackbox', 'draft-multiturn', 'planner-full', 'job-small-task'],
     allowedTools: [
@@ -456,8 +455,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
   'JOB-CHAT-RO-001': {
     caseId: 'JOB-CHAT-RO-001',
     gate: 'G6',
-    title:
-      'phase-2 thicken: task1 running + task2 + chat reads job dir as readonly',
+    title: 'phase-2 thicken: task1 running + task2 + chat reads job dir as readonly',
     driver: 'fake',
     skills: ['common-blackbox', 'project-thread', 'job-chat-readonly'],
     allowedTools: [
@@ -484,8 +482,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
   'SETTINGS-MCP-001': {
     caseId: 'SETTINGS-MCP-001',
     gate: 'G2',
-    title:
-      'phase-3: register business-e2e-probe into conversation/task/verification MCP settings',
+    title: 'phase-3: register business-e2e-probe into conversation/task/verification MCP settings',
     driver: 'fake',
     skills: ['common-blackbox', 'settings-mcp-probe'],
     allowedTools: [
@@ -587,11 +584,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'case_checkpoint',
       'report_case_result'
     ],
-    requiredOperations: [
-      'mcp.case_next_fixture',
-      'mcp.codetask_start_turn',
-      'case.report_result'
-    ],
+    requiredOperations: ['mcp.case_next_fixture', 'mcp.codetask_start_turn', 'case.report_result'],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
     stagedFixture: 'conversation/draft-multiturn.json',
@@ -670,11 +663,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'case_checkpoint',
       'report_case_result'
     ],
-    requiredOperations: [
-      'mcp.case_next_fixture',
-      'mcp.codetask_start_turn',
-      'case.report_result'
-    ],
+    requiredOperations: ['mcp.case_next_fixture', 'mcp.codetask_start_turn', 'case.report_result'],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
     stagedFixture: 'conversation/draft-multiturn.json',
@@ -686,13 +675,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
   ...buildRecoveryAndFullManifests()
 }
 
-
 export const DRAFT_CORE_CASES = ['G4-001', 'G4-002', 'G4-003', 'G4-012'] as const
 
-export function resolveCaseIds(options: {
-  gate?: string
-  caseId?: string
-}): string[] {
+export function resolveCaseIds(options: { gate?: string; caseId?: string }): string[] {
   if (options.caseId) return [options.caseId]
   if (options.gate === 'smoke') return [...SMOKE_CASES]
   if (options.gate === 'foundation') return ['FOUNDATION-FAKE-001']

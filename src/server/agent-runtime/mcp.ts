@@ -30,6 +30,7 @@ type CodexMcpServerEntry =
   | {
       url: string
       http_headers: Record<string, string>
+      required: true
       default_tools_approval_mode: 'approve'
       tools: Record<string, { approval_mode: 'approve' }>
     }
@@ -54,6 +55,7 @@ export function buildCodexMcpConfig(
         http_headers: {
           Accept: MCP_HTTP_ACCEPT_HEADER_VALUE
         },
+        required: true,
         default_tools_approval_mode: 'approve',
         tools: buildCodexMcpToolApprovals(toolNames)
       }
