@@ -196,7 +196,6 @@ export async function startSettingsMcpProbe(options?: {
     })
   })
 
-  const url = `http://${host}:${port}/mcp`
   // Accept POST on any path (some clients hit /mcp)
   // Our handler already accepts all POST paths on this server.
 

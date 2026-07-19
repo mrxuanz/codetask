@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TIMEOUTS } from '../config/timeouts'
 import type { ProcessRegistry } from './process-registry'
 import { writeJson } from './run-layout'
 

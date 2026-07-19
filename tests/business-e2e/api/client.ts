@@ -93,22 +93,18 @@ export class PublicApiClient {
   }
 
   async health(): Promise<boolean> {
-    const result = await this.request<{ status?: string }>(
-      'GET',
-      '/api/health',
-      undefined,
-      { operationId: 'health.get', auth: false }
-    )
+    const result = await this.request<{ status?: string }>('GET', '/api/health', undefined, {
+      operationId: 'health.get',
+      auth: false
+    })
     return result.status === 200 && result.data?.status === 'ok'
   }
 
   async bootstrap(auth = false): Promise<Record<string, unknown>> {
-    const result = await this.request<Record<string, unknown>>(
-      'GET',
-      '/api/bootstrap',
-      undefined,
-      { operationId: 'auth.bootstrap', auth }
-    )
+    const result = await this.request<Record<string, unknown>>('GET', '/api/bootstrap', undefined, {
+      operationId: 'auth.bootstrap',
+      auth
+    })
     return (result.data ?? {}) as Record<string, unknown>
   }
 

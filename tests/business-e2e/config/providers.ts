@@ -4,12 +4,7 @@
  * Naming a provider (or `all`) opts it in; no BUSINESS_ALLOW_* env.
  */
 
-import {
-  fixedProfileForCore,
-  resolveProfile,
-  type Profile,
-  type SutCoreCode
-} from './profiles'
+import { fixedProfileForCore, resolveProfile, type Profile, type SutCoreCode } from './profiles'
 
 export type ProviderAlias = 'opencode' | 'cursor' | 'claude' | 'codex'
 
@@ -39,16 +34,17 @@ export function normalizeProviderAlias(raw: string): ProviderAlias {
   }
   if (v === 'claude' || v === 'claude-code' || v === 'claudecode') return 'claude'
   if (v === 'codex') return 'codex'
-  throw new Error(
-    `unknown_provider:${raw}:use opencode|cursor|claude|codex|all (comma-separated)`
-  )
+  throw new Error(`unknown_provider:${raw}:use opencode|cursor|claude|codex|all (comma-separated)`)
 }
 
 export function parseProvidersList(raw: string | undefined): ProviderAlias[] | null {
   if (!raw?.trim()) return null
   const trimmed = raw.trim().toLowerCase()
   if (trimmed === 'all') return [...ALL_PROVIDERS]
-  const parts = trimmed.split(/[,+\s]+/).map((s) => s.trim()).filter(Boolean)
+  const parts = trimmed
+    .split(/[,+\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
   if (parts.length === 0) return null
   return parts.map(normalizeProviderAlias)
 }

@@ -78,6 +78,10 @@ export class ReportWriter {
   writeManifest(manifest: unknown): void {
     const safe = redactValue(manifest)
     assertNoSecrets(safe, 'manifest')
-    writeFileSync(join(this.reportsDir, '..', 'manifest.json'), JSON.stringify(safe, null, 2), 'utf8')
+    writeFileSync(
+      join(this.reportsDir, '..', 'manifest.json'),
+      JSON.stringify(safe, null, 2),
+      'utf8'
+    )
   }
 }

@@ -10,11 +10,7 @@ export type RoleProviders = {
   milestoneVerifier: string
 }
 
-export type ProfileName =
-  | 'fixed-opencode'
-  | 'fixed-cursor'
-  | 'fixed-claude'
-  | 'fixed-codex'
+export type ProfileName = 'fixed-opencode' | 'fixed-cursor' | 'fixed-claude' | 'fixed-codex'
 
 export type Profile = {
   name: ProfileName
