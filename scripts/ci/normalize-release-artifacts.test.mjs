@@ -5,12 +5,12 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { normalizeReleaseArtifacts } from '../normalize-release-artifacts.mjs'
 
-test('release artifacts use release version and public amd64 naming', () => {
+test('linux amd64 accepts electron-builder AppImage x86_64 and deb amd64 names', () => {
   const root = mkdtempSync(join(tmpdir(), 'release-artifacts-'))
   try {
     mkdirSync(root, { recursive: true })
-    writeFileSync(join(root, 'codetask-0.1.0-beta-linux-x64.AppImage'), 'app')
-    writeFileSync(join(root, 'codetask-0.1.0-beta-linux-x64.deb'), 'deb')
+    writeFileSync(join(root, 'codetask-0.1.0-beta-linux-x86_64.AppImage'), 'app')
+    writeFileSync(join(root, 'codetask-0.1.0-beta-linux-amd64.deb'), 'deb')
     const artifacts = normalizeReleaseArtifacts({
       distDir: root,
       platform: 'linux-amd64',
@@ -21,7 +21,8 @@ test('release artifacts use release version and public amd64 naming', () => {
       'codetask-0.1.0-beta-linux-amd64.deb'
     ])
     assert.equal(existsSync(join(root, artifacts[0])), true)
-    assert.equal(existsSync(join(root, 'codetask-0.1.0-beta-linux-x64.AppImage')), false)
+    assert.equal(existsSync(join(root, 'codetask-0.1.0-beta-linux-x86_64.AppImage')), false)
+    assert.equal(existsSync(join(root, 'codetask-0.1.0-beta-linux-amd64.deb')), true)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
