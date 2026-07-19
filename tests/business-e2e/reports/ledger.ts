@@ -40,7 +40,9 @@ export class OperationLedger {
   }
 
   hasOperation(caseRunId: string, operationId: string): boolean {
-    return this.entries.some((item) => item.caseRunId === caseRunId && item.operationId === operationId)
+    return this.entries.some(
+      (item) => item.caseRunId === caseRunId && item.operationId === operationId
+    )
   }
 
   snapshot(): LedgerEntry[] {

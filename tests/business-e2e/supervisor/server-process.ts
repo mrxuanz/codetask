@@ -33,9 +33,7 @@ function pickPort(): Promise<number> {
 }
 
 function extractSetupToken(output: string): string | undefined {
-  const banner = output.match(
-    /Setup token \(valid 15 min\):\s*\n\s*([A-Za-z0-9._~+/=-]+)/
-  )
+  const banner = output.match(/Setup token \(valid 15 min\):\s*\n\s*([A-Za-z0-9._~+/=-]+)/)
   if (banner?.[1]) return banner[1]
   const lines = output.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {

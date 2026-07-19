@@ -363,7 +363,7 @@ export class FakeDriver implements AgentDriver {
     const messageId = 'missing-message'
     const probes: Array<{ name: string; ok: boolean; detail?: unknown }> = []
 
-    const soft = async (name: string, fn: () => Promise<unknown>) => {
+    const soft = async (name: string, fn: () => Promise<unknown>): Promise<void> => {
       try {
         const detail = await fn()
         probes.push({ name, ok: true, detail })
@@ -475,7 +475,7 @@ export class FakeDriver implements AgentDriver {
   ): Promise<void> {
     const ctx = await this.createTaskContext(input, mcp, push, `planner-${input.caseId}`)
     const probes: Array<{ name: string; ok: boolean; detail?: unknown }> = []
-    const soft = async (name: string, fn: () => Promise<unknown>) => {
+    const soft = async (name: string, fn: () => Promise<unknown>): Promise<void> => {
       try {
         probes.push({ name, ok: true, detail: await fn() })
       } catch (error) {
@@ -935,7 +935,7 @@ export class FakeDriver implements AgentDriver {
     const text = `${input.assistantText}\n${JSON.stringify(input.detail ?? {})}`.toLowerCase()
     const detail = input.detail ?? {}
 
-    const missingField = (key: string, aliases: string[]) => {
+    const missingField = (key: string, aliases: string[]): boolean => {
       const direct = detail[key]
       if (
         direct != null &&
@@ -1369,7 +1369,7 @@ export class FakeDriver implements AgentDriver {
   ): Promise<void> {
     const ctx = await this.createTaskContext(input, mcp, push, `job-${input.caseId}`)
     const probes: Array<{ name: string; ok: boolean; detail?: unknown }> = []
-    const soft = async (name: string, fn: () => Promise<unknown>) => {
+    const soft = async (name: string, fn: () => Promise<unknown>): Promise<void> => {
       try {
         probes.push({ name, ok: true, detail: await fn() })
       } catch (error) {
@@ -1440,7 +1440,7 @@ export class FakeDriver implements AgentDriver {
 
     const connectionId = `biz-${input.caseId}-${Date.now()}`
     const probes: Array<{ name: string; ok: boolean; detail?: unknown }> = []
-    const soft = async (name: string, fn: () => Promise<unknown>) => {
+    const soft = async (name: string, fn: () => Promise<unknown>): Promise<void> => {
       try {
         probes.push({ name, ok: true, detail: await fn() })
       } catch (error) {
@@ -1491,7 +1491,7 @@ export class FakeDriver implements AgentDriver {
   ): Promise<void> {
     const ctx = await this.createTaskContext(input, mcp, push, `full-${input.caseId}`)
     const probes: Array<{ name: string; ok: boolean; detail?: unknown }> = []
-    const soft = async (name: string, fn: () => Promise<unknown>) => {
+    const soft = async (name: string, fn: () => Promise<unknown>): Promise<void> => {
       try {
         probes.push({ name, ok: true, detail: await fn() })
       } catch (error) {

@@ -14,8 +14,7 @@ async function main(): Promise<void> {
   if (!contextPath) throw new Error('worker.context_required')
   const input = readJson<CaseWorkerInput>(contextPath)
 
-  const driver =
-    input.driver === 'opencode' ? new OpenCodeDriver() : new FakeDriver()
+  const driver = input.driver === 'opencode' ? new OpenCodeDriver() : new FakeDriver()
 
   let fixture: Record<string, unknown> | undefined
   if (input.fixturePath) {

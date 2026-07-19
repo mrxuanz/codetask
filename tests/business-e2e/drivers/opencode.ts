@@ -339,7 +339,8 @@ function waitForOpencodeUrl(
       const lines = stdoutBuffer.split(/\r?\n/)
       stdoutBuffer = lines.pop() ?? ''
       for (const line of lines) {
-        const clean = line.replace(/\u001b\[[0-9;]*m/g, '').trim()
+        const ansiColor = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'gu')
+        const clean = line.replace(ansiColor, '').trim()
         if (!clean.startsWith('opencode server listening')) continue
         const match = clean.match(/on\s+(https?:\/\/[^\s]+)/)
         if (!match?.[1]) continue
