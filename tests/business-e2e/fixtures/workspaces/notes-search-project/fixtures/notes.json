@@ -1,0 +1,17 @@
+[
+  {
+    "id": "note-1",
+    "title": "Alpha Beta Planning",
+    "body": "Discuss alpha rollout and beta metrics for the notes search task."
+  },
+  {
+    "id": "note-2",
+    "title": "Gamma Release Notes",
+    "body": "Gamma contains only release checklist items unrelated to alpha."
+  },
+  {
+    "id": "note-3",
+    "title": "Ops Handbook",
+    "body": "Operational runbook with ALPHA mentioned in the body only."
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "requiredTopLevel": ["id", "status", "nodes", "revision"],
+  "nodeRequiredFields": ["id", "title", "kind", "status"],
+  "notes": "Plan invariants checked by HTTP Oracle after planner completes; exact schema may grow with public API."
+}
