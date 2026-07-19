@@ -22,7 +22,7 @@ import {
   setTaskEvidenceWaitTimeoutForTests,
   setTestAgentTurnProviders
 } from '../../src/server/agent-runtime/providers/test-overrides'
-import { eq } from 'drizzle-orm'
+import { eq, or } from 'drizzle-orm'
 import { getDb } from '../../src/server/db'
 import { threadJobs } from '../../src/server/db/schema'
 import { clearExecutionLease } from '../../src/server/legacy-control-plane/repository'
@@ -144,6 +144,16 @@ export class WorkflowHarness {
     }
   }
 
+  async waitForExecutionIdle(jobId: string, timeoutMs = 60_000): Promise<void> {
+    const ctx = getAppContext()
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      if (!ctx.executionRuntime.isLoopActive(jobId)) return
+      await sleep(50)
+    }
+    throw new Error(`waitForExecutionIdle timeout: jobId=${jobId}`)
+  }
+
   async simulateServiceRestart(): Promise<void> {
     if (!this.server || !this.dataDir) {
       throw new Error('harness not set up')
@@ -158,7 +168,7 @@ export class WorkflowHarness {
     const activeJobs = db
       .select({ id: threadJobs.id })
       .from(threadJobs)
-      .where(eq(threadJobs.status, 'running'))
+      .where(or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing')))
       .all()
     for (const row of activeJobs) {
       ctx.executionRuntime.setControl(row.id, 'paused')
@@ -178,7 +188,7 @@ export class WorkflowHarness {
     const runningJobs = restartedDb
       .select({ id: threadJobs.id })
       .from(threadJobs)
-      .where(eq(threadJobs.status, 'running'))
+      .where(or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing')))
       .all()
     for (const row of runningJobs) {
       await clearExecutionLease(row.id)
