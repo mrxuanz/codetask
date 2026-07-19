@@ -6,7 +6,15 @@ import vueParser from 'vue-eslint-parser'
 
 export default defineConfig(
   {
-    ignores: ['**/node_modules', '**/dist', '**/out', 'data/**', 'scripts/tmp-query-m1s2.cjs']
+    ignores: [
+      '**/node_modules',
+      '**/dist',
+      '**/out',
+      'data/**',
+      'tests/business-e2e/.runtime/**',
+      'tests/business/.runtime/**',
+      'scripts/tmp-query-m1s2.cjs'
+    ]
   },
   tseslint.configs.recommended,
   eslintPluginVue.configs['flat/recommended'],

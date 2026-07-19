@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 
@@ -8,56 +9,50 @@ const tscEntrypoint = resolve(repositoryRoot, 'node_modules/typescript/bin/tsc')
 const knownDiagnostics = [
   {
     file: 'src/server/agent-runtime/cursor-acp/acp-shared.ts',
-    line: 206,
-    column: 11,
-    code: 'TS2375'
+    code: 'TS2375',
+    sourceLine: 'toolCall: {',
+    count: 1
   },
   {
     file: 'src/server/agent-runtime/providers/claude-sdk.ts',
-    line: 36,
-    column: 59,
-    code: 'TS2379'
+    code: 'TS2379',
+    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
+    count: 1
   },
   {
     file: 'src/server/agent-runtime/providers/codex-policy.ts',
-    line: 57,
-    column: 59,
-    code: 'TS2379'
+    code: 'TS2379',
+    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
+    count: 1
   },
   {
     file: 'src/server/agent-runtime/providers/cursor-policy.ts',
-    line: 41,
-    column: 59,
-    code: 'TS2379'
+    code: 'TS2379',
+    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
+    count: 1
   },
   {
     file: 'src/server/agent-runtime/providers/opencode-sdk.ts',
-    line: 58,
-    column: 59,
-    code: 'TS2379'
-  },
-  {
-    file: 'src/server/agent-runtime/providers/opencode-sdk.ts',
-    line: 390,
-    column: 59,
-    code: 'TS2379'
+    code: 'TS2379',
+    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
+    count: 2
   },
   {
     file: 'src/server/agent-runtime/runner.ts',
-    line: 252,
-    column: 53,
-    code: 'TS2379'
+    code: 'TS2379',
+    sourceLine: 'yield* withSandboxLeaseRefresh(sandboxStream, {',
+    count: 1
   },
   {
     file: 'src/server/conversation/service.ts',
-    line: 372,
-    column: 50,
-    code: 'TS2379'
+    code: 'TS2379',
+    sourceLine: 'const prepared = await prepareConversationTurn({',
+    count: 1
   }
 ]
 
 function diagnosticKey(diagnostic) {
-  return [diagnostic.file, diagnostic.line, diagnostic.column, diagnostic.code].join('\u0000')
+  return [diagnostic.file, diagnostic.code, diagnostic.sourceLine].join('\u0000')
 }
 
 function annotation(kind, diagnostic, title) {
@@ -86,24 +81,35 @@ const actualDiagnostics = [...output.matchAll(diagnosticPattern)].map((match) =>
   line: Number(match[2]),
   column: Number(match[3]),
   code: match[4],
-  message: match[5]
+  message: match[5],
+  sourceLine:
+    readFileSync(resolve(repositoryRoot, match[1]), 'utf8')
+      .split(/\r?\n/u)
+      [Number(match[2]) - 1]?.trim() ?? ''
 }))
 
 const knownByKey = new Map(
   knownDiagnostics.map((diagnostic) => [diagnosticKey(diagnostic), diagnostic])
 )
-const actualByKey = new Map(
-  actualDiagnostics.map((diagnostic) => [diagnosticKey(diagnostic), diagnostic])
-)
-const unexpectedDiagnostics = actualDiagnostics.filter(
-  (diagnostic) => !knownByKey.has(diagnosticKey(diagnostic))
-)
+const actualCounts = new Map()
+const unexpectedDiagnostics = []
+for (const diagnostic of actualDiagnostics) {
+  const key = diagnosticKey(diagnostic)
+  const count = (actualCounts.get(key) ?? 0) + 1
+  actualCounts.set(key, count)
+  const known = knownByKey.get(key)
+  if (!known || count > known.count) unexpectedDiagnostics.push(diagnostic)
+}
 const staleAllowances = knownDiagnostics.filter(
-  (diagnostic) => !actualByKey.has(diagnosticKey(diagnostic))
+  (diagnostic) => (actualCounts.get(diagnosticKey(diagnostic)) ?? 0) < diagnostic.count
 )
 
 for (const diagnostic of actualDiagnostics) {
-  if (knownByKey.has(diagnosticKey(diagnostic))) {
+  if (
+    knownByKey.has(diagnosticKey(diagnostic)) &&
+    (actualCounts.get(diagnosticKey(diagnostic)) ?? 0) <=
+      knownByKey.get(diagnosticKey(diagnostic)).count
+  ) {
     console.log(annotation('warning', diagnostic, 'BUSINESS-003 known control-plane type error'))
   }
 }
@@ -114,7 +120,7 @@ for (const diagnostic of unexpectedDiagnostics) {
 
 for (const diagnostic of staleAllowances) {
   console.error(
-    `Stale typecheck baseline: ${diagnostic.file}:${diagnostic.line}:${diagnostic.column} ${diagnostic.code}`
+    `Stale typecheck baseline: ${diagnostic.file} ${diagnostic.code} ${JSON.stringify(diagnostic.sourceLine)}`
   )
 }
 
@@ -132,7 +138,7 @@ if (hasUnexpectedTermination && !hasUnparsedFailure) {
 }
 
 console.log(
-  `Control-plane typecheck baseline: ${actualDiagnostics.length}/${knownDiagnostics.length} known diagnostic(s)`
+  `Control-plane typecheck baseline: ${actualDiagnostics.length}/${knownDiagnostics.reduce((total, diagnostic) => total + diagnostic.count, 0)} known diagnostic(s)`
 )
 
 if (
