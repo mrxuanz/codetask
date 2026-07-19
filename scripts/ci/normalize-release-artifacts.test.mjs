@@ -14,11 +14,11 @@ test('release artifacts use release version and public amd64 naming', () => {
     const artifacts = normalizeReleaseArtifacts({
       distDir: root,
       platform: 'linux-amd64',
-      version: '0.1.0-beta.1'
+      version: '0.1.0-beta'
     })
     assert.deepEqual(artifacts, [
-      'codetask-0.1.0-beta.1-linux-amd64.AppImage',
-      'codetask-0.1.0-beta.1-linux-amd64.deb'
+      'codetask-0.1.0-beta-linux-amd64.AppImage',
+      'codetask-0.1.0-beta-linux-amd64.deb'
     ])
     assert.equal(existsSync(join(root, artifacts[0])), true)
     assert.equal(existsSync(join(root, 'codetask-0.1.0-beta-linux-x64.AppImage')), false)
@@ -36,12 +36,12 @@ test('Windows installer, portable executable and archive keep their suffixes', (
     const artifacts = normalizeReleaseArtifacts({
       distDir: root,
       platform: 'windows-amd64',
-      version: '0.1.0-beta.1'
+      version: '0.1.0-beta'
     })
     assert.deepEqual(artifacts, [
-      'codetask-0.1.0-beta.1-windows-amd64-portable.exe',
-      'codetask-0.1.0-beta.1-windows-amd64-setup.exe',
-      'codetask-0.1.0-beta.1-windows-amd64.zip'
+      'codetask-0.1.0-beta-windows-amd64-portable.exe',
+      'codetask-0.1.0-beta-windows-amd64-setup.exe',
+      'codetask-0.1.0-beta-windows-amd64.zip'
     ])
     for (const artifact of artifacts) assert.equal(existsSync(join(root, artifact)), true)
   } finally {
