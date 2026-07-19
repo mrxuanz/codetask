@@ -59,6 +59,8 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+tests/business-e2e/.runtime/
+tests/business/.runtime/
 
 # Electron / tooling
 .codegraph/
