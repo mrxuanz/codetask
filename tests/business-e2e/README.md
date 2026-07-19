@@ -9,11 +9,11 @@ Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + S
 
 ## Phases
 
-| Phase | `--part` | Cases | Evidence (summary) |
-| ----- | -------- | ----- | ------------------ |
-| 1 | `conversation` | `chat-basic`, `chat-create-html` | Turn + (html) file oracle |
-| 2 | `draft-job` | `notes-search`, `job-chat-readonly` | Plan/job + file oracle; readonly thicken in progress |
-| 3 | `settings-mcp` | `settings-mcp-probe` | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
+| Phase | `--part`       | Cases                               | Evidence (summary)                                                                                               |
+| ----- | -------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 1     | `conversation` | `chat-basic`, `chat-create-html`    | Turn + (html) file oracle                                                                                        |
+| 2     | `draft-job`    | `notes-search`, `job-chat-readonly` | Plan/job + file oracle; readonly thicken in progress                                                             |
+| 3     | `settings-mcp` | `settings-mcp-probe`                | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
 
 **Two MCP surfaces:** Test MCP = outer driver. Settings Probe (`business-e2e-probe`) = user MCP registered via `PUT /api/settings/mcp`. Do not confuse them.
 
@@ -55,4 +55,4 @@ Each run kills leftover processes, clears test DBs, resets `tests/business-e2e/.
 
 UI strings: `i18n/messages.ts` (`--lang` / `BUSINESS_E2E_LANG`).
 
-Default fixed roles via `--providers` (or legacy `--profile fixed-opencode`). Mixed-job / mid-chat switch ≈ G8 later.
+Each `--providers` slot fixes all SUT roles to the selected provider (or use the legacy `--profile` flag). G8 is the provider-selected full-chain probe.

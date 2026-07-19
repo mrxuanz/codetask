@@ -69,14 +69,14 @@ export async function createProject(
 export async function createThread(
   client: PublicApiClient,
   projectId: string,
-  input: { title?: string; coreCode?: string; threadKind?: string } = {}
+  input: { title?: string; coreCode: string; threadKind?: string }
 ): Promise<{ id: string; coreCode?: string }> {
   const result = await client.request<{ id: string; coreCode?: string }>(
     'POST',
     `/api/projects/${projectId}/threads`,
     {
       title: input.title ?? 'Business E2E Chat',
-      coreCode: input.coreCode ?? 'opencode',
+      coreCode: input.coreCode,
       threadKind: input.threadKind ?? 'chat'
     },
     { operationId: 'thread.create' }
@@ -450,11 +450,9 @@ export async function uploadThreadAttachment(
   const bytes = readFileSync(filePath)
   const form = new FormData()
   form.append('file', new Blob([bytes]), fileName)
-  const result = await client.uploadMultipart(
-    `/api/threads/${threadId}/attachments`,
-    form,
-    { operationId: 'attachment.upload' }
-  )
+  const result = await client.uploadMultipart(`/api/threads/${threadId}/attachments`, form, {
+    operationId: 'attachment.upload'
+  })
   if (result.status >= 400) {
     throw new Error(`attachment.upload_failed:${result.status}:${result.raw.message ?? ''}`)
   }
@@ -473,9 +471,7 @@ export async function putControlPlanePolicies(
     operationId: 'settings.control_plane.put'
   })
   if (result.status >= 400) {
-    throw new Error(
-      `settings.control_plane_failed:${result.status}:${result.raw.message ?? ''}`
-    )
+    throw new Error(`settings.control_plane_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
@@ -524,7 +520,6 @@ export async function putMcpSettings(
   return result.data ?? { settings }
 }
 
-
 /** Soft probe helper: returns status without throwing. */
 export async function softRequest(
   client: PublicApiClient,
@@ -539,68 +534,77 @@ export async function softRequest(
   return { status: result.status, data: result.data, message: result.raw.message }
 }
 
-export async function pauseJob(
-  client: PublicApiClient,
-  jobId: string
-): Promise<unknown> {
-  const result = await client.request('POST', `/api/jobs/${jobId}/pause`, {}, {
-    operationId: 'job.pause'
-  })
+export async function pauseJob(client: PublicApiClient, jobId: string): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/jobs/${jobId}/pause`,
+    {},
+    {
+      operationId: 'job.pause'
+    }
+  )
   if (result.status >= 400) {
     throw new Error(`job.pause_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
-export async function resumeJob(
-  client: PublicApiClient,
-  jobId: string
-): Promise<unknown> {
-  const result = await client.request('POST', `/api/jobs/${jobId}/resume`, {}, {
-    operationId: 'job.resume'
-  })
+export async function resumeJob(client: PublicApiClient, jobId: string): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/jobs/${jobId}/resume`,
+    {},
+    {
+      operationId: 'job.resume'
+    }
+  )
   if (result.status >= 400) {
     throw new Error(`job.resume_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
-export async function continueJob(
-  client: PublicApiClient,
-  jobId: string
-): Promise<unknown> {
-  const result = await client.request('POST', `/api/jobs/${jobId}/continue`, {}, {
-    operationId: 'job.continue'
-  })
+export async function continueJob(client: PublicApiClient, jobId: string): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/jobs/${jobId}/continue`,
+    {},
+    {
+      operationId: 'job.continue'
+    }
+  )
   if (result.status >= 400) {
     throw new Error(`job.continue_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
-export async function cancelJob(
-  client: PublicApiClient,
-  jobId: string
-): Promise<unknown> {
-  const result = await client.request('POST', `/api/jobs/${jobId}/cancel`, {}, {
-    operationId: 'job.cancel'
-  })
+export async function cancelJob(client: PublicApiClient, jobId: string): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/jobs/${jobId}/cancel`,
+    {},
+    {
+      operationId: 'job.cancel'
+    }
+  )
   if (result.status >= 400) {
     throw new Error(`job.cancel_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
-export async function restartJob(
-  client: PublicApiClient,
-  jobId: string
-): Promise<unknown> {
-  const result = await client.request('POST', `/api/jobs/${jobId}/restart`, {}, {
-    operationId: 'job.restart'
-  })
+export async function restartJob(client: PublicApiClient, jobId: string): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/jobs/${jobId}/restart`,
+    {},
+    {
+      operationId: 'job.restart'
+    }
+  )
   if (result.status >= 400) {
     throw new Error(`job.restart_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
-

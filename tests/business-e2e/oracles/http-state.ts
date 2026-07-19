@@ -17,15 +17,21 @@ export async function runHttpStateOracle(input: {
     requireAssistantMessage?: boolean
     requireTurnCompleted?: boolean
     turnId?: string
+    expectedCoreCode?: string
   }
 }): Promise<OracleResult[]> {
   const results: OracleResult[] = []
   const { expectations, client } = input
 
   if (expectations.projectId) {
-    const result = await client.request('GET', `/api/projects/${expectations.projectId}`, undefined, {
-      operationId: 'oracle.project.get'
-    })
+    const result = await client.request(
+      'GET',
+      `/api/projects/${expectations.projectId}`,
+      undefined,
+      {
+        operationId: 'oracle.project.get'
+      }
+    )
     results.push({
       name: 'project_exists',
       passed: result.status === 200 && Boolean((result.data as { id?: string })?.id),
@@ -40,6 +46,15 @@ export async function runHttpStateOracle(input: {
       passed: String(thread.id ?? '') === expectations.threadId,
       detail: { id: thread.id }
     })
+
+    if (expectations.expectedCoreCode) {
+      const actualCoreCode = String(thread.coreCode ?? thread.core_code ?? '')
+      results.push({
+        name: 'thread_core_matches_provider',
+        passed: actualCoreCode === expectations.expectedCoreCode,
+        detail: { expected: expectations.expectedCoreCode, actual: actualCoreCode }
+      })
+    }
 
     if (expectations.requireAssistantMessage) {
       const messages = await ops.listMessages(client, expectations.threadId)

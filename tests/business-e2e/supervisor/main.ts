@@ -42,16 +42,11 @@ import {
 } from './run-layout'
 import { startDedicatedServer, type ServerHandle } from './server-process'
 import { runPreflightCleanup } from './preflight'
-import {
-  assertWorkspaceCopied,
-  copyFixtureWorkspace
-} from './workspace-copy'
+import { assertWorkspaceCopied, copyFixtureWorkspace } from './workspace-copy'
 import type { FixturePhaseState } from '../mcp/capabilities'
 import { progress } from '../reports/progress'
 import { setLang, tFailure, tSuccess } from '../i18n'
-import {
-  htmlFileNameForConversationCore
-} from '../config/sdk-html'
+import { htmlFileNameForConversationCore } from '../config/sdk-html'
 
 function readFlag(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name)
@@ -446,7 +441,9 @@ async function executeCase(ctx: {
 
   const workspaceRoot = join(layout.workspaces, caseRunId)
   if (manifest.workspaceFixture) {
-    progress(scopeLabelForCaseId(manifest.caseId), 'workspace.copy', { fixture: manifest.workspaceFixture })
+    progress(scopeLabelForCaseId(manifest.caseId), 'workspace.copy', {
+      fixture: manifest.workspaceFixture
+    })
     copyFixtureWorkspace({
       repoRoot,
       fixtureWorkspaceName: manifest.workspaceFixture,
@@ -468,7 +465,9 @@ async function executeCase(ctx: {
 
   let fixtureState: FixturePhaseState | undefined
   if (manifest.stagedFixture) {
-    progress(scopeLabelForCaseId(manifest.caseId), 'fixture.stage', { stagedFixture: manifest.stagedFixture })
+    progress(scopeLabelForCaseId(manifest.caseId), 'fixture.stage', {
+      stagedFixture: manifest.stagedFixture
+    })
     const staged = readJson<{
       fixtureId?: string
       phaseOrder: string[]
@@ -536,7 +535,8 @@ async function executeCase(ctx: {
     server,
     registry,
     artifacts,
-    expectedHtmlFile
+    expectedHtmlFile,
+    expectedThreadCore: conversationCore
   })
 
   const agentReportedCompleted = Boolean(
@@ -607,8 +607,19 @@ async function runSupervisorCase(ctx: {
   runRoot: string
   started: number
 }): Promise<CaseReport> {
-  const { manifest, caseRunId, profile, server, client, vault, ledger, registry, repoRoot, runRoot, started } =
-    ctx
+  const {
+    manifest,
+    caseRunId,
+    profile,
+    server,
+    client,
+    vault,
+    ledger,
+    registry,
+    repoRoot,
+    runRoot,
+    started
+  } = ctx
   const scoped = client.withCase(caseRunId)
   const oracleResults: OracleResult[] = []
   let classification: FailureClass = 'passed'
@@ -631,7 +642,11 @@ async function runSupervisorCase(ctx: {
       const bootOk = server.bootstrapDir.startsWith(runRoot)
       oracleResults.push(
         { name: 'data_dir_isolated', passed: dataOk, detail: { dataDir: server.dataDir } },
-        { name: 'bootstrap_isolated', passed: bootOk, detail: { bootstrapDir: server.bootstrapDir } }
+        {
+          name: 'bootstrap_isolated',
+          passed: bootOk,
+          detail: { bootstrapDir: server.bootstrapDir }
+        }
       )
       if (!dataOk || !bootOk) classification = 'assertion_failed'
       break
@@ -673,7 +688,11 @@ async function runSupervisorCase(ctx: {
       await ensureAuthenticated(scoped, vault, server)
       const boot = await scoped.bootstrap(true)
       const ok = boot.authenticated === true
-      oracleResults.push({ name: 'authenticated', passed: ok, detail: { initialized: boot.initialized } })
+      oracleResults.push({
+        name: 'authenticated',
+        passed: ok,
+        detail: { initialized: boot.initialized }
+      })
       if (!ok) classification = 'assertion_failed'
       break
     }
@@ -742,7 +761,11 @@ async function runSupervisorCase(ctx: {
     requiredOperationsObserved,
     oraclePassed: allPassed(oracleResults),
     noProcessLeak: true,
-    classification: passed ? 'passed' : classification === 'passed' ? 'oracle_failed' : classification,
+    classification: passed
+      ? 'passed'
+      : classification === 'passed'
+        ? 'oracle_failed'
+        : classification,
     summary,
     oracleResults,
     ledgerOps: ledger.list(caseRunId),
@@ -786,6 +809,7 @@ async function buildOracleResults(input: {
   registry: ProcessRegistry
   artifacts: { projectId?: string; threadId?: string; turnId?: string }
   expectedHtmlFile?: string
+  expectedThreadCore: string
 }): Promise<OracleResult[]> {
   const results: OracleResult[] = []
   results.push(runAgentReportOracle(input.capability))
@@ -812,7 +836,8 @@ async function buildOracleResults(input: {
     threadId: input.manifest.oracle.requireThread ? input.artifacts.threadId : undefined,
     requireAssistantMessage: input.manifest.oracle.requireAssistantMessage,
     requireTurnCompleted: input.manifest.oracle.requireTurnCompleted,
-    turnId: input.artifacts.turnId
+    turnId: input.artifacts.turnId,
+    expectedCoreCode: input.manifest.oracle.requireThread ? input.expectedThreadCore : undefined
   }
   if (httpExpectations.projectId || httpExpectations.threadId) {
     results.push(

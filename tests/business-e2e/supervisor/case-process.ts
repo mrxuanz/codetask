@@ -18,8 +18,8 @@ export type CaseWorkerInput = {
   fixturePath?: string
   timeoutMs: number
   resultPath: string
-  /** Conversation SDK / core used for thread + HTML naming (opencode → opencode.html). */
-  conversationCore?: string
+  /** Selected SUT conversation SDK / core used for thread creation and HTML naming. */
+  conversationCore: string
   expectedHtmlFile?: string
   probeMcpUrl?: string
   probeMcpName?: string
@@ -44,10 +44,7 @@ export async function runCaseWorker(
   const contextPath = join(input.agentRoot, 'worker-context.json')
   writeJson(contextPath, input)
 
-  const workerEntry = join(
-    options.repoRoot,
-    'tests/business-e2e/supervisor/case-worker-main.ts'
-  )
+  const workerEntry = join(options.repoRoot, 'tests/business-e2e/supervisor/case-worker-main.ts')
   const child = spawn(
     process.execPath,
     ['--import', 'tsx', workerEntry, '--context', contextPath],

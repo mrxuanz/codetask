@@ -50,7 +50,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'DRAFT-MULTITURN-001': '草案·多轮确认',
       'G6-001': '笔记搜索·完整闭环',
       'G6-002': '笔记搜索·假完成陷阱',
-      'G8-001': '固定OpenCode链路探测'
+      'G8-001': '所选Provider全链路探测'
     },
     steps: {
       'preflight.start': '预检开始',
@@ -147,7 +147,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'DRAFT-MULTITURN-001': 'Draft·multiturn',
       'G6-001': 'Notes search·happy path',
       'G6-002': 'Notes search·oracle trap',
-      'G8-001': 'Fixed OpenCode chain probe'
+      'G8-001': 'Selected-provider full-chain probe'
     },
     steps: {
       'preflight.start': 'preflight start',
@@ -244,7 +244,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'DRAFT-MULTITURN-001': '草案·多ターン',
       'G6-001': 'ノート検索·ハッピーパス',
       'G6-002': 'ノート検索·オラクルトラップ',
-      'G8-001': '固定OpenCodeチェーン'
+      'G8-001': '選択Providerフルチェーン'
     },
     steps: {
       'preflight.start': '事前チェック開始',

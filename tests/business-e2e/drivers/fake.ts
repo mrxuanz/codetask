@@ -9,11 +9,7 @@ import {
   CHAT_HTML_MARKER,
   htmlFileNameForConversationCore
 } from '../config/sdk-html'
-import {
-  CLI_MCP_ROOT_KEY,
-  PROBE_OK,
-  PROBE_SERVER_NAME
-} from '../config/providers'
+import { CLI_MCP_ROOT_KEY, PROBE_OK, PROBE_SERVER_NAME } from '../config/providers'
 import type { SutCoreCode } from '../config/profiles'
 
 type Push = (type: string, detail?: unknown) => void
@@ -31,6 +27,12 @@ type CollectSnapshot = {
 }
 
 const REFS_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/references')
+
+function selectedConversationCore(input: DriverStartInput): string {
+  const core = input.conversationCore.trim()
+  if (!core) throw new Error('conversation_core_required')
+  return core
+}
 
 /**
  * Deterministic driver used to validate Test MCP + public API surfaces
@@ -54,7 +56,7 @@ export class FakeDriver implements AgentDriver {
       ) {
         const key = `${input.caseId}:${type}`
         const now = Date.now()
-        const last = (FakeDriver.pollLogAt.get(key) ?? 0)
+        const last = FakeDriver.pollLogAt.get(key) ?? 0
         if (now - last < 5_000) return
         FakeDriver.pollLogAt.set(key, now)
       }
@@ -139,7 +141,7 @@ export class FakeDriver implements AgentDriver {
         const thread = (await mcp.callTool('codetask_create_thread', {
           projectId: project.id,
           title: 'fake-thread',
-          coreCode: 'opencode'
+          coreCode: selectedConversationCore(input)
         })) as { id: string }
         push('thread.created', { id: thread.id })
         await mcp.callTool('case_checkpoint', { name: 'thread_created' })
@@ -172,7 +174,7 @@ export class FakeDriver implements AgentDriver {
         })) as { id: string }
         const thread = (await mcp.callTool('codetask_create_thread', {
           projectId: project.id,
-          coreCode: 'opencode'
+          coreCode: selectedConversationCore(input)
         })) as { id: string }
         const started = (await mcp.callTool('codetask_start_turn', {
           threadId: thread.id,
@@ -217,7 +219,7 @@ export class FakeDriver implements AgentDriver {
     const thread = (await mcp.callTool('codetask_create_thread', {
       projectId: project.id,
       title: 'foundation-create-task',
-      coreCode: 'opencode',
+      coreCode: selectedConversationCore(input),
       threadKind: 'create_task'
     })) as { id: string }
     push('thread.created', { id: thread.id })
@@ -548,8 +550,7 @@ export class FakeDriver implements AgentDriver {
     await mcp.callTool('case_checkpoint', { name: 'draft_confirmed_final' })
 
     const jobFromConfirm = this.unwrapJobRecord(confirmFinal)
-    const job =
-      jobFromConfirm ?? (await this.pollLatestJob(mcp, ctx.threadId, push, 180_000))
+    const job = jobFromConfirm ?? (await this.pollLatestJob(mcp, ctx.threadId, push, 180_000))
     const jobId = String(job.id ?? job.jobId ?? '')
     if (!jobId) throw new Error(`job_id_missing:${JSON.stringify(job)}`)
     push('job.ready', { jobId, job })
@@ -900,7 +901,8 @@ export class FakeDriver implements AgentDriver {
       draftRow?.collecting !== true &&
       draftRow?.status !== 'collecting'
     const readyToConfirm =
-      Boolean(draftReviewable) && (leftCollect || (!assistantStillAsking && wizardPhase !== 'collect'))
+      Boolean(draftReviewable) &&
+      (leftCollect || (!assistantStillAsking && wizardPhase !== 'collect'))
 
     return {
       wizardPhase,
@@ -910,7 +912,7 @@ export class FakeDriver implements AgentDriver {
           draftRow?.status === 'collecting' ||
           wizardPhase === 'collect' ||
           wizardPhase === '') &&
-          !leftCollect
+        !leftCollect
       ),
       summaryEmpty,
       assistantStillAsking,
@@ -935,7 +937,11 @@ export class FakeDriver implements AgentDriver {
 
     const missingField = (key: string, aliases: string[]) => {
       const direct = detail[key]
-      if (direct != null && String(direct).trim() !== '' && !(Array.isArray(direct) && direct.length === 0)) {
+      if (
+        direct != null &&
+        String(direct).trim() !== '' &&
+        !(Array.isArray(direct) && direct.length === 0)
+      ) {
         return false
       }
       // Nested payload shapes
@@ -957,9 +963,7 @@ export class FakeDriver implements AgentDriver {
     if (missingField('constraints', ['约束', 'constraint', '不能', '禁止', '依赖'])) {
       gaps.push('constraints')
     }
-    if (
-      missingField('acceptanceCriteria', ['验收', 'acceptance', '通过标准', 'node --test'])
-    ) {
+    if (missingField('acceptanceCriteria', ['验收', 'acceptance', '通过标准', 'node --test'])) {
       gaps.push('acceptance')
     }
 
@@ -984,8 +988,10 @@ export class FakeDriver implements AgentDriver {
   private assistantLooksLikeFollowUp(text: string): boolean {
     const t = text.trim()
     if (!t) return false
-    return /[？?]/.test(t) ||
+    return (
+      /[？?]/.test(t) ||
       /(请(?:告诉|说明|提供|确认|补充)|还需要|还缺|能否|可以再说|具体.*(什么|哪些)|你希望)/.test(t)
+    )
   }
 
   private async latestAssistantText(mcp: McpToolClient, threadId: string): Promise<string> {
@@ -1036,9 +1042,7 @@ export class FakeDriver implements AgentDriver {
       if (match) return match
     }
     return (
-      rows.find(
-        (row) => row.collecting !== true && row.status !== 'collecting' && row.messageId
-      ) ??
+      rows.find((row) => row.collecting !== true && row.status !== 'collecting' && row.messageId) ??
       rows[0] ??
       null
     )
@@ -1157,7 +1161,10 @@ export class FakeDriver implements AgentDriver {
           return job
         }
         // Tree claimed ready but check failed → retry planner if allowed.
-        if (retries < maxRetries && (await this.tryContinuePlan(mcp, jobId, job, push, retries + 1))) {
+        if (
+          retries < maxRetries &&
+          (await this.tryContinuePlan(mcp, jobId, job, push, retries + 1))
+        ) {
           retries += 1
           await new Promise((resolve) => setTimeout(resolve, 3000))
           continue
@@ -1169,7 +1176,10 @@ export class FakeDriver implements AgentDriver {
         // Detected failure: API check, then up to maxRetries continue (OpenCode planner again).
         const check = await this.checkPlanViaApi(mcp, threadId, jobId, push)
         push('plan.check', { outcome: 'failed', ...check, retries, status })
-        if (retries < maxRetries && (await this.tryContinuePlan(mcp, jobId, job, push, retries + 1))) {
+        if (
+          retries < maxRetries &&
+          (await this.tryContinuePlan(mcp, jobId, job, push, retries + 1))
+        ) {
           retries += 1
           await new Promise((resolve) => setTimeout(resolve, 3000))
           continue
@@ -1262,7 +1272,9 @@ export class FakeDriver implements AgentDriver {
       if (Array.isArray(obj.drafts)) list = obj.drafts
       else if (Array.isArray(obj.data)) list = obj.data
     }
-    const rows = list.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    const rows = list.filter(
+      (item): item is Record<string, unknown> => !!item && typeof item === 'object'
+    )
     const preferred =
       rows.find(
         (row) =>
@@ -1422,7 +1434,7 @@ export class FakeDriver implements AgentDriver {
     const thread = (await mcp.callTool('codetask_create_thread', {
       projectId: project.id,
       title: `recovery-${input.caseId}`,
-      coreCode: 'opencode'
+      coreCode: selectedConversationCore(input)
     })) as { id: string }
     push('context', { projectId: project.id, threadId: thread.id })
 
@@ -1525,7 +1537,7 @@ export class FakeDriver implements AgentDriver {
     await mcp.callTool('report_case_result', {
       caseId: input.caseId,
       status: 'completed',
-      summary: 'Fake fixed-opencode full chain probed Draft/Plan/Job/Realtime surfaces',
+      summary: `Fake ${selectedConversationCore(input)} full chain probed Draft/Plan/Job/Realtime surfaces`,
       observations: [{ step: 'full-chain', probes }],
       artifacts: { projectId: ctx.projectId, threadId: ctx.threadId }
     })
@@ -1537,7 +1549,7 @@ export class FakeDriver implements AgentDriver {
     mcp: McpToolClient,
     push: Push
   ): Promise<void> {
-    const core = (input.conversationCore?.trim() || 'opencode') as SutCoreCode
+    const core = selectedConversationCore(input) as SutCoreCode
     const rootKey = CLI_MCP_ROOT_KEY[core] ?? 'mcp'
     const probeUrl = input.probeMcpUrl?.replace(/\/$/, '') || ''
     const probeName = input.probeMcpName || PROBE_SERVER_NAME
@@ -1574,9 +1586,7 @@ export class FakeDriver implements AgentDriver {
     const roles = ['conversation', 'task', 'verification'] as const
     for (const role of roles) {
       const roleMap =
-        base[role] && typeof base[role] === 'object'
-          ? (base[role] as Record<string, unknown>)
-          : {}
+        base[role] && typeof base[role] === 'object' ? (base[role] as Record<string, unknown>) : {}
       const fragment =
         roleMap[core] && typeof roleMap[core] === 'object'
           ? (roleMap[core] as Record<string, unknown>)
@@ -1685,7 +1695,7 @@ export class FakeDriver implements AgentDriver {
     mcp: McpToolClient,
     push: Push
   ): Promise<void> {
-    const core = input.conversationCore?.trim() || 'opencode'
+    const core = selectedConversationCore(input)
     const project = (await mcp.callTool('codetask_create_project', {
       workspaceRoot: input.workspaceRoot,
       title: 'job-chat-readonly'
@@ -1761,9 +1771,8 @@ export class FakeDriver implements AgentDriver {
     mcp: McpToolClient,
     push: Push
   ): Promise<void> {
-    const core = input.conversationCore?.trim() || 'opencode'
-    const fileName =
-      input.expectedHtmlFile?.trim() || htmlFileNameForConversationCore(core)
+    const core = selectedConversationCore(input)
+    const fileName = input.expectedHtmlFile?.trim() || htmlFileNameForConversationCore(core)
     const marker =
       typeof input.fixture?.expect === 'object' &&
       input.fixture.expect &&
@@ -1868,7 +1877,7 @@ export class FakeDriver implements AgentDriver {
     const thread = (await mcp.callTool('codetask_create_thread', {
       projectId: project.id,
       title,
-      coreCode: 'opencode',
+      coreCode: selectedConversationCore(input),
       threadKind: 'create_task'
     })) as { id: string }
     push('thread.created', { id: thread.id })

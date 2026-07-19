@@ -5,10 +5,7 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { progress } from '../reports/progress'
-import {
-  buildCreateHtmlUserMessage,
-  htmlFileNameForConversationCore
-} from '../config/sdk-html'
+import { buildCreateHtmlUserMessage, htmlFileNameForConversationCore } from '../config/sdk-html'
 
 const nodeRequire = createRequire(import.meta.url)
 const crossSpawn = nodeRequire('cross-spawn') as typeof spawn
@@ -107,6 +104,16 @@ export class OpenCodeDriver implements AgentDriver {
     }
     progress(input.caseId, 'driver.start', { driver: this.name, timeoutMs: input.timeoutMs })
 
+    const conversationCore = input.conversationCore.trim()
+    if (!conversationCore) {
+      return {
+        ok: false,
+        classification: 'runner_crash',
+        error: 'conversation_core_required',
+        events
+      }
+    }
+
     mkdirSync(input.agentRoot, { recursive: true })
     const skillText = input.skillPaths
       .filter((path) => existsSync(path))
@@ -118,8 +125,7 @@ export class OpenCodeDriver implements AgentDriver {
         ? input.fixture.message
         : input.caseId === 'CHAT-HTML-001'
           ? buildCreateHtmlUserMessage(
-              input.expectedHtmlFile?.trim() ||
-                htmlFileNameForConversationCore(input.conversationCore?.trim() || 'opencode')
+              input.expectedHtmlFile?.trim() || htmlFileNameForConversationCore(conversationCore)
             )
           : '请用中文简短回答：1+1等于几？'
 
@@ -144,6 +150,7 @@ export class OpenCodeDriver implements AgentDriver {
       '## Runtime context',
       `- caseId: ${input.caseId}`,
       `- workspaceRoot to use when creating project: ${input.workspaceRoot}`,
+      `- conversationCore to use for every CodeTask thread: ${conversationCore}`,
       input.caseId.startsWith('G4') || input.caseId.startsWith('DRAFT')
         ? '- Use case_next_fixture for user messages; do not invent later phases early.'
         : `- user message for the conversation turn: ${message}`,
@@ -310,10 +317,13 @@ function waitForOpencodeUrl(
     let output = ''
     let stdoutBuffer = ''
     let settled = false
-    const timer = setTimeout(() => {
-      stopTree(proc)
-      fail(new Error(`timeout:opencode_server_start`))
-    }, Math.min(timeoutMs, 60_000))
+    const timer = setTimeout(
+      () => {
+        stopTree(proc)
+        fail(new Error(`timeout:opencode_server_start`))
+      },
+      Math.min(timeoutMs, 60_000)
+    )
 
     const fail = (error: Error): void => {
       if (settled) return
