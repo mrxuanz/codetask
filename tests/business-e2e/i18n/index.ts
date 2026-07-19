@@ -1,14 +1,14 @@
 import { MESSAGES, type Lang, type MessageBag } from './messages'
 
-let currentLang: Lang = 'zh'
+let currentLang: Lang = 'en'
 
 export function resolveLang(raw?: string | null): Lang {
-  const v = String(raw ?? process.env.BUSINESS_E2E_LANG ?? 'zh')
+  const v = String(raw ?? process.env.BUSINESS_E2E_LANG ?? 'en')
     .trim()
     .toLowerCase()
-  if (v.startsWith('en')) return 'en'
+  if (v.startsWith('zh') || v.startsWith('cn')) return 'zh'
   if (v.startsWith('ja') || v.startsWith('jp')) return 'ja'
-  return 'zh'
+  return 'en'
 }
 
 export function setLang(lang: Lang | string): Lang {
@@ -21,7 +21,7 @@ export function getLang(): Lang {
 }
 
 export function messages(): MessageBag {
-  return MESSAGES[currentLang] ?? MESSAGES.zh
+  return MESSAGES[currentLang] ?? MESSAGES.en
 }
 
 export function tPart(part: string): string {
