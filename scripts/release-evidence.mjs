@@ -12,24 +12,25 @@ import {
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { resolveInvocation } from './run-and-record.mjs'
 
 const SCHEMA_VERSION = 1
 const REQUIRED_PLATFORMS = [
+  'linux-amd64',
   'linux-arm64',
-  'linux-x64',
+  'macos-amd64',
   'macos-arm64',
-  'macos-x64',
-  'windows-arm64',
-  'windows-x64'
+  'windows-amd64',
+  'windows-arm64'
 ]
 const ARTIFACT_EXTENSIONS = ['.exe', '.deb', '.AppImage', '.dmg', '.zip', '.tar.gz']
 const PLATFORM_ARTIFACT_TOKEN = {
   'linux-arm64': '-linux-arm64',
-  'linux-x64': '-linux-x64',
+  'linux-amd64': '-linux-amd64',
   'macos-arm64': '-macos-arm64',
-  'macos-x64': '-macos-x64',
+  'macos-amd64': '-macos-amd64',
   'windows-arm64': '-windows-arm64',
-  'windows-x64': '-windows-x64'
+  'windows-amd64': '-windows-amd64'
 }
 
 function values(argv, name) {
@@ -72,8 +73,11 @@ function writeJson(path, value) {
 }
 
 function commandVersion(command, args = ['--version']) {
-  const actual = process.platform === 'win32' && command === 'npm' ? 'npm.cmd' : command
-  const result = spawnSync(actual, args, { encoding: 'utf8', windowsHide: true })
+  const invocation = resolveInvocation(process.platform, process.execPath, command, args)
+  const result = spawnSync(invocation.command, invocation.args, {
+    encoding: 'utf8',
+    windowsHide: true
+  })
   if (result.status !== 0) throw new Error(`release_evidence.toolchain_unavailable:${command}`)
   return result.stdout.trim().split(/\r?\n/u)[0]
 }

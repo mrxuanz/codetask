@@ -43,6 +43,7 @@ on:
 
 jobs:
   build:
+    name: package
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 45
     steps:
@@ -87,6 +88,16 @@ jobs:
         name: Smoke unpacked app
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-smoke.log -- node scripts/package-smoke.mjs --dist dist
 
+      - if: ${{ inputs.release-version != '' }}
+        name: Normalize public release artifact names
+        run: >-
+          node scripts/run-and-record.mjs
+          --out release-evidence/${{ inputs.artifact-name }}/normalize-artifacts.log
+          -- node scripts/normalize-release-artifacts.mjs
+          --dist dist
+          --platform ${{ inputs.artifact-name }}
+          --version ${{ inputs.release-version }}
+
       - name: Smoke standalone Node service without a display
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/standalone-smoke.log -- npm run smoke:standalone:ci
 
@@ -118,6 +129,7 @@ jobs:
           --log release-evidence/${{ inputs.artifact-name }}/build-sandbox.log
           --log release-evidence/${{ inputs.artifact-name }}/build-app.log
           --log release-evidence/${{ inputs.artifact-name }}/package.log
+          --log release-evidence/${{ inputs.artifact-name }}/normalize-artifacts.log
           --log release-evidence/${{ inputs.artifact-name }}/package-unpacked.log
           --log release-evidence/${{ inputs.artifact-name }}/package-smoke.log
           --log release-evidence/${{ inputs.artifact-name }}/standalone-smoke.log
