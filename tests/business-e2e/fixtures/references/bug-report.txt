@@ -1,0 +1,5 @@
+BUG REPORT
+Title: Notes search ignores body matches
+Steps: search for ALPHA from body-only note
+Expected: note-3 returned
+Actual: empty list (before repair)

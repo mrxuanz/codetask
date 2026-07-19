@@ -1,0 +1,13 @@
+{
+  "titleText": "Orders",
+  "numbers": [
+    1
+  ],
+  "columns": [
+    "id",
+    "amount"
+  ],
+  "colorLabels": [
+    "green"
+  ]
+}
