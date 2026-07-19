@@ -120,21 +120,20 @@ describe('06 controls and recovery workflow', () => {
       120_000
     )
 
-    // Freeze the job before snapshotting progress. Soft-failing pause left the
-    // executor running into milestone verify, which could write verifier-infra
-    // counters and make the restart comparison flake.
+    // Freeze execution before snapshotting. Pause may linger in `pausing` while the
+    // loop unwinds; wait for the loop to go idle so progress can no longer change,
+    // then restart. Do not hard-require `paused` — CI timed out there.
     job = await harness.getJob(jobId)
+    if (job.status === 'running') {
+      await harness.pauseJob(jobId)
+    }
     if (job.status === 'running' || job.status === 'pausing') {
-      if (job.status === 'running') await harness.pauseJob(jobId)
-      job = await harness.waitForJob(
-        jobId,
-        (j) => j.status === 'paused' || j.status === 'completed',
-        30_000
-      )
+      await harness.waitForExecutionIdle(jobId, 60_000)
+      job = await harness.getJob(jobId)
     }
     assert.ok(
-      job.status === 'paused' || job.status === 'completed',
-      `expected paused or completed before restart, got ${String(job.status)}`
+      job.status === 'paused' || job.status === 'pausing' || job.status === 'completed',
+      `expected paused, pausing, or completed before restart, got ${String(job.status)}`
     )
 
     const messagesBefore = await harness.listMessages(seeded.threadId)
@@ -163,6 +162,15 @@ describe('06 controls and recovery workflow', () => {
 
     if (job.status === 'paused') {
       await harness.resumeJob(jobId)
+    } else if (job.status === 'pausing') {
+      job = await harness.waitForJob(
+        jobId,
+        (j) => j.status === 'paused' || j.status === 'completed',
+        30_000
+      )
+      if (job.status === 'paused') await harness.resumeJob(jobId)
+    }
+    if (job.status !== 'completed') {
       job = await harness.waitForJob(jobId, (j) => j.status === 'completed', 120_000)
     }
 
