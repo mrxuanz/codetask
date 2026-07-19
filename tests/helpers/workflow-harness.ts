@@ -183,7 +183,8 @@ export class WorkflowHarness {
     for (const row of runningJobs) {
       await clearExecutionLease(row.id)
     }
-    await reconcileOrphanRunningJobsOnStartup()
+    // Wire test doubles before startup reconcile: running jobs may auto-resume
+    // immediately, and must not execute against unbound agent providers.
     initConversationMcpBackend(port)
     setCoreAvailabilityStubForTests((code) => ({
       code,
@@ -196,6 +197,7 @@ export class WorkflowHarness {
     }))
     this.wireFakeAgents()
     setTaskEvidenceWaitTimeoutForTests(3_000)
+    await reconcileOrphanRunningJobsOnStartup()
   }
 
   private wireFakeAgents(): void {

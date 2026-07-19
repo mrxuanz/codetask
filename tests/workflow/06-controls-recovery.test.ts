@@ -120,22 +120,29 @@ describe('06 controls and recovery workflow', () => {
       120_000
     )
 
+    // Freeze the job before snapshotting progress. Soft-failing pause left the
+    // executor running into milestone verify, which could write verifier-infra
+    // counters and make the restart comparison flake.
+    job = await harness.getJob(jobId)
+    if (job.status === 'running' || job.status === 'pausing') {
+      if (job.status === 'running') await harness.pauseJob(jobId)
+      job = await harness.waitForJob(
+        jobId,
+        (j) => j.status === 'paused' || j.status === 'completed',
+        30_000
+      )
+    }
+    assert.ok(
+      job.status === 'paused' || job.status === 'completed',
+      `expected paused or completed before restart, got ${String(job.status)}`
+    )
+
     const messagesBefore = await harness.listMessages(seeded.threadId)
     const threadBefore = await harness.getThread(seeded.threadId)
     const progressBefore = job.taskProgress as {
       repairGenerations?: Record<string, number>
       verificationAttempts?: Record<string, number>
       verificationBundleHashes?: Record<string, string>
-    }
-
-    job = await harness.getJob(jobId)
-    if (job.status === 'running') {
-      try {
-        await harness.pauseJob(jobId)
-        job = await harness.waitForJob(jobId, (j) => j.status === 'paused', 15_000)
-      } catch {
-        job = await harness.getJob(jobId)
-      }
     }
 
     await harness.simulateServiceRestart()

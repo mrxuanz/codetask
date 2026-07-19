@@ -81,6 +81,13 @@ test('release validates its source and requires all six native target builds', (
   assert.doesNotMatch(releaseWorkflow, /name: (?:linux|macos|windows)-x64/u)
 })
 
+test('GitHub Release publish avoids basename-colliding evidence logs', () => {
+  assert.match(releaseWorkflow, /dist\/legacy-release-report\.json/u)
+  assert.match(releaseWorkflow, /name: release-evidence-bundle/u)
+  assert.doesNotMatch(releaseWorkflow, /dist\/release-evidence\/\*\*\/\*\.log/u)
+  assert.doesNotMatch(releaseWorkflow, /dist\/release-evidence\/\*\*\/\*\.manifest\.json/u)
+})
+
 test('Rust workspace tests are serialized without skipping failures', () => {
   assert.ok(ciWorkflow.includes(serialRustTest))
   assert.ok(sandboxWorkflow.includes(serialRustTest))
