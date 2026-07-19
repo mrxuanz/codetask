@@ -91,7 +91,11 @@ export async function startTestMcpServer(options: {
     const method = body.method ?? ''
 
     if (method === 'initialize') {
-      if (!capabilityId || !capabilities.get(capabilityId) || capabilities.get(capabilityId)?.revoked) {
+      if (
+        !capabilityId ||
+        !capabilities.get(capabilityId) ||
+        capabilities.get(capabilityId)?.revoked
+      ) {
         respond({
           jsonrpc: '2.0',
           id,

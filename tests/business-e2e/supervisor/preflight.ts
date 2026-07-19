@@ -9,10 +9,7 @@ import { progress } from '../reports/progress'
  * 2) always wipe test DB + .runtime (no carry-over jobs/drafts)
  * --keep-runtime is ignored for wipe (debug copies must be made before rerun).
  */
-export function runPreflightCleanup(options: {
-  repoRoot: string
-  keepRuntime?: boolean
-}): void {
+export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: boolean }): void {
   const e2eRoot = join(options.repoRoot, 'tests/business-e2e')
   const runtimeRoot = join(e2eRoot, '.runtime')
   const scratchDirs = [runtimeRoot, join(e2eRoot, '.tmp'), join(e2eRoot, '.cache')]
@@ -97,7 +94,7 @@ function wipeTestDatabases(e2eRoot: string): string[] {
 
 function findDbFiles(root: string): string[] {
   const out: string[] = []
-  const walk = (dir: string) => {
+  const walk = (dir: string): void => {
     if (!existsSync(dir)) return
     let entries: string[] = []
     try {
@@ -138,7 +135,7 @@ function findDbFiles(root: string): string[] {
 
 function findNamedDirs(root: string, names: Set<string>): string[] {
   const out: string[] = []
-  const walk = (dir: string, depth: number) => {
+  const walk = (dir: string, depth: number): void => {
     if (!existsSync(dir) || depth > 8) return
     let entries: string[] = []
     try {
