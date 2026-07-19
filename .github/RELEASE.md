@@ -3,9 +3,14 @@
 The Release workflow builds the Electron application and the ncc + Node SEA standalone
 service natively on six targets:
 
-- Linux x64 and ARM64
-- macOS Intel x64 and Apple Silicon ARM64
-- Windows x64 and ARM64
+- Linux AMD64 and ARM64
+- macOS AMD64 (Intel) and ARM64 (Apple Silicon)
+- Windows AMD64 and ARM64
+
+Public artifact names use only the operating system and architecture, for example
+`codetask-0.1.0-beta.1-linux-amd64.AppImage` and
+`codetask-server-0.1.0-beta.1-windows-arm64.tar.gz`. GitHub runner image labels such as
+`ubuntu-24.04` are not included in job display names or published filenames.
 
 All CI and release jobs read Node `24` from `.node-version`. The major version is pinned
 while `actions/setup-node` selects the newest available Node 24 LTS patch.

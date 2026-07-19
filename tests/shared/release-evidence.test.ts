@@ -9,11 +9,11 @@ const script = resolve('scripts/release-evidence.mjs')
 const commit = '0123456789abcdef0123456789abcdef01234567'
 const platforms = [
   'linux-arm64',
-  'linux-x64',
+  'linux-amd64',
   'macos-arm64',
-  'macos-x64',
+  'macos-amd64',
   'windows-arm64',
-  'windows-x64'
+  'windows-amd64'
 ]
 
 function run(args: string[], cwd = resolve('.')): ReturnType<typeof spawnSync> {
@@ -114,7 +114,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     assert.equal(parsed.status, 'passed')
     assert.equal(parsed.manifests.length, 7)
 
-    writeFileSync(join(root, 'codetask-0.1.0-linux-x64.AppImage'), 'tampered artifact')
+    writeFileSync(join(root, 'codetask-0.1.0-linux-amd64.AppImage'), 'tampered artifact')
     const rejected = run([
       'verify',
       '--root',
