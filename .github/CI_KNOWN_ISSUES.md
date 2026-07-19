@@ -34,7 +34,7 @@ reviewable.
 ## Warning baseline
 
 After excluding generated runtime data and the tracked temporary query helper,
-the clean baseline contains 458 non-blocking ESLint warnings. CI permits the
+the clean baseline contains 459 non-blocking ESLint warnings. CI permits the
 count to decrease but fails if it grows above that baseline.
 
 ## BUSINESS-003: control-plane exact optional property diagnostics
