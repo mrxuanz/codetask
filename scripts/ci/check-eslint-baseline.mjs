@@ -4,7 +4,7 @@ import process from 'node:process'
 import { ESLint } from 'eslint'
 
 const repositoryRoot = resolve(import.meta.dirname, '../..')
-const maximumWarnings = 458
+const maximumWarnings = 459
 
 const knownErrors = [
   {

@@ -8,8 +8,8 @@ service natively on six targets:
 - Windows AMD64 and ARM64
 
 Public artifact names use only the operating system and architecture, for example
-`codetask-0.1.0-beta.1-linux-amd64.AppImage` and
-`codetask-server-0.1.0-beta.1-windows-arm64.tar.gz`. GitHub runner image labels such as
+`codetask-0.1.0-beta-linux-amd64.AppImage` and
+`codetask-server-0.1.0-beta-windows-arm64.tar.gz`. GitHub runner image labels such as
 `ubuntu-24.04` are not included in job display names or published filenames.
 
 All CI and release jobs read Node `24` from `.node-version`. The major version is pinned
@@ -17,14 +17,10 @@ while `actions/setup-node` selects the newest available Node 24 LTS patch.
 
 ## Manual release
 
-Run the workflow from the commit that should be released and enter a new `v*` tag. If
-the tag already exists, it must point to that exact commit. The workflow intentionally
-rejects an older tag that points elsewhere, because building current code under an old
-source tag would make the release unverifiable.
-
-For example, `v0.1.0-beta` points to a commit from before the release evidence and SEA
-packaging scripts existed. Leave that tag unchanged and create a new tag such as
-`v0.1.0-beta.1` from the current release-capable commit.
+Run the workflow from the commit that should be released and enter a new `v*` tag such as
+`v0.1.0-beta`. If the tag already exists, it must point to that exact commit. The workflow
+intentionally rejects an older tag that points elsewhere, because building current code
+under an old source tag would make the release unverifiable.
 
 Publishing is allowed only after the test gate, all six native package smokes, all six
 SEA service smokes, and the release evidence-chain verification pass.
