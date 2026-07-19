@@ -76,16 +76,13 @@ Examples:
   npm run business:e2e:settings-mcp
   npm run business:e2e:phases
   npm run business:e2e -- --providers opencode --part conversation,draft-job,settings-mcp
+  npm run business:e2e -- --providers claude --part conversation
+  npm run business:e2e -- --providers codex --part conversation
   npm run business:e2e -- --providers cursor,opencode --case chat-basic --lang en
   npm run business:e2e -- --providers all --suite both
+  npm run business:e2e -- --providers opencode,cursor,claude,codex --suite both
 `)
     process.exit(0)
-  }
-  if (hasFlag(argv, '--enable-provider') && readFlag(argv, '--enable-provider') === 'codex') {
-    if (process.env.BUSINESS_ALLOW_CODEX !== '1') {
-      console.log(JSON.stringify({ skipped: true, reason: 'provider_disabled', provider: 'codex' }))
-      process.exit(0)
-    }
   }
 
   const providerQueue = resolveProviderQueue({

@@ -317,7 +317,9 @@ export function formatCaseList(): string {
     '  smoke | conversation | draft-job | both | phases | all',
     '',
     'Providers (--providers):',
-    '  opencode | cursor | claude | cursor,opencode | all',
+    '  opencode | cursor | claude | codex | all',
+    '  all = opencode,cursor,claude  (codex: pass explicitly)',
+    '  naming a provider opts in (no BUSINESS_ALLOW_* env)',
     '',
     'Language: --lang zh|en|ja  (or BUSINESS_E2E_LANG)'
   ]
