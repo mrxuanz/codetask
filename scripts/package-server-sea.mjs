@@ -49,11 +49,11 @@ function requireFile(path, label) {
 }
 
 function runtimePlatform() {
-  if (process.platform === 'linux' && process.arch === 'x64') return 'linux-x64'
+  if (process.platform === 'linux' && process.arch === 'x64') return 'linux-amd64'
   if (process.platform === 'linux' && process.arch === 'arm64') return 'linux-arm64'
-  if (process.platform === 'darwin' && process.arch === 'x64') return 'macos-x64'
+  if (process.platform === 'darwin' && process.arch === 'x64') return 'macos-amd64'
   if (process.platform === 'darwin' && process.arch === 'arm64') return 'macos-arm64'
-  if (process.platform === 'win32' && process.arch === 'x64') return 'windows-x64'
+  if (process.platform === 'win32' && process.arch === 'x64') return 'windows-amd64'
   if (process.platform === 'win32' && process.arch === 'arm64') return 'windows-arm64'
   throw new Error(`server_sea.unsupported_runtime:${process.platform}-${process.arch}`)
 }

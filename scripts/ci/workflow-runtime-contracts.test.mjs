@@ -54,17 +54,20 @@ test('release validates its source and requires all six native target builds', (
   assert.match(releaseWorkflow, /scripts\/resolve-release-source\.mjs/u)
   assert.match(releaseWorkflow, /target_commitish: \$\{\{ needs\.prepare\.outputs\.sha \}\}/u)
   const targets = [
-    ['ubuntu-24.04', 'linux-x64'],
+    ['ubuntu-24.04', 'linux-amd64'],
     ['ubuntu-24.04-arm', 'linux-arm64'],
-    ['macos-15-intel', 'macos-x64'],
+    ['macos-15-intel', 'macos-amd64'],
     ['macos-15', 'macos-arm64'],
-    ['windows-2025', 'windows-x64'],
+    ['windows-2025', 'windows-amd64'],
     ['windows-11-arm', 'windows-arm64']
   ]
   for (const [runner, platform] of targets) {
     assert.ok(releaseWorkflow.includes(`runner: ${runner}`))
     assert.ok(releaseWorkflow.includes(`name: ${platform}`))
   }
+  assert.match(releaseWorkflow, /name: \$\{\{ matrix\.name \}\}/u)
+  assert.match(buildWorkflow, /name: Normalize public release artifact names/u)
+  assert.doesNotMatch(releaseWorkflow, /name: (?:linux|macos|windows)-x64/u)
 })
 
 test('Rust workspace tests are serialized without skipping failures', () => {
