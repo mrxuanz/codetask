@@ -32,9 +32,15 @@ npm run business:e2e:both
 npm run business:e2e:phases
 
 npm run business:e2e -- --providers opencode --part conversation,draft-job,settings-mcp
+npm run business:e2e -- --providers claude --part conversation,draft-job,settings-mcp
+npm run business:e2e -- --providers codex --part conversation,draft-job,settings-mcp
 npm run business:e2e -- --providers cursor,opencode --case settings-mcp-probe
 npm run business:e2e -- --providers all --suite both --lang en
+npm run business:e2e -- --providers opencode,cursor,claude,codex --suite both
 ```
+
+Naming a provider in `--providers` (or a fixed `--profile`) opts it in — no `BUSINESS_ALLOW_*` env.
+`all` = opencode + cursor + claude; add `codex` explicitly when needed.
 
 ## Phase 3 registration (short)
 

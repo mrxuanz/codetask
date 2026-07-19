@@ -1,6 +1,9 @@
 /**
  * --providers CLI: single / comma-list / all → fixed SUT role profiles.
  * Aliases: cursor → cursorcli, claude → claude-code.
+ *
+ * Naming a provider in `--providers` (or a fixed `--profile`) is the opt-in;
+ * no BUSINESS_ALLOW_* env vars. `all` = opencode+cursor+claude (not codex).
  */
 
 import {
@@ -27,6 +30,7 @@ const ALIAS_TO_CORE: Record<ProviderAlias, SutCoreCode> = {
   codex: 'codex'
 }
 
+/** `all` excludes codex — pass `--providers ...,codex` to include it. */
 const DEFAULT_ALL: ProviderAlias[] = ['opencode', 'cursor', 'claude']
 
 export function normalizeProviderAlias(raw: string): ProviderAlias {
@@ -51,16 +55,6 @@ export function parseProvidersList(raw: string | undefined): ProviderAlias[] | n
   return parts.map(normalizeProviderAlias)
 }
 
-function skipReasonForAlias(alias: ProviderAlias): string | undefined {
-  if (alias === 'codex' && process.env.BUSINESS_ALLOW_CODEX !== '1') {
-    return 'provider_disabled:codex'
-  }
-  if (alias === 'claude' && process.env.BUSINESS_ALLOW_CLAUDE !== '1') {
-    return 'provider_disabled:claude'
-  }
-  return undefined
-}
-
 function aliasForCore(core: string): ProviderAlias {
   if (core === 'cursorcli') return 'cursor'
   if (core === 'claude-code') return 'claude'
@@ -71,6 +65,7 @@ function aliasForCore(core: string): ProviderAlias {
 /**
  * Resolve run queue. `--providers` wins over `--profile`.
  * When neither is set, default to a single opencode slot.
+ * Explicit provider/profile selection runs immediately (no env gate).
  */
 export function resolveProviderQueue(input: {
   providers?: string
@@ -83,8 +78,7 @@ export function resolveProviderQueue(input: {
       return {
         alias,
         core,
-        profile: fixedProfileForCore(core),
-        skipReason: skipReasonForAlias(alias)
+        profile: fixedProfileForCore(core)
       }
     })
   }
@@ -95,8 +89,7 @@ export function resolveProviderQueue(input: {
     {
       alias,
       core: ALIAS_TO_CORE[alias],
-      profile,
-      skipReason: skipReasonForAlias(alias)
+      profile
     }
   ]
 }
