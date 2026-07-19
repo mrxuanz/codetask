@@ -418,6 +418,90 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     },
     fixture: 'conversation/basic-zh.json'
   },
+  'CHAT-HTML-001': {
+    caseId: 'CHAT-HTML-001',
+    gate: 'G3',
+    title: 'conversation creates SDK-named HTML file then Node oracle checks',
+    driver: 'fake',
+    skills: ['common-blackbox', 'project-thread', 'conversation-create-html'],
+    allowedTools: [
+      'codetask_create_project',
+      'codetask_create_thread',
+      'codetask_get_thread',
+      'codetask_list_cores',
+      'codetask_start_turn',
+      'codetask_get_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
+      'case_checkpoint',
+      'report_case_result'
+    ],
+    requiredOperations: [
+      'mcp.codetask_create_project',
+      'mcp.codetask_create_thread',
+      'mcp.codetask_start_turn',
+      'case.report_result'
+    ],
+    oracle: {
+      requireProject: true,
+      requireThread: true,
+      requireAssistantMessage: true,
+      requireTurnCompleted: true
+    },
+    fixture: 'conversation/create-html.json',
+    workspaceFixture: 'empty-project',
+    // Wait until turn/API terminal; no worker kill timer.
+    timeoutMs: 0
+  },
+  'JOB-CHAT-RO-001': {
+    caseId: 'JOB-CHAT-RO-001',
+    gate: 'G6',
+    title:
+      'phase-2 thicken: task1 running + task2 + chat reads job dir as readonly',
+    driver: 'fake',
+    skills: ['common-blackbox', 'project-thread', 'job-chat-readonly'],
+    allowedTools: [
+      'codetask_create_project',
+      'codetask_create_thread',
+      'codetask_get_thread',
+      'codetask_start_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
+      'codetask_get_latest_job',
+      'codetask_get_job',
+      'case_checkpoint',
+      'report_case_result'
+    ],
+    requiredOperations: [
+      'mcp.codetask_create_project',
+      'mcp.codetask_create_thread',
+      'case.report_result'
+    ],
+    oracle: { requireProject: true, requireThread: true },
+    workspaceFixture: 'empty-project',
+    timeoutMs: 300_000
+  },
+  'SETTINGS-MCP-001': {
+    caseId: 'SETTINGS-MCP-001',
+    gate: 'G2',
+    title:
+      'phase-3: register business-e2e-probe into conversation/task/verification MCP settings',
+    driver: 'fake',
+    skills: ['common-blackbox', 'settings-mcp-probe'],
+    allowedTools: [
+      'codetask_get_mcp_settings',
+      'codetask_put_mcp_settings',
+      'case_checkpoint',
+      'report_case_result'
+    ],
+    requiredOperations: [
+      'mcp.codetask_get_mcp_settings',
+      'mcp.codetask_put_mcp_settings',
+      'case.report_result'
+    ],
+    oracle: {},
+    timeoutMs: 120_000
+  },
   'FOUNDATION-FAKE-001': {
     caseId: 'FOUNDATION-FAKE-001',
     gate: 'foundation',
@@ -613,11 +697,17 @@ export function resolveCaseIds(options: {
   if (options.gate === 'smoke') return [...SMOKE_CASES]
   if (options.gate === 'foundation') return ['FOUNDATION-FAKE-001']
   if (options.gate === 'draft-core') return [...DRAFT_CORE_CASES]
-  if (options.gate === 'conversation' || options.gate === 'chat') return ['G3-001']
+  if (options.gate === 'conversation' || options.gate === 'chat') return ['G3-001', 'CHAT-HTML-001']
   if (options.gate === 'draft-job' || options.gate === 'draft' || options.gate === 'job') {
-    return ['G6-001']
+    return ['G6-001', 'JOB-CHAT-RO-001']
   }
-  if (options.gate === 'both' || options.gate === 'a-b') return ['G3-001', 'G6-001']
+  if (options.gate === 'settings-mcp' || options.gate === 'mcp') return ['SETTINGS-MCP-001']
+  if (options.gate === 'both' || options.gate === 'a-b') {
+    return ['G3-001', 'CHAT-HTML-001', 'G6-001', 'JOB-CHAT-RO-001']
+  }
+  if (options.gate === 'phases') {
+    return ['G3-001', 'CHAT-HTML-001', 'G6-001', 'JOB-CHAT-RO-001', 'SETTINGS-MCP-001']
+  }
   if (options.gate === 'fixed-opencode-full') {
     return [
       ...SMOKE_CASES,
