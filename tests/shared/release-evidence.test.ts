@@ -18,14 +18,22 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     const lockfile = join(root, 'package-lock.json')
     const testLog = join(root, 'test-gate.log')
     const smokeLog = join(root, 'package-smoke.log')
+    const seaSmokeLog = join(root, 'server-sea-smoke.log')
     const buildLog = join(root, 'build.log')
     writeFileSync(lockfile, '{"lockfileVersion":3}\n')
     writeFileSync(testLog, 'all release tests passed\n')
     writeFileSync(smokeLog, '{"ok":true,"health":{"health":"ok"}}\n')
+    writeFileSync(seaSmokeLog, '{"ok":true,"mode":"sea","health":{"health":"ok"}}\n')
     writeFileSync(buildLog, 'build passed\n')
     writeFileSync(join(root, 'codetask-0.1.0-linux-x64.AppImage'), 'linux application artifact')
     writeFileSync(join(root, 'codetask-0.1.0-macos-arm64.dmg'), 'macos application artifact')
     writeFileSync(join(root, 'codetask-0.1.0-windows-x64.exe'), 'windows application artifact')
+    for (const platform of ['linux-x64', 'macos-arm64', 'windows-x64']) {
+      writeFileSync(
+        join(root, `codetask-server-0.1.0-${platform}.tar.gz`),
+        `${platform} sea service artifact`
+      )
+    }
 
     const testOutput = join(root, 'release-evidence', 'test', 'test-gate.manifest.json')
     const testResult = run([
@@ -63,7 +71,9 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
         '--log',
         buildLog,
         '--log',
-        smokeLog
+        smokeLog,
+        '--log',
+        seaSmokeLog
       ])
       assert.equal(result.status, 0, result.stderr)
     }

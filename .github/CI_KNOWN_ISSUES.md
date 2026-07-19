@@ -9,9 +9,10 @@ reviewable.
 - Location: `src/server/conversation/service.ts:152`
 - Finding: `threadRow` is declared with `let` but is never reassigned.
 - Impact: style-only ESLint error; no runtime behavior change is known.
-- CI handling: `scripts/ci/check-eslint-baseline.mjs` admits only this exact
-  error. The baseline fails if the error changes, disappears without cleanup, or
-  another ESLint error is introduced.
+- CI handling: `scripts/ci/check-eslint-baseline.mjs` admits only this
+  file/rule/message/source-line signature. The source anchor remains stable when
+  unrelated lines move, while the baseline still fails if the error changes,
+  disappears without cleanup, or another ESLint error is introduced.
 - Decision needed: change business code to `const`, or retain the explicit
   baseline.
 
@@ -33,7 +34,7 @@ reviewable.
 ## Warning baseline
 
 After excluding generated runtime data and the tracked temporary query helper,
-the clean baseline contains 459 non-blocking ESLint warnings. CI permits the
+the clean baseline contains 458 non-blocking ESLint warnings. CI permits the
 count to decrease but fails if it grows above that baseline.
 
 ## BUSINESS-003: control-plane exact optional property diagnostics
@@ -41,7 +42,7 @@ count to decrease but fails if it grows above that baseline.
 - Locations:
   - `src/server/agent-runtime/cursor-acp/acp-shared.ts:206` (`TS2375`)
   - `src/server/agent-runtime/providers/claude-sdk.ts:36` (`TS2379`)
-  - `src/server/agent-runtime/providers/codex-policy.ts:57` (`TS2379`)
+  - `src/server/agent-runtime/providers/codex-policy.ts:58` (`TS2379`)
   - `src/server/agent-runtime/providers/cursor-policy.ts:41` (`TS2379`)
   - `src/server/agent-runtime/providers/opencode-sdk.ts:58` and `:390` (`TS2379`)
   - `src/server/agent-runtime/runner.ts:252` (`TS2379`)
@@ -50,8 +51,9 @@ count to decrease but fails if it grows above that baseline.
   `exactOptionalPropertyTypes` requires omission or an explicitly widened type.
 - Impact: the stricter control-plane TypeScript project does not compile cleanly.
 - CI handling: `scripts/ci/check-control-plane-typecheck-baseline.mjs` permits
-  only these exact file/line/error-code tuples. New diagnostics and stale
-  allowances fail CI.
+  only these file/error-code/source-line signatures at their exact occurrence
+  counts. New diagnostics and stale allowances fail CI, while unrelated line
+  movement does not invalidate the baseline.
 - Decision needed: choose whether callers should omit undefined properties or
   the receiving types should explicitly admit `undefined`.
 
