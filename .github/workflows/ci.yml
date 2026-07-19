@@ -73,5 +73,8 @@ jobs:
       ref: ${{ github.sha }}
       runner: ubuntu-24.04
       builder-args: --linux --x64
+      # Must match runtimePlatform() in package-server-sea.mjs (not the
+      # build.yml default "package", which is only an upload artifact label).
+      artifact-name: linux-amd64
       smoke-unpacked: true
       upload-artifact: false

@@ -42,6 +42,17 @@ test('release builds package and smoke an ncc + SEA service artifact', () => {
   assert.match(buildWorkflow, /dist\/\*\.tar\.gz/)
 })
 
+test('CI package-smoke passes a real platform label for SEA packaging', () => {
+  assert.match(
+    ciWorkflow,
+    /package-smoke:[\s\S]*?artifact-name:\s*linux-amd64/u
+  )
+  assert.match(
+    buildWorkflow,
+    /npm run package:server:sea -- --platform \$\{\{ inputs\.artifact-name \}\}/u
+  )
+})
+
 test('CI and release use Node 24 LTS from one version file', () => {
   assert.equal(nodeVersion, '24')
   for (const workflow of [buildWorkflow, ciWorkflow, sandboxWorkflow, releaseWorkflow]) {
