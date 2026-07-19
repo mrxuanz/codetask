@@ -149,6 +149,9 @@ jobs:
           name: ${{ needs.prepare.outputs.tag }}
           tag_name: ${{ needs.prepare.outputs.tag }}
           target_commitish: ${{ needs.prepare.outputs.sha }}
+          # Release assets are basename-only. Per-platform evidence logs share names
+          # like package.log / build.manifest.json across six targets and race the
+          # GitHub asset API; keep those on workflow artifacts instead.
           files: |
             dist/*.exe
             dist/*.deb
@@ -157,8 +160,15 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
             dist/legacy-release-report.json
-            dist/release-evidence/**/*.manifest.json
-            dist/release-evidence/**/*.log
           draft: false
           prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
           generate_release_notes: true
+
+      - name: Upload release evidence bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-bundle
+          path: |
+            dist/legacy-release-report.json
+            dist/release-evidence/**
+          if-no-files-found: error

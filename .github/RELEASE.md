@@ -24,3 +24,8 @@ under an old source tag would make the release unverifiable.
 
 Publishing is allowed only after the test gate, all six native package smokes, all six
 SEA service smokes, and the release evidence-chain verification pass.
+
+GitHub Release attachments include only uniquely named installers/archives plus
+`legacy-release-report.json`. Per-platform evidence logs and manifests stay on workflow
+artifacts (`release-evidence-bundle` and each platform build artifact), because Release
+asset names are basename-only and would collide across the six targets.
