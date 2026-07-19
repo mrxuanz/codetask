@@ -91,6 +91,7 @@ jobs:
       builder-args: ${{ matrix.args }}
       smoke-unpacked: true
       include-release-evidence: true
+      release-version: ${{ needs.prepare.outputs.version }}
       upload-artifact: true
       artifact-name: ${{ matrix.name }}
 
@@ -135,6 +136,7 @@ jobs:
             dist/*.AppImage
             dist/*.dmg
             dist/*.zip
+            dist/*.tar.gz
             dist/legacy-release-report.json
             dist/release-evidence/**/*.manifest.json
             dist/release-evidence/**/*.log

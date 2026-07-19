@@ -30,6 +30,13 @@ test('standalone Node smoke runs separately from the Electron display smoke', ()
   assert.match(buildWorkflow, /standalone-smoke\.log/)
 })
 
+test('release builds package and smoke an ncc + SEA service artifact', () => {
+  assert.match(buildWorkflow, /Package ncc \+ SEA standalone service/)
+  assert.match(buildWorkflow, /npm run package:server:sea/)
+  assert.match(buildWorkflow, /server-sea-smoke\.log/)
+  assert.match(buildWorkflow, /dist\/\*\.tar\.gz/)
+})
+
 test('Rust workspace tests are serialized without skipping failures', () => {
   assert.ok(ciWorkflow.includes(serialRustTest))
   assert.ok(sandboxWorkflow.includes(serialRustTest))

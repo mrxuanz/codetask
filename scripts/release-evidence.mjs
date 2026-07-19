@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process'
 
 const SCHEMA_VERSION = 1
 const REQUIRED_PLATFORMS = ['linux-x64', 'macos-arm64', 'windows-x64']
-const ARTIFACT_EXTENSIONS = ['.exe', '.deb', '.AppImage', '.dmg', '.zip']
+const ARTIFACT_EXTENSIONS = ['.exe', '.deb', '.AppImage', '.dmg', '.zip', '.tar.gz']
 const PLATFORM_ARTIFACT_TOKEN = {
   'linux-x64': '-linux-',
   'macos-arm64': '-macos-',
@@ -155,6 +155,18 @@ function createBuild(argv) {
   }
   const artifacts = listArtifacts(distDir, platform)
   if (artifacts.length === 0) throw new Error('release_evidence.artifact_missing')
+  if (
+    !artifacts.some(
+      (artifact) =>
+        artifact.name.startsWith('codetask-server-') && artifact.name.endsWith('.tar.gz')
+    )
+  ) {
+    throw new Error('release_evidence.server_sea_artifact_missing')
+  }
+  const seaSmokeLog = logPaths.find((path) => basename(path) === 'server-sea-smoke.log')
+  if (!seaSmokeLog || !readFileSync(seaSmokeLog, 'utf8').includes('"mode":"sea"')) {
+    throw new Error('release_evidence.server_sea_smoke_proof_missing')
+  }
   const logs = copyAndDescribeLogs(logPaths, evidenceRoot, dirname(output))
   const testManifestPath = join(evidenceRoot, 'release-evidence', 'test', 'test-gate.manifest.json')
   if (!existsSync(testManifestPath)) throw new Error('release_evidence.test_manifest_missing')

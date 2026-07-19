@@ -4,16 +4,15 @@ import process from 'node:process'
 import { ESLint } from 'eslint'
 
 const repositoryRoot = resolve(import.meta.dirname, '../..')
-const maximumWarnings = 459
+const maximumWarnings = 458
 
 const knownErrors = [
   {
     id: 'BUSINESS-001',
     file: 'src/server/conversation/service.ts',
-    line: 152,
-    column: 7,
     ruleId: 'prefer-const',
-    message: "'threadRow' is never reassigned. Use 'const' instead."
+    message: "'threadRow' is never reassigned. Use 'const' instead.",
+    sourceLine: 'let threadRow = await getThreadRow(username, threadId)'
   }
 ]
 
@@ -22,7 +21,7 @@ function repositoryPath(filePath) {
 }
 
 function issueKey(issue) {
-  return [issue.file, issue.line, issue.column, issue.ruleId ?? '', issue.message].join('\u0000')
+  return [issue.file, issue.ruleId ?? '', issue.message, issue.sourceLine].join('\u0000')
 }
 
 function annotation(kind, issue, title) {
@@ -33,17 +32,19 @@ function annotation(kind, issue, title) {
 const eslint = new ESLint({ cwd: repositoryRoot, cache: false })
 const results = await eslint.lintFiles(['.'])
 const warningCount = results.reduce((total, result) => total + result.warningCount, 0)
-const actualErrors = results.flatMap((result) =>
-  result.messages
+const actualErrors = results.flatMap((result) => {
+  const sourceLines = result.source?.split(/\r?\n/u) ?? []
+  return result.messages
     .filter((message) => message.severity === 2)
     .map((message) => ({
       file: repositoryPath(result.filePath),
       line: message.line,
       column: message.column,
       ruleId: message.ruleId,
-      message: message.message
+      message: message.message,
+      sourceLine: sourceLines[message.line - 1]?.trim() ?? ''
     }))
-)
+})
 
 const knownByKey = new Map(knownErrors.map((issue) => [issueKey(issue), issue]))
 const actualByKey = new Map(actualErrors.map((issue) => [issueKey(issue), issue]))
@@ -51,8 +52,9 @@ const unexpectedErrors = actualErrors.filter((issue) => !knownByKey.has(issueKey
 const staleAllowances = knownErrors.filter((issue) => !actualByKey.has(issueKey(issue)))
 
 for (const issue of knownErrors) {
-  if (actualByKey.has(issueKey(issue))) {
-    console.log(annotation('warning', issue, `${issue.id} known business-code lint issue`))
+  const actual = actualByKey.get(issueKey(issue))
+  if (actual) {
+    console.log(annotation('warning', actual, `${issue.id} known business-code lint issue`))
   }
 }
 
@@ -62,7 +64,7 @@ for (const issue of unexpectedErrors) {
 
 for (const issue of staleAllowances) {
   console.error(
-    `Stale ESLint baseline ${issue.id}: ${issue.file}:${issue.line}:${issue.column} no longer matches`
+    `Stale ESLint baseline ${issue.id}: ${issue.file} ${JSON.stringify(issue.sourceLine)} no longer matches`
   )
 }
 
