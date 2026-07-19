@@ -18,6 +18,11 @@ export type CaseWorkerInput = {
   fixturePath?: string
   timeoutMs: number
   resultPath: string
+  /** Conversation SDK / core used for thread + HTML naming (opencode → opencode.html). */
+  conversationCore?: string
+  expectedHtmlFile?: string
+  probeMcpUrl?: string
+  probeMcpName?: string
 }
 
 export type CaseWorkerResult = {

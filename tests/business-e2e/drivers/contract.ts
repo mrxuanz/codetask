@@ -8,6 +8,12 @@ export type DriverStartInput = {
   agentRoot: string
   fixture?: Record<string, unknown>
   timeoutMs: number
+  /** Conversation SDK / core (e.g. opencode) for thread coreCode and HTML filename. */
+  conversationCore?: string
+  expectedHtmlFile?: string
+  /** Phase-3 settings probe base URL (http://127.0.0.1:port). */
+  probeMcpUrl?: string
+  probeMcpName?: string
 }
 
 export type DriverEvent = {

@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { PublicApiClient } from '../api/client'
 import * as ops from '../api/operations'
 import { resolveProfile } from '../config/profiles'
+import { PROBE_SERVER_NAME, resolveProviderQueue } from '../config/providers'
+import { startSettingsMcpProbe } from '../probes/settings-mcp-probe'
 import { TIMEOUTS } from '../config/timeouts'
 import { MANIFESTS, resolveCaseIds, type CaseManifest } from '../cases/catalog'
 import {
@@ -46,6 +48,10 @@ import {
 } from './workspace-copy'
 import type { FixturePhaseState } from '../mcp/capabilities'
 import { progress } from '../reports/progress'
+import { setLang, tFailure, tSuccess } from '../i18n'
+import {
+  htmlFileNameForConversationCore
+} from '../config/sdk-html'
 
 function readFlag(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name)
@@ -58,19 +64,23 @@ function hasFlag(argv: string[], name: string): boolean {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2)
+  setLang(readFlag(argv, '--lang') ?? process.env.BUSINESS_E2E_LANG)
+
   if (hasFlag(argv, '--list') || hasFlag(argv, '--help')) {
     console.log(formatCaseList())
     console.log(`
 Examples:
   npm run business:e2e:conversation
+  npm run business:e2e:chat-html
   npm run business:e2e:draft-job
-  npm run business:e2e -- --profile fixed-opencode --case notes-search
-  npm run business:e2e -- --profile fixed-opencode --part conversation,draft-job
-  npm run business:e2e -- --profile fixed-opencode --suite both
+  npm run business:e2e:settings-mcp
+  npm run business:e2e:phases
+  npm run business:e2e -- --providers opencode --part conversation,draft-job,settings-mcp
+  npm run business:e2e -- --providers cursor,opencode --case chat-basic --lang en
+  npm run business:e2e -- --providers all --suite both
 `)
     process.exit(0)
   }
-
   if (hasFlag(argv, '--enable-provider') && readFlag(argv, '--enable-provider') === 'codex') {
     if (process.env.BUSINESS_ALLOW_CODEX !== '1') {
       console.log(JSON.stringify({ skipped: true, reason: 'provider_disabled', provider: 'codex' }))
@@ -78,7 +88,10 @@ Examples:
     }
   }
 
-  const profile = resolveProfile(readFlag(argv, '--profile') ?? 'fixed-opencode')
+  const providerQueue = resolveProviderQueue({
+    providers: readFlag(argv, '--providers'),
+    profile: readFlag(argv, '--profile')
+  })
   const selection = resolveSelection({
     part: readFlag(argv, '--part'),
     suite: readFlag(argv, '--suite'),
@@ -103,7 +116,11 @@ Examples:
   runPreflightCleanup({ repoRoot, keepRuntime })
 
   progress('supervisor', 'run.start', {
-    profile: profile.name,
+    providers: providerQueue.map((p) => ({
+      alias: p.alias,
+      core: p.core,
+      skip: p.skipReason ?? null
+    })),
     阶段: selection.part?.map(labelForPart) ?? null,
     套件: selection.suite,
     用例: caseIds.map((id) => scopeLabelForCaseId(id)),
@@ -120,7 +137,12 @@ Examples:
 
   reports.writeManifest({
     runId,
-    profile: profile.name,
+    providers: providerQueue.map((p) => ({
+      alias: p.alias,
+      core: p.core,
+      profile: p.profile.name,
+      skipReason: p.skipReason ?? null
+    })),
     caseIds,
     startedAt: runStartedAt,
     runRoot,
@@ -129,6 +151,7 @@ Examples:
 
   let server: ServerHandle | undefined
   let mcp: Awaited<ReturnType<typeof startTestMcpServer>> | undefined
+  let settingsProbe: Awaited<ReturnType<typeof startSettingsMcpProbe>> | undefined
   const caseSummaries: Array<{ caseId: string; classification: FailureClass }> = []
   let failed = 0
   let passed = 0
@@ -155,113 +178,165 @@ Examples:
     })
     progress('supervisor', 'mcp.ready', { url: mcp.url })
 
-    for (const id of caseIds) {
-      const scope = scopeLabelForCaseId(id)
-      const slug = slugForCaseId(id)
-      const manifest = MANIFESTS[id]
-      if (!manifest) {
-        progress(scope, 'case.skipped', { reason: 'manifest_missing', internalId: id })
-        caseSummaries.push({ caseId: labelForCaseId(id), classification: 'skipped' })
-        skipped += 1
-        continue
-      }
-
-      const caseRunId = createCaseRunId(id)
-      const started = Date.now()
-      let report: CaseReport
-      progress(scope, 'case.start', {
-        driver: manifest.driver,
-        title: manifest.title,
-        skipReason: manifest.skipReason ?? null
+    const needsSettingsProbe = caseIds.includes('SETTINGS-MCP-001')
+    if (needsSettingsProbe) {
+      settingsProbe = await startSettingsMcpProbe()
+      progress('supervisor', 'settings.probe.ready', {
+        name: settingsProbe.name,
+        url: settingsProbe.url
       })
+    }
 
-      if (manifest.skipReason) {
-        report = {
-          runId,
-          caseRunId,
-          caseId: id,
-          driverProvider:
-            manifest.driver === 'supervisor' ? 'supervisor' : profile.driverProvider,
-          roleProviders: profile.roleProviders,
-          agentReportedCompleted: false,
-          requiredOperationsObserved: true,
-          oraclePassed: true,
-          noProcessLeak: true,
-          classification: 'skipped',
-          summary: manifest.skipReason,
-          durationMs: Date.now() - started,
-          serverPid: server?.pid
-        }
-        progress(scope, 'case.skipped', { reason: manifest.skipReason })
-        caseSummaries.push({ caseId: labelForCaseId(id), classification: 'skipped' })
-        skipped += 1
-        reports.writeCase(report)
-        continue
-      }
-
-      try {
-        if (!server || !isAlive(server.pid)) {
-          throw Object.assign(new Error('sut_crash'), { classification: 'sut_crash' })
-        }
-
-        report = await executeCase({
-          manifest,
-          caseRunId,
-          profile,
-          repoRoot,
-          runRoot,
-          layout,
-          server,
-          client,
-          vault,
-          mcp,
-          ledger,
-          registry
+    for (const slot of providerQueue) {
+      const profile = slot.profile
+      if (slot.skipReason) {
+        progress('supervisor', 'case.skipped', {
+          provider: slot.alias,
+          reason: slot.skipReason
         })
-      } catch (error) {
-        const classification = classifyError(error)
-        report = {
-          runId,
-          caseRunId,
-          caseId: id,
-          driverProvider:
-            manifest.driver === 'supervisor' ? 'supervisor' : profile.driverProvider,
-          roleProviders: profile.roleProviders,
-          agentReportedCompleted: false,
-          requiredOperationsObserved: false,
-          oraclePassed: false,
-          noProcessLeak: true,
-          classification,
-          summary: String(error),
-          durationMs: Date.now() - started,
-          serverPid: server?.pid,
-          error: String(error)
-        }
+        caseSummaries.push({
+          caseId: `provider:${slot.alias}`,
+          classification: 'skipped'
+        })
+        skipped += 1
+        continue
       }
 
-      reports.writeCase(report)
-      caseSummaries.push({ caseId: labelForCaseId(id), classification: report.classification })
-      if (report.classification === 'passed') passed += 1
-      else if (report.classification === 'skipped') skipped += 1
-      else failed += 1
-      progress(scope, 'case.done', {
-        classification: report.classification,
-        durationMs: report.durationMs,
-        summary: report.summary
+      progress('supervisor', 'settings.control_plane', {
+        provider: slot.alias,
+        core: slot.core,
+        profile: profile.name
       })
 
-      // Post-case health (R16)
-      if (server) {
-        const healthy = isAlive(server.pid) && (await client.health().catch(() => false))
-        if (!healthy) {
-          console.error(JSON.stringify({ event: 'sut_crash', caseId: slug, label: scope, internalId: id }))
-          break
+      for (const id of caseIds) {
+        const scope = `${scopeLabelForCaseId(id)} [${slot.alias}]`
+        const slug = slugForCaseId(id)
+        const manifest = MANIFESTS[id]
+        if (!manifest) {
+          progress(scope, 'case.skipped', { reason: 'manifest_missing', internalId: id })
+          caseSummaries.push({
+            caseId: `${labelForCaseId(id)}/${slot.alias}`,
+            classification: 'skipped'
+          })
+          skipped += 1
+          continue
         }
+
+        const caseRunId = createCaseRunId(`${id}-${slot.alias}`)
+        const started = Date.now()
+        let report: CaseReport
+        progress(scope, 'case.start', {
+          driver: manifest.driver,
+          title: manifest.title,
+          provider: slot.alias,
+          skipReason: manifest.skipReason ?? null
+        })
+
+        if (manifest.skipReason) {
+          report = {
+            runId,
+            caseRunId,
+            caseId: id,
+            driverProvider:
+              manifest.driver === 'supervisor' ? 'supervisor' : profile.driverProvider,
+            roleProviders: profile.roleProviders,
+            agentReportedCompleted: false,
+            requiredOperationsObserved: true,
+            oraclePassed: true,
+            noProcessLeak: true,
+            classification: 'skipped',
+            summary: manifest.skipReason,
+            durationMs: Date.now() - started,
+            serverPid: server?.pid
+          }
+          progress(scope, 'case.skipped', { reason: manifest.skipReason })
+          caseSummaries.push({
+            caseId: `${labelForCaseId(id)}/${slot.alias}`,
+            classification: 'skipped'
+          })
+          skipped += 1
+          reports.writeCase(report)
+          continue
+        }
+
+        try {
+          if (!server || !isAlive(server.pid)) {
+            throw Object.assign(new Error('sut_crash'), { classification: 'sut_crash' })
+          }
+
+          report = await executeCase({
+            manifest,
+            caseRunId,
+            profile,
+            repoRoot,
+            runRoot,
+            layout,
+            server,
+            client,
+            vault,
+            mcp,
+            ledger,
+            registry,
+            probeMcpUrl: settingsProbe?.url,
+            probeMcpName: settingsProbe?.name ?? PROBE_SERVER_NAME
+          })
+        } catch (error) {
+          const classification = classifyError(error)
+          report = {
+            runId,
+            caseRunId,
+            caseId: id,
+            driverProvider:
+              manifest.driver === 'supervisor' ? 'supervisor' : profile.driverProvider,
+            roleProviders: profile.roleProviders,
+            agentReportedCompleted: false,
+            requiredOperationsObserved: false,
+            oraclePassed: false,
+            noProcessLeak: true,
+            classification,
+            summary: String(error),
+            durationMs: Date.now() - started,
+            serverPid: server?.pid,
+            error: String(error)
+          }
+        }
+
+        reports.writeCase(report)
+        caseSummaries.push({
+          caseId: `${labelForCaseId(id)}/${slot.alias}`,
+          classification: report.classification
+        })
+        if (report.classification === 'passed') passed += 1
+        else if (report.classification === 'skipped') skipped += 1
+        else failed += 1
+        progress(scope, 'case.done', {
+          classification: report.classification,
+          durationMs: report.durationMs,
+          summary: report.summary
+        })
+
+        // Post-case health (R16)
+        if (server) {
+          const healthy = isAlive(server.pid) && (await client.health().catch(() => false))
+          if (!healthy) {
+            console.error(
+              JSON.stringify({
+                event: 'sut_crash',
+                caseId: slug,
+                label: scope,
+                internalId: id,
+                provider: slot.alias
+              })
+            )
+            break
+          }
+        }
+        registry.stopCase(caseRunId)
+        mcp.capabilities.revoke(caseRunId)
       }
-      registry.stopCase(caseRunId)
-      mcp.capabilities.revoke(caseRunId)
     }
   } finally {
+    await settingsProbe?.close().catch(() => undefined)
     await mcp?.close().catch(() => undefined)
     await server?.stop().catch(() => undefined)
     registry.stopAllExcept()
@@ -270,7 +345,12 @@ Examples:
 
   const summary = {
     runId,
-    profile: profile.name,
+    providers: providerQueue.map((p) => ({
+      alias: p.alias,
+      core: p.core,
+      profile: p.profile.name,
+      skipReason: p.skipReason ?? null
+    })),
     baseUrl: server?.baseUrl ?? '',
     serverPid: server?.pid ?? 0,
     startedAt: runStartedAt,
@@ -284,9 +364,9 @@ Examples:
   assertNoSecrets(summary, 'final_summary')
   console.log(JSON.stringify(summary, null, 2))
   if (failed > 0) {
-    console.log('########## 失败 FAILURE #####')
+    console.log(tFailure())
   } else {
-    console.log('********* 成功 SUCCESS *********')
+    console.log(tSuccess())
   }
   process.exitCode = failed > 0 ? 1 : 0
 }
@@ -304,9 +384,24 @@ async function executeCase(ctx: {
   mcp: Awaited<ReturnType<typeof startTestMcpServer>>
   ledger: OperationLedger
   registry: ProcessRegistry
+  probeMcpUrl?: string
+  probeMcpName?: string
 }): Promise<CaseReport> {
-  const { manifest, caseRunId, profile, server, client, vault, mcp, ledger, registry, repoRoot, layout } =
-    ctx
+  const {
+    manifest,
+    caseRunId,
+    profile,
+    server,
+    client,
+    vault,
+    mcp,
+    ledger,
+    registry,
+    repoRoot,
+    layout,
+    probeMcpUrl,
+    probeMcpName
+  } = ctx
   const started = Date.now()
   const caseDir = join(layout.cases, caseRunId)
   mkdirSync(caseDir, { recursive: true })
@@ -400,11 +495,18 @@ async function executeCase(ctx: {
     fixtureState
   })
 
+  const conversationCore = profile.roleProviders.conversation
+  const expectedHtmlFile =
+    manifest.caseId === 'CHAT-HTML-001'
+      ? htmlFileNameForConversationCore(conversationCore)
+      : undefined
+
   const agentRoot = join(layout.agents, caseRunId)
   const resultPath = join(caseDir, 'worker-result.json')
   progress(scopeLabelForCaseId(manifest.caseId), 'worker.start', {
     driver: manifest.driver,
-    timeoutMs: manifest.timeoutMs ?? TIMEOUTS.caseTotalMs
+    timeoutMs: manifest.timeoutMs ?? TIMEOUTS.caseTotalMs,
+    ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {})
   })
   const workerResult = await runCaseWorker(
     {
@@ -418,7 +520,11 @@ async function executeCase(ctx: {
       skillPaths: manifest.skills.map((name) => skillPath(repoRoot, name)),
       fixturePath: manifest.fixture ? fixturePath(repoRoot, manifest.fixture) : undefined,
       timeoutMs: manifest.timeoutMs ?? TIMEOUTS.caseTotalMs,
-      resultPath
+      resultPath,
+      conversationCore,
+      expectedHtmlFile,
+      probeMcpUrl,
+      probeMcpName
     },
     { repoRoot, registry }
   )
@@ -433,7 +539,8 @@ async function executeCase(ctx: {
     capability: capabilityAfter,
     server,
     registry,
-    artifacts
+    artifacts,
+    expectedHtmlFile
   })
 
   const agentReportedCompleted = Boolean(
@@ -682,6 +789,7 @@ async function buildOracleResults(input: {
   server: ServerHandle
   registry: ProcessRegistry
   artifacts: { projectId?: string; threadId?: string; turnId?: string }
+  expectedHtmlFile?: string
 }): Promise<OracleResult[]> {
   const results: OracleResult[] = []
   results.push(runAgentReportOracle(input.capability))
@@ -732,6 +840,21 @@ async function buildOracleResults(input: {
     }
   }
 
+  if (input.manifest.caseId === 'CHAT-HTML-001') {
+    const workspaceRoot = input.capability?.workspaceRoot
+    const fileName = input.expectedHtmlFile || 'opencode.html'
+    progress(input.manifest.caseId, 'html.oracle', { fileName, workspaceRoot })
+    if (workspaceRoot) {
+      results.push(await runChatHtmlFileOracle(workspaceRoot, fileName))
+    } else {
+      results.push({
+        name: 'chat_html_file_oracle',
+        passed: false,
+        detail: { reason: 'workspace_missing', fileName }
+      })
+    }
+  }
+
   return results
 }
 
@@ -749,6 +872,33 @@ async function runNotesSearchFileOracle(workspaceRoot: string): Promise<OracleRe
     name: 'notes_search_file_oracle',
     passed: result.status === 0,
     detail: {
+      status: result.status,
+      stdout: result.stdout?.slice(0, 500),
+      stderr: result.stderr?.slice(0, 500)
+    }
+  }
+}
+
+async function runChatHtmlFileOracle(
+  workspaceRoot: string,
+  fileName: string
+): Promise<OracleResult> {
+  const { spawnSync } = await import('node:child_process')
+  const { join } = await import('node:path')
+  const oraclePath = join(
+    repoRootFromHere(),
+    'tests/business-e2e/fixtures/validators/chat-html-oracle.mjs'
+  )
+  const result = spawnSync(
+    process.execPath,
+    [oraclePath, '--workspace', workspaceRoot, '--file', fileName],
+    { encoding: 'utf8' }
+  )
+  return {
+    name: 'chat_html_file_oracle',
+    passed: result.status === 0,
+    detail: {
+      fileName,
       status: result.status,
       stdout: result.stdout?.slice(0, 500),
       stderr: result.stderr?.slice(0, 500)

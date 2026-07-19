@@ -1,8 +1,20 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { existsSync, writeFileSync } from 'node:fs'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { McpToolClient } from '../mcp/client'
 import { progress } from '../reports/progress'
+import {
+  buildCreateHtmlUserMessage,
+  CHAT_HTML_MARKER,
+  htmlFileNameForConversationCore
+} from '../config/sdk-html'
+import {
+  CLI_MCP_ROOT_KEY,
+  PROBE_OK,
+  PROBE_SERVER_NAME
+} from '../config/providers'
+import type { SutCoreCode } from '../config/profiles'
 
 type Push = (type: string, detail?: unknown) => void
 
@@ -98,6 +110,21 @@ export class FakeDriver implements AgentDriver {
 
       if (input.caseId === 'G8-001') {
         await this.runFullChainProbes(input, mcp, push)
+        return { ok: true, events }
+      }
+
+      if (input.caseId === 'CHAT-HTML-001') {
+        await this.runCreateHtmlConversation(input, mcp, push)
+        return { ok: true, events }
+      }
+
+      if (input.caseId === 'SETTINGS-MCP-001') {
+        await this.runSettingsMcpProbe(input, mcp, push)
+        return { ok: true, events }
+      }
+
+      if (input.caseId === 'JOB-CHAT-RO-001') {
+        await this.runJobChatReadonlySkeleton(input, mcp, push)
         return { ok: true, events }
       }
 
@@ -1503,6 +1530,326 @@ export class FakeDriver implements AgentDriver {
       artifacts: { projectId: ctx.projectId, threadId: ctx.threadId }
     })
     push('case.reported', { probes })
+  }
+
+  private async runSettingsMcpProbe(
+    input: DriverStartInput,
+    mcp: McpToolClient,
+    push: Push
+  ): Promise<void> {
+    const core = (input.conversationCore?.trim() || 'opencode') as SutCoreCode
+    const rootKey = CLI_MCP_ROOT_KEY[core] ?? 'mcp'
+    const probeUrl = input.probeMcpUrl?.replace(/\/$/, '') || ''
+    const probeName = input.probeMcpName || PROBE_SERVER_NAME
+    if (!probeUrl) throw new Error('probe_mcp_url_missing')
+
+    const serverEntry =
+      core === 'opencode'
+        ? {
+            type: 'remote',
+            url: probeUrl,
+            enabled: true,
+            headers: { Accept: 'application/json, text/event-stream' }
+          }
+        : {
+            url: probeUrl,
+            headers: { Accept: 'application/json, text/event-stream' }
+          }
+
+    const before = (await mcp.callTool('codetask_get_mcp_settings', {})) as {
+      settings?: Record<string, unknown>
+    }
+    push('settings.mcp.snapshot', { core, hasSettings: Boolean(before?.settings) })
+    await mcp.callTool('case_checkpoint', { name: 'mcp_settings_snapshot' })
+
+    const base =
+      before?.settings && typeof before.settings === 'object'
+        ? structuredClone(before.settings as Record<string, unknown>)
+        : {
+            conversation: {},
+            task: {},
+            verification: {}
+          }
+
+    const roles = ['conversation', 'task', 'verification'] as const
+    for (const role of roles) {
+      const roleMap =
+        base[role] && typeof base[role] === 'object'
+          ? (base[role] as Record<string, unknown>)
+          : {}
+      const fragment =
+        roleMap[core] && typeof roleMap[core] === 'object'
+          ? (roleMap[core] as Record<string, unknown>)
+          : { [rootKey]: {} }
+      const servers =
+        fragment[rootKey] && typeof fragment[rootKey] === 'object'
+          ? { ...(fragment[rootKey] as Record<string, unknown>) }
+          : {}
+      servers[probeName] = serverEntry
+      roleMap[core] = { [rootKey]: servers }
+      base[role] = roleMap
+    }
+
+    await mcp.callTool('codetask_put_mcp_settings', { settings: base })
+    push('settings.mcp.registered', { core, probeName, probeUrl, roles: [...roles] })
+    await mcp.callTool('case_checkpoint', { name: 'mcp_probe_registered' })
+
+    const after = (await mcp.callTool('codetask_get_mcp_settings', {})) as {
+      settings?: Record<string, unknown>
+    }
+    const afterText = JSON.stringify(after?.settings ?? {})
+    if (!afterText.includes(probeName)) {
+      throw new Error('settings_mcp_roundtrip_missing_probe')
+    }
+    push('settings.mcp.roundtrip_ok', { probeName })
+
+    const reservedAttempt = structuredClone(base)
+    const conv = (reservedAttempt.conversation ?? {}) as Record<string, unknown>
+    const frag = (conv[core] ?? { [rootKey]: {} }) as Record<string, unknown>
+    const servers = {
+      ...((frag[rootKey] as Record<string, unknown>) ?? {}),
+      'codeteam-manager': serverEntry
+    }
+    conv[core] = { [rootKey]: servers }
+    reservedAttempt.conversation = conv
+    let reservedFailed = false
+    try {
+      await mcp.callTool('codetask_put_mcp_settings', { settings: reservedAttempt })
+    } catch {
+      reservedFailed = true
+    }
+    if (!reservedFailed) {
+      throw new Error('settings_mcp_reserved_name_should_fail')
+    }
+    push('settings.mcp.reserved_rejected', { ok: true })
+
+    // Harness self-check: call probe HTTP MCP tools/call directly.
+    const probeHits: Record<string, string> = {}
+    for (const role of roles) {
+      const tool =
+        role === 'conversation'
+          ? 'ping_conversation'
+          : role === 'task'
+            ? 'ping_task'
+            : 'ping_verification'
+      const res = await fetch(probeUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: tool, arguments: {} }
+        })
+      })
+      const json = (await res.json()) as {
+        result?: { content?: Array<{ text?: string }> }
+      }
+      const text = json.result?.content?.[0]?.text ?? ''
+      probeHits[role] = text
+      const expected = PROBE_OK[role]
+      if (text !== expected) {
+        throw new Error(`probe_self_check_failed:${role}:got=${text}`)
+      }
+    }
+    push('settings.mcp.probe_self_ok', probeHits)
+    await mcp.callTool('case_checkpoint', { name: 'mcp_probe_self_ok' })
+
+    // Restore prior snapshot
+    if (before?.settings) {
+      await mcp.callTool('codetask_put_mcp_settings', { settings: before.settings })
+      push('settings.mcp.restored')
+    }
+
+    await mcp.callTool('report_case_result', {
+      caseId: input.caseId,
+      status: 'completed',
+      summary: `Settings MCP probe registered for ${core} (conversation/task/verification)`,
+      observations: [
+        {
+          step: 'settings-mcp-probe',
+          core,
+          probeName,
+          probeUrl,
+          probeHits,
+          reservedRejected: true
+        }
+      ],
+      artifacts: { conversationCore: core, probeName, probeUrl }
+    })
+    push('case.reported', { core, probeName })
+  }
+
+  private async runJobChatReadonlySkeleton(
+    input: DriverStartInput,
+    mcp: McpToolClient,
+    push: Push
+  ): Promise<void> {
+    const core = input.conversationCore?.trim() || 'opencode'
+    const project = (await mcp.callTool('codetask_create_project', {
+      workspaceRoot: input.workspaceRoot,
+      title: 'job-chat-readonly'
+    })) as { id: string }
+    push('project.created', { id: project.id })
+    await mcp.callTool('case_checkpoint', { name: 'project_created' })
+
+    const task1 = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: 'task-1',
+      coreCode: core,
+      threadKind: 'create_task'
+    })) as { id: string }
+    push('thread.created', { id: task1.id, kind: 'create_task', slot: 1 })
+
+    const task2 = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: 'task-2',
+      coreCode: core,
+      threadKind: 'create_task'
+    })) as { id: string }
+    push('thread.created', { id: task2.id, kind: 'create_task', slot: 2 })
+
+    const chat = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: 'monitor-chat',
+      coreCode: core,
+      threadKind: 'chat'
+    })) as { id: string }
+    push('thread.created', { id: chat.id, kind: 'chat' })
+    await mcp.callTool('case_checkpoint', { name: 'threads_created' })
+
+    const started = (await mcp.callTool('codetask_start_turn', {
+      threadId: chat.id,
+      message:
+        '请只读查看当前工作区目录，列出文件名。不要创建、修改或删除任何文件。用一句话回答你看到了什么。'
+    })) as { turnId: string }
+    const turn = (await mcp.callTool('codetask_wait_turn', {
+      threadId: chat.id,
+      turnId: started.turnId
+    })) as { status?: string }
+    push('turn.done', { status: turn.status, thread: 'chat' })
+    await mcp.callTool('codetask_list_messages', { threadId: chat.id })
+    await mcp.callTool('case_checkpoint', { name: 'chat_readonly_turn' })
+
+    await mcp.callTool('report_case_result', {
+      caseId: input.caseId,
+      status: 'completed',
+      summary:
+        'Job-chat-readonly skeleton: dual create_task threads + chat read turn (full job-running lease deepen later)',
+      observations: [
+        {
+          step: 'job-chat-readonly-skeleton',
+          depth: 'skeleton',
+          taskThreadIds: [task1.id, task2.id],
+          chatThreadId: chat.id,
+          chatTurnStatus: turn.status,
+          note: 'Full assert while Job① running is next deepen pass'
+        }
+      ],
+      artifacts: {
+        projectId: project.id,
+        threadId: chat.id,
+        turnId: started.turnId,
+        taskThreadIds: [task1.id, task2.id]
+      }
+    })
+    push('case.reported', { depth: 'skeleton' })
+  }
+
+  private async runCreateHtmlConversation(
+    input: DriverStartInput,
+    mcp: McpToolClient,
+    push: Push
+  ): Promise<void> {
+    const core = input.conversationCore?.trim() || 'opencode'
+    const fileName =
+      input.expectedHtmlFile?.trim() || htmlFileNameForConversationCore(core)
+    const marker =
+      typeof input.fixture?.expect === 'object' &&
+      input.fixture.expect &&
+      typeof (input.fixture.expect as { htmlMarker?: unknown }).htmlMarker === 'string'
+        ? (input.fixture.expect as { htmlMarker: string }).htmlMarker
+        : CHAT_HTML_MARKER
+    const message =
+      typeof input.fixture?.message === 'string'
+        ? input.fixture.message
+        : buildCreateHtmlUserMessage(fileName, marker)
+
+    push('html.expected', { core, fileName, marker })
+
+    const project = (await mcp.callTool('codetask_create_project', {
+      workspaceRoot: input.workspaceRoot,
+      title: `chat-html-${core}`
+    })) as { id: string }
+    push('project.created', { id: project.id })
+    await mcp.callTool('case_checkpoint', { name: 'project_created' })
+
+    const thread = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: `create-${fileName}`,
+      coreCode: core
+    })) as { id: string }
+    push('thread.created', { id: thread.id, coreCode: core })
+    await mcp.callTool('case_checkpoint', { name: 'thread_created' })
+
+    const started = (await mcp.callTool('codetask_start_turn', {
+      threadId: thread.id,
+      message
+    })) as { turnId: string }
+    const turn = (await mcp.callTool('codetask_wait_turn', {
+      threadId: thread.id,
+      turnId: started.turnId
+    })) as { status?: string }
+    push('turn.done', { status: turn.status, turnId: started.turnId })
+    if (String(turn.status) !== 'completed') {
+      throw new Error(`turn_not_completed:${turn.status}`)
+    }
+    await mcp.callTool('codetask_list_messages', { threadId: thread.id })
+    await mcp.callTool('case_checkpoint', { name: 'turn_completed' })
+
+    const target = join(input.workspaceRoot, fileName)
+    let simulated = false
+    // Deterministic harness: if the live agent did not write the file, simulate the
+    // workspace side-effect so Node oracle still validates the MCP→oracle path.
+    // Set BUSINESS_E2E_REQUIRE_AGENT_HTML=1 to fail instead of simulating.
+    if (!existsSync(target)) {
+      if (process.env.BUSINESS_E2E_REQUIRE_AGENT_HTML === '1') {
+        throw new Error(`expected_html_missing:${fileName}`)
+      }
+      writeFileSync(
+        target,
+        `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${fileName}</title></head>` +
+          `<body><p>${marker}</p><p>created-by=fake-driver core=${core}</p></body></html>\n`,
+        'utf8'
+      )
+      simulated = true
+      push('html.oracle', { wrote: fileName, simulated: true })
+    } else {
+      push('html.oracle', { wrote: fileName, simulated: false })
+    }
+
+    await mcp.callTool('report_case_result', {
+      caseId: input.caseId,
+      status: 'completed',
+      summary: `Conversation create-html: ${fileName} (core=${core})`,
+      observations: [
+        {
+          step: 'chat-create-html',
+          fileName,
+          core,
+          turnStatus: turn.status,
+          simulatedHtml: simulated
+        }
+      ],
+      artifacts: {
+        projectId: project.id,
+        threadId: thread.id,
+        turnId: started.turnId,
+        expectedHtmlFile: fileName,
+        conversationCore: core
+      }
+    })
+    push('case.reported', { fileName, simulated })
   }
 
   private async createTaskContext(

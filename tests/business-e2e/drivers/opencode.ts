@@ -5,6 +5,10 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { progress } from '../reports/progress'
+import {
+  buildCreateHtmlUserMessage,
+  htmlFileNameForConversationCore
+} from '../config/sdk-html'
 
 const nodeRequire = createRequire(import.meta.url)
 const crossSpawn = nodeRequire('cross-spawn') as typeof spawn
@@ -112,9 +116,16 @@ export class OpenCodeDriver implements AgentDriver {
     const message =
       typeof input.fixture?.message === 'string'
         ? input.fixture.message
-        : '请用中文简短回答：1+1等于几？'
+        : input.caseId === 'CHAT-HTML-001'
+          ? buildCreateHtmlUserMessage(
+              input.expectedHtmlFile?.trim() ||
+                htmlFileNameForConversationCore(input.conversationCore?.trim() || 'opencode')
+            )
+          : '请用中文简短回答：1+1等于几？'
 
     const caseHints: Record<string, string> = {
+      'CHAT-HTML-001':
+        'Create project/thread with the conversation coreCode. Ask the product agent to create the SDK-named HTML file in workspace root (opencode.html / cursor.html / …) containing BUSINESS_E2E_CHAT_HTML. Wait for turn completion, then report with expectedHtmlFile in artifacts.',
       'G4-001':
         'Only unlock and send the first fixture phase (fuzzy). Do NOT unlock later phases. After the assistant replies, list drafts; do not confirm a full draft. Report completed with observations about missing info.',
       'G4-002':
