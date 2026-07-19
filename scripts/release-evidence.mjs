@@ -14,12 +14,22 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const SCHEMA_VERSION = 1
-const REQUIRED_PLATFORMS = ['linux-x64', 'macos-arm64', 'windows-x64']
+const REQUIRED_PLATFORMS = [
+  'linux-arm64',
+  'linux-x64',
+  'macos-arm64',
+  'macos-x64',
+  'windows-arm64',
+  'windows-x64'
+]
 const ARTIFACT_EXTENSIONS = ['.exe', '.deb', '.AppImage', '.dmg', '.zip', '.tar.gz']
 const PLATFORM_ARTIFACT_TOKEN = {
-  'linux-x64': '-linux-',
-  'macos-arm64': '-macos-',
-  'windows-x64': '-windows-'
+  'linux-arm64': '-linux-arm64',
+  'linux-x64': '-linux-x64',
+  'macos-arm64': '-macos-arm64',
+  'macos-x64': '-macos-x64',
+  'windows-arm64': '-windows-arm64',
+  'windows-x64': '-windows-x64'
 }
 
 function values(argv, name) {

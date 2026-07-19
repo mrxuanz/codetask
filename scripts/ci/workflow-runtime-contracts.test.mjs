@@ -11,6 +11,11 @@ const sandboxWorkflow = readFileSync(
   new URL('../../.github/workflows/sandbox.yml', import.meta.url),
   'utf8'
 )
+const releaseWorkflow = readFileSync(
+  new URL('../../.github/workflows/release.yml', import.meta.url),
+  'utf8'
+)
+const nodeVersion = readFileSync(new URL('../../.node-version', import.meta.url), 'utf8').trim()
 
 const serialRustTest =
   'cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1'
@@ -35,6 +40,31 @@ test('release builds package and smoke an ncc + SEA service artifact', () => {
   assert.match(buildWorkflow, /npm run package:server:sea/)
   assert.match(buildWorkflow, /server-sea-smoke\.log/)
   assert.match(buildWorkflow, /dist\/\*\.tar\.gz/)
+})
+
+test('CI and release use Node 24 LTS from one version file', () => {
+  assert.equal(nodeVersion, '24')
+  for (const workflow of [buildWorkflow, ciWorkflow, sandboxWorkflow, releaseWorkflow]) {
+    assert.match(workflow, /node-version-file: \.node-version/u)
+    assert.doesNotMatch(workflow, /node-version:\s*['"]?22/u)
+  }
+})
+
+test('release validates its source and requires all six native target builds', () => {
+  assert.match(releaseWorkflow, /scripts\/resolve-release-source\.mjs/u)
+  assert.match(releaseWorkflow, /target_commitish: \$\{\{ needs\.prepare\.outputs\.sha \}\}/u)
+  const targets = [
+    ['ubuntu-24.04', 'linux-x64'],
+    ['ubuntu-24.04-arm', 'linux-arm64'],
+    ['macos-15-intel', 'macos-x64'],
+    ['macos-15', 'macos-arm64'],
+    ['windows-2025', 'windows-x64'],
+    ['windows-11-arm', 'windows-arm64']
+  ]
+  for (const [runner, platform] of targets) {
+    assert.ok(releaseWorkflow.includes(`runner: ${runner}`))
+    assert.ok(releaseWorkflow.includes(`name: ${platform}`))
+  }
 })
 
 test('Rust workspace tests are serialized without skipping failures', () => {

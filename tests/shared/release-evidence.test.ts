@@ -7,6 +7,14 @@ import test from 'node:test'
 
 const script = resolve('scripts/release-evidence.mjs')
 const commit = '0123456789abcdef0123456789abcdef01234567'
+const platforms = [
+  'linux-arm64',
+  'linux-x64',
+  'macos-arm64',
+  'macos-x64',
+  'windows-arm64',
+  'windows-x64'
+]
 
 function run(args: string[], cwd = resolve('.')): ReturnType<typeof spawnSync> {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' })
@@ -25,10 +33,16 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     writeFileSync(smokeLog, '{"ok":true,"health":{"health":"ok"}}\n')
     writeFileSync(seaSmokeLog, '{"ok":true,"mode":"sea","health":{"health":"ok"}}\n')
     writeFileSync(buildLog, 'build passed\n')
-    writeFileSync(join(root, 'codetask-0.1.0-linux-x64.AppImage'), 'linux application artifact')
-    writeFileSync(join(root, 'codetask-0.1.0-macos-arm64.dmg'), 'macos application artifact')
-    writeFileSync(join(root, 'codetask-0.1.0-windows-x64.exe'), 'windows application artifact')
-    for (const platform of ['linux-x64', 'macos-arm64', 'windows-x64']) {
+    for (const platform of platforms) {
+      const extension = platform.startsWith('linux-')
+        ? 'AppImage'
+        : platform.startsWith('macos-')
+          ? 'dmg'
+          : 'exe'
+      writeFileSync(
+        join(root, `codetask-0.1.0-${platform}.${extension}`),
+        `${platform} application artifact`
+      )
       writeFileSync(
         join(root, `codetask-server-0.1.0-${platform}.tar.gz`),
         `${platform} sea service artifact`
@@ -51,7 +65,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     ])
     assert.equal(testResult.status, 0, testResult.stderr)
 
-    for (const platform of ['linux-x64', 'macos-arm64', 'windows-x64']) {
+    for (const platform of platforms) {
       const outputDir = join(root, 'release-evidence', platform)
       mkdirSync(outputDir, { recursive: true })
       const result = run([
@@ -98,7 +112,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     }
     assert.equal(parsed.kind, 'legacy-release-report')
     assert.equal(parsed.status, 'passed')
-    assert.equal(parsed.manifests.length, 4)
+    assert.equal(parsed.manifests.length, 7)
 
     writeFileSync(join(root, 'codetask-0.1.0-linux-x64.AppImage'), 'tampered artifact')
     const rejected = run([
