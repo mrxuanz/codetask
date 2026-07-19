@@ -141,3 +141,29 @@ count to decrease but fails if it grows above that baseline.
 - Decision needed: use a future authenticated failure log to identify the exact
   test, then choose platform-aware per-test timeouts or explicit test-level
   serialization in native test code.
+
+## BUSINESS-010: Codex internal HTTP MCP can disappear without failing the turn
+
+- Locations: `src/server/agent-runtime/mcp.ts`,
+  `src/server/agent-runtime/env.ts`,
+  `src/server/agent-runtime/providers/codex-policy.ts`, and
+  `src/server/agent-runtime/providers/codex-sdk.ts`
+- Finding: live Codex probes for both the read-only Planner role and the
+  full-access task-worker role completed without making any request to the
+  configured loopback Streamable HTTP MCP server. A direct CLI diagnostic
+  reported HTTP 502 during MCP initialization, while the Codex process still
+  exited successfully. Adding `127.0.0.1,localhost,::1` to both `NO_PROXY` and
+  `no_proxy` made initialize, tools/list, and tools/call succeed. The internal
+  `codeteam-manager` MCP entry was not marked `required`, so the original startup
+  failure is not surfaced before the model turn.
+- Impact: Planner has no `register_plan_outline`, `register_task_context`, or
+  `finalize_plan` tools and the job is later misclassified as
+  `draft.plan_not_ready` instead of an MCP/provider infrastructure failure.
+- CI handling: business E2E now verifies that the persisted thread core matches
+  the selected provider, but no runtime failure is baselined or hidden.
+- Resolution: the Codex child environment now merges the loopback exclusions
+  into both proxy-variable casings whenever the internal MCP URL is configured;
+  the internal MCP entry is required; and required-MCP startup failures map to
+  `plan.mcp_unavailable` or `conversation.mcp_unavailable` before the role is
+  treated as healthy. The live Codex probe consumes these production settings
+  directly so a regression cannot be masked by diagnostic-only overrides.

@@ -1,0 +1,22 @@
+{
+  "fixtureId": "draft-multiturn",
+  "workspace": "notes-search-project",
+  "phases": {
+    "fuzzy": {
+      "message": "帮我做一个笔记搜索功能，具体先不定。"
+    },
+    "scope": {
+      "message": "范围：在本地 notes.json 里按标题和正文搜索，输出匹配笔记列表。不需要 UI，不需要网络。"
+    },
+    "constraints": {
+      "message": "约束：不能安装第三方依赖；不能修改 SENTINEL.txt；使用 Node 内置测试。"
+    },
+    "acceptance": {
+      "message": "验收：大小写不敏感；多关键词为 AND；空 query 返回 []；结果含稳定 id、title、summary；最终 node --test 全部通过。"
+    },
+    "propose": {
+      "message": "以上范围、约束、验收已齐全。请立即提出完整任务草案并进入可确认状态（调用 propose_task_draft / 提出任务草案）；不要再只探查文件或继续追问。"
+    }
+  },
+  "phaseOrder": ["fuzzy", "scope", "constraints", "acceptance", "propose"]
+}

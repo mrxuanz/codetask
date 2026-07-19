@@ -7,6 +7,7 @@ import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
 import { SafeLoggerImpl } from '../server/application/safe-logger'
 import { resolveDataDirSelection } from './data-dir'
 import { discoverRunningService } from './service-discovery'
+import { createElectronServerPlatform } from './electron-server-platform'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
 
@@ -116,7 +117,7 @@ app.whenReady().then(async () => {
         console.log(`[desktop] using running service at ${serverInfo.url}`)
       }
     }
-    serverInfo ??= await startAppServer(cli)
+    serverInfo ??= await startAppServer(cli, createElectronServerPlatform())
     ipcMain.handle('get-server-info', () => serverInfo)
     ipcMain.handle('select-data-directory', async () => {
       const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

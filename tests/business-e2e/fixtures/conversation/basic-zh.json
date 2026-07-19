@@ -1,0 +1,7 @@
+{
+  "message": "请用中文简短回答：1+1等于几？只回复数字。",
+  "language": "zh-CN",
+  "expect": {
+    "assistantMentions": ["2"]
+  }
+}

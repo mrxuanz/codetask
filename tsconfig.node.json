@@ -5,6 +5,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/server/**/*",
+    "src/standalone/**/*",
     "src/sandbox/**/*",
     "src/shared/**/*",
     "scripts/control-plane/**/*",

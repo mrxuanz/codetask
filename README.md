@@ -142,6 +142,10 @@ npm run dev:serve
 
 # Custom host/port (dev or packaged app)
 electron . --serve --host 127.0.0.1 --port 9000
+
+# Pure Node server — no Electron, DISPLAY, or Xvfb required
+npm run build:server
+npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 ```
 
 Notes:
@@ -149,6 +153,7 @@ Notes:
 - In **server** mode, Electron skips GPU init (helpful on WSL / CI / headless hosts).
 - When bound to `0.0.0.0`, other devices on the LAN can reach the UI at `http://<your-ip>:<port>`.
 - Job execution, planner, and sandbox behavior are identical in both modes — only the shell differs.
+- The dedicated Node entry is always server mode, so `--serve` is optional for `start:server`.
 
 ## Quick Start
 

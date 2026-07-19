@@ -8,6 +8,8 @@ import {
   resolveCodexMcpToolNamesForTurn,
   resolveCodexOuterSandbox
 } from '../../src/server/agent-runtime/providers/codex-policy'
+import { applyLoopbackNoProxyEnv } from '../../src/server/agent-runtime/env'
+import { resolveCodexMcpStartupTurnError } from '../../src/server/agent-runtime/providers/codex-sdk'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'
 
 const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-policy-'))
@@ -63,6 +65,14 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.ok(
     conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
   )
+  const systemMcp = conversation.sdkConfig?.mcp_servers?.['codeteam-manager'] as
+    | { required?: boolean }
+    | undefined
+  assert.equal(systemMcp?.required, true)
+  for (const entry of ['127.0.0.1', 'localhost', '::1']) {
+    assert.ok(conversation.env.NO_PROXY.split(',').includes(entry))
+    assert.ok(conversation.env.no_proxy.split(',').includes(entry))
+  }
 
   const planner = buildCodexTurnPlan(
     {
@@ -92,6 +102,49 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.ok(task.mcpToolNames?.includes('report_task_result'))
   assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
   assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_SCOPE, 'logical-task')
+})
+
+test('applyLoopbackNoProxyEnv preserves inherited entries and synchronizes both casings', () => {
+  const env = {
+    NO_PROXY: 'example.test, localhost',
+    no_proxy: 'internal.test,127.0.0.1'
+  }
+
+  applyLoopbackNoProxyEnv(env)
+
+  const expected = 'example.test,localhost,internal.test,127.0.0.1,::1'
+  assert.equal(env.NO_PROXY, expected)
+  assert.equal(env.no_proxy, expected)
+})
+
+test('resolveCodexMcpStartupTurnError maps required system MCP startup failures by role', () => {
+  const failure = new Error(
+    'MCP startup failed: required MCP servers failed to initialize: codeteam-manager'
+  )
+
+  assert.equal(
+    resolveCodexMcpStartupTurnError({ role: 'planner', mcpUrl: 'http://127.0.0.1:9/mcp' }, failure)
+      ?.code,
+    'plan.mcp_unavailable'
+  )
+  assert.equal(
+    resolveCodexMcpStartupTurnError(
+      { role: 'conversation', mcpUrl: 'http://127.0.0.1:9/mcp' },
+      failure
+    )?.code,
+    'conversation.mcp_unavailable'
+  )
+  assert.equal(
+    resolveCodexMcpStartupTurnError({ role: 'planner', mcpUrl: undefined }, failure),
+    null
+  )
+  assert.equal(
+    resolveCodexMcpStartupTurnError(
+      { role: 'planner', mcpUrl: 'http://127.0.0.1:9/mcp' },
+      new Error('model overloaded')
+    ),
+    null
+  )
 })
 
 test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {

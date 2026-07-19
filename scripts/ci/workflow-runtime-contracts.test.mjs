@@ -24,6 +24,12 @@ test('Linux package smoke runs Electron under a virtual display', () => {
   assert.match(buildWorkflow, /inputs\.smoke-unpacked && runner\.os != 'Linux'/)
 })
 
+test('standalone Node smoke runs separately from the Electron display smoke', () => {
+  assert.match(buildWorkflow, /Smoke standalone Node service without a display/)
+  assert.match(buildWorkflow, /npm run smoke:standalone:ci/)
+  assert.match(buildWorkflow, /standalone-smoke\.log/)
+})
+
 test('Rust workspace tests are serialized without skipping failures', () => {
   assert.ok(ciWorkflow.includes(serialRustTest))
   assert.ok(sandboxWorkflow.includes(serialRustTest))

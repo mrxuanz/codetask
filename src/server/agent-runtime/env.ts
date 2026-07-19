@@ -98,6 +98,42 @@ export interface ProviderChildEnvOptions {
 
 const TASK_IDEMPOTENCY_ENV_KEY = 'CODETASK_TASK_IDEMPOTENCY_KEY'
 const TASK_IDEMPOTENCY_SCOPE_ENV_KEY = 'CODETASK_TASK_IDEMPOTENCY_SCOPE'
+const LOOPBACK_NO_PROXY_ENTRIES = ['127.0.0.1', 'localhost', '::1'] as const
+
+/**
+ * Keep CodeTask's loopback MCP traffic out of inherited HTTP proxies.
+ *
+ * Codex's Streamable HTTP MCP client honors conventional proxy variables. On
+ * some hosts NO_PROXY is absent, incomplete, or only supplied in one casing,
+ * which can route the local CodeTask MCP endpoint through an upstream proxy.
+ * Merge both casings so the spawned CLI sees the same complete exclusion list.
+ */
+export function applyLoopbackNoProxyEnv(env: Record<string, string>): Record<string, string> {
+  const entries: string[] = []
+  const seen = new Set<string>()
+
+  for (const value of [env.NO_PROXY, env.no_proxy]) {
+    for (const raw of value?.split(',') ?? []) {
+      const entry = raw.trim()
+      if (!entry) continue
+      const normalized = entry.toLowerCase()
+      if (seen.has(normalized)) continue
+      seen.add(normalized)
+      entries.push(entry)
+    }
+  }
+
+  for (const entry of LOOPBACK_NO_PROXY_ENTRIES) {
+    if (seen.has(entry)) continue
+    seen.add(entry)
+    entries.push(entry)
+  }
+
+  const merged = entries.join(',')
+  env.NO_PROXY = merged
+  env.no_proxy = merged
+  return env
+}
 
 /**
  * Add the durable logical-task identity to the environment consumed by the

@@ -1,20 +1,16 @@
-import { join } from 'path'
 import { serve, type ServerType } from '@hono/node-server'
 import type { ExecutionContext, Hono } from 'hono'
-import { app as electronApp } from 'electron'
-import { is } from '@electron-toolkit/utils'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { readSchemaGeneration } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
 import { mkdirSync } from 'fs'
-import { resolveDataDirSelection } from './data-dir'
 import { ensureResolvedDataRoot, type DataDirResolution } from './storage-locator'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
 import { generateSetupToken } from '../server/auth/setup-token'
-import { loadMainProcessAuthSecret } from './app-secret'
 import { clearPublishedRunningService, publishRunningService } from './service-discovery'
+import type { AppSecretProvider } from '../server/auth/secret'
 
 export interface ServerInfo {
   host: string
@@ -23,6 +19,27 @@ export interface ServerInfo {
   requestedPort: number
   portChanged: boolean
   mode: CliOptions['mode']
+}
+
+/**
+ * Host-specific capabilities used by the shared HTTP/runtime composition.
+ *
+ * Electron and standalone Node entry points provide separate implementations so the business
+ * runtime never needs to import Electron APIs directly.
+ */
+export interface AppServerPlatform {
+  isDev: boolean
+  rendererDevUrl?: string
+  staticDir?: string
+  appRoot: string
+  resolveDataDirSelection(input: {
+    explicitDataDir?: string
+    mode: CliOptions['mode']
+  }): DataDirResolution
+  loadAuthSecret(input: {
+    mode: CliOptions['mode']
+    bootstrapSecretPath: string
+  }): Promise<{ value: string; provider: AppSecretProvider }>
 }
 
 let activeServer: ServerType | null = null
@@ -84,12 +101,13 @@ function activeFetch(getApp: () => Hono): NodeFetch {
 async function createReadyApp(
   cli: CliOptions,
   storage: DataDirResolution,
+  platform: AppServerPlatform,
   http: { rendererDevUrl?: string; staticDir?: string }
 ): Promise<{ app: Hono; dataDir: string }> {
   const dataDir = ensureResolvedDataRoot(storage)
   process.env.CODETASK_DATA_DIR = dataDir
 
-  const authSecret = await loadMainProcessAuthSecret({
+  const authSecret = await platform.loadAuthSecret({
     mode: cli.mode,
     bootstrapSecretPath: storage.bootstrap.authSecretFile
   })
@@ -128,7 +146,7 @@ async function createReadyApp(
   }
 
   const app = createApp(ctx, {
-    isDev: is.dev,
+    isDev: platform.isDev,
     rendererDevUrl: http.rendererDevUrl,
     staticDir: http.staticDir
   })
@@ -144,15 +162,20 @@ export async function gracefulShutdown(): Promise<void> {
   return shutdownPromise
 }
 
-export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
-  const rendererDevUrl = process.env['ELECTRON_RENDERER_URL']
-  const staticDir = join(__dirname, '../renderer')
+export async function startAppServer(
+  cli: CliOptions,
+  platform: AppServerPlatform
+): Promise<ServerInfo> {
+  const rendererDevUrl = platform.rendererDevUrl
   const http = {
     rendererDevUrl,
-    staticDir: is.dev ? undefined : staticDir
+    staticDir: platform.isDev ? undefined : platform.staticDir
   }
 
-  const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
+  const storage = platform.resolveDataDirSelection({
+    explicitDataDir: cli.dataDir,
+    mode: cli.mode
+  })
   let activeApp: Hono
   let boundPort = cli.port
   let bindChanged = false
@@ -170,7 +193,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
 
     const setupTokenRequired = cli.mode === 'server'
     if (setupTokenRequired) {
-      const earlySecret = await loadMainProcessAuthSecret({
+      const earlySecret = await platform.loadAuthSecret({
         mode: cli.mode,
         bootstrapSecretPath: storage.bootstrap.authSecretFile
       })
@@ -181,10 +204,10 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     let publishedInfo: ServerInfo | null = null
     const setupApp = createSetupShell({
       storage,
-      isDev: is.dev,
+      isDev: platform.isDev,
       rendererDevUrl,
       staticDir: http.staticDir,
-      forbiddenRoots: [electronApp.getAppPath(), process.cwd()],
+      forbiddenRoots: [platform.appRoot, process.cwd()],
       setupTokenRequired,
       activateStorage: async () => {
         if (promoteInflight) {
@@ -192,11 +215,11 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
           return
         }
         promoteInflight = (async () => {
-          const resolved = resolveDataDirSelection({ mode: cli.mode })
+          const resolved = platform.resolveDataDirSelection({ mode: cli.mode })
           if (resolved.phase !== 'ready') {
             throw new Error(resolved.issue ?? 'Storage locator is not ready after initialization')
           }
-          const { app, dataDir } = await createReadyApp(cli, resolved, http)
+          const { app, dataDir } = await createReadyApp(cli, resolved, platform, http)
           activeApp = app
           initConversationMcpBackend(boundPort)
           if (cli.mode === 'server' && publishedInfo) {
@@ -262,7 +285,7 @@ export async function startAppServer(cli: CliOptions): Promise<ServerInfo> {
     return info
   }
 
-  const { app, dataDir } = await createReadyApp(cli, storage, http)
+  const { app, dataDir } = await createReadyApp(cli, storage, platform, http)
   activeApp = app
 
   const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
