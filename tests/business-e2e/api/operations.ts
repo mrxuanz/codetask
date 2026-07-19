@@ -492,6 +492,39 @@ export async function getControlPlanePolicies(client: PublicApiClient): Promise<
   return result.data
 }
 
+export async function getMcpSettings(client: PublicApiClient): Promise<{
+  settings: unknown
+  constraints?: unknown
+}> {
+  const result = await client.request<{ settings: unknown; constraints?: unknown }>(
+    'GET',
+    '/api/settings/mcp',
+    undefined,
+    { operationId: 'settings.mcp.get' }
+  )
+  if (result.status >= 400) {
+    throw new Error(`settings.mcp_get_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data ?? { settings: {} }
+}
+
+export async function putMcpSettings(
+  client: PublicApiClient,
+  settings: unknown
+): Promise<{ settings: unknown }> {
+  const result = await client.request<{ settings: unknown }>(
+    'PUT',
+    '/api/settings/mcp',
+    { settings },
+    { operationId: 'settings.mcp.put' }
+  )
+  if (result.status >= 400) {
+    throw new Error(`settings.mcp_put_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data ?? { settings }
+}
+
+
 /** Soft probe helper: returns status without throwing. */
 export async function softRequest(
   client: PublicApiClient,

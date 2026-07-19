@@ -62,6 +62,13 @@ blob-report/
 tests/business-e2e/.runtime/
 tests/business/.runtime/
 
+# Accidental root artifacts from chat-create-html / local runs
+/opencode.html
+/cursor.html
+/codex.html
+/claude.html
+/gemini.html
+
 # Electron / tooling
 .codegraph/
 .cursor/

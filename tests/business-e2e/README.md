@@ -1,65 +1,54 @@
 # Business E2E (black-box)
 
-Node Supervisor + Test MCP + OpenCode/Fake Driver + Skills + Node Oracle.
+Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + Skills + Node Oracle.
 
-Canonical organization: **two acceptance parts** — see
-[`docs/业务测试.md` §0.1](../../docs/业务测试.md#01-两段式业务验收约定).
+- Capability parts: [`docs/业务测试.md` §0.1](../../docs/业务测试.md#01-两段式业务验收约定)
+- Run phases + providers: [`docs/业务测试.md` §0.2](../../docs/业务测试.md#02-三阶段跑测与-providers-cli)
+- Operator guide (architecture, phase-3 evidence, i18n):
+  [`docs/business-testing/04-脚本使用与三语言架构.md`](../../docs/business-testing/04-脚本使用与三语言架构.md)
 
-| Part | Meaning | Default depth case |
-| ---- | ------- | ------------------ |
-| **conversation** | Normal chat system | `chat-basic` |
-| **draft-job** | Draft → execution tree → job (one chain) | `notes-search` |
+## Phases
 
-Do **not** use `G3` / `G6-001` style names in daily scripts. Prefer friendly slugs and `--part`.
+| Phase | `--part` | Cases | Evidence (summary) |
+| ----- | -------- | ----- | ------------------ |
+| 1 | `conversation` | `chat-basic`, `chat-create-html` | Turn + (html) file oracle |
+| 2 | `draft-job` | `notes-search`, `job-chat-readonly` | Plan/job + file oracle; readonly thicken in progress |
+| 3 | `settings-mcp` | `settings-mcp-probe` | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
+
+**Two MCP surfaces:** Test MCP = outer driver. Settings Probe (`business-e2e-probe`) = user MCP registered via `PUT /api/settings/mcp`. Do not confuse them.
 
 ```bash
 npm run build:server
 
-# List friendly names
 npm run business:e2e:list
+npm run business:e2e:list -- --lang en
 
-# Part A — normal conversation
 npm run business:e2e:conversation
-
-# Part B — draft → plan → job (Notes Search)
+npm run business:e2e:chat-html
 npm run business:e2e:draft-job
-# same:
 npm run business:e2e:notes-search
-
-# Both parts
+npm run business:e2e:settings-mcp
 npm run business:e2e:both
+npm run business:e2e:phases
 
-# Smoke (bootstrap + chat-basic)
-npm run business:e2e:smoke
-
-# Explicit flags
-npm run business:e2e -- --profile fixed-opencode --case notes-search
-npm run business:e2e -- --profile fixed-opencode --part conversation,draft-job
-npm run business:e2e -- --profile fixed-opencode --suite both
-
-# Keep previous .runtime for debugging
-npm run business:e2e:notes-search -- --keep-runtime
+npm run business:e2e -- --providers opencode --part conversation,draft-job,settings-mcp
+npm run business:e2e -- --providers cursor,opencode --case settings-mcp-probe
+npm run business:e2e -- --providers all --suite both --lang en
 ```
 
-Legacy `--gate G4` / `--case G6-001` still work but print a deprecation warning.
+## Phase 3 registration (short)
 
-Each run **always** resets test state at startup:
+1. Supervisor starts `probes/settings-mcp-probe.ts`.
+2. Driver `GET` → `PUT` → `GET` `/api/settings/mcp` for roles `conversation` / `task` / `verification` × current core.
+3. Assert probe name present; assert reserved name rejected; harness `tools/call` gets `PROBE_OK_*`.
+4. Restore settings snapshot; `report_case_result`.
 
-- kill leftover OpenCode / case-worker / prior `.runtime` processes
-- **clear test databases** (`app.db` / `*.db*` under business-e2e runtime)
-- delete `tests/business-e2e/.runtime/` (and `.tmp` / `.cache` if present)
-- recreate a clean `.runtime`; the dedicated Server then boots on a **fresh empty DB**
+Artifacts: terminal `settings.mcp.*` lines + `.runtime/runs/<runId>/reports/`.
 
-`--keep-runtime` no longer skips DB/runtime wipe (copy artifacts out before rerun if you need them).
+## Runtime hygiene
 
-Run end banner: `********* SUCCESS *********` or `########## FAILURE #####`.
+Each run kills leftover processes, clears test DBs, resets `tests/business-e2e/.runtime/`, boots Server on empty DB.
 
-Default: one fixed SDK/ACP for conversation + control-plane planner/slice/milestone
-(`--profile fixed-opencode`). Provider switch / mixed-job is later (≈ G8), not the default path.
+UI strings: `i18n/messages.ts` (`--lang` / `BUSINESS_E2E_LANG`).
 
-Progress notes:
-
-- Part B depth representative: **notes-search** (human-like draft collect → confirm → poll plan → confirm_plan → job → file oracle)
-- Fake/scripted probes remain available under legacy gates; they do not replace Part A/B depth
-
-Runtime artifacts (gitignored): `tests/business-e2e/.runtime/runs/<runId>/`.
+Default fixed roles via `--providers` (or legacy `--profile fixed-opencode`). Mixed-job / mid-chat switch ≈ G8 later.

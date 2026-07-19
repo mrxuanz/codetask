@@ -1,4 +1,4 @@
-/** Live progress lines for business e2e (stdout, flushed). Chinese labels for now. */
+/** Live progress lines for business e2e (stdout, flushed). Locale via i18n (--lang). */
 
 import {
   labelForStep,
@@ -7,6 +7,7 @@ import {
   slugForCaseId,
   CASE_SLUG_BY_ID
 } from '../cases/selection'
+import { tBanner, tSupervisor } from '../i18n'
 
 export function progress(scope: string, step: string, detail?: unknown): void {
   const scopeLabel = humanizeScope(scope)
@@ -17,16 +18,16 @@ export function progress(scope: string, step: string, detail?: unknown): void {
       : typeof detail === 'string'
         ? ` ${detail}`
         : ` ${compactDetail(detail)}`
-  const line = `[业务测试] ${scopeLabel} · ${stepLabel}${suffix}`
+  const line = `[${tBanner()}] ${scopeLabel} · ${stepLabel}${suffix}`
   process.stdout.write(`${line}\n`)
 }
 
 function humanizeScope(scope: string): string {
-  if (scope === 'supervisor') return '调度器'
+  if (scope === 'supervisor') return tSupervisor()
   if (/[\u4e00-\u9fff]/.test(scope)) return scope
 
   // Already an internal catalog id
-  if (/^(G\d|FOUNDATION|DRAFT)/i.test(scope)) {
+  if (/^(G\d|FOUNDATION|DRAFT|CHAT|SETTINGS|JOB)/i.test(scope)) {
     return scopeLabelForCaseId(scope)
   }
 

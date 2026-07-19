@@ -31,7 +31,11 @@ async function main(): Promise<void> {
     workspaceRoot: input.workspaceRoot,
     agentRoot: input.agentRoot,
     fixture,
-    timeoutMs: input.timeoutMs
+    timeoutMs: input.timeoutMs,
+    conversationCore: input.conversationCore,
+    expectedHtmlFile: input.expectedHtmlFile,
+    probeMcpUrl: input.probeMcpUrl,
+    probeMcpName: input.probeMcpName
   })
 
   const payload: CaseWorkerResult = {

@@ -414,6 +414,22 @@ export const TOOL_DEFS: Array<{
     }
   },
   {
+    name: 'codetask_get_mcp_settings',
+    description: 'GET /api/settings/mcp (user MCP for conversation/task/verification)',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'codetask_put_mcp_settings',
+    description: 'PUT /api/settings/mcp with full UserMcpSettings body',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        settings: { type: 'object' }
+      },
+      required: ['settings']
+    }
+  },
+  {
     name: 'case_checkpoint',
     description: 'Record a named checkpoint for the current case',
     inputSchema: {
@@ -677,6 +693,19 @@ const handlers: Record<string, ToolHandler> = {
   },
   async codetask_restart_job(args, ctx) {
     return ok(await ops.restartJob(ctx.client, String(args.jobId)))
+  },
+  async codetask_get_mcp_settings(_args, ctx) {
+    return ok(await ops.getMcpSettings(ctx.client))
+  },
+  async codetask_put_mcp_settings(args, ctx) {
+    if (!args.settings || typeof args.settings !== 'object') {
+      return fail('settings object required')
+    }
+    try {
+      return ok(await ops.putMcpSettings(ctx.client, args.settings))
+    } catch (error) {
+      return fail(String(error))
+    }
   },
   async case_checkpoint(args, ctx) {
     const capability = ctx.capabilities.assertAllowed(ctx.capabilityId, 'case_checkpoint')
