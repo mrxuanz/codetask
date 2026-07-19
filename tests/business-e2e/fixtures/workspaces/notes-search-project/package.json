@@ -1,0 +1,10 @@
+{
+  "name": "notes-search-project",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fixed business-e2e Notes Search workspace (no third-party dependencies)",
+  "scripts": {
+    "test": "node --test"
+  }
+}

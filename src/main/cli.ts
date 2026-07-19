@@ -51,3 +51,9 @@ export function parseCliArgs(argv: string[] = process.argv): CliOptions {
   const port = readPort(argv, DEFAULT_DESKTOP_PORT)
   return { mode: 'desktop', host: '127.0.0.1', port, smokeTest, ...dataDirOption }
 }
+
+/** Parse the dedicated Node entry point, which is always a server even without `--serve`. */
+export function parseServerCliArgs(argv: string[] = process.argv): CliOptions {
+  const normalized = argv.includes('--serve') ? argv : [...argv, '--serve']
+  return parseCliArgs(normalized)
+}

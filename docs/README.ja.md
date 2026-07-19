@@ -127,6 +127,10 @@ npm run dev:serve
 
 # host/port を指定（開発時またはパッケージ済みアプリ）
 electron . --serve --host 127.0.0.1 --port 9000
+
+# 純粋な Node サーバー（Electron、DISPLAY、Xvfb は不要）
+npm run build:server
+npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 ```
 
 補足:
@@ -134,6 +138,7 @@ electron . --serve --host 127.0.0.1 --port 9000
 - **Server** モードでは Electron が GPU 初期化をスキップ（WSL / CI / ヘッドレス環境向け）。
 - `0.0.0.0` に bind すると、LAN 内の他端末から `http://<あなたのIP>:<ポート>` で UI にアクセス可能。
 - Job 実行・Planner・サンドボックスの挙動は両モードで同一。違いはシェルのみ。
+- 専用 Node エントリは常に Server モードのため、`start:server` に `--serve` は不要です。
 
 ## クイックスタート
 

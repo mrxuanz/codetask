@@ -1,4 +1,5 @@
 import {
+  applyLoopbackNoProxyEnv,
   applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv
@@ -67,6 +68,7 @@ export function buildCodexTurnPlan(
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
+  if (input.mcpUrl) applyLoopbackNoProxyEnv(env)
   applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const sandboxMode: CodexSandboxMode = outerSandbox

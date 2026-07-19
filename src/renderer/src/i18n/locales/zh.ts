@@ -590,6 +590,7 @@ export default {
         managed: '该路径由 CLI 或环境变量管理，不能在此处更改。',
         phase: '迁移阶段：{phase}',
         restart: '重启并切换到新目录',
+        restartServerRequired: '请由管理员重启 codetask-server 服务以切换到新目录。',
         deleteOld: '删除旧数据目录',
         migrationFailed: '数据存储迁移失败',
         deleteOldFailed: '删除旧数据目录失败'
