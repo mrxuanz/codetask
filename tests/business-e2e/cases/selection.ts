@@ -41,8 +41,9 @@ export const CASE_ALIASES: Record<string, string> = {
   // Phase 3 — settings user MCP (conversation / task / verification)
   'settings-mcp-probe': 'SETTINGS-MCP-001',
 
-  // full scripted probe (legacy surface)
-  'fixed-opencode-chain': 'G8-001'
+  // full scripted probe (`fixed-opencode-chain` retained as a legacy alias)
+  'fixed-opencode-chain': 'G8-001',
+  'full-chain': 'G8-001'
 }
 
 /** Internal id → preferred slug (for CLI / machine logs) */
@@ -169,7 +170,10 @@ export function resolveInternalCaseId(raw: string): string {
 export function parseParts(raw: string | undefined): AcceptancePart[] {
   if (!raw?.trim()) return []
   const out: AcceptancePart[] = []
-  for (const piece of raw.split(/[,+\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+  for (const piece of raw
+    .split(/[,+\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)) {
     if (piece === 'a' || piece === 'conversation' || piece === 'chat') {
       out.push('conversation')
       continue
@@ -224,9 +228,7 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
   if (input.caseId) {
     const resolved = resolveInternalCaseId(input.caseId)
     if (/^G\d/i.test(input.caseId) && CASE_SLUG_BY_ID[resolved]) {
-      warnings.push(
-        `deprecated_case_id:${input.caseId}:prefer --case ${CASE_SLUG_BY_ID[resolved]}`
-      )
+      warnings.push(`deprecated_case_id:${input.caseId}:prefer --case ${CASE_SLUG_BY_ID[resolved]}`)
     } else if (/^G\d/i.test(input.caseId)) {
       warnings.push(`deprecated_case_id:${input.caseId}:prefer friendly --case slugs (see --list)`)
     }

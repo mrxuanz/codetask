@@ -47,6 +47,36 @@ function logCodexMcpItem(item: {
   })
 }
 
+function readErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.trim() : String(error ?? '').trim()
+}
+
+function indicatesCodexMcpStartupFailure(error: unknown): boolean {
+  const message = readErrorMessage(error).toLowerCase()
+  return (
+    message.includes('mcp startup failed') ||
+    message.includes('required mcp servers failed to initialize') ||
+    (message.includes('required mcp server') && message.includes('failed to initialize'))
+  )
+}
+
+export function resolveCodexMcpStartupTurnError(
+  input: Pick<AgentTurnInput, 'role' | 'mcpUrl'>,
+  error: unknown
+): ReturnType<typeof createTurnError> | null {
+  if (!input.mcpUrl || !indicatesCodexMcpStartupFailure(error)) return null
+
+  const code =
+    input.role === 'planner'
+      ? 'plan.mcp_unavailable'
+      : input.role === 'conversation'
+        ? 'conversation.mcp_unavailable'
+        : null
+  if (!code) return null
+
+  return createTurnError(code, { detail: readErrorMessage(error) })
+}
+
 export async function* streamCodexTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
@@ -91,10 +121,10 @@ export async function* streamCodexTurn(
   }
   const turnAbortListener = forwardAbortSignal(turnScope.signal, turnAbort)
 
-  const streamed = await thread.runStreamed(prompt, { signal: turnAbort.signal })
   let reply = ''
   let thinking = ''
   let turnFinished = false
+  let closeEventIterator: (() => Promise<unknown>) | null = null
 
   const finishTurn = function* (): Generator<AgentTurnChunk, void, unknown> {
     turnFinished = true
@@ -108,9 +138,11 @@ export async function* streamCodexTurn(
     turnAbort.abort()
   }
 
-  const eventIterator = streamed.events[Symbol.asyncIterator]()
-
   try {
+    const streamed = await thread.runStreamed(prompt, { signal: turnAbort.signal })
+    const eventIterator = streamed.events[Symbol.asyncIterator]()
+    closeEventIterator = async () => eventIterator.return?.(undefined)
+
     while (true) {
       const next = await turnScope.race(eventIterator.next())
       if (next.done) break
@@ -198,11 +230,13 @@ export async function* streamCodexTurn(
       replyChars: reply.length,
       error: error instanceof Error ? error.message : String(error)
     })
+    const mcpStartupError = resolveCodexMcpStartupTurnError(input, error)
+    if (mcpStartupError) throw mcpStartupError
     throwSdkTurnError(error)
   } finally {
     turnScope.signal.removeEventListener('abort', turnAbortListener)
     turnScope.dispose()
-    await eventIterator.return?.(undefined).catch(() => {})
+    if (closeEventIterator) await closeEventIterator().catch(() => {})
   }
 
   if (!turnFinished) {

@@ -6,10 +6,11 @@
 export const CHAT_HTML_MARKER = 'BUSINESS_E2E_CHAT_HTML'
 
 export function htmlFileNameForConversationCore(core: string): string {
-  const c = String(core ?? 'opencode')
+  const c = String(core)
     .trim()
     .toLowerCase()
     .replace(/[\s_]+/g, '-')
+  if (!c) throw new Error('conversation_core_required')
 
   if (c === 'opencode') return 'opencode.html'
   if (
@@ -30,7 +31,10 @@ export function htmlFileNameForConversationCore(core: string): string {
   return `${safe}.html`
 }
 
-export function buildCreateHtmlUserMessage(fileName: string, marker: string = CHAT_HTML_MARKER): string {
+export function buildCreateHtmlUserMessage(
+  fileName: string,
+  marker: string = CHAT_HTML_MARKER
+): string {
   return [
     `请在当前项目工作区根目录创建一个名为 ${fileName} 的 HTML 文件。`,
     `文件内容必须是合法 HTML，并在 body 中包含纯文本标记：${marker}`,

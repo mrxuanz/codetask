@@ -65,7 +65,7 @@ export const TOOL_DEFS: Array<{
         coreCode: { type: 'string' },
         threadKind: { type: 'string' }
       },
-      required: ['projectId']
+      required: ['projectId', 'coreCode']
     }
   },
   {
@@ -461,7 +461,9 @@ export const TOOL_DEFS: Array<{
 const handlers: Record<string, ToolHandler> = {
   async codetask_create_project(args, ctx) {
     const workspaceRoot =
-      typeof args.workspaceRoot === 'string' ? args.workspaceRoot : ctx.capabilities.get(ctx.capabilityId)?.workspaceRoot
+      typeof args.workspaceRoot === 'string'
+        ? args.workspaceRoot
+        : ctx.capabilities.get(ctx.capabilityId)?.workspaceRoot
     if (!workspaceRoot) return fail('workspaceRoot required')
     const project = await ops.createProject(ctx.client, {
       workspaceRoot,
@@ -471,9 +473,11 @@ const handlers: Record<string, ToolHandler> = {
   },
   async codetask_create_thread(args, ctx) {
     const projectId = String(args.projectId ?? '')
+    const coreCode = typeof args.coreCode === 'string' ? args.coreCode.trim() : ''
+    if (!coreCode) return fail('coreCode required')
     const thread = await ops.createThread(ctx.client, projectId, {
       title: typeof args.title === 'string' ? args.title : undefined,
-      coreCode: typeof args.coreCode === 'string' ? args.coreCode : 'opencode',
+      coreCode,
       threadKind: typeof args.threadKind === 'string' ? args.threadKind : 'chat'
     })
     return ok(thread)
@@ -493,12 +497,7 @@ const handlers: Record<string, ToolHandler> = {
       threadKind === 'create_task' ||
       args.kind === 'create_task' ||
       args.kind === 'draft'
-    const kind =
-      typeof args.kind === 'string'
-        ? args.kind
-        : createTaskMode
-          ? 'create_task'
-          : 'chat'
+    const kind = typeof args.kind === 'string' ? args.kind : createTaskMode ? 'create_task' : 'chat'
     return ok(
       await ops.startTurn(ctx.client, threadId, String(args.message), {
         createTaskMode,
@@ -559,9 +558,7 @@ const handlers: Record<string, ToolHandler> = {
     return ok(await ops.listThreadDrafts(ctx.client, String(args.threadId)))
   },
   async codetask_confirm_draft(args, ctx) {
-    return ok(
-      await ops.confirmDraft(ctx.client, String(args.threadId), String(args.messageId))
-    )
+    return ok(await ops.confirmDraft(ctx.client, String(args.threadId), String(args.messageId)))
   },
   async codetask_confirm_draft_final(args, ctx) {
     return ok(
@@ -575,9 +572,7 @@ const handlers: Record<string, ToolHandler> = {
     return ok(await ops.getLatestJob(ctx.client, String(args.threadId)))
   },
   async codetask_confirm_plan(args, ctx) {
-    return ok(
-      await ops.confirmPlan(ctx.client, String(args.threadId), String(args.jobId))
-    )
+    return ok(await ops.confirmPlan(ctx.client, String(args.threadId), String(args.jobId)))
   },
   async codetask_confirm_plan_node(args, ctx) {
     return ok(
