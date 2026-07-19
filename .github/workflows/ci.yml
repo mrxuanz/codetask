@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [main, master]
 
-env:
-  NODE_VERSION: '22'
-
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -17,7 +14,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npm run lint:ci
@@ -35,7 +32,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .node-version
           cache: npm
       - run: npm ci
       - run: npm run test:fast
@@ -54,7 +51,7 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .node-version
           cache: npm
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -74,7 +71,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ github.sha }}
-      runner: ubuntu-latest
-      builder-args: --linux
+      runner: ubuntu-24.04
+      builder-args: --linux --x64
       smoke-unpacked: true
       upload-artifact: false
