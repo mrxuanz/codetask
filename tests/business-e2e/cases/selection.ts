@@ -318,8 +318,6 @@ export function formatCaseList(): string {
     '',
     'Providers (--providers):',
     '  opencode | cursor | claude | codex | all',
-    '  all = opencode,cursor,claude  (codex: pass explicitly)',
-    '  naming a provider opts in (no BUSINESS_ALLOW_* env)',
     '',
     'Language: --lang zh|en|ja  (or BUSINESS_E2E_LANG)'
   ]

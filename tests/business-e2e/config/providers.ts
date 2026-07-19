@@ -1,9 +1,7 @@
 /**
  * --providers CLI: single / comma-list / all → fixed SUT role profiles.
  * Aliases: cursor → cursorcli, claude → claude-code.
- *
- * Naming a provider in `--providers` (or a fixed `--profile`) is the opt-in;
- * no BUSINESS_ALLOW_* env vars. `all` = opencode+cursor+claude (not codex).
+ * Naming a provider (or `all`) opts it in; no BUSINESS_ALLOW_* env.
  */
 
 import {
@@ -30,8 +28,8 @@ const ALIAS_TO_CORE: Record<ProviderAlias, SutCoreCode> = {
   codex: 'codex'
 }
 
-/** `all` excludes codex — pass `--providers ...,codex` to include it. */
-const DEFAULT_ALL: ProviderAlias[] = ['opencode', 'cursor', 'claude']
+/** Every supported provider alias — keep in sync with ALIAS_TO_CORE. */
+const ALL_PROVIDERS = Object.keys(ALIAS_TO_CORE) as ProviderAlias[]
 
 export function normalizeProviderAlias(raw: string): ProviderAlias {
   const v = raw.trim().toLowerCase()
@@ -49,7 +47,7 @@ export function normalizeProviderAlias(raw: string): ProviderAlias {
 export function parseProvidersList(raw: string | undefined): ProviderAlias[] | null {
   if (!raw?.trim()) return null
   const trimmed = raw.trim().toLowerCase()
-  if (trimmed === 'all') return [...DEFAULT_ALL]
+  if (trimmed === 'all') return [...ALL_PROVIDERS]
   const parts = trimmed.split(/[,+\s]+/).map((s) => s.trim()).filter(Boolean)
   if (parts.length === 0) return null
   return parts.map(normalizeProviderAlias)
