@@ -166,19 +166,22 @@ export async function advanceExecutionQueue(_username?: string): Promise<void> {
   await startPendingExecutionJob(next.username, next.id)
 }
 
-export async function advancePlanningQueue(username: string): Promise<void> {
+export async function advancePlanningQueue(_username?: string): Promise<void> {
   await ensureStartupWorkloadReady()
-  const { reconcileUserPlanningState } = await import('./reconcile')
-  await reconcileUserPlanningState(username)
+  const { isDraining } = await import('./shutdown-state')
+  if (isDraining()) return
 
-  const { findPlanningOccupant } = await import('./workload-slot')
-  if (await findPlanningOccupant(username)) return
+  const { reconcileOrphanPlanningSessionsOnStartup } = await import('./reconcile')
+  await reconcileOrphanPlanningSessionsOnStartup()
+
+  const { findPlanningOccupantGlobal } = await import('./workload-slot')
+  if (await findPlanningOccupantGlobal()) return
 
   const { tryStartPendingDesignSessionPlanning } = await import('../design-session/planner')
-  await tryStartPendingDesignSessionPlanning(username)
+  await tryStartPendingDesignSessionPlanning()
 }
 
-export async function advanceAllQueues(username: string): Promise<void> {
+export async function advanceAllQueues(username?: string): Promise<void> {
   await advanceExecutionQueue(username)
   await advancePlanningQueue(username)
 }

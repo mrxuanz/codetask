@@ -347,7 +347,7 @@ async function runDesignPlanner(
     await import('../legacy-control-plane/runtime-handle-cursor')
   const { updateRunRuntimeRef } = await import('../legacy-control-plane/workload-slot-store')
   registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
-  await updateRunRuntimeRef(run.runId, { kind: 'cursor-acp', scopeId: plannerScopeId })
+  await updateRunRuntimeRef(run.runId, { kind: 'sandbox-worker', scopeId: plannerScopeId })
 
   try {
     const plannerCoreCode = await resolvePlannerCoreCode(coreCode)
@@ -611,11 +611,15 @@ async function runDesignPlanner(
       outcome: runOutcome
     })
     const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
-    await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
-    // Provider close must finish before admitting another exclusive writer; planner no longer
-    // holds an exclusive lease, but release remains idempotent for any leftover row.
-    releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
-    getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
+    try {
+      await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
+    } finally {
+      // In-memory admission and the legacy lease must never survive a failed
+      // provider cleanup attempt; the durable workload slot remains the safety
+      // fence until lifecycle escalation or reconciliation confirms closure.
+      releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
+      getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
+    }
   }
 }
 
@@ -633,7 +637,25 @@ export function scheduleDesignSessionPlanning(
     coreCode,
     draft: summarizeDraftForPlanner(draft)
   })
-  void runDesignPlanner(username, threadId, designSessionId, draft, workspacePath, coreCode)
+  void runDesignPlanner(username, threadId, designSessionId, draft, workspacePath, coreCode).catch(
+    (error) => {
+      console.error(
+        '[runDesignPlanner] unhandled planner lifecycle failure',
+        designSessionId,
+        error
+      )
+    }
+  )
+}
+
+function isUserPausedPlanningRow(row: typeof threadJobs.$inferSelect): boolean {
+  if (!row.lastError) return false
+  try {
+    const parsed = JSON.parse(row.lastError) as { code?: string }
+    return parsed?.code === 'job.paused'
+  } catch {
+    return false
+  }
 }
 
 async function startDesignSessionPlanningRow(
@@ -643,14 +665,7 @@ async function startDesignSessionPlanningRow(
   if (!row) return
 
   // User-paused planning wait uses the same planStatus=pending; do not auto-restart.
-  if (row.lastError) {
-    try {
-      const parsed = JSON.parse(row.lastError) as { code?: string }
-      if (parsed?.code === 'job.paused') return
-    } catch {
-      // ignore malformed lastError
-    }
-  }
+  if (isUserPausedPlanningRow(row)) return
 
   const { getMessage } = await import('../conversation/messages')
   const message = await getMessage(username, row.threadId, row.draftMessageId, {
@@ -716,25 +731,25 @@ export async function tryStartDesignSessionPlanning(
   await startDesignSessionPlanningRow(username, row)
 }
 
-export async function tryStartPendingDesignSessionPlanning(username: string): Promise<void> {
+export async function tryStartPendingDesignSessionPlanning(): Promise<void> {
   const db = getDb()
   const rows = await db
     .select()
     .from(threadJobs)
     .where(
       and(
-        eq(threadJobs.username, username),
         eq(threadJobs.status, 'planning'),
         eq(threadJobs.planStatus, 'pending'),
         isNull(threadJobs.activeRunId)
       )
     )
-    .orderBy(asc(threadJobs.updatedAt))
-    .limit(1)
+    .orderBy(asc(threadJobs.createdAt), asc(threadJobs.updatedAt), asc(threadJobs.id))
 
-  const row = rows[0]
+  // A user-paused row remains pending by contract but must not block runnable
+  // work behind it in the process-global planning FIFO.
+  const row = rows.find((candidate) => !isUserPausedPlanningRow(candidate))
   if (!row) return
-  await startDesignSessionPlanningRow(username, row)
+  await startDesignSessionPlanningRow(row.username, row)
 }
 
 export function scheduleDesignSessionPlanRegeneration(
@@ -749,6 +764,12 @@ export function scheduleDesignSessionPlanRegeneration(
   void runDesignPlanner(username, threadId, designSessionId, draft, workspacePath, coreCode, {
     regenerationInstruction: options.instruction,
     planRevisionBefore: options.planRevisionBefore
+  }).catch((error) => {
+    console.error(
+      '[runDesignPlanner] unhandled planner regeneration lifecycle failure',
+      designSessionId,
+      error
+    )
   })
 }
 

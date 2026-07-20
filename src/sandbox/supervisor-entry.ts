@@ -16,14 +16,36 @@ import { sandboxTurnDebug } from '../server/debug/sandbox-turn'
 interface ActiveTurn {
   controller: AbortController
   jobId?: string
+  cancelWatchdog?: ReturnType<typeof setTimeout>
 }
 
 const activeSessions = new Map<string, ActiveTurn>()
+const CANCEL_DRAIN_TIMEOUT_MS = 15_000
 
 function send(event: SupervisorEvent): void {
   if (typeof process.send === 'function') {
     process.send(event)
   }
+}
+
+function cancelActiveTurn(sessionId: string, active: ActiveTurn): void {
+  if (!active.controller.signal.aborted) {
+    active.controller.abort(
+      new SandboxError('sandbox turn cancelled', 'sandbox.turn.cancelled', 'supervisor')
+    )
+  }
+  if (active.cancelWatchdog) return
+  active.cancelWatchdog = setTimeout(() => {
+    if (activeSessions.get(sessionId) !== active) return
+    // A cancelled turn that cannot drain is unsafe to keep beside later turns.
+    // Exiting the supervisor makes the parent fail every affected stream and
+    // restart from a clean process instead of leaking an untracked child.
+    console.error(
+      `[sandbox-supervisor] cancelled session ${sessionId} did not drain within ${CANCEL_DRAIN_TIMEOUT_MS}ms`
+    )
+    process.exit(1)
+  }, CANCEL_DRAIN_TIMEOUT_MS)
+  active.cancelWatchdog.unref?.()
 }
 
 function handleCommand(command: SupervisorCommand): void {
@@ -32,16 +54,14 @@ function handleCommand(command: SupervisorCommand): void {
       send({ type: 'pong' })
       break
     case 'shutdown':
-      for (const active of activeSessions.values()) {
-        active.controller.abort()
+      for (const [sessionId, active] of activeSessions) {
+        cancelActiveTurn(sessionId, active)
       }
-      activeSessions.clear()
       void closeAllJobCursorSandboxes().finally(() => process.exit(0))
       break
     case 'cancel': {
       const active = activeSessions.get(command.sessionId)
-      active?.controller.abort()
-      activeSessions.delete(command.sessionId)
+      if (active) cancelActiveTurn(command.sessionId, active)
       break
     }
     case 'cancel-job-turns': {
@@ -49,8 +69,7 @@ function handleCommand(command: SupervisorCommand): void {
       if (!jobId) break
       for (const [sessionId, active] of activeSessions) {
         if (active.jobId === jobId) {
-          active.controller.abort()
-          activeSessions.delete(sessionId)
+          cancelActiveTurn(sessionId, active)
         }
       }
       break
@@ -148,6 +167,8 @@ async function runTurn(
       errorCode
     })
   } finally {
+    const active = activeSessions.get(sessionId)
+    if (active?.cancelWatchdog) clearTimeout(active.cancelWatchdog)
     activeSessions.delete(sessionId)
   }
 }

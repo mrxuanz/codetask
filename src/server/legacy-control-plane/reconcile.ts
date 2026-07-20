@@ -363,8 +363,33 @@ async function killRuntimeForStaleSlot(slot: WorkloadRunSummary): Promise<void> 
   await stopRunLifecycle(slot.runId, 'reconcile_stale', {}, { skipRelease: true })
 }
 
-export async function reconcileOrphanWorkloadSlotsForUser(username: string): Promise<void> {
-  const slots = await listActiveWorkloadSlots({ username })
+const PLANNING_TERMINAL_SLOT_GRACE_SEC = 60
+
+async function planningSlotOwnerFinished(slot: WorkloadRunSummary, now: number): Promise<boolean> {
+  if (slot.kind !== 'planning' || slot.ownerKind !== 'thread_job') return false
+  const row = await getDb()
+    .select({
+      activeRunId: threadJobs.activeRunId,
+      status: threadJobs.status,
+      planStatus: threadJobs.planStatus,
+      updatedAt: threadJobs.updatedAt
+    })
+    .from(threadJobs)
+    .where(eq(threadJobs.id, slot.ownerId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
+  if (!row || row.activeRunId !== slot.runId) return true
+
+  const planFinished = row.planStatus === 'completed' || row.planStatus === 'failed'
+  const ownerLeftPlanning = row.status !== 'planning'
+  if (!planFinished && !ownerLeftPlanning) return false
+  return now - row.updatedAt >= PLANNING_TERMINAL_SLOT_GRACE_SEC
+}
+
+async function reconcileWorkloadSlots(
+  slots: WorkloadRunSummary[],
+  reason: 'reconcile_stale' | 'startup_reconcile_stale' | 'periodic_reconcile_stale'
+): Promise<void> {
   const currentOwner = leaseOwner()
   const now = nowSec()
 
@@ -373,10 +398,11 @@ export async function reconcileOrphanWorkloadSlotsForUser(username: string): Pro
     try {
       const currentPid = slot.leaseOwner === currentOwner
       const leaseValid = slot.leaseExpiresAt ? slot.leaseExpiresAt > now : false
+      const ownerFinished = await planningSlotOwnerFinished(slot, now)
 
-      if (currentPid && leaseValid) {
+      if (currentPid && leaseValid && !ownerFinished) {
         if (slot.kind === 'planning') {
-          getAppContext().runtimeRegistry.tryStartJobPlanning(slot.ownerId, username)
+          getAppContext().runtimeRegistry.tryStartJobPlanning(slot.ownerId, slot.username)
         }
         continue
       }
@@ -385,16 +411,20 @@ export async function reconcileOrphanWorkloadSlotsForUser(username: string): Pro
         ownerKind: slot.ownerKind,
         ownerId: slot.ownerId,
         currentPid,
-        leaseValid
+        leaseValid,
+        ownerFinished
       })
 
       await killRuntimeForStaleSlot(slot)
       await releaseWorkloadSlot(slot.runId, {
-        reason: 'reconcile_stale',
+        reason,
         status: 'released',
         skipQueueAdvance: true
       })
-      if (slot.ownerKind === 'thread_job') {
+      if (slot.kind === 'planning') {
+        getAppContext().runtimeRegistry.endJobPlanning(slot.ownerId)
+      }
+      if (slot.kind === 'execution' && slot.ownerKind === 'thread_job') {
         const { clearStaleExecutionLeaseIfNeeded } = await import('./repository')
         clearStaleExecutionLeaseIfNeeded(slot.ownerId)
       }
@@ -407,48 +437,16 @@ export async function reconcileOrphanWorkloadSlotsForUser(username: string): Pro
   if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile workload slots')
 }
 
-export async function reconcileOrphanWorkloadSlotsOnStartup(): Promise<void> {
+export async function reconcileOrphanWorkloadSlotsForUser(username: string): Promise<void> {
+  const slots = await listActiveWorkloadSlots({ username })
+  await reconcileWorkloadSlots(slots, 'reconcile_stale')
+}
+
+export async function reconcileOrphanWorkloadSlotsOnStartup(
+  reason: 'startup_reconcile_stale' | 'periodic_reconcile_stale' = 'startup_reconcile_stale'
+): Promise<void> {
   const slots = await listActiveWorkloadSlots({})
-  const currentOwner = leaseOwner()
-  const now = nowSec()
-
-  const errors: Error[] = []
-  for (const slot of slots) {
-    try {
-      const currentPid = slot.leaseOwner === currentOwner
-      const leaseValid = slot.leaseExpiresAt ? slot.leaseExpiresAt > now : false
-
-      if (currentPid && leaseValid) {
-        if (slot.kind === 'planning') {
-          getAppContext().runtimeRegistry.tryStartJobPlanning(slot.ownerId, slot.username)
-        }
-        continue
-      }
-
-      console.warn('[reconcile] releasing stale workload slot', slot.runId, {
-        ownerKind: slot.ownerKind,
-        ownerId: slot.ownerId,
-        currentPid,
-        leaseValid
-      })
-
-      await killRuntimeForStaleSlot(slot)
-      await releaseWorkloadSlot(slot.runId, {
-        reason: 'startup_reconcile_stale',
-        status: 'released',
-        skipQueueAdvance: true
-      })
-      if (slot.ownerKind === 'thread_job') {
-        const { clearStaleExecutionLeaseIfNeeded } = await import('./repository')
-        clearStaleExecutionLeaseIfNeeded(slot.ownerId)
-      }
-      await clearActiveRunIfMatches(slot.ownerKind, slot.ownerId, slot.runId)
-    } catch (error) {
-      console.warn('[reconcile] failed to reconcile workload slot', slot.runId, error)
-      errors.push(new Error(`workload slot ${slot.runId}`, { cause: error }))
-    }
-  }
-  if (errors.length > 0) throw new AggregateError(errors, 'Failed to reconcile workload slots')
+  await reconcileWorkloadSlots(slots, reason)
 }
 
 let startupWorkloadSlotsReconciled = false
@@ -470,22 +468,42 @@ export async function reconcileOrphanWorkloadSlotsOnStartupOnce(): Promise<void>
 }
 
 let reconcilerTimer: ReturnType<typeof setInterval> | null = null
+let periodicReconcilePromise: Promise<void> | null = null
+
+export const WORKLOAD_RECONCILE_INTERVAL_MS = 60_000
+
+export async function runPeriodicWorkloadReconcile(): Promise<void> {
+  if (periodicReconcilePromise) return periodicReconcilePromise
+  periodicReconcilePromise = (async () => {
+    const results = await Promise.allSettled([
+      reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale'),
+      reconcileOrphanRunningJobsOnStartup(),
+      reconcileOrphanPlanningSessionsOnStartup()
+    ])
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.warn('[reconcile] periodic workload reconcile step failed', result.reason)
+      }
+    }
+
+    // Queue advancement is deliberately outside the startup reconcile gate.
+    // Running it every cycle also repairs a previously missed release event.
+    const { advanceAllQueues } = await import('./queue-coordinator')
+    await advanceAllQueues()
+  })().finally(() => {
+    periodicReconcilePromise = null
+  })
+  return periodicReconcilePromise
+}
 
 export function startWorkloadReconciler(): void {
   if (reconcilerTimer) return
-  const intervalMs = 5 * 60_000
 
   reconcilerTimer = setInterval(() => {
-    void reconcileOrphanWorkloadSlotsOnStartup().catch((error) => {
-      console.warn('[reconcile] periodic workload slot reconciler failed', error)
+    void runPeriodicWorkloadReconcile().catch((error) => {
+      console.warn('[reconcile] periodic workload reconciler failed', error)
     })
-    void reconcileOrphanRunningJobsOnStartup().catch((error) => {
-      console.warn('[reconcile] periodic running jobs reconciler failed', error)
-    })
-    void reconcileOrphanPlanningSessionsOnStartup().catch((error) => {
-      console.warn('[reconcile] periodic planning sessions reconciler failed', error)
-    })
-  }, intervalMs)
+  }, WORKLOAD_RECONCILE_INTERVAL_MS)
   reconcilerTimer.unref?.()
 }
 
@@ -494,6 +512,7 @@ export function stopWorkloadReconciler(): void {
     clearInterval(reconcilerTimer)
     reconcilerTimer = null
   }
+  periodicReconcilePromise = null
 }
 
 /** @deprecated Use stopWorkloadReconciler */

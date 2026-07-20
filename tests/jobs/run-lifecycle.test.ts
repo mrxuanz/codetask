@@ -386,6 +386,54 @@ test('finishPlanningRunLifecycle quarantines and keeps slot when close fails', a
   }
 })
 
+test('finishPlanningRunLifecycle escalates a transient close failure and releases the slot', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-plan-close-retry')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-plan-close-retry',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    const events: string[] = []
+    let closeCalls = 0
+    registerRunRuntime(run.runId, {
+      kind: 'sandbox-worker',
+      cancel: async () => {
+        events.push('cancel')
+      },
+      close: async () => {
+        closeCalls += 1
+        events.push(`close-${closeCalls}`)
+        if (closeCalls === 1) throw new Error('transient planning close failure')
+      },
+      kill: async () => {
+        events.push('kill')
+      },
+      waitClosed: async () => {
+        events.push('waitClosed')
+      }
+    })
+
+    await finishPlanningRunLifecycle(run.runId, 'planning_done', 'success')
+
+    assert.deepEqual(events, [
+      'close-1',
+      'cancel',
+      'close-2',
+      'kill',
+      'waitClosed',
+      'close-3'
+    ])
+    assert.equal(await getActiveRun('thread_job', 'job-plan-close-retry'), null)
+  } finally {
+    await teardownDb()
+  }
+})
+
 test('finishExecutionRunLifecycle failure runs stop lifecycle before release', async () => {
   await setupDb()
   try {

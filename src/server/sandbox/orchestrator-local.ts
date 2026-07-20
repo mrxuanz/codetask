@@ -67,7 +67,10 @@ async function* readWorkerJsonl(
 
   sandboxTurnDebug('sandbox orchestrator: readWorkerJsonl start')
 
-  const abort = (): void => terminateSandboxTree(handle)
+  // Keep the native handle open until the finally block reaps it. Closing it from
+  // the abort listener can make a concurrent stdout poll lose the only observable
+  // child-exit signal and strand the async iterator.
+  const abort = (): void => handle.kill()
   signal?.addEventListener('abort', abort, { once: true })
 
   let exitResult: { code: number | null; status: string } | undefined
@@ -75,7 +78,8 @@ async function* readWorkerJsonl(
     let lineCount = 0
     for await (const line of readSandboxStdoutLines(handle, {
       keepReading: () => !streamEnded,
-      pollExit: () => pollSandboxExit(handle)
+      pollExit: () => pollSandboxExit(handle),
+      signal
     })) {
       lineCount += 1
       if (lineCount <= 3) {
