@@ -164,10 +164,75 @@ function evaluateSliceDependency(slices: GateSliceState[], depId: string): strin
   return `slice dependency ${depId} is ${dep.runtimeStatus ?? dep.status}, not progress-ok`
 }
 
+function effectiveTaskDependencyIds(
+  task: GateTaskState,
+  target: GateTaskState,
+  tasks: GateTaskState[]
+): string[] {
+  if (task.dependsOnTaskIds.length > 0) return task.dependsOnTaskIds
+  if (task.canRunInParallel) return []
+  if (
+    task.milestoneIndex === target.milestoneIndex &&
+    task.sliceIndex === target.sliceIndex &&
+    task.order >= target.order
+  ) {
+    return []
+  }
+  return tasks
+    .filter(
+      (candidate) =>
+        candidate.milestoneIndex === task.milestoneIndex &&
+        candidate.sliceIndex === task.sliceIndex &&
+        candidate.order < task.order
+    )
+    .map((candidate) => candidate.id)
+}
+
+/**
+ * Explicit dependencies take precedence over the legacy implicit slice order.
+ *
+ * Task-level PREP/REPAIR recovery is appended to a slice and the blocked task is
+ * changed to depend on it. Applying the ordinary "later tasks wait for every
+ * earlier task" fallback to that injected prerequisite would close a cycle.
+ * Detect the reverse dependency path (including implicit predecessors between
+ * the blocked task and its recovery task) before applying the fallback edge.
+ */
+function hasEffectiveDependencyPath(
+  fromTaskId: string,
+  target: GateTaskState,
+  tasksById: Map<string, GateTaskState>,
+  allTasks: GateTaskState[],
+  visiting: Set<string>,
+  memo: Map<string, boolean>
+): boolean {
+  if (fromTaskId === target.id) return true
+  const cached = memo.get(fromTaskId)
+  if (cached !== undefined) return cached
+  if (visiting.has(fromTaskId)) return false
+
+  const from = tasksById.get(fromTaskId)
+  if (!from) {
+    memo.set(fromTaskId, false)
+    return false
+  }
+
+  visiting.add(fromTaskId)
+  const found = effectiveTaskDependencyIds(from, target, allTasks).some(
+    (dependencyId) =>
+      dependencyId === target.id ||
+      hasEffectiveDependencyPath(dependencyId, target, tasksById, allTasks, visiting, memo)
+  )
+  visiting.delete(fromTaskId)
+  memo.set(fromTaskId, found)
+  return found
+}
+
 export function findNextReadyTask(
   slices: GateSliceState[],
   tasks: GateTaskState[]
 ): GateTaskState | null {
+  const tasksById = new Map(tasks.map((task) => [task.id, task]))
+
   for (const slice of slices) {
     if (TERMINAL_UNIT.has(slice.status) && slice.status !== 'completed') continue
 
@@ -186,8 +251,21 @@ export function findNextReadyTask(
       }
 
       if (!task.canRunInParallel && task.dependsOnTaskIds.length === 0) {
+        const dependencyPathMemo = new Map<string, boolean>()
         for (const pred of slice.tasks) {
           if (pred.order < task.order) {
+            if (
+              hasEffectiveDependencyPath(
+                pred.id,
+                task,
+                tasksById,
+                tasks,
+                new Set(),
+                dependencyPathMemo
+              )
+            ) {
+              continue
+            }
             const msg = evaluateTaskDependency(pred, pred.id)
             if (msg) blockers.push(msg)
           }
@@ -368,7 +446,10 @@ export function applyVerificationProgress(
               id: string
               runtimeStatus?: string | null | undefined
               verificationStatus?: string | null | undefined
-              verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null | undefined
+              verdict?:
+                | import('@shared/contracts/evidence').SliceVerificationRecordDto
+                | null
+                | undefined
             }>
           | undefined
         milestones?:
@@ -399,7 +480,10 @@ export function exportVerificationProgress(
     slices?:
       | Array<{
           id: string
-          verdict?: import('@shared/contracts/evidence').SliceVerificationRecordDto | null | undefined
+          verdict?:
+            | import('@shared/contracts/evidence').SliceVerificationRecordDto
+            | null
+            | undefined
         }>
       | undefined
   }
