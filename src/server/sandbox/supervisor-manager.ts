@@ -26,8 +26,10 @@ export class SandboxSupervisorManager extends EventEmitter {
   private ready = false
   private starting = false
   private shuttingDown = false
+  private recycling = false
   private restartCount = 0
   private startPromise: Promise<void> | null = null
+  private recyclePromise: Promise<void> | null = null
   private lastError: string | undefined
 
   statusSnapshot(): { ready: boolean; starting: boolean; lastError?: string | undefined } {
@@ -42,6 +44,7 @@ export class SandboxSupervisorManager extends EventEmitter {
     if (this.shuttingDown) {
       throw new SandboxError('sandbox supervisor is shutting down', 'sandbox.supervisor.shutdown')
     }
+    if (this.recycling && this.recyclePromise) return this.recyclePromise
     if (this.ready && this.child && !this.child.killed) return
     if (this.startPromise) return this.startPromise
 
@@ -125,7 +128,7 @@ export class SandboxSupervisorManager extends EventEmitter {
           return
         }
 
-        if (this.shuttingDown) return
+        if (this.shuttingDown || this.recycling) return
 
         if (wasReady && this.restartCount < MAX_SUPERVISOR_RESTARTS) {
           this.restartCount += 1
@@ -188,6 +191,55 @@ export class SandboxSupervisorManager extends EventEmitter {
       throw new SandboxError('sandbox supervisor not connected', 'sandbox.supervisor.disconnected')
     }
     this.child.send(command)
+  }
+
+  async recycle(reason: string): Promise<void> {
+    if (this.shuttingDown) {
+      throw new SandboxError('sandbox supervisor is shutting down', 'sandbox.supervisor.shutdown')
+    }
+    if (this.recyclePromise) return this.recyclePromise
+
+    this.recyclePromise = this.recycleOnce(reason)
+    try {
+      await this.recyclePromise
+    } finally {
+      this.recyclePromise = null
+    }
+  }
+
+  private async recycleOnce(reason: string): Promise<void> {
+    this.recycling = true
+    this.lastError = reason
+    const child = this.child
+    this.ready = false
+
+    if (child) {
+      try {
+        if (child.connected) child.send({ type: 'shutdown' } satisfies SupervisorCommand)
+      } catch {
+        // Fall through to the bounded hard-stop path.
+      }
+
+      await Promise.race([
+        new Promise<void>((resolve) => child.once('exit', () => resolve())),
+        new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+      ])
+
+      if (this.child === child) {
+        child.kill('SIGKILL')
+        await Promise.race([
+          new Promise<void>((resolve) => child.once('exit', () => resolve())),
+          new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+        ])
+      }
+
+      if (this.child === child) {
+        this.child = null
+      }
+    }
+
+    this.recycling = false
+    await this.ensureReady()
   }
 
   async shutdown(): Promise<void> {

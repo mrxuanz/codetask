@@ -247,8 +247,21 @@ export async function finishPlanningRunLifecycle(
   }
 
   if (outcome === 'success' || outcome === 'failure') {
-    // Planner turn already ended; release immediately so the planning queue can advance.
-    await closeAndReleaseWorkloadSlot(runId, reason)
+    // Planner turns normally end before this point. If the first close fails,
+    // escalate through cancel → stop → kill → confirmed close rather than
+    // stranding the global planning slot until its lease expires.
+    try {
+      await closeAndReleaseWorkloadSlot(runId, reason)
+    } catch (closeError) {
+      try {
+        await stopAndReleaseWorkloadSlot(runId, reason)
+      } catch (stopError) {
+        throw new AggregateError(
+          [closeError, stopError],
+          `Failed to close and release planning run ${runId}`
+        )
+      }
+    }
     return
   }
 

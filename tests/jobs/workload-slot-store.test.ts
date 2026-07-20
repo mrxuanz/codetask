@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import {
+  reconcileOrphanWorkloadSlotsOnStartup,
   resetJobReconcileForTests,
   stopWorkloadReconcilerForTests
 } from '../../src/server/legacy-control-plane/reconcile'
@@ -49,7 +50,14 @@ async function setupDb(): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'codetask-workload-slot-'))
   await resetAppContextForTests()
   resetJobReconcileForTests()
-  bootstrapRuntime({ dataDir })
+  bootstrapRuntime({
+    dataDir,
+    config: {
+      execution: {
+        runLifecycle: { cancelGraceMs: 0, killGraceMs: 0 }
+      }
+    }
+  })
   await ensureStartupWorkloadReady()
   // Unit tests claim planning slots; stop startup reconciler so it does not
   // mark seeded planning rows as failed mid-test.
@@ -226,6 +234,49 @@ test('release is idempotent', async () => {
 
     assert.equal(first.released, true)
     assert.equal(second.released, false)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('periodic reconcile releases a finished planning owner before lease expiry', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-finished-plan', 'planning')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-finished-plan',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.ok(run)
+    assert.equal(
+      getAppContext().runtimeRegistry.tryStartJobPlanning('job-finished-plan', 'user'),
+      true
+    )
+
+    db.update(threadJobs)
+      .set({
+        status: 'published',
+        planStatus: 'completed',
+        updatedAt: Math.floor(Date.now() / 1000) - 61
+      })
+      .where(eq(threadJobs.id, 'job-finished-plan'))
+      .run()
+
+    await reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale')
+
+    const reconciled = db
+      .select()
+      .from(workloadRuns)
+      .where(eq(workloadRuns.id, run.runId))
+      .get()
+    assert.equal(reconciled?.status, 'released')
+    assert.equal(reconciled?.cancelReason, 'periodic_reconcile_stale')
+    assert.equal(await getActiveRun('thread_job', 'job-finished-plan'), null)
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-finished-plan'), false)
   } finally {
     await teardownDb()
   }

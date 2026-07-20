@@ -8,6 +8,7 @@ import type { SupervisorEvent } from '../../sandbox/supervisor-protocol'
 import { sandboxErrorFromErrorChunk } from './stdout-reader'
 
 const TURN_IDLE_TIMEOUT_MS = 25_000
+const TURN_CANCEL_DRAIN_TIMEOUT_MS = 20_000
 const MAX_PENDING_CHUNKS = 256
 
 export async function* streamSandboxedTurnViaSupervisor(
@@ -51,6 +52,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
   let finished = false
   let failure: Error | undefined
   const waiters: Array<() => void> = []
+  let cancelEscalation: ReturnType<typeof setTimeout> | undefined
 
   const notify = (): void => {
     for (const wake of waiters.splice(0)) wake()
@@ -134,8 +136,35 @@ async function* streamSandboxedTurnViaSupervisorOnce(
     } catch {
       // ignore
     }
+    if (cancelEscalation !== undefined) return
+    cancelEscalation = setTimeout(() => {
+      if (finished) return
+      void manager.recycle(`cancelled sandbox session ${sessionId} did not drain`).then(
+        () => {
+          if (finished) return
+          failure = new SandboxError(
+            'sandbox supervisor was recycled after cancellation did not drain',
+            'sandbox.supervisor.cleanup_failed',
+            'supervisor'
+          )
+          finished = true
+          notify()
+        },
+        (error) => {
+          if (finished) return
+          failure =
+            error instanceof Error
+              ? error
+              : new SandboxError(String(error), 'sandbox.supervisor.cleanup_failed', 'supervisor')
+          finished = true
+          notify()
+        }
+      )
+    }, TURN_CANCEL_DRAIN_TIMEOUT_MS)
+    cancelEscalation.unref?.()
   }
   input.signal?.addEventListener('abort', abort, { once: true })
+  if (input.signal?.aborted) abort()
 
   try {
     manager.send({
@@ -167,6 +196,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
     }
     if (failure) throw failure
   } finally {
+    if (cancelEscalation !== undefined) clearTimeout(cancelEscalation)
     manager.off('event', onEvent)
     manager.off('crash', onCrash)
     input.signal?.removeEventListener('abort', abort)

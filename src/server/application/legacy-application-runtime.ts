@@ -204,8 +204,8 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
 
     // Startup reconcile repaired durable state without entering the gated queue. Once every stage
     // is complete and the executor is initialized, resume an interrupted running job (or FIFO work).
-    const { advanceExecutionQueue } = await import('../legacy-control-plane/queue-coordinator')
-    await advanceExecutionQueue()
+    const { advanceAllQueues } = await import('../legacy-control-plane/queue-coordinator')
+    await advanceAllQueues()
     const { advanceTurnQueue } = await import('../conversation/turn-queue')
     await advanceTurnQueue()
 

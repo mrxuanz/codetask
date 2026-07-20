@@ -66,10 +66,18 @@ export function findInMemoryPlanningOccupant(username: string, exceptId?: string
   }
 }
 
+export function findInMemoryPlanningOccupantGlobal(exceptId?: string): string | null {
+  try {
+    return getAppContext().runtimeRegistry.findActivePlanningId(exceptId)
+  } catch {
+    return null
+  }
+}
+
 export function isWorkloadBlockedInMemory(username: string, exceptId?: string): boolean {
   return Boolean(
     findInMemoryExecutionOccupant(username, exceptId) ||
-      findInMemoryPlanningOccupant(username, exceptId)
+    findInMemoryPlanningOccupant(username, exceptId)
   )
 }
 
@@ -121,6 +129,19 @@ export async function findDbPlanningSessionId(
         eq(threadJobs.planStatus, 'running')
       )
     )
+    .orderBy(threadJobs.updatedAt)
+    .limit(1)
+  const id = rows[0]?.id ?? null
+  if (!id) return null
+  if (exceptId && id === exceptId) return null
+  return id
+}
+
+export async function findDbPlanningSessionGlobal(exceptId?: string): Promise<string | null> {
+  const rows = await getDb()
+    .select({ id: threadJobs.id })
+    .from(threadJobs)
+    .where(and(eq(threadJobs.status, 'planning'), eq(threadJobs.planStatus, 'running')))
     .orderBy(threadJobs.updatedAt)
     .limit(1)
   const id = rows[0]?.id ?? null
@@ -211,6 +232,18 @@ export async function findPlanningOccupant(
   if (dbPlan) return dbPlan
 
   return null
+}
+
+export async function findPlanningOccupantGlobal(exceptId?: string): Promise<string | null> {
+  await ensureStartupWorkloadReady()
+
+  const memPlan = findInMemoryPlanningOccupantGlobal(exceptId)
+  if (memPlan) return memPlan
+
+  const slotOccupant = await findActiveSlotOccupantInPool('planning', exceptId)
+  if (slotOccupant) return slotOccupant
+
+  return findDbPlanningSessionGlobal(exceptId)
 }
 
 /**
