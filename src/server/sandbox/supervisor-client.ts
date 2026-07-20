@@ -6,9 +6,9 @@ import type { RunSandboxedTurnInput } from './orchestrator-local'
 import { getSandboxSupervisorManager } from './supervisor-manager'
 import type { SupervisorEvent } from '../../sandbox/supervisor-protocol'
 import { sandboxErrorFromErrorChunk } from './stdout-reader'
+import { CLIENT_CANCEL_DRAIN_TIMEOUT_MS, armCancelDrainWatchdog } from './cancel-drain-watchdog'
 
 const TURN_IDLE_TIMEOUT_MS = 25_000
-const TURN_CANCEL_DRAIN_TIMEOUT_MS = 20_000
 const MAX_PENDING_CHUNKS = 256
 
 export async function* streamSandboxedTurnViaSupervisor(
@@ -52,7 +52,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
   let finished = false
   let failure: Error | undefined
   const waiters: Array<() => void> = []
-  let cancelEscalation: ReturnType<typeof setTimeout> | undefined
+  let cancelEscalation: { clear: () => void } | undefined
 
   const notify = (): void => {
     for (const wake of waiters.splice(0)) wake()
@@ -136,32 +136,34 @@ async function* streamSandboxedTurnViaSupervisorOnce(
     } catch {
       // ignore
     }
-    if (cancelEscalation !== undefined) return
-    cancelEscalation = setTimeout(() => {
-      if (finished) return
-      void manager.recycle(`cancelled sandbox session ${sessionId} did not drain`).then(
-        () => {
-          if (finished) return
-          failure = new SandboxError(
-            'sandbox supervisor was recycled after cancellation did not drain',
-            'sandbox.supervisor.cleanup_failed',
-            'supervisor'
-          )
-          finished = true
-          notify()
-        },
-        (error) => {
-          if (finished) return
-          failure =
-            error instanceof Error
-              ? error
-              : new SandboxError(String(error), 'sandbox.supervisor.cleanup_failed', 'supervisor')
-          finished = true
-          notify()
-        }
-      )
-    }, TURN_CANCEL_DRAIN_TIMEOUT_MS)
-    cancelEscalation.unref?.()
+    if (cancelEscalation) return
+    cancelEscalation = armCancelDrainWatchdog({
+      timeoutMs: CLIENT_CANCEL_DRAIN_TIMEOUT_MS,
+      isStale: () => finished,
+      onTimeout: () => {
+        void manager.recycle(`cancelled sandbox session ${sessionId} did not drain`).then(
+          () => {
+            if (finished) return
+            failure = new SandboxError(
+              'sandbox supervisor was recycled after cancellation did not drain',
+              'sandbox.supervisor.cleanup_failed',
+              'supervisor'
+            )
+            finished = true
+            notify()
+          },
+          (error) => {
+            if (finished) return
+            failure =
+              error instanceof Error
+                ? error
+                : new SandboxError(String(error), 'sandbox.supervisor.cleanup_failed', 'supervisor')
+            finished = true
+            notify()
+          }
+        )
+      }
+    })
   }
   input.signal?.addEventListener('abort', abort, { once: true })
   if (input.signal?.aborted) abort()
@@ -196,7 +198,7 @@ async function* streamSandboxedTurnViaSupervisorOnce(
     }
     if (failure) throw failure
   } finally {
-    if (cancelEscalation !== undefined) clearTimeout(cancelEscalation)
+    cancelEscalation?.clear()
     manager.off('event', onEvent)
     manager.off('crash', onCrash)
     input.signal?.removeEventListener('abort', abort)

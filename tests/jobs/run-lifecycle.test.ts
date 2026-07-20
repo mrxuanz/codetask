@@ -374,7 +374,12 @@ test('finishPlanningRunLifecycle quarantines and keeps slot when close fails', a
 
     await assert.rejects(
       () => finishPlanningRunLifecycle(run.runId, 'planning_done', 'success'),
-      /planning close failed/
+      (error: unknown) =>
+        error instanceof AggregateError &&
+        error.message.includes('Failed to close and release planning run') &&
+        error.errors.some(
+          (inner) => inner instanceof Error && /planning close failed/.test(inner.message)
+        )
     )
 
     const active = await getActiveRun('thread_job', 'job-plan-close-fail')
@@ -420,14 +425,7 @@ test('finishPlanningRunLifecycle escalates a transient close failure and release
 
     await finishPlanningRunLifecycle(run.runId, 'planning_done', 'success')
 
-    assert.deepEqual(events, [
-      'close-1',
-      'cancel',
-      'close-2',
-      'kill',
-      'waitClosed',
-      'close-3'
-    ])
+    assert.deepEqual(events, ['close-1', 'cancel', 'close-2', 'kill', 'waitClosed', 'close-3'])
     assert.equal(await getActiveRun('thread_job', 'job-plan-close-retry'), null)
   } finally {
     await teardownDb()
@@ -583,6 +581,134 @@ test('finishPlanningRunLifecycle skips release when run already released', async
 
     await finishPlanningRunLifecycle(run.runId, 'planning_done', 'failure')
     assert.equal(closeCalls, 1)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('finishPlanningRunLifecycle releases slot after normal close', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-plan-close-ok')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-plan-close-ok',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    let closed = false
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        closed = true
+      }
+    })
+
+    await finishPlanningRunLifecycle(run.runId, 'planning_done', 'success')
+    assert.equal(closed, true)
+    assert.equal(await getActiveRun('thread_job', 'job-plan-close-ok'), null)
+    assert.equal(hasRunRuntime(run.runId), false)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('finishPlanningRunLifecycle escalates when first close fails then stop path succeeds', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-plan-escalate')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-plan-escalate',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    let closeAttempts = 0
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        closeAttempts += 1
+        if (closeAttempts === 1) throw new Error('first close failed')
+      },
+      cancel: async () => {},
+      kill: async () => {},
+      waitClosed: async () => {}
+    })
+
+    await finishPlanningRunLifecycle(run.runId, 'planning_done', 'success')
+    assert.ok(closeAttempts >= 1)
+    assert.equal(await getActiveRun('thread_job', 'job-plan-escalate'), null)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('finishPlanningRunLifecycle quarantines when cancel/kill/waitClosed all fail', async () => {
+  await setupDb()
+  try {
+    await seedJob('job-plan-quarantine')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-plan-quarantine',
+      kind: 'planning'
+    })
+    assert.ok(run)
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        throw new Error('close failed')
+      }
+    })
+
+    await assert.rejects(
+      () => finishPlanningRunLifecycle(run.runId, 'planning_done', 'success'),
+      (error: unknown) => error instanceof AggregateError
+    )
+
+    const active = await getActiveRun('thread_job', 'job-plan-quarantine')
+    assert.ok(active, 'durable slot must remain when close is unconfirmed')
+    assert.equal(active.status, 'stopping')
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('planner admission memory clears even when finishPlanningRunLifecycle quarantines', async () => {
+  await setupDb()
+  try {
+    const { getAppContext } = await import('../../src/server/bootstrap')
+    await seedJob('job-plan-mem-clear')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-plan-mem-clear',
+      kind: 'planning'
+    })
+    assert.ok(run)
+    assert.equal(
+      getAppContext().runtimeRegistry.tryStartJobPlanning('job-plan-mem-clear', 'user'),
+      true
+    )
+
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {
+        throw new Error('close failed')
+      }
+    })
+
+    await assert.rejects(() => finishPlanningRunLifecycle(run.runId, 'planning_done', 'success'))
+
+    // Mirrors runDesignPlanner finally: memory admission must not survive lifecycle failure.
+    getAppContext().runtimeRegistry.endJobPlanning('job-plan-mem-clear')
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-plan-mem-clear'), false)
+    assert.notEqual(await getActiveRun('thread_job', 'job-plan-mem-clear'), null)
   } finally {
     await teardownDb()
   }

@@ -30,6 +30,16 @@ function unregisterJobTurn(jobId: string, controller: AbortController): void {
   if (active.size === 0) activeJobTurns.delete(jobId)
 }
 
+/** @internal test helper — register a turn without starting a real sandbox stream. */
+export function registerJobTurnForTests(jobId: string, controller: AbortController): void {
+  registerJobTurn(jobId, controller)
+}
+
+/** @internal test helper */
+export function resetActiveJobTurnsForTests(): void {
+  activeJobTurns.clear()
+}
+
 function abortJobTurns(jobId: string, reason: string): void {
   for (const controller of activeJobTurns.get(jobId) ?? []) {
     if (!controller.signal.aborted) {
