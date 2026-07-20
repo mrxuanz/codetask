@@ -31,12 +31,16 @@ test('RuntimeRegistry blocks a second planning session for the same user', () =>
   assert.equal(registry.tryStartJobPlanning('session-b', 'alice'), true)
 })
 
-test('RuntimeRegistry allows parallel planning for different users', () => {
+test('RuntimeRegistry blocks parallel planning globally at capacity 1', () => {
   const registry = new RuntimeRegistry()
   assert.equal(registry.tryStartJobPlanning('session-a', 'alice'), true)
-  assert.equal(registry.tryStartJobPlanning('session-b', 'bob'), true)
+  assert.equal(registry.tryStartJobPlanning('session-b', 'bob'), false)
+  assert.equal(registry.findActivePlanningId('session-a'), null)
+  assert.equal(registry.findActivePlanningId(), 'session-a')
   assert.equal(registry.findActivePlanningIdForUser('alice'), 'session-a')
-  assert.equal(registry.findActivePlanningIdForUser('bob'), 'session-b')
+  assert.equal(registry.findActivePlanningIdForUser('bob'), null)
+  registry.endJobPlanning('session-a')
+  assert.equal(registry.tryStartJobPlanning('session-b', 'bob'), true)
 })
 
 test('isRestartInterruptedPause is retired after P7 one-time migration', () => {
@@ -99,9 +103,8 @@ test('isRestartInterruptedPause does not auto-resume pause-human dependency', ()
 })
 
 test('resolveStaleExecutionJobAction keeps pause-human as noop', async () => {
-  const { resolveStaleExecutionJobAction } = await import(
-    '../../src/server/legacy-control-plane/execution-recovery'
-  )
+  const { resolveStaleExecutionJobAction } =
+    await import('../../src/server/legacy-control-plane/execution-recovery')
   const humanPaused = {
     status: 'paused',
     lastError: null,
@@ -129,9 +132,8 @@ test('resolveStaleExecutionJobAction keeps pause-human as noop', async () => {
 })
 
 test('resolveStaleExecutionJobAction keeps legacy restart-looking paused as noop', async () => {
-  const { resolveStaleExecutionJobAction } = await import(
-    '../../src/server/legacy-control-plane/execution-recovery'
-  )
+  const { resolveStaleExecutionJobAction } =
+    await import('../../src/server/legacy-control-plane/execution-recovery')
   const interrupted = {
     status: 'paused',
     lastError: null,

@@ -12,15 +12,18 @@ import {
   closeJobCursorSandbox
 } from '../server/sandbox/job-cursor-pool'
 import { sandboxTurnDebug } from '../server/debug/sandbox-turn'
+import {
+  SUPERVISOR_CANCEL_DRAIN_TIMEOUT_MS,
+  armCancelDrainWatchdog
+} from '../server/sandbox/cancel-drain-watchdog'
 
 interface ActiveTurn {
   controller: AbortController
   jobId?: string
-  cancelWatchdog?: ReturnType<typeof setTimeout>
+  cancelWatchdog?: { clear: () => void }
 }
 
 const activeSessions = new Map<string, ActiveTurn>()
-const CANCEL_DRAIN_TIMEOUT_MS = 15_000
 
 function send(event: SupervisorEvent): void {
   if (typeof process.send === 'function') {
@@ -35,17 +38,19 @@ function cancelActiveTurn(sessionId: string, active: ActiveTurn): void {
     )
   }
   if (active.cancelWatchdog) return
-  active.cancelWatchdog = setTimeout(() => {
-    if (activeSessions.get(sessionId) !== active) return
-    // A cancelled turn that cannot drain is unsafe to keep beside later turns.
-    // Exiting the supervisor makes the parent fail every affected stream and
-    // restart from a clean process instead of leaking an untracked child.
-    console.error(
-      `[sandbox-supervisor] cancelled session ${sessionId} did not drain within ${CANCEL_DRAIN_TIMEOUT_MS}ms`
-    )
-    process.exit(1)
-  }, CANCEL_DRAIN_TIMEOUT_MS)
-  active.cancelWatchdog.unref?.()
+  // A cancelled turn that cannot drain is unsafe to keep beside later turns.
+  // Exiting the supervisor makes the parent fail every affected stream and
+  // restart from a clean process instead of leaking an untracked child.
+  active.cancelWatchdog = armCancelDrainWatchdog({
+    timeoutMs: SUPERVISOR_CANCEL_DRAIN_TIMEOUT_MS,
+    isStale: () => activeSessions.get(sessionId) !== active,
+    onTimeout: () => {
+      console.error(
+        `[sandbox-supervisor] cancelled session ${sessionId} did not drain within ${SUPERVISOR_CANCEL_DRAIN_TIMEOUT_MS}ms`
+      )
+      process.exit(1)
+    }
+  })
 }
 
 function handleCommand(command: SupervisorCommand): void {
@@ -168,7 +173,7 @@ async function runTurn(
     })
   } finally {
     const active = activeSessions.get(sessionId)
-    if (active?.cancelWatchdog) clearTimeout(active.cancelWatchdog)
+    active?.cancelWatchdog?.clear()
     activeSessions.delete(sessionId)
   }
 }

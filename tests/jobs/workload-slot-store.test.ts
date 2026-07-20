@@ -3,7 +3,11 @@ import test from 'node:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
+import {
+  bootstrapRuntime,
+  getAppContext,
+  resetAppContextForTests
+} from '../../src/server/bootstrap'
 import { getDb } from '../../src/server/db'
 import {
   reconcileOrphanWorkloadSlotsOnStartup,
@@ -268,11 +272,7 @@ test('periodic reconcile releases a finished planning owner before lease expiry'
 
     await reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale')
 
-    const reconciled = db
-      .select()
-      .from(workloadRuns)
-      .where(eq(workloadRuns.id, run.runId))
-      .get()
+    const reconciled = db.select().from(workloadRuns).where(eq(workloadRuns.id, run.runId)).get()
     assert.equal(reconciled?.status, 'released')
     assert.equal(reconciled?.cancelReason, 'periodic_reconcile_stale')
     assert.equal(await getActiveRun('thread_job', 'job-finished-plan'), null)
@@ -535,6 +535,208 @@ test('MCP handler rejects stale run', async () => {
     } finally {
       unregisterPlannerMcpSession('plan-mcp-test')
     }
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('cross-user planning claim is blocked while another user holds the global slot', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-alice', 'planning')
+    await seedJob(db, 'job-bob', 'planning')
+    db.update(threadJobs).set({ username: 'alice' }).where(eq(threadJobs.id, 'job-alice')).run()
+    db.update(threadJobs).set({ username: 'bob' }).where(eq(threadJobs.id, 'job-bob')).run()
+    db.update(threads).set({ username: 'alice' }).where(eq(threads.id, 'thread-job-alice')).run()
+    db.update(threads).set({ username: 'bob' }).where(eq(threads.id, 'thread-job-bob')).run()
+
+    const alice = await claimWorkloadSlotTx({
+      username: 'alice',
+      ownerKind: 'thread_job',
+      ownerId: 'job-alice',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.ok(alice)
+
+    const bob = await claimWorkloadSlotTx({
+      username: 'bob',
+      ownerKind: 'thread_job',
+      ownerId: 'job-bob',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.equal(bob, null)
+
+    await releaseWorkloadSlot(alice.runId, { reason: 'test' })
+    const bobAfter = await claimWorkloadSlotTx({
+      username: 'bob',
+      ownerKind: 'thread_job',
+      ownerId: 'job-bob',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.ok(bobAfter)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('concurrent planning claims admit at most one active slot', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-c1', 'planning')
+    await seedJob(db, 'job-c2', 'planning')
+    await seedJob(db, 'job-c3', 'planning')
+
+    const results = await Promise.all([
+      claimWorkloadSlotTx({
+        username: 'user',
+        ownerKind: 'thread_job',
+        ownerId: 'job-c1',
+        kind: 'planning',
+        pool: 'planning'
+      }),
+      claimWorkloadSlotTx({
+        username: 'user',
+        ownerKind: 'thread_job',
+        ownerId: 'job-c2',
+        kind: 'planning',
+        pool: 'planning'
+      }),
+      claimWorkloadSlotTx({
+        username: 'user',
+        ownerKind: 'thread_job',
+        ownerId: 'job-c3',
+        kind: 'planning',
+        pool: 'planning'
+      })
+    ])
+    assert.equal(results.filter(Boolean).length, 1)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('terminal planning owner under 60s grace is not reclaimed', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-grace', 'planning')
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-grace',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.ok(run)
+
+    db.update(threadJobs)
+      .set({
+        status: 'published',
+        planStatus: 'completed',
+        updatedAt: Math.floor(Date.now() / 1000) - 30
+      })
+      .where(eq(threadJobs.id, 'job-grace'))
+      .run()
+
+    await reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale')
+    assert.notEqual(await getActiveRun('thread_job', 'job-grace'), null)
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('quarantined planning slot continues to block global admission', async () => {
+  await setupDb()
+  try {
+    const db = getDb()
+    await seedJob(db, 'job-quarantine-fence', 'planning')
+    await seedJob(db, 'job-waiting', 'planning')
+
+    const run = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-quarantine-fence',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.ok(run)
+
+    const { stopRunLifecycle } = await import('../../src/server/legacy-control-plane/run-lifecycle')
+    const { registerRunRuntime, resetRuntimeSupervisorForTests } =
+      await import('../../src/server/legacy-control-plane/runtime-supervisor')
+    resetRuntimeSupervisorForTests()
+    registerRunRuntime(run.runId, {
+      kind: 'cursor-acp',
+      close: async () => {}
+    })
+
+    await assert.rejects(
+      () =>
+        stopRunLifecycle(run.runId, 'child_close_unconfirmed', {
+          sleep: async () => {},
+          waitClosed: async () => {
+            throw new Error('provider close unconfirmed')
+          }
+        }),
+      /provider close unconfirmed/
+    )
+
+    assert.notEqual(await getActiveRun('thread_job', 'job-quarantine-fence'), null)
+    const blocked = await claimWorkloadSlotTx({
+      username: 'user',
+      ownerKind: 'thread_job',
+      ownerId: 'job-waiting',
+      kind: 'planning',
+      pool: 'planning'
+    })
+    assert.equal(
+      blocked,
+      null,
+      'unconfirmed provider close must keep the durable slot and block admission'
+    )
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('advancePlanningQueue is a no-op while draining', async () => {
+  await setupDb()
+  try {
+    const { beginDraining, endDraining } =
+      await import('../../src/server/legacy-control-plane/shutdown-state')
+    const { advancePlanningQueue } =
+      await import('../../src/server/legacy-control-plane/queue-coordinator')
+    const db = getDb()
+    await seedJob(db, 'job-drain', 'planning')
+    db.update(threadJobs)
+      .set({ planStatus: 'pending', status: 'planning' })
+      .where(eq(threadJobs.id, 'job-drain'))
+      .run()
+
+    beginDraining()
+    try {
+      await advancePlanningQueue()
+      assert.equal(await getActiveRun('thread_job', 'job-drain'), null)
+    } finally {
+      endDraining()
+    }
+  } finally {
+    await teardownDb()
+  }
+})
+
+test('periodic reconcile advances queues even when no stale slots exist', async () => {
+  await setupDb()
+  try {
+    const { runPeriodicWorkloadReconcile } =
+      await import('../../src/server/legacy-control-plane/reconcile')
+    await runPeriodicWorkloadReconcile()
+    await runPeriodicWorkloadReconcile()
   } finally {
     await teardownDb()
   }
