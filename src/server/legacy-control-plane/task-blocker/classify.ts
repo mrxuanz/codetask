@@ -50,6 +50,10 @@ const INFRA_PATTERNS: RegExp[] = [
   /socket hang up/,
   /rate limit|429/,
   /unknown exit status/,
+  /\b(?:node(?:\.js)?|npm|npx|pnpm|yarn):\s*(?:command\s+)?not found\b/,
+  /\bno\s+(?:node(?:\.js)?|npm|npx|pnpm|yarn)\s+executable\b.*\bpath\b/,
+  /\b(?:node(?:\.js)?|npm|npx|pnpm|yarn)\b.*\bexecutable\b.*\bnot found\b/,
+  /\b(?:could not|cannot|unable to)\s+(?:find|locate|run)\b.*\b(?:node(?:\.js)?|npm|npx|pnpm|yarn)\b/,
   /report_task_result/
 ]
 

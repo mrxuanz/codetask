@@ -27,6 +27,17 @@ const infraPacket = {
   blockers: ['All workspace tools (Read, Grep, Shell) are aborting/failing']
 }
 
+const missingNodePacket = {
+  status: 'failed' as const,
+  summary:
+    'Could not verify tests because the workspace environment has no Node.js executable on PATH; no implementation changes were made.',
+  changedFiles: [] as string[],
+  evidence: ['node --test could not be executed'],
+  validation: { ran: false, outcome: 'skipped' as const, command: 'node --test' },
+  blockers: ['No Node.js executable on PATH'],
+  blockerKind: 'implementation' as const
+}
+
 test('isInfraTurnError detects ACP authenticate failure by code', () => {
   assert.equal(isInfraTurnError(createTurnError('provider.cursor.acp_authenticate_failed')), true)
 })
@@ -56,6 +67,29 @@ test('classifyTaskOutcome detects infra tool abort as high-confidence infra', ()
   assert.equal(result.kind, 'infra')
   assert.equal(result.confidence, 'high')
   assert.equal(result.source, 'classifier')
+})
+
+test('classifyTaskOutcome treats a missing Node executable as environment infra', () => {
+  const result = classifyTaskOutcome(missingNodePacket)
+  assert.equal(result.kind, 'infra')
+  assert.equal(result.confidence, 'high')
+  assert.equal(result.source, 'merged')
+  assert.match(result.reasons.join('\n'), /agent blockerKind=implementation/)
+})
+
+test('resolveTaskRecoveryAction retries missing Node infra instead of injecting repair', () => {
+  const action = resolveTaskRecoveryAction({
+    packet: missingNodePacket,
+    taskId: 'm1-s2-t1',
+    taskProgress: {
+      phase: 'running',
+      status: 'running',
+      currentIndex: 3,
+      total: 4,
+      tasks: []
+    }
+  })
+  assert.equal(action.action, 'infra-retry')
 })
 
 test('classifyTaskOutcome detects API key blockers as dependency-human', () => {

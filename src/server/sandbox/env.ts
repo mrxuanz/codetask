@@ -6,6 +6,7 @@ import {
   buildSandboxAuthPassthrough,
   ensureIsolatedProviderDirs
 } from '../agent-runtime/env'
+import { augmentPathWithHostNode } from './toolchain-path'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -78,6 +79,7 @@ export function buildSandboxEnv(input: {
     ...buildSandboxAuthPassthrough(),
     ...providerEnv
   }
+  env.PATH = augmentPathWithHostNode(env.PATH)
 
   if (!env.CODETASK_RUNTIME_ROOT) {
     env.CODETASK_RUNTIME_ROOT = input.runtimeRoot
