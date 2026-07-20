@@ -41,6 +41,14 @@ export class RuntimeRegistry {
     return this.planningJobs.size > 0
   }
 
+  findActivePlanningId(exceptId?: string): string | null {
+    for (const jobId of this.planningJobs) {
+      if (exceptId && jobId === exceptId) continue
+      return jobId
+    }
+    return null
+  }
+
   findActivePlanningIdForUser(username: string, exceptId?: string): string | null {
     for (const jobId of this.planningJobs) {
       if (exceptId && jobId === exceptId) continue
@@ -53,10 +61,8 @@ export class RuntimeRegistry {
     if (this.planningJobs.has(jobId)) {
       return false
     }
-    if (username) {
-      const otherPlanning = this.findActivePlanningIdForUser(username, jobId)
-      if (otherPlanning) return false
-    }
+    const otherPlanning = this.findActivePlanningId(jobId)
+    if (otherPlanning) return false
     this.planningJobs.add(jobId)
     if (username) {
       this.planningOwners.set(jobId, username)

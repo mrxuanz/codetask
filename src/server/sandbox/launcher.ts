@@ -61,7 +61,11 @@ export async function launchSandboxedWorker(input: {
   const abortHandler = (): void => {
     handle.kill()
   }
-  input.signal?.addEventListener('abort', abortHandler, { once: true })
+  if (input.signal?.aborted) {
+    abortHandler()
+  } else {
+    input.signal?.addEventListener('abort', abortHandler, { once: true })
+  }
 
   sandboxTurnDebug('sandbox launcher: spawn handle ready', {
     pid: handle.pid,
@@ -185,6 +189,7 @@ export async function* readSandboxStdoutLines(
     keepReading?: () => boolean
     pollExit?: () => number | null
     maxIdleMs?: number
+    signal?: AbortSignal | undefined
   }
 ): AsyncGenerator<string> {
   const keepReading = options?.keepReading ?? (() => false)
@@ -196,6 +201,9 @@ export async function* readSandboxStdoutLines(
   const heartbeatMs = 5_000
 
   while (true) {
+    if (options?.signal?.aborted) {
+      throw new SandboxError('sandbox turn cancelled', 'sandbox.turn.cancelled')
+    }
     const chunk = handle.readStdoutChunk(64 * 1024)
     if (chunk.length > 0) {
       lastDataAt = Date.now()
@@ -207,7 +215,16 @@ export async function* readSandboxStdoutLines(
       continue
     }
 
-    const exitCode = pollExit?.() ?? null
+    let exitCode: number | null = null
+    try {
+      exitCode = pollExit?.() ?? null
+    } catch (error) {
+      if (error instanceof SandboxError && error.code === 'sandbox.child_closed') {
+        exitCode = -1
+      } else {
+        throw error
+      }
+    }
     if (exitCode !== null) {
       while (true) {
         const tail = handle.readStdoutChunk(64 * 1024)
