@@ -15,6 +15,11 @@ export type CaseManifest = {
   fixture?: string
   workspaceFixture?: string
   stagedFixture?: string
+  /**
+   * Optional worker kill timer. Omit or <=0 (default) to wait until the driver
+   * exits on CodeTask API terminal state. Positive values are for rare harness
+   * probes only — not for normal agent turns/jobs.
+   */
   timeoutMs?: number
   skipReason?: string
   /** When set, matching classification counts as passed (e.g. G6-002 oracle_failed). */
@@ -82,7 +87,6 @@ function buildDraftMatrixManifests(): Record<string, CaseManifest> {
       oracle: { requireProject: true, requireThread: true },
       workspaceFixture: 'notes-search-project',
       stagedFixture: 'conversation/draft-multiturn.json',
-      timeoutMs: 300_000,
       skipReason: item.skipReason
     }
   }
@@ -121,7 +125,6 @@ function buildPlannerManifests(): Record<string, CaseManifest> {
       oracle: { requireProject: true, requireThread: true },
       workspaceFixture: 'notes-search-project',
       stagedFixture: 'conversation/draft-multiturn.json',
-      timeoutMs: 300_000,
       skipReason: id === 'G5-010' ? 'provider_disabled:second_provider' : undefined
     }
   }
@@ -194,7 +197,6 @@ function buildJobManifests(): Record<string, CaseManifest> {
       oracle: { requireProject: !multi && i !== 20, requireThread: !multi && i !== 20 },
       workspaceFixture,
       stagedFixture: 'conversation/draft-multiturn.json',
-      timeoutMs: i === 1 ? 0 : 300_000,
       skipReason: multi
         ? 'provider_disabled:multi_provider'
         : i === 20
@@ -236,7 +238,6 @@ function buildRecoveryAndFullManifests(): Record<string, CaseManifest> {
       requiredOperations: id === 'G7-009' ? [] : ['case.report_result'],
       oracle: {},
       workspaceFixture: 'empty-project',
-      timeoutMs: 120_000,
       skipReason: id === 'G7-009' ? 'provider_disabled:cursor_concurrency' : undefined
     }
   }
@@ -263,8 +264,7 @@ function buildRecoveryAndFullManifests(): Record<string, CaseManifest> {
     ],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
-    stagedFixture: 'conversation/draft-multiturn.json',
-    timeoutMs: 600_000
+    stagedFixture: 'conversation/draft-multiturn.json'
   }
   return out
 }
@@ -448,9 +448,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       requireTurnCompleted: true
     },
     fixture: 'conversation/create-html.json',
-    workspaceFixture: 'empty-project',
-    // Wait until turn/API terminal; no worker kill timer.
-    timeoutMs: 0
+    workspaceFixture: 'empty-project'
   },
   'JOB-CHAT-RO-001': {
     caseId: 'JOB-CHAT-RO-001',
@@ -476,8 +474,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'case.report_result'
     ],
     oracle: { requireProject: true, requireThread: true },
-    workspaceFixture: 'empty-project',
-    timeoutMs: 300_000
+    workspaceFixture: 'empty-project'
   },
   'SETTINGS-MCP-001': {
     caseId: 'SETTINGS-MCP-001',
@@ -496,8 +493,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'mcp.codetask_put_mcp_settings',
       'case.report_result'
     ],
-    oracle: {},
-    timeoutMs: 120_000
+    oracle: {}
   },
   'FOUNDATION-FAKE-001': {
     caseId: 'FOUNDATION-FAKE-001',
@@ -564,8 +560,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     ],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
-    stagedFixture: 'conversation/draft-multiturn.json',
-    timeoutMs: 300_000
+    stagedFixture: 'conversation/draft-multiturn.json'
   },
   'G4-002': {
     caseId: 'G4-002',
@@ -587,8 +582,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: ['mcp.case_next_fixture', 'mcp.codetask_start_turn', 'case.report_result'],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
-    stagedFixture: 'conversation/draft-multiturn.json',
-    timeoutMs: 600_000
+    stagedFixture: 'conversation/draft-multiturn.json'
   },
   'G4-003': {
     caseId: 'G4-003',
@@ -610,8 +604,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: ['mcp.codetask_get_thread_drafts', 'case.report_result'],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
-    stagedFixture: 'conversation/draft-multiturn.json',
-    timeoutMs: 600_000
+    stagedFixture: 'conversation/draft-multiturn.json'
   },
   'G4-012': {
     caseId: 'G4-012',
@@ -640,8 +633,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     ],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
-    stagedFixture: 'conversation/draft-multiturn.json',
-    timeoutMs: 600_000
+    stagedFixture: 'conversation/draft-multiturn.json'
   },
   'DRAFT-MULTITURN-001': {
     caseId: 'DRAFT-MULTITURN-001',
@@ -666,8 +658,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: ['mcp.case_next_fixture', 'mcp.codetask_start_turn', 'case.report_result'],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
-    stagedFixture: 'conversation/draft-multiturn.json',
-    timeoutMs: 600_000
+    stagedFixture: 'conversation/draft-multiturn.json'
   },
   ...buildDraftMatrixManifests(),
   ...buildPlannerManifests(),

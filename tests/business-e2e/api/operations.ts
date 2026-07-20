@@ -142,20 +142,27 @@ export async function getTurn(
   return { turn: (result.data?.turn ?? {}) as Record<string, unknown> }
 }
 
+/**
+ * Poll until CodeTask marks the turn terminal.
+ * Pass a positive timeoutMs only for intentional short negative probes;
+ * omit / <=0 waits forever for product completion or error.
+ */
 export async function waitTurnTerminal(
   client: PublicApiClient,
   threadId: string,
   turnId: string,
-  timeoutMs = TIMEOUTS.agentTurnMs
+  timeoutMs?: number
 ): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
+  const deadline = typeof timeoutMs === 'number' && timeoutMs > 0 ? Date.now() + timeoutMs : null
+  for (;;) {
     const { turn } = await getTurn(client, threadId, turnId)
     const status = String(turn.status ?? '')
     if (['completed', 'failed', 'cancelled'].includes(status)) return turn
+    if (deadline !== null && Date.now() >= deadline) {
+      throw new Error(`timeout:turn_${turnId}`)
+    }
     await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.turnPollMs))
   }
-  throw new Error(`timeout:turn_${turnId}`)
 }
 
 export async function listMessages(
@@ -336,20 +343,27 @@ export async function getTaskEvidence(
   return result.data
 }
 
+/**
+ * Poll until CodeTask marks the job terminal.
+ * Pass a positive timeoutMs only for intentional short negative probes;
+ * omit / <=0 waits forever for product completion or error.
+ */
 export async function waitJobTerminal(
   client: PublicApiClient,
   threadId: string,
   jobId: string,
-  timeoutMs = TIMEOUTS.caseTotalMs
+  timeoutMs?: number
 ): Promise<Record<string, unknown>> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
+  const deadline = typeof timeoutMs === 'number' && timeoutMs > 0 ? Date.now() + timeoutMs : null
+  for (;;) {
     const job = await getJob(client, threadId, jobId)
     const status = String(job.status ?? '')
     if (['completed', 'failed', 'cancelled'].includes(status)) return job
+    if (deadline !== null && Date.now() >= deadline) {
+      throw new Error(`timeout:job_${jobId}`)
+    }
     await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.turnPollMs))
   }
-  throw new Error(`timeout:job_${jobId}`)
 }
 
 export async function updateDraft(

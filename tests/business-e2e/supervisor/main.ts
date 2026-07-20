@@ -5,7 +5,6 @@ import * as ops from '../api/operations'
 import { resolveProfile } from '../config/profiles'
 import { PROBE_SERVER_NAME, resolveProviderQueue } from '../config/providers'
 import { startSettingsMcpProbe } from '../probes/settings-mcp-probe'
-import { TIMEOUTS } from '../config/timeouts'
 import { MANIFESTS, resolveCaseIds, type CaseManifest } from '../cases/catalog'
 import {
   formatCaseList,
@@ -500,7 +499,8 @@ async function executeCase(ctx: {
   const resultPath = join(caseDir, 'worker-result.json')
   progress(scopeLabelForCaseId(manifest.caseId), 'worker.start', {
     driver: manifest.driver,
-    timeoutMs: manifest.timeoutMs ?? TIMEOUTS.caseTotalMs,
+    // <=0: no worker kill timer — wait for driver / CodeTask terminal state.
+    timeoutMs: manifest.timeoutMs ?? 0,
     ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {})
   })
   const workerResult = await runCaseWorker(
@@ -514,7 +514,7 @@ async function executeCase(ctx: {
       agentRoot,
       skillPaths: manifest.skills.map((name) => skillPath(repoRoot, name)),
       fixturePath: manifest.fixture ? fixturePath(repoRoot, manifest.fixture) : undefined,
-      timeoutMs: manifest.timeoutMs ?? TIMEOUTS.caseTotalMs,
+      timeoutMs: manifest.timeoutMs ?? 0,
       resultPath,
       conversationCore,
       expectedHtmlFile,

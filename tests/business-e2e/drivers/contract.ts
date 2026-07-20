@@ -7,6 +7,7 @@ export type DriverStartInput = {
   workspaceRoot: string
   agentRoot: string
   fixture?: Record<string, unknown>
+  /** Worker kill budget; <=0 means wait for driver exit / CodeTask terminal only. */
   timeoutMs: number
   /** Selected SUT conversation SDK / core for every thread created by this case. */
   conversationCore: string
