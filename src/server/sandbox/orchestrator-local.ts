@@ -9,8 +9,7 @@ import {
   launchSandboxedWorker,
   pollSandboxExit,
   readSandboxStdoutLines,
-  reapSandboxChild,
-  terminateSandboxTree
+  reapSandboxChild
 } from './launcher'
 import { policyForRoleV2, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'

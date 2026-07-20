@@ -648,7 +648,7 @@ export function scheduleDesignSessionPlanning(
   )
 }
 
-function isUserPausedPlanningRow(row: typeof threadJobs.$inferSelect): boolean {
+function isUserPausedPlanningRow(row: Pick<typeof threadJobs.$inferSelect, 'lastError'>): boolean {
   if (!row.lastError) return false
   try {
     const parsed = JSON.parse(row.lastError) as { code?: string }
@@ -656,6 +656,13 @@ function isUserPausedPlanningRow(row: typeof threadJobs.$inferSelect): boolean {
   } catch {
     return false
   }
+}
+
+/** Process-global FIFO pick: skip user-paused pending rows so they do not block the queue. */
+export function pickNextPendingPlanningRow<
+  T extends Pick<typeof threadJobs.$inferSelect, 'lastError'>
+>(rows: readonly T[]): T | undefined {
+  return rows.find((candidate) => !isUserPausedPlanningRow(candidate))
 }
 
 async function startDesignSessionPlanningRow(
@@ -747,7 +754,7 @@ export async function tryStartPendingDesignSessionPlanning(): Promise<void> {
 
   // A user-paused row remains pending by contract but must not block runnable
   // work behind it in the process-global planning FIFO.
-  const row = rows.find((candidate) => !isUserPausedPlanningRow(candidate))
+  const row = pickNextPendingPlanningRow(rows)
   if (!row) return
   await startDesignSessionPlanningRow(row.username, row)
 }
