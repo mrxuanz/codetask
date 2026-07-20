@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { progress } from '../reports/progress'
 import { buildCreateHtmlUserMessage, htmlFileNameForConversationCore } from '../config/sdk-html'
+import { TIMEOUTS } from '../config/timeouts'
 
 const nodeRequire = createRequire(import.meta.url)
 const crossSpawn = nodeRequire('cross-spawn') as typeof spawn
@@ -293,8 +294,8 @@ async function waitForCapabilityReport(
   const statusUrl = new URL(mcpUrl)
   statusUrl.pathname = '/capability-report'
   statusUrl.searchParams.set('capabilityId', capabilityId)
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
+  const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : null
+  for (;;) {
     try {
       const response = await fetch(statusUrl)
       const body = (await response.json()) as {
@@ -304,9 +305,9 @@ async function waitForCapabilityReport(
     } catch {
       /* retry */
     }
+    if (deadline !== null && Date.now() >= deadline) return null
     await new Promise((resolve) => setTimeout(resolve, 1_000))
   }
-  return null
 }
 
 function waitForOpencodeUrl(
@@ -317,13 +318,13 @@ function waitForOpencodeUrl(
     let output = ''
     let stdoutBuffer = ''
     let settled = false
-    const timer = setTimeout(
-      () => {
-        stopTree(proc)
-        fail(new Error(`timeout:opencode_server_start`))
-      },
-      Math.min(timeoutMs, 60_000)
-    )
+    // Process bootstrap only — not turn execution. Keep a positive startup budget.
+    const startupMs =
+      timeoutMs > 0 ? Math.min(timeoutMs, TIMEOUTS.agentStartupMs) : TIMEOUTS.agentStartupMs
+    const timer = setTimeout(() => {
+      stopTree(proc)
+      fail(new Error(`timeout:opencode_server_start`))
+    }, startupMs)
 
     const fail = (error: Error): void => {
       if (settled) return

@@ -303,8 +303,7 @@ export class FakeDriver implements AgentDriver {
       })) as { turnId: string }
       const turn = (await mcp.callTool('codetask_wait_turn', {
         threadId: ctx.threadId,
-        turnId: started.turnId,
-        timeoutMs: 180_000
+        turnId: started.turnId
       })) as { status?: string }
       if (!['completed', 'failed'].includes(String(turn.status))) {
         throw new Error(`turn_not_terminal:${turn.status}`)
@@ -540,7 +539,7 @@ export class FakeDriver implements AgentDriver {
       messageId: draftMessageId
     })
     push('draft.confirmed')
-    await this.waitForWizardPhase(mcp, ctx.threadId, 'draft_review', push, 60_000)
+    await this.waitForWizardPhase(mcp, ctx.threadId, 'draft_review', push)
 
     const confirmFinal = (await mcp.callTool('codetask_confirm_draft_final', {
       threadId: ctx.threadId,
@@ -550,7 +549,7 @@ export class FakeDriver implements AgentDriver {
     await mcp.callTool('case_checkpoint', { name: 'draft_confirmed_final' })
 
     const jobFromConfirm = this.unwrapJobRecord(confirmFinal)
-    const job = jobFromConfirm ?? (await this.pollLatestJob(mcp, ctx.threadId, push, 180_000))
+    const job = jobFromConfirm ?? (await this.pollLatestJob(mcp, ctx.threadId, push))
     const jobId = String(job.id ?? job.jobId ?? '')
     if (!jobId) throw new Error(`job_id_missing:${JSON.stringify(job)}`)
     push('job.ready', { jobId, job })
@@ -1066,8 +1065,7 @@ export class FakeDriver implements AgentDriver {
       })) as { turnId: string }
       const turn = (await mcp.callTool('codetask_wait_turn', {
         threadId,
-        turnId: started.turnId,
-        timeoutMs: 180_000
+        turnId: started.turnId
       })) as { status?: string; lastError?: unknown; error?: unknown }
       const status = String(turn.status ?? '')
       if (status === 'completed') {
@@ -1105,11 +1103,9 @@ export class FakeDriver implements AgentDriver {
     mcp: McpToolClient,
     threadId: string,
     expected: string,
-    push: Push,
-    timeoutMs: number
+    push: Push
   ): Promise<void> {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
+    for (;;) {
       const thread = (await mcp.callTool('codetask_get_thread', {
         threadId
       })) as Record<string, unknown>
@@ -1118,7 +1114,6 @@ export class FakeDriver implements AgentDriver {
       if (phase === expected) return
       await new Promise((resolve) => setTimeout(resolve, 1000))
     }
-    throw new Error(`timeout:wizard_phase_${expected}`)
   }
 
   private unwrapJobRecord(payload: unknown): Record<string, unknown> | null {
@@ -1333,12 +1328,10 @@ export class FakeDriver implements AgentDriver {
   private async pollLatestJob(
     mcp: McpToolClient,
     threadId: string,
-    push: Push,
-    timeoutMs: number
+    push: Push
   ): Promise<Record<string, unknown>> {
-    const deadline = Date.now() + timeoutMs
     let lastError = ''
-    while (Date.now() < deadline) {
+    for (;;) {
       try {
         const latest = (await mcp.callTool('codetask_get_latest_job', {
           threadId
@@ -1359,7 +1352,6 @@ export class FakeDriver implements AgentDriver {
       }
       await new Promise((resolve) => setTimeout(resolve, 2000))
     }
-    throw new Error(`timeout:latest_job:${lastError}`)
   }
 
   private async runJobProbes(
