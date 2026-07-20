@@ -8,6 +8,7 @@ import {
   resolveClaudeInstallDirs,
   resolveOpencodeInstallDirs
 } from './provider-auth/paths'
+import { resolveHostNodeBinDirs } from './toolchain-path'
 
 const PROVIDER_COMMANDS: Record<SupportedCoreCode, string[]> = {
   codex: ['codex'],
@@ -78,7 +79,11 @@ function ancestorNamed(path: string, segment: string): string | null {
     .slice(parsed.root.length)
     .split(/[\\/]+/)
     .filter(Boolean)
-  const index = parts.findIndex((part) => part.toLowerCase() === segment.toLowerCase())
+  const expected = segment.toLowerCase()
+  const index = parts.findIndex((part) => {
+    const candidate = part.toLowerCase()
+    return candidate === expected || candidate === `.${expected}`
+  })
   if (index === -1) return null
   return safeRealpath(`${parsed.root}${parts.slice(0, index + 1).join(sep)}`)
 }
@@ -120,6 +125,10 @@ export function resolveProviderReadRoots(provider: SupportedCoreCode): string[] 
 
   for (const key of TOOL_HOME_ENV_KEYS) {
     addRoot(roots, process.env[key])
+  }
+  for (const dir of resolveHostNodeBinDirs()) {
+    addRoot(roots, dir)
+    addRoot(roots, ancestorNamed(dir, 'Volta'))
   }
 
   if (provider === 'cursorcli') {

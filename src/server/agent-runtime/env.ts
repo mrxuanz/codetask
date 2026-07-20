@@ -1,6 +1,7 @@
 import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { resolveCursorWorkspaceProjectSlug } from './cursor-acp/cursor-workspace'
+import { augmentPathWithHostNode } from '../sandbox/toolchain-path'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -220,6 +221,7 @@ export function buildSandboxPreparedProviderEnv(): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === 'string') env[key] = value
   }
+  env.PATH = augmentPathWithHostNode(env.PATH)
 
   for (const name of BLOCKED_ENV) {
     delete env[name]
@@ -243,7 +245,7 @@ export function buildProviderChildEnv(
     process.env.HOME ?? process.env.USERPROFILE ?? process.env.HOMEPATH ?? runtimeRoot
 
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? '',
+    PATH: augmentPathWithHostNode(process.env.PATH),
     LANG: process.env.LANG ?? 'C.UTF-8',
     CODETASK_RUNTIME_ROOT: runtimeRoot
   }
