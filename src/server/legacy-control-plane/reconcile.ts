@@ -402,7 +402,11 @@ async function reconcileWorkloadSlots(
 
       if (currentPid && leaseValid && !ownerFinished) {
         if (slot.kind === 'planning') {
-          getAppContext().runtimeRegistry.tryStartJobPlanning(slot.ownerId, slot.username)
+          getAppContext().runtimeRegistry.tryStartJobPlanning(
+            slot.ownerId,
+            slot.username,
+            slot.runId
+          )
         }
         continue
       }
@@ -421,9 +425,6 @@ async function reconcileWorkloadSlots(
         status: 'released',
         skipQueueAdvance: true
       })
-      if (slot.kind === 'planning') {
-        getAppContext().runtimeRegistry.endJobPlanning(slot.ownerId)
-      }
       if (slot.kind === 'execution' && slot.ownerKind === 'thread_job') {
         const { clearStaleExecutionLeaseIfNeeded } = await import('./repository')
         clearStaleExecutionLeaseIfNeeded(slot.ownerId)
@@ -475,14 +476,20 @@ export const WORKLOAD_RECONCILE_INTERVAL_MS = 60_000
 export async function runPeriodicWorkloadReconcile(): Promise<void> {
   if (periodicReconcilePromise) return periodicReconcilePromise
   periodicReconcilePromise = (async () => {
-    const results = await Promise.allSettled([
-      reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale'),
-      reconcileOrphanRunningJobsOnStartup(),
-      reconcileOrphanPlanningSessionsOnStartup()
-    ])
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        console.warn('[reconcile] periodic workload reconcile step failed', result.reason)
+    const steps: Array<() => Promise<void>> = [
+      () => reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale'),
+      () => reconcileOrphanRunningJobsOnStartup({ deferQueueAdvance: true }),
+      () => reconcileOrphanPlanningSessionsOnStartup()
+    ]
+    // Slot reconciliation must run first: it restores current-process planning
+    // admission for live leases and tears down stale runtimes. Running planning
+    // reconciliation concurrently could misclassify a live DB row before that
+    // in-memory admission is restored.
+    for (const step of steps) {
+      try {
+        await step()
+      } catch (error) {
+        console.warn('[reconcile] periodic workload reconcile step failed', error)
       }
     }
 
@@ -512,7 +519,6 @@ export function stopWorkloadReconciler(): void {
     clearInterval(reconcilerTimer)
     reconcilerTimer = null
   }
-  periodicReconcilePromise = null
 }
 
 /** @deprecated Use stopWorkloadReconciler */

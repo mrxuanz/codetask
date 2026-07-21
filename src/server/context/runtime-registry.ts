@@ -3,6 +3,7 @@ export class RuntimeRegistry {
   private readonly inflightThreadOwners = new Map<string, string>()
   private readonly planningJobs = new Set<string>()
   private readonly planningOwners = new Map<string, string>()
+  private readonly planningRunIds = new Map<string, string>()
   private readonly planningControl = new Map<string, 'running' | 'paused'>()
 
   isThreadInflight(threadId: string): boolean {
@@ -57,8 +58,13 @@ export class RuntimeRegistry {
     return null
   }
 
-  tryStartJobPlanning(jobId: string, username?: string): boolean {
+  tryStartJobPlanning(jobId: string, username?: string, runId?: string): boolean {
     if (this.planningJobs.has(jobId)) {
+      // A durable retry/reconcile for the same logical job supersedes an older
+      // run token. This keeps late finalizers fenced even if process-local
+      // admission survived the prior run.
+      if (username) this.planningOwners.set(jobId, username)
+      if (runId) this.planningRunIds.set(jobId, runId)
       return false
     }
     const otherPlanning = this.findActivePlanningId(jobId)
@@ -67,13 +73,20 @@ export class RuntimeRegistry {
     if (username) {
       this.planningOwners.set(jobId, username)
     }
+    if (runId) {
+      this.planningRunIds.set(jobId, runId)
+    }
     return true
   }
 
-  endJobPlanning(jobId: string): void {
+  endJobPlanning(jobId: string, runId?: string): boolean {
+    const activeRunId = this.planningRunIds.get(jobId)
+    if (runId && activeRunId && activeRunId !== runId) return false
     this.planningJobs.delete(jobId)
     this.planningOwners.delete(jobId)
+    this.planningRunIds.delete(jobId)
     this.planningControl.delete(jobId)
+    return true
   }
 
   setPlanningControl(jobId: string, control: 'running' | 'paused'): void {

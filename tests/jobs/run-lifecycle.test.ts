@@ -703,10 +703,11 @@ test('planner admission memory clears even when finishPlanningRunLifecycle quara
       }
     })
 
+    // Mirrors runDesignPlanner finally: clear memory before durable release so
+    // release-triggered queue advancement cannot see the old planner occupant.
+    getAppContext().runtimeRegistry.endJobPlanning('job-plan-mem-clear')
     await assert.rejects(() => finishPlanningRunLifecycle(run.runId, 'planning_done', 'success'))
 
-    // Mirrors runDesignPlanner finally: memory admission must not survive lifecycle failure.
-    getAppContext().runtimeRegistry.endJobPlanning('job-plan-mem-clear')
     assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-plan-mem-clear'), false)
     assert.notEqual(await getActiveRun('thread_job', 'job-plan-mem-clear'), null)
   } finally {

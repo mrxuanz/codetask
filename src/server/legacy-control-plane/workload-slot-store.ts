@@ -41,6 +41,8 @@ export interface ReleaseWorkloadSlotResult {
   username?: string
   ownerKind?: WorkloadOwnerKind
   ownerId?: string
+  kind?: WorkloadRunKind
+  ownerActiveRunId?: string | null
 }
 
 export interface WorkloadRunSummary {
@@ -222,12 +224,25 @@ export async function releaseWorkloadSlot(
       return { released: false }
     }
 
+    const ownerKind = runRow.ownerKind as WorkloadOwnerKind
+    const ownerTableRef = ownerTable(ownerKind)
+    const ownerIdCol = ownerIdColumn(ownerKind)
+    const readOwnerActiveRunId = (): string | null =>
+      tx
+        .select({ activeRunId: ownerTableRef.activeRunId })
+        .from(ownerTableRef)
+        .where(eq(ownerIdCol, runRow.ownerId))
+        .limit(1)
+        .all()[0]?.activeRunId ?? null
+
     if (runRow.status === 'released' || runRow.status === 'failed') {
       return {
         released: false,
         username: runRow.username,
-        ownerKind: runRow.ownerKind as WorkloadOwnerKind,
-        ownerId: runRow.ownerId
+        ownerKind,
+        ownerId: runRow.ownerId,
+        kind: runRow.kind as WorkloadRunKind,
+        ownerActiveRunId: readOwnerActiveRunId()
       }
     }
 
@@ -249,10 +264,6 @@ export async function releaseWorkloadSlot(
       .where(eq(workloadSlots.runId, runId))
       .run()
 
-    const ownerKind = runRow.ownerKind as WorkloadOwnerKind
-    const ownerTableRef = ownerTable(ownerKind)
-    const ownerIdCol = ownerIdColumn(ownerKind)
-
     tx.update(ownerTableRef)
       .set({ activeRunId: null })
       .where(and(eq(ownerIdCol, runRow.ownerId), eq(ownerTableRef.activeRunId, runId)))
@@ -262,11 +273,16 @@ export async function releaseWorkloadSlot(
       released: true,
       username: runRow.username,
       ownerKind,
-      ownerId: runRow.ownerId
+      ownerId: runRow.ownerId,
+      kind: runRow.kind as WorkloadRunKind,
+      ownerActiveRunId: readOwnerActiveRunId()
     }
   })
 
-  if (result.released) {
+  // Apply in-memory cleanup for both the first release and an idempotent retry.
+  // A process can fail after the DB transaction commits but before these steps;
+  // retrying release must repair that partial completion and wake the queue.
+  if (result.kind) {
     const controller = runControllers.get(runId)
     if (controller) {
       try {
@@ -277,11 +293,22 @@ export async function releaseWorkloadSlot(
       runControllers.delete(runId)
     }
 
-    if (!options.skipQueueAdvance && result.username) {
-      await advanceWorkloadQueue(result.username).catch((error) => {
-        console.warn('[workload-slot] advance queue after release failed', runId, error)
-      })
+    // Queue advancement happens in this function, so planning admission must
+    // be cleared here as a store-level invariant, not only by individual
+    // planner callers.
+    if (
+      result.kind === 'planning' &&
+      result.ownerId &&
+      (!result.ownerActiveRunId || result.ownerActiveRunId === runId)
+    ) {
+      getAppContext().runtimeRegistry.endJobPlanning(result.ownerId, runId)
     }
+  }
+
+  if (!options.skipQueueAdvance && result.username) {
+    await advanceWorkloadQueue(result.username).catch((error) => {
+      console.warn('[workload-slot] advance queue after release failed', runId, error)
+    })
   }
 
   return result
