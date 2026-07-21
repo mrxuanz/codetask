@@ -232,12 +232,27 @@ test('release is idempotent', async () => {
       kind: 'planning'
     })
     assert.ok(run)
+    assert.equal(
+      getAppContext().runtimeRegistry.tryStartJobPlanning('job-1', 'user', run.runId),
+      true
+    )
 
-    const first = await releaseWorkloadSlot(run.runId, { reason: 'test' })
+    const first = await releaseWorkloadSlot(run.runId, {
+      reason: 'test',
+      skipQueueAdvance: true
+    })
+    assert.equal(first.released, true)
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-1'), false)
+
+    // Simulate a crash after the durable release but before in-memory cleanup.
+    assert.equal(
+      getAppContext().runtimeRegistry.tryStartJobPlanning('job-1', 'user', run.runId),
+      true
+    )
     const second = await releaseWorkloadSlot(run.runId, { reason: 'test' })
 
-    assert.equal(first.released, true)
     assert.equal(second.released, false)
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-1'), false)
   } finally {
     await teardownDb()
   }
@@ -257,7 +272,7 @@ test('periodic reconcile releases a finished planning owner before lease expiry'
     })
     assert.ok(run)
     assert.equal(
-      getAppContext().runtimeRegistry.tryStartJobPlanning('job-finished-plan', 'user'),
+      getAppContext().runtimeRegistry.tryStartJobPlanning('job-finished-plan', 'user', run.runId),
       true
     )
 
@@ -304,12 +319,25 @@ test('stale release does not clear newer active_run_id', async () => {
       kind: 'planning'
     })
     assert.ok(newRun)
+    assert.equal(
+      getAppContext().runtimeRegistry.tryStartJobPlanning('job-1', 'user', newRun.runId),
+      true
+    )
+    assert.equal(getAppContext().runtimeRegistry.endJobPlanning('job-1', oldRun.runId), false)
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-1'), true)
 
     const stale = await releaseWorkloadSlot(oldRun.runId, { reason: 'test' })
     assert.equal(stale.released, false)
 
     const active = await getActiveRun('thread_job', 'job-1')
     assert.equal(active?.runId, newRun.runId)
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-1'), true)
+
+    await releaseWorkloadSlot(newRun.runId, {
+      reason: 'test_cleanup',
+      skipQueueAdvance: true
+    })
+    assert.equal(getAppContext().runtimeRegistry.isJobPlanning('job-1'), false)
   } finally {
     await teardownDb()
   }
@@ -645,6 +673,8 @@ test('terminal planning owner under 60s grace is not reclaimed', async () => {
 
     await reconcileOrphanWorkloadSlotsOnStartup('periodic_reconcile_stale')
     assert.notEqual(await getActiveRun('thread_job', 'job-grace'), null)
+    await releaseWorkloadSlot(run.runId, { reason: 'test_cleanup', skipQueueAdvance: true })
+    getAppContext().runtimeRegistry.endJobPlanning('job-grace')
   } finally {
     await teardownDb()
   }

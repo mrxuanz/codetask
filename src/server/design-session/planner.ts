@@ -289,67 +289,67 @@ async function runDesignPlanner(
     return
   }
 
-  // Planner uses snapshot-read / runtimeRoot writes only — never exclusive main-workspace lease.
-  const { releaseWorkspaceLeaseForOwner } =
-    await import('../legacy-control-plane/workspace-lease-store')
-
-  getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username)
-
-  const revisionBefore = options?.planRevisionBefore ?? 0
-  const designRunId = await createPlannerRun({
-    designSessionId,
-    planRevisionBefore: revisionBefore
-  })
-  const planningDraft = ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode)
-  if (planningDraft.abilities.length > 0 && draft.abilities.length === 0) {
-    await saveDesignAbilities(
-      getDb(),
-      designSessionId,
-      planningDraft.abilities.map((ability) => ({
-        abilityCode: ability.abilityCode,
-        label: ability.label,
-        recommendedCoreCode: ability.recommendedCoreCode
-      }))
-    )
-    plannerSandboxDebug('runDesignPlanner: inferred draft abilities', {
-      designSessionId,
-      abilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode)
-    })
-  }
-  plannerSandboxDebug('runDesignPlanner: start', {
-    designSessionId,
-    runId: run.runId,
-    threadId,
-    workspacePath,
-    coreCode,
-    draft: summarizeDraftForPlanner(planningDraft),
-    regeneration: Boolean(options?.regenerationInstruction?.trim())
-  })
-
-  const { getDesignSessionRow } = await import('./service')
-  const sessionRow = await getDesignSessionRow(designSessionId)
-  const phaseAdvance = sessionRow
-    ? {
-        username,
-        threadId,
-        coreCode,
-        draftMessageId: sessionRow.draftMessageId
-      }
-    : undefined
-
   let planCommitted = false
-  let runOutcome: PlanningRunOutcome = 'success'
+  let runOutcome: PlanningRunOutcome = 'failure'
   let plannerSession: PlannerMcpSession | null = null
+  let designRunId: string | null = null
   const plannerScopeId = `${designSessionId}:${run.runId}`
 
-  const { registerRunRuntime } = await import('../legacy-control-plane/runtime-supervisor')
-  const { buildCursorPlannerRuntimeHandle } =
-    await import('../legacy-control-plane/runtime-handle-cursor')
-  const { updateRunRuntimeRef } = await import('../legacy-control-plane/workload-slot-store')
-  registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
-  await updateRunRuntimeRef(run.runId, { kind: 'sandbox-worker', scopeId: plannerScopeId })
-
+  // Everything after the durable claim belongs inside this cleanup boundary.
+  // Setup failures are lifecycle failures too and must never retain the global
+  // planning slot until its lease expires.
   try {
+    getAppContext().runtimeRegistry.tryStartJobPlanning(designSessionId, username, run.runId)
+
+    const revisionBefore = options?.planRevisionBefore ?? 0
+    designRunId = await createPlannerRun({
+      designSessionId,
+      planRevisionBefore: revisionBefore
+    })
+    const planningDraft = ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode)
+    if (planningDraft.abilities.length > 0 && draft.abilities.length === 0) {
+      await saveDesignAbilities(
+        getDb(),
+        designSessionId,
+        planningDraft.abilities.map((ability) => ({
+          abilityCode: ability.abilityCode,
+          label: ability.label,
+          recommendedCoreCode: ability.recommendedCoreCode
+        }))
+      )
+      plannerSandboxDebug('runDesignPlanner: inferred draft abilities', {
+        designSessionId,
+        abilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode)
+      })
+    }
+    plannerSandboxDebug('runDesignPlanner: start', {
+      designSessionId,
+      runId: run.runId,
+      threadId,
+      workspacePath,
+      coreCode,
+      draft: summarizeDraftForPlanner(planningDraft),
+      regeneration: Boolean(options?.regenerationInstruction?.trim())
+    })
+
+    const { getDesignSessionRow } = await import('./service')
+    const sessionRow = await getDesignSessionRow(designSessionId)
+    const phaseAdvance = sessionRow
+      ? {
+          username,
+          threadId,
+          coreCode,
+          draftMessageId: sessionRow.draftMessageId
+        }
+      : undefined
+
+    const { registerRunRuntime } = await import('../legacy-control-plane/runtime-supervisor')
+    const { buildCursorPlannerRuntimeHandle } =
+      await import('../legacy-control-plane/runtime-handle-cursor')
+    const { updateRunRuntimeRef } = await import('../legacy-control-plane/workload-slot-store')
+    registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
+    await updateRunRuntimeRef(run.runId, { kind: 'sandbox-worker', scopeId: plannerScopeId })
+
     const plannerCoreCode = await resolvePlannerCoreCode(coreCode)
     const core = await ensureCoreAvailable(plannerCoreCode)
     const runtimeRoot = ensureJobRuntimeRoot(
@@ -494,6 +494,7 @@ async function runDesignPlanner(
       })
 
       if (await commitPlanningSoftPause(designSessionId, designRunId)) {
+        runOutcome = 'user_stopped'
         return
       }
 
@@ -516,6 +517,7 @@ async function runDesignPlanner(
 
     if (session.planCommitted) {
       planCommitted = true
+      runOutcome = 'success'
       await finishPlannerRun(designRunId, {
         status: 'completed',
         planRevisionAfter: session.planRevision
@@ -540,7 +542,7 @@ async function runDesignPlanner(
     if (isPlannerPlanCommitted(planCommitted, plannerSession)) {
       planCommitted = true
       runOutcome = 'success'
-      if (plannerSession?.planCommitted) {
+      if (plannerSession?.planCommitted && designRunId) {
         await finishPlannerRun(designRunId, {
           status: 'completed',
           planRevisionAfter: plannerSession.planRevision
@@ -574,10 +576,10 @@ async function runDesignPlanner(
     const current = await getUserDesignSessionAsJob(username, designSessionId)
     if (getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)) {
       runOutcome = 'user_stopped'
-      if (await commitPlanningSoftPause(designSessionId, designRunId)) return
+      if (designRunId && (await commitPlanningSoftPause(designSessionId, designRunId))) return
     }
     if (current?.status === 'cancelled') {
-      await finishPlannerRun(designRunId, { status: 'cancelled' })
+      if (designRunId) await finishPlannerRun(designRunId, { status: 'cancelled' })
       runOutcome = 'user_stopped'
       return
     }
@@ -589,10 +591,12 @@ async function runDesignPlanner(
       planProgress: failure.planProgress,
       lastError: failure.lastError
     })
-    await finishPlannerRun(designRunId, {
-      status: 'failed',
-      error: failure.lastError.message
-    })
+    if (designRunId) {
+      await finishPlannerRun(designRunId, {
+        status: 'failed',
+        error: failure.lastError.message
+      })
+    }
     if (job) {
       emitJobEvent(designSessionId, {
         event: 'plan_progress',
@@ -610,15 +614,27 @@ async function runDesignPlanner(
       runId: run.runId,
       outcome: runOutcome
     })
-    const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
+    // releaseWorkloadSlot advances the queue synchronously. Drop the in-memory
+    // occupant first so that wake-up can admit the next pending planner. The
+    // durable slot remains the safety fence until provider close is confirmed.
+    getAppContext().runtimeRegistry.endJobPlanning(designSessionId, run.runId)
     try {
+      const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
       await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
     } finally {
-      // In-memory admission and the legacy lease must never survive a failed
-      // provider cleanup attempt; the durable workload slot remains the safety
-      // fence until lifecycle escalation or reconciliation confirms closure.
-      releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
-      getAppContext().runtimeRegistry.endJobPlanning(designSessionId)
+      try {
+        // Planner uses snapshot-read / runtimeRoot writes only, but clear any
+        // legacy lease defensively if setup reached an older compatibility path.
+        const { releaseWorkspaceLeaseForOwner } =
+          await import('../legacy-control-plane/workspace-lease-store')
+        releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
+      } catch (error) {
+        console.warn(
+          '[runDesignPlanner] legacy workspace lease cleanup failed',
+          designSessionId,
+          error
+        )
+      }
     }
   }
 }

@@ -43,6 +43,16 @@ test('RuntimeRegistry blocks parallel planning globally at capacity 1', () => {
   assert.equal(registry.tryStartJobPlanning('session-b', 'bob'), true)
 })
 
+test('RuntimeRegistry ignores a late finalizer from an older planning run', () => {
+  const registry = new RuntimeRegistry()
+  assert.equal(registry.tryStartJobPlanning('session-a', 'alice', 'run-old'), true)
+  assert.equal(registry.tryStartJobPlanning('session-a', 'alice', 'run-new'), false)
+  assert.equal(registry.endJobPlanning('session-a', 'run-old'), false)
+  assert.equal(registry.isJobPlanning('session-a'), true)
+  assert.equal(registry.endJobPlanning('session-a', 'run-new'), true)
+  assert.equal(registry.isJobPlanning('session-a'), false)
+})
+
 test('isRestartInterruptedPause is retired after P7 one-time migration', () => {
   const interrupted = {
     status: 'paused',
