@@ -109,15 +109,24 @@ export class SandboxSupervisorManager extends EventEmitter {
       }
 
       const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+        const isCurrentChild = this.child === child
+        const error = new SandboxError(
+          `sandbox supervisor exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
+          'sandbox.supervisor.crashed'
+        )
+        if (!isCurrentChild) {
+          // A force-recycled child may report exit after its replacement is
+          // already ready. Never let that stale event clear or restart the
+          // replacement supervisor.
+          if (!settled) onFailed(error)
+          return
+        }
+
         const wasReady = this.ready
         this.ready = false
         this.starting = false
         this.child = null
 
-        const error = new SandboxError(
-          `sandbox supervisor exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
-          'sandbox.supervisor.crashed'
-        )
         this.lastError = error.message
 
         this.emit('crash', error)
@@ -209,36 +218,61 @@ export class SandboxSupervisorManager extends EventEmitter {
 
   private async recycleOnce(reason: string): Promise<void> {
     this.recycling = true
-    this.lastError = reason
-    const child = this.child
-    this.ready = false
-
-    if (child) {
-      try {
-        if (child.connected) child.send({ type: 'shutdown' } satisfies SupervisorCommand)
-      } catch {
-        // Fall through to the bounded hard-stop path.
+    try {
+      this.lastError = reason
+      // If recycle races the initial startup, let that attempt settle first so
+      // its ensureReady() cleanup cannot hand us a stale startPromise when we
+      // bring up the replacement below.
+      const pendingStart = this.startPromise
+      if (pendingStart) {
+        await pendingStart.catch(() => {})
       }
+      const child = this.child
+      this.ready = false
 
-      await Promise.race([
-        new Promise<void>((resolve) => child.once('exit', () => resolve())),
-        new Promise<void>((resolve) => setTimeout(resolve, 2_000))
-      ])
+      if (child) {
+        // Recycling replaces one process shared by every active session. Fail
+        // all parent streams now; otherwise sessions other than the one that
+        // triggered recycle can remain attached to a detached old child and
+        // wait forever if that child reports exit late (or never reports it).
+        this.emit(
+          'crash',
+          new SandboxError(
+            `sandbox supervisor recycled: ${reason}`,
+            'sandbox.supervisor.cleanup_failed'
+          )
+        )
+        try {
+          if (child.connected) child.send({ type: 'shutdown' } satisfies SupervisorCommand)
+        } catch {
+          // Fall through to the bounded hard-stop path.
+        }
 
-      if (this.child === child) {
-        child.kill('SIGKILL')
         await Promise.race([
           new Promise<void>((resolve) => child.once('exit', () => resolve())),
           new Promise<void>((resolve) => setTimeout(resolve, 2_000))
         ])
-      }
 
-      if (this.child === child) {
-        this.child = null
+        if (this.child === child) {
+          try {
+            child.kill('SIGKILL')
+          } catch {
+            // The bounded state reset below still fences stale exit events.
+          }
+          await Promise.race([
+            new Promise<void>((resolve) => child.once('exit', () => resolve())),
+            new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+          ])
+        }
+
+        if (this.child === child) {
+          this.child = null
+        }
       }
+    } finally {
+      this.recycling = false
     }
 
-    this.recycling = false
     await this.ensureReady()
   }
 

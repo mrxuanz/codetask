@@ -39,6 +39,9 @@ export async function* streamSandboxedTurnViaSupervisor(
 async function* streamSandboxedTurnViaSupervisorOnce(
   input: RunSandboxedTurnInput
 ): AsyncGenerator<AgentTurnChunk> {
+  if (input.signal?.aborted) {
+    throw new SandboxError('sandbox turn cancelled', 'sandbox.turn.cancelled', 'supervisor')
+  }
   const manager = getSandboxSupervisorManager()
   await manager.ensureReady()
 

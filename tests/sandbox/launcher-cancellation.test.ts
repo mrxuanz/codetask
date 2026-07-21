@@ -1,19 +1,11 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test, { mock } from 'node:test'
 import {
   CLIENT_CANCEL_DRAIN_TIMEOUT_MS,
   SUPERVISOR_CANCEL_DRAIN_TIMEOUT_MS,
   armCancelDrainWatchdog
 } from '../../src/server/sandbox/cancel-drain-watchdog'
-import {
-  launchSandboxedWorker,
-  pollSandboxExit,
-  readSandboxStdoutLines
-} from '../../src/server/sandbox/launcher'
-import { policyForRole } from '../../src/server/sandbox/policy'
+import { launchSandboxedWorker, readSandboxStdoutLines } from '../../src/server/sandbox/launcher'
 import { SandboxError } from '../../src/server/sandbox/types'
 
 test('stdout reader stops when cancellation arrives before child exit is observable', async () => {
@@ -93,48 +85,21 @@ test('stdout reader treats an already-closed child as exited', async () => {
   assert.deepEqual(lines, [])
 })
 
-test('launchSandboxedWorker kills immediately when signal is already aborted', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'codetask-launcher-abort-'))
-  try {
-    const policy = policyForRole({
-      role: 'planner',
-      workspaceRoot: root,
-      runtimeRoot: root
-    })
-    const controller = new AbortController()
-    controller.abort()
+test('launchSandboxedWorker rejects an already-aborted turn before native startup', async () => {
+  const controller = new AbortController()
+  controller.abort()
 
-    const spawned = await launchSandboxedWorker({
-      policy,
-      command: process.platform === 'win32' ? 'ping' : 'sleep',
-      args: process.platform === 'win32' ? ['-n', '30', '127.0.0.1'] : ['30'],
-      env: {},
-      signal: controller.signal
-    })
-
-    let code: number | null = null
-    for (let i = 0; i < 100; i += 1) {
-      try {
-        code = pollSandboxExit(spawned.handle)
-      } catch (error) {
-        if (error instanceof SandboxError && error.code === 'sandbox.child_closed') {
-          code = -1
-          break
-        }
-        throw error
-      }
-      if (code !== null) break
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    assert.notEqual(code, null, 'aborted launch must kill the child promptly')
-    try {
-      spawned.handle.close()
-    } catch {
-      // already closed
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
+  await assert.rejects(
+    () =>
+      launchSandboxedWorker({
+        policy: {} as never,
+        command: 'unused',
+        args: [],
+        env: {},
+        signal: controller.signal
+      }),
+    (error: unknown) => error instanceof SandboxError && error.code === 'sandbox.turn.cancelled'
+  )
 })
 
 test('cancel drain watchdog fires after timeout when session stays active', () => {

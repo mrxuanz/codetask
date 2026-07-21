@@ -9,8 +9,31 @@ import {
   streamSandboxedConversationTurn,
   waitForJobSandboxTurnsIdle
 } from '../../src/server/sandbox/orchestrator'
+import { streamSandboxedTurnViaSupervisor } from '../../src/server/sandbox/supervisor-client'
 import { SandboxSupervisorManager } from '../../src/server/sandbox/supervisor-manager'
 import { SandboxError } from '../../src/server/sandbox/types'
+
+test('already-aborted supervisor turn fails before starting a provider session', async () => {
+  const controller = new AbortController()
+  controller.abort()
+
+  await assert.rejects(
+    async () => {
+      for await (const _chunk of streamSandboxedTurnViaSupervisor({
+        role: 'planner',
+        coreCode: 'cursor',
+        workspaceRoot: '/tmp',
+        runtimeRoot: '/tmp',
+        prompt: 'x',
+        signal: controller.signal,
+        capabilityProfile: 'planner-read'
+      })) {
+        // should not yield
+      }
+    },
+    (error: unknown) => error instanceof SandboxError && error.code === 'sandbox.turn.cancelled'
+  )
+})
 
 test('aborted sandbox turn unregisters active job turn in finally', async () => {
   const previous = process.env.CODETASK_SANDBOX_SUPERVISOR
@@ -66,6 +89,10 @@ test('forceTerminateJobSandboxTurns drains registered turns so waitIdle succeeds
 test('SandboxSupervisorManager recycle dedupes concurrent ensureReady without double spawn', async () => {
   const manager = new SandboxSupervisorManager()
   let spawnCount = 0
+  let crashCount = 0
+  manager.on('crash', () => {
+    crashCount += 1
+  })
 
   const child = new EventEmitter() as EventEmitter & {
     connected: boolean
@@ -125,6 +152,7 @@ test('SandboxSupervisorManager recycle dedupes concurrent ensureReady without do
 
   await Promise.all([recycleA, readyDuring, recycleB])
   assert.equal(spawnCount, 1)
+  assert.ok(crashCount >= 1, 'recycle must fail streams attached to the replaced supervisor')
 
   await manager.shutdown()
 })

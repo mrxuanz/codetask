@@ -370,11 +370,18 @@ test('conversation lease release advances pending task queues and snapshots reso
 
 test('planner releases its workspace lease only after runtime lifecycle completion', () => {
   const source = readFileSync(plannerPath, 'utf8')
-  const finallyStart = source.lastIndexOf('} finally {')
-  assert.ok(finallyStart >= 0)
-  const lifecycleIdx = source.indexOf('await finishPlanningRunLifecycle(', finallyStart)
-  const releaseIdx = source.indexOf("releaseWorkspaceLeaseForOwner('planner'", finallyStart)
-  assert.ok(lifecycleIdx > finallyStart)
+  const plannerStart = source.indexOf('async function runDesignPlanner(')
+  const plannerEnd = source.indexOf('export function scheduleDesignSessionPlanning(', plannerStart)
+  assert.ok(plannerStart >= 0)
+  assert.ok(plannerEnd > plannerStart)
+  const plannerSource = source.slice(plannerStart, plannerEnd)
+  const admissionReleaseIdx = plannerSource.indexOf(
+    'runtimeRegistry.endJobPlanning(designSessionId, run.runId)'
+  )
+  const lifecycleIdx = plannerSource.indexOf('await finishPlanningRunLifecycle(')
+  const releaseIdx = plannerSource.indexOf("releaseWorkspaceLeaseForOwner('planner'")
+  assert.ok(admissionReleaseIdx >= 0)
+  assert.ok(lifecycleIdx > admissionReleaseIdx, 'queue admission must clear before slot release')
   assert.ok(releaseIdx > lifecycleIdx, 'planner lease must outlive provider runtime close')
-  assert.match(source.slice(releaseIdx, releaseIdx + 100), /designSessionId, run\.runId/)
+  assert.match(plannerSource.slice(releaseIdx, releaseIdx + 100), /designSessionId, run\.runId/)
 })

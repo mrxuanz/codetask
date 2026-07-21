@@ -40,6 +40,9 @@ export async function launchSandboxedWorker(input: {
   writeRoots?: string[] | undefined
   signal?: AbortSignal | undefined
 }): Promise<SpawnedSandboxWorker> {
+  if (input.signal?.aborted) {
+    throw new SandboxError('sandbox turn cancelled', 'sandbox.turn.cancelled')
+  }
   sandboxTurnDebug('sandbox launcher: load native + spawn', {
     command: input.command,
     args: input.args,
