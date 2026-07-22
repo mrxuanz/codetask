@@ -20,7 +20,6 @@ import { resolveRuntimeReadRoots } from './runtime-read-roots'
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from './session-state'
 import { SandboxError } from './types'
 import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
-import { streamJobCursorSandboxTurn } from './job-cursor-pool'
 import { throwIfSandboxTurnAborted } from './turn-guards'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
@@ -230,24 +229,10 @@ export async function* streamSandboxedConversationTurnLocal(
   const readRoots = collectPolicyReadRoots(policy)
   const writeRoots = collectPolicyWriteRoots(policy)
 
-  const usePersistentCursorPool =
-    process.platform !== 'win32' &&
-    input.coreCode === 'cursorcli' &&
-    Boolean(input.jobId?.trim()) &&
-    input.role === 'task-worker'
-
   try {
-    if (usePersistentCursorPool) {
-      throwIfSandboxTurnAborted(input.signal)
-      yield* streamJobCursorSandboxTurn(input.jobId!, input, {
-        policy,
-        env,
-        readRoots,
-        writeRoots
-      })
-      return
-    }
-
+    // Every provider turn, including Cursor task work, owns a fresh sandbox worker.
+    // Keeping Cursor ACP alive across tasks allowed a wedged permission service to poison the
+    // remainder of the job. Verification already uses this one-shot lifecycle.
     const spawned = await launchSandboxedWorker({
       policy,
       command: process.execPath,

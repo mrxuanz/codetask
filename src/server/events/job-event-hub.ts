@@ -18,6 +18,8 @@ interface HubConnection {
   queue: HubEnvelope[]
   recent: HubEnvelope[]
   nextSeq: number
+  droppedSinceOverflowWarn: number
+  lastOverflowWarnAt: number
   resolveWait: (() => void) | null
   closed: boolean
 }
@@ -25,6 +27,8 @@ interface HubConnection {
 const MAX_QUEUE_SIZE = 256
 const MAX_RECENT_SIZE = 256
 const RECENT_LINGER_MS = 60_000
+const OVERFLOW_WARN_INTERVAL_MS = 10_000
+const NON_DROPPABLE_EVENTS = new Set<HubEvent['event']>(['job_done', 'error', 'resync'])
 const connections = new Map<string, Map<string, HubConnection>>()
 
 interface LingerBuffer {
@@ -78,16 +82,61 @@ function notify(conn: HubConnection): void {
   conn.resolveWait = null
 }
 
+function isCoalescableSnapshot(event: HubEvent): boolean {
+  return (
+    event.event === 'job_snapshot' ||
+    event.event === 'plan_progress' ||
+    event.event === 'task_progress' ||
+    event.event === 'thread_snapshot' ||
+    event.event === 'turn_snapshot'
+  )
+}
+
+function replaceQueuedSnapshot(conn: HubConnection, topic: HubTopic, event: HubEvent): boolean {
+  if (!isCoalescableSnapshot(event)) return false
+
+  for (let index = conn.queue.length - 1; index >= 0; index -= 1) {
+    const current = conn.queue[index]
+    if (!current || current.topic !== topic || current.event !== event.event) continue
+
+    const replacement = { topic, seq: current.seq, ...event } as HubEnvelope
+    conn.queue[index] = replacement
+    const recentIndex = conn.recent.findIndex((item) => item.seq === current.seq)
+    if (recentIndex >= 0) conn.recent[recentIndex] = replacement
+    notify(conn)
+    return true
+  }
+  return false
+}
+
+function warnQueueOverflow(conn: HubConnection, topic: HubTopic): void {
+  conn.droppedSinceOverflowWarn += 1
+  const now = Date.now()
+  if (now - conn.lastOverflowWarnAt < OVERFLOW_WARN_INTERVAL_MS) return
+
+  console.warn(
+    '[event-hub] queue overflow, dropped messages',
+    conn.username,
+    topic,
+    `count=${conn.droppedSinceOverflowWarn}`
+  )
+  conn.droppedSinceOverflowWarn = 0
+  conn.lastOverflowWarnAt = now
+}
+
 function pushEnvelope(conn: HubConnection, topic: HubTopic, event: HubEvent): void {
   if (conn.closed) return
+  if (replaceQueuedSnapshot(conn, topic, event)) return
+
   const envelope: HubEnvelope = {
     topic,
     seq: conn.nextSeq++,
     ...event
   }
   if (conn.queue.length >= MAX_QUEUE_SIZE) {
-    conn.queue.shift()
-    console.warn('[event-hub] queue overflow, dropped oldest message', conn.username, topic)
+    const dropIndex = conn.queue.findIndex((item) => !NON_DROPPABLE_EVENTS.has(item.event))
+    conn.queue.splice(dropIndex >= 0 ? dropIndex : 0, 1)
+    warnQueueOverflow(conn, topic)
   }
   conn.queue.push(envelope)
   conn.recent.push(envelope)
@@ -241,6 +290,8 @@ export function registerJobHubConnection(
     queue: [],
     recent: [],
     nextSeq: replaySource?.nextSeq ?? 1,
+    droppedSinceOverflowWarn: 0,
+    lastOverflowWarnAt: 0,
     resolveWait: null,
     closed: false
   }

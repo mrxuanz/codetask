@@ -8,6 +8,7 @@ import { SafeLoggerImpl } from '../server/application/safe-logger'
 import { resolveDataDirSelection } from './data-dir'
 import { discoverRunningService } from './service-discovery'
 import { createElectronServerPlatform } from './electron-server-platform'
+import { createShutdownSignalHandler } from './shutdown-signal'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
 
@@ -165,5 +166,10 @@ app.on('before-quit', async (event) => {
     app.quit()
   }
 })
-process.on('SIGTERM', () => void gracefulShutdownFromApp().finally(() => process.exit(0)))
-process.on('SIGINT', () => void gracefulShutdownFromApp().finally(() => process.exit(0)))
+const handleShutdownSignal = createShutdownSignalHandler({
+  shutdown: gracefulShutdownFromApp,
+  exit: (code) => process.exit(code),
+  log: (message, error) => console.error(message, error ?? '')
+})
+process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'))
+process.on('SIGINT', () => handleShutdownSignal('SIGINT'))

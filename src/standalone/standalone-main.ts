@@ -1,5 +1,6 @@
 import { gracefulShutdown, startAppServer, type ServerInfo } from '../main/server'
 import { parseServerCliArgs } from '../main/cli'
+import { createShutdownSignalHandler } from '../main/shutdown-signal'
 import { createNodeServerPlatform } from './platform'
 
 let shutdownPromise: Promise<void> | null = null
@@ -40,8 +41,13 @@ async function main(): Promise<void> {
   }
 }
 
-process.once('SIGTERM', () => void shutdown().finally(() => process.exit(0)))
-process.once('SIGINT', () => void shutdown().finally(() => process.exit(0)))
+const handleShutdownSignal = createShutdownSignalHandler({
+  shutdown,
+  exit: (code) => process.exit(code),
+  log: (message, error) => console.error(message, error ?? '')
+})
+process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'))
+process.on('SIGINT', () => handleShutdownSignal('SIGINT'))
 
 void main().catch(async (error) => {
   console.error(
