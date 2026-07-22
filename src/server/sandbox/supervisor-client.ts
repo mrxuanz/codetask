@@ -52,6 +52,10 @@ async function* streamSandboxedTurnViaSupervisorOnce(
     coreCode: input.coreCode
   })
   const pending: AgentTurnChunk[] = []
+  // A provider-level `completed` chunk only means the worker finished producing
+  // output. Do not expose it to the executor until the supervisor confirms that
+  // worker cleanup (stderr drain + process reap) also completed successfully.
+  let bufferedCompleted: AgentTurnChunk | undefined
   let finished = false
   let failure: Error | undefined
   const waiters: Array<() => void> = []
@@ -80,6 +84,17 @@ async function* streamSandboxedTurnViaSupervisorOnce(
         notify()
         break
       case 'chunk':
+        if (event.chunk.type === 'completed') {
+          if (pending.length === 0 && !bufferedCompleted) {
+            sandboxTurnDebug('supervisor-client: first chunk', {
+              sessionId,
+              type: event.chunk.type
+            })
+          }
+          bufferedCompleted = event.chunk
+          notify()
+          break
+        }
         if (pending.length >= MAX_PENDING_CHUNKS) {
           failure = new SandboxError('supervisor chunk queue overflow', 'sandbox.queue.overflow')
           finished = true
@@ -117,6 +132,10 @@ async function* streamSandboxedTurnViaSupervisorOnce(
             event.errorCode ?? 'sandbox.worker.exit'
           )
         }
+        if (!failure && bufferedCompleted) {
+          pending.push(bufferedCompleted)
+        }
+        bufferedCompleted = undefined
         finished = true
         notify()
         break
@@ -195,8 +214,17 @@ async function* streamSandboxedTurnViaSupervisorOnce(
       }
       if (finished) break
       await new Promise<void>((resolve) => {
-        waiters.push(resolve)
-        setTimeout(resolve, TURN_IDLE_TIMEOUT_MS)
+        const waitState: { timeout?: ReturnType<typeof setTimeout> } = {}
+        const wake = (): void => {
+          if (waitState.timeout) clearTimeout(waitState.timeout)
+          resolve()
+        }
+        waiters.push(wake)
+        waitState.timeout = setTimeout(() => {
+          const index = waiters.indexOf(wake)
+          if (index >= 0) waiters.splice(index, 1)
+          resolve()
+        }, TURN_IDLE_TIMEOUT_MS)
       })
     }
     if (failure) throw failure

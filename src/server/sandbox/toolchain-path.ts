@@ -110,8 +110,8 @@ export function augmentPathWithHostNode(
   const seen = new Set<string>()
   const unique: string[] = []
   for (const entry of entries) {
-    const normalized = normalize(entry)
-    const key = platform === 'win32' ? normalized.toLowerCase() : normalized
+    const canonical = canonicalDirectory(entry)
+    const key = platform === 'win32' ? canonical.toLowerCase() : canonical
     if (seen.has(key)) continue
     seen.add(key)
     unique.push(entry)

@@ -32,4 +32,14 @@ describe('runExecutionLoop step extraction', () => {
     assert.match(source, /rawVerification\.ok && !rawVerification\.verdict/)
     assert.match(source, /reopenSliceVerificationForMissingVerdict/)
   })
+
+  it('closes the durable attempt when a task pauses for human input', () => {
+    const pausedStart = source.indexOf("if (result.kind === 'paused')")
+    const interruptedStart = source.indexOf("if (result.kind === 'interrupted')", pausedStart)
+    assert.ok(pausedStart >= 0 && interruptedStart > pausedStart)
+    const pausedBranch = source.slice(pausedStart, interruptedStart)
+
+    assert.match(pausedBranch, /markTaskAttemptFailed\(\{/)
+    assert.match(pausedBranch, /errorJson: JSON\.stringify\(result\.lastError\)/)
+  })
 })

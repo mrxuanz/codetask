@@ -10,7 +10,10 @@ import {
   waitForJobSandboxTurnsIdle
 } from '../../src/server/sandbox/orchestrator'
 import { streamSandboxedTurnViaSupervisor } from '../../src/server/sandbox/supervisor-client'
-import { SandboxSupervisorManager } from '../../src/server/sandbox/supervisor-manager'
+import {
+  getSandboxSupervisorManager,
+  SandboxSupervisorManager
+} from '../../src/server/sandbox/supervisor-manager'
 import { SandboxError } from '../../src/server/sandbox/types'
 
 test('already-aborted supervisor turn fails before starting a provider session', async () => {
@@ -33,6 +36,62 @@ test('already-aborted supervisor turn fails before starting a provider session',
     },
     (error: unknown) => error instanceof SandboxError && error.code === 'sandbox.turn.cancelled'
   )
+})
+
+test('supervisor client publishes completed only after worker cleanup exits successfully', async () => {
+  const manager = getSandboxSupervisorManager()
+  const originalEnsureReady = manager.ensureReady
+  const originalSend = manager.send
+  let sessionId = ''
+
+  manager.ensureReady = async () => {}
+  manager.send = (command) => {
+    if (command.type !== 'start-turn') return
+    sessionId = command.sessionId
+    queueMicrotask(() => {
+      manager.emit('event', {
+        type: 'chunk',
+        sessionId,
+        chunk: { type: 'completed', reply: '', runtimeSessionId: 'runtime-1' }
+      })
+    })
+  }
+
+  try {
+    const stream = streamSandboxedTurnViaSupervisor({
+      role: 'planner',
+      coreCode: 'cursor',
+      workspaceRoot: '/tmp',
+      runtimeRoot: '/tmp',
+      prompt: 'x',
+      capabilityProfile: 'planner-read'
+    })
+    let settled = false
+    const firstPromise = stream.next().finally(() => {
+      settled = true
+    })
+
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.ok(sessionId)
+    assert.equal(settled, false, 'completed must remain buffered before the exit event')
+
+    manager.emit('event', {
+      type: 'exit',
+      sessionId,
+      code: 0,
+      status: 'exited'
+    })
+
+    const first = await firstPromise
+    assert.deepEqual(first, {
+      done: false,
+      value: { type: 'completed', reply: '', runtimeSessionId: 'runtime-1' }
+    })
+    assert.equal((await stream.next()).done, true)
+  } finally {
+    manager.ensureReady = originalEnsureReady
+    manager.send = originalSend
+  }
 })
 
 test('aborted sandbox turn unregisters active job turn in finally', async () => {

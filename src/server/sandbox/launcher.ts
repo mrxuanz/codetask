@@ -134,6 +134,9 @@ export async function reapSandboxChild(
   handle: SandboxChild,
   options?: { pollMs?: number; maxWaitMs?: number; signal?: AbortSignal | undefined }
 ): Promise<ReapSandboxChildResult> {
+  // This function may signal the child, but ownership of stderr draining and
+  // handle.close() stays with the caller. Closing here races the caller's final
+  // stderr read and can replace a valid cancellation with "sandbox child closed".
   const pollMs = options?.pollMs ?? SANDBOX_REAP_POLL_MS
   const maxWaitMs = options?.maxWaitMs ?? 0
   const started = Date.now()
@@ -141,7 +144,6 @@ export async function reapSandboxChild(
   const abortIfNeeded = (): ReapSandboxChildResult | null => {
     if (!options?.signal?.aborted) return null
     handle.kill()
-    handle.close()
     return { code: -1, status: 'cancelled' }
   }
 
@@ -160,7 +162,6 @@ export async function reapSandboxChild(
 
     if (maxWaitMs > 0 && Date.now() - started > maxWaitMs) {
       handle.kill()
-      handle.close()
       sandboxTurnDebug('sandbox launcher: reapSandboxChild timed out', { maxWaitMs })
       return { code: -1, status: 'timed_out' }
     }
