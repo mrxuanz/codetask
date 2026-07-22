@@ -4,7 +4,8 @@ import {
   TASK_EVIDENCE_BASIC_FACTS_OK,
   applyTaskProgressToGate,
   buildGateStates,
-  findNextReadyTask
+  findNextReadyTask,
+  reopenSliceVerificationForMissingVerdict
 } from '../../src/server/legacy-control-plane/execution-gate'
 import {
   injectSliceRepairTasks,
@@ -91,6 +92,20 @@ function complete(
 }
 
 describe('execution gate dependency precedence', () => {
+  it('reopens a passed slice whose durable verifier verdict is missing', () => {
+    const gate = buildGateStates(createPlan(1))
+    const slice = gate.slices[0]!
+    slice.status = 'completed'
+    slice.runtimeStatus = 'progress-ok'
+    slice.verificationStatus = 'passed'
+
+    assert.equal(reopenSliceVerificationForMissingVerdict(gate.slices, slice.id), true)
+    assert.equal(slice.status, 'completed')
+    assert.equal(slice.runtimeStatus, 'ready-for-verification')
+    assert.equal(slice.verificationStatus, null)
+    assert.equal(reopenSliceVerificationForMissingVerdict(gate.slices, slice.id), false)
+  })
+
   it('preserves sequential fallback for ordinary tasks without explicit dependencies', () => {
     const plan = createPlan(2)
     let items = queuedItems(plan)

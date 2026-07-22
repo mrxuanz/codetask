@@ -404,6 +404,23 @@ export function findSliceReadyForVerification(slices: GateSliceState[]): GateSli
   return null
 }
 
+/**
+ * Repair legacy/inconsistent progress that marked a slice accepted without persisting its verdict.
+ * The executor will run the ordinary verifier path again; that path has bounded infra retries.
+ */
+export function reopenSliceVerificationForMissingVerdict(
+  slices: GateSliceState[],
+  sliceId: string
+): boolean {
+  const slice = slices.find((candidate) => candidate.id === sliceId)
+  if (!slice || slice.runtimeStatus !== 'progress-ok') return false
+
+  slice.status = 'completed'
+  slice.runtimeStatus = 'ready-for-verification'
+  slice.verificationStatus = null
+  return true
+}
+
 export function findMilestoneReadyForVerification(
   milestones: GateMilestoneState[],
   slices: GateSliceState[]

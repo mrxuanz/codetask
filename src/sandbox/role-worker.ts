@@ -5,6 +5,7 @@ import { streamCodexTurn } from '../server/agent-runtime/providers/codex-sdk'
 import { streamClaudeTurn } from '../server/agent-runtime/providers/claude-sdk'
 import { streamOpencodeTurn } from '../server/agent-runtime/providers/opencode-sdk'
 import { streamCursorAcpTurn } from '../server/agent-runtime/providers/cursor-acp'
+import { closeJobCursorRuntime } from '../server/agent-runtime/cursor-acp/stream-session-turn'
 import type { AgentTurnChunk, AgentTurnInput } from '../server/agent-runtime/types'
 
 function writeChunk(role: AgentTurnInput['role'], chunk: AgentTurnChunk): void {
@@ -32,8 +33,17 @@ async function runTurn(input: AgentTurnInput): Promise<void> {
     throw new Error(`unsupported provider: ${input.provider}`)
   }
 
-  for await (const chunk of stream) {
-    writeChunk(input.role, chunk)
+  try {
+    for await (const chunk of stream) {
+      writeChunk(input.role, chunk)
+    }
+  } finally {
+    // Task workers carry a jobId, so Cursor's in-process registry would otherwise retain the ACP
+    // child until process.exit(). Close it explicitly to make the one-turn ownership observable
+    // and to avoid orphaning a poisoned Cursor permission service.
+    if (input.provider === 'cursorcli' && input.jobId?.trim()) {
+      await closeJobCursorRuntime(input.jobId).catch(() => {})
+    }
   }
 }
 

@@ -44,6 +44,7 @@ import {
   isWorkflowComplete,
   reconcileMilestoneStatuses,
   reconcileSliceStatuses,
+  reopenSliceVerificationForMissingVerdict,
   TASK_EVIDENCE_BASIC_FACTS_OK,
   type GateMilestoneState,
   type GateSliceState
@@ -1203,7 +1204,7 @@ async function runSliceVerificationResilient(input: {
 }> {
   let progress = input.taskProgress
   while (true) {
-    const verification = await runSliceVerification({
+    const rawVerification = await runSliceVerification({
       jobId: input.jobId,
       threadId: input.threadId,
       workspacePath: input.workspacePath,
@@ -1212,6 +1213,15 @@ async function runSliceVerificationResilient(input: {
       taskItems: input.taskItems,
       signal: input.signal
     })
+    const verification =
+      rawVerification.ok && !rawVerification.verdict
+        ? {
+            ...rawVerification,
+            ok: false,
+            infraMiss: true,
+            message: `Slice verifier ${input.slice.id} completed without the required verdict`
+          }
+        : rawVerification
     if (verification.ok || !verification.infraMiss) {
       return { verification, taskProgress: progress }
     }
@@ -1268,7 +1278,7 @@ async function runMilestoneVerificationResilient(input: {
 }> {
   let progress = input.taskProgress
   while (true) {
-    const verification = await runMilestoneVerification({
+    const rawVerification = await runMilestoneVerification({
       jobId: input.jobId,
       threadId: input.threadId,
       workspacePath: input.workspacePath,
@@ -1279,6 +1289,15 @@ async function runMilestoneVerificationResilient(input: {
       progressSlices: input.progressSlices,
       signal: input.signal
     })
+    const verification =
+      rawVerification.ok && !rawVerification.verdict
+        ? {
+            ...rawVerification,
+            ok: false,
+            infraMiss: true,
+            message: `Milestone verifier ${input.milestone.id} completed without the required verdict`
+          }
+        : rawVerification
     if (verification.ok || !verification.infraMiss) {
       return { verification, taskProgress: progress }
     }
@@ -1832,6 +1851,48 @@ interface ExecutionLoopMutable {
 
 type LoopStepAction = 'continue' | 'return' | 'skip'
 
+const MAX_STAGNANT_EXECUTION_ITERATIONS = 8
+
+function executionStateFingerprint(ctx: ExecutionLoopMutable): string {
+  return JSON.stringify({
+    jobStatus: ctx.job.status,
+    tasks: ctx.items.map((item) => [
+      item.id,
+      item.status,
+      item.executionStatus,
+      item.evidenceStatus,
+      item.error?.code
+    ]),
+    slices: ctx.gate.slices.map((slice) => [
+      slice.id,
+      slice.status,
+      slice.runtimeStatus,
+      slice.verificationStatus
+    ]),
+    milestones: ctx.gate.milestones.map((milestone) => [
+      milestone.id,
+      milestone.status,
+      milestone.verificationStatus
+    ]),
+    progressCode: ctx.taskProgress.progressCode,
+    progressParams: ctx.taskProgress.progressParams,
+    repairGenerations: ctx.taskProgress.repairGenerations,
+    verificationAttempts: ctx.taskProgress.verificationAttempts
+  })
+}
+
+async function failStagnantExecution(ctx: ExecutionLoopMutable): Promise<void> {
+  await failJobWithProgress(
+    ctx.jobId,
+    ctx.taskProgress,
+    ctx.items,
+    ctx.gate,
+    'execution.workflow_deadlock',
+    { id: ctx.jobId },
+    taskTerminalError(ctx.jobId, 'Execution loop made no durable state progress')
+  )
+}
+
 function syncLoopState(
   ctx: ExecutionLoopMutable,
   next: {
@@ -2139,7 +2200,30 @@ async function processMilestoneVerificationStep(
     sliceVerdictMap
   )
   if (!milestonePreflight.ok) {
-    milestoneToVerify.verificationStatus = 'ready-for-verification'
+    const reopenedSliceIds = (milestonePreflight.missingSliceIds ?? []).filter((sliceId) =>
+      reopenSliceVerificationForMissingVerdict(gate.slices, sliceId)
+    )
+    if (reopenedSliceIds.length === 0) {
+      await failJobWithProgress(
+        jobId,
+        taskProgress,
+        items,
+        gate,
+        'execution.workflow_deadlock',
+        { id: milestoneToVerify.id },
+        taskTerminalError(
+          milestoneToVerify.id,
+          'Milestone is ready but its missing slice verdict cannot be regenerated'
+        )
+      )
+      syncLoopState(ctx, { plan, items, taskProgress, gate, job })
+      return 'return'
+    }
+
+    // A milestone may only be ready after every slice reached progress-ok. If its durable verdict
+    // is absent, reopen that slice instead of persisting the same milestone state forever.
+    milestoneToVerify.verificationStatus = null
+    reconcileMilestoneStatuses(gate.milestones, gate.slices)
     taskProgress = {
       ...taskProgress,
       phase: 'running',
@@ -2149,7 +2233,11 @@ async function processMilestoneVerificationStep(
       currentTaskId: null,
       message: null,
       progressCode: 'execution.evidence_incomplete',
-      progressParams: { milestoneId: milestoneToVerify.id },
+      progressParams: {
+        milestoneId: milestoneToVerify.id,
+        missingSlices: (milestonePreflight.missingSliceIds ?? []).join(','),
+        reopenedSlices: reopenedSliceIds.length
+      },
       tasks: items
     }
     await persistTaskProgress(jobId, taskProgress, undefined, gate)
@@ -2708,6 +2796,8 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
     gate: state.gate,
     dataDir: state.dataDir
   }
+  let previousFingerprint: string | null = null
+  let stagnantIterations = 0
 
   while (true) {
     refreshExecutionLease(jobId)
@@ -2734,6 +2824,14 @@ async function runExecutionLoop(username: string, jobId: string): Promise<void> 
     applyTaskProgressToGate(ctx.gate.tasks, ctx.items)
     reconcileSliceStatuses(ctx.gate.slices)
     reconcileMilestoneStatuses(ctx.gate.milestones, ctx.gate.slices)
+
+    const fingerprint = executionStateFingerprint(ctx)
+    stagnantIterations = fingerprint === previousFingerprint ? stagnantIterations + 1 : 0
+    previousFingerprint = fingerprint
+    if (stagnantIterations >= MAX_STAGNANT_EXECUTION_ITERATIONS) {
+      await failStagnantExecution(ctx)
+      return
+    }
 
     if (isWorkflowComplete(ctx.gate.milestones, ctx.gate.slices)) {
       const result = await handleWorkflowCompletion(jobId, ctx.items, ctx.gate, ctx.taskProgress)
