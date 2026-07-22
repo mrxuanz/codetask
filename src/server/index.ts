@@ -5,6 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { proxy } from 'hono/proxy'
 import type { AppContext } from './bootstrap'
 import { code } from './error'
+import { shouldServeSpaIndex } from './http/spa-fallback'
 import { fail } from './response'
 import { createApiRoutes } from './routes/api'
 
@@ -50,6 +51,9 @@ export function createApp(ctx: AppContext, options: CreateAppHttpOptions): Hono 
 
     app.notFound((c) => {
       if (c.req.path.startsWith('/api/')) {
+        return c.json(fail(code.NOT_FOUND, 'Not Found', { error: 'Not Found' }), 404)
+      }
+      if (!shouldServeSpaIndex(c.req.raw, c.req.path)) {
         return c.json(fail(code.NOT_FOUND, 'Not Found', { error: 'Not Found' }), 404)
       }
 
