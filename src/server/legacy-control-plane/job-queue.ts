@@ -53,8 +53,8 @@ export async function resumeJobQueueForUser(username: string): Promise<void> {
 export async function resumeJobQueuesAfterServerReady(supervisor?: {
   ensureReady(): Promise<void>
 }): Promise<void> {
-  // FIX-PLAN F3-C (§8.5): fail closed — do not swallow readiness errors. The caller runs this
-  // BEFORE HTTP listen, so a rejection prevents claiming the runtime is ready.
+  // Runtime readiness still fails closed inside this operation. The server deliberately invokes
+  // it only after HTTP listen, so a bad persisted job cannot prevent the health/API port binding.
   await ensureStartupWorkloadReady()
   if (supervisor) {
     await supervisor.ensureReady()
@@ -99,7 +99,10 @@ export async function resumeJobQueuesOnStartup(): Promise<void> {
 
   if (failures.length > 0) {
     const detail = failures
-      .map(({ username, error }) => `${username}: ${error instanceof Error ? error.message : String(error)}`)
+      .map(
+        ({ username, error }) =>
+          `${username}: ${error instanceof Error ? error.message : String(error)}`
+      )
       .join('; ')
     throw new Error(`Startup queue resume failed for ${failures.length} user(s): ${detail}`)
   }
@@ -144,8 +147,4 @@ export function resetJobQueueStartupForTests(): void {
   startupQueueResumePromise = null
 }
 
-export {
-  EXECUTION_OCCUPYING_STATUSES,
-  findOccupyingJobId,
-  findNextPendingJobId
-}
+export { EXECUTION_OCCUPYING_STATUSES, findOccupyingJobId, findNextPendingJobId }

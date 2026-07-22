@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   jobIdFromTopic,
@@ -73,6 +75,13 @@ test('enqueueHubEvent coalesces task_progress', () => {
   if (queue[0].event === 'task_progress') {
     assert.equal(queue[0].data.taskProgress.currentIndex, 2)
   }
+})
+
+test('connection hub coalesces snapshots and rate-limits overflow warnings', () => {
+  const source = readFileSync(join(process.cwd(), 'src/server/events/job-event-hub.ts'), 'utf8')
+  assert.match(source, /replaceQueuedSnapshot/)
+  assert.match(source, /OVERFLOW_WARN_INTERVAL_MS/)
+  assert.match(source, /droppedSinceOverflowWarn/)
 })
 
 test('hub reconnect with unknown Last-Event-ID emits resync', async () => {

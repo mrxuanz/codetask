@@ -12,6 +12,7 @@ import {
   applyCursorModel,
   bootstrapCursorAcp,
   cancelCursorAcpSession,
+  CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS,
   createChildAcpStream,
   createChildDiagnostics,
   createCodetaskAcpClient,
@@ -51,6 +52,56 @@ type CursorAcpErrorDto = {
   message: string
   params?: Record<string, unknown>
   detail?: string
+}
+
+type CursorSessionUpdate = Awaited<ReturnType<ActiveSession['nextUpdate']>>
+const CURSOR_ACP_CONNECTION_CLOSE_TIMEOUT_MS = 2_000
+
+async function waitForConnectionClose(connectionDone: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    connectionDone.catch(() => {}),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, CURSOR_ACP_CONNECTION_CLOSE_TIMEOUT_MS)
+      timer.unref?.()
+    })
+  ])
+  if (timer !== undefined) clearTimeout(timer)
+}
+
+function waitForCursorUpdateOrPrompt(
+  session: ActiveSession,
+  promptPromise: Promise<unknown>
+): Promise<{ kind: 'session-update'; message: CursorSessionUpdate } | { kind: 'prompt-settled' }> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(
+          createTurnError('provider.cursor.acp_keepalive_timeout', {
+            detail: `Cursor ACP produced no session update for ${CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS / 1000}s`
+          })
+        )
+      )
+    }, CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS)
+    timer.unref?.()
+
+    const finish = (complete: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      complete()
+    }
+
+    session.nextUpdate().then(
+      (message) => finish(() => resolve({ kind: 'session-update', message })),
+      (error) => finish(() => reject(error))
+    )
+    promptPromise.then(
+      () => finish(() => resolve({ kind: 'prompt-settled' })),
+      (error) => finish(() => reject(error))
+    )
+  })
 }
 
 function isCursorAcpErrorDto(error: unknown): error is CursorAcpErrorDto {
@@ -418,7 +469,9 @@ export class CursorAcpSessionRuntime {
 
     const pumpUpdates = async (): Promise<void> => {
       while (!promptSettled && !aborted) {
-        const message = await turnScope.race(session.nextUpdate())
+        const next = await turnScope.race(waitForCursorUpdateOrPrompt(session, promptPromise))
+        if (next.kind === 'prompt-settled') break
+        const message = next.message
 
         if (message.kind === 'session_update') {
           turnScope.recordProgress('provider_event')
@@ -538,13 +591,13 @@ export class CursorAcpSessionRuntime {
     const connectionDone = this.connectionDone
     this.releaseConnection = null
     this.connectionDone = null
+    const child = this.child
+    if (child) killChildTree(child)
     releaseConnection?.()
     if (connectionDone) {
-      await connectionDone.catch(() => {})
+      await waitForConnectionClose(connectionDone)
     }
-    if (this.child) {
-      const child = this.child
-      killChildTree(child)
+    if (child) {
       await waitForChildExit(child, 10_000)
       if (this.child === child) {
         this.child = null

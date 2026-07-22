@@ -25,4 +25,11 @@ describe('runExecutionLoop step extraction', () => {
     const loopLines = loop.split('\n').length
     assert.ok(loopLines < 80, `expected thin loop, got ${loopLines} lines`)
   })
+
+  it('bounds unchanged-state loops and reopens missing slice verdicts', () => {
+    assert.match(source, /MAX_STAGNANT_EXECUTION_ITERATIONS/)
+    assert.match(source, /failStagnantExecution\(ctx\)/)
+    assert.match(source, /rawVerification\.ok && !rawVerification\.verdict/)
+    assert.match(source, /reopenSliceVerificationForMissingVerdict/)
+  })
 })
