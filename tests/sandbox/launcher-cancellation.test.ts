@@ -5,7 +5,11 @@ import {
   SUPERVISOR_CANCEL_DRAIN_TIMEOUT_MS,
   armCancelDrainWatchdog
 } from '../../src/server/sandbox/cancel-drain-watchdog'
-import { launchSandboxedWorker, readSandboxStdoutLines } from '../../src/server/sandbox/launcher'
+import {
+  launchSandboxedWorker,
+  readSandboxStdoutLines,
+  reapSandboxChild
+} from '../../src/server/sandbox/launcher'
 import { SandboxError } from '../../src/server/sandbox/types'
 
 test('stdout reader stops when cancellation arrives before child exit is observable', async () => {
@@ -151,4 +155,29 @@ test('cancel drain watchdog skips stale sessions and clears cleanly', () => {
   } finally {
     mock.timers.reset()
   }
+})
+
+test('reapSandboxChild cancellation kills but leaves handle closing to its caller', async () => {
+  const controller = new AbortController()
+  controller.abort()
+  let killCount = 0
+  let closeCount = 0
+
+  const result = await reapSandboxChild(
+    {
+      pid: 123,
+      kill: () => {
+        killCount += 1
+      },
+      close: () => {
+        closeCount += 1
+      },
+      pollExit: () => null
+    } as never,
+    { signal: controller.signal, maxWaitMs: 1 }
+  )
+
+  assert.deepEqual(result, { code: -1, status: 'cancelled' })
+  assert.equal(killCount, 1)
+  assert.equal(closeCount, 0)
 })

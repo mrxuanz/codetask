@@ -1362,8 +1362,8 @@ async function executeSingleTask(
 
   const coreCode = resolveCoreForTask(job, flat)
   const core = await ensureCoreAvailable(coreCode)
-  // Cursor ACP long sessions must stay on a stable job-level runtimeRoot across tasks.
-  // Other providers keep per-task isolation for evidence/workdir hygiene.
+  // Cursor CLI host-state projection stays job-scoped across tasks, while the ACP
+  // worker process itself is one-shot per turn. Other providers use task-scoped homes.
   const runtimeRoot =
     core.code === 'cursorcli'
       ? ensureJobRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, core.code)
@@ -2647,6 +2647,12 @@ async function processNextTaskStep(ctx: ExecutionLoopMutable): Promise<LoopStepA
       progressParams: null,
       tasks: fullItems
     }
+    markTaskAttemptFailed({
+      jobId,
+      taskId: next.id,
+      attemptNo,
+      errorJson: JSON.stringify(result.lastError)
+    })
     await persistTaskProgress(
       jobId,
       pausedProgress,
