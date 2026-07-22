@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { proxy } from 'hono/proxy'
 import { browse, parentBrowsePath } from '../server/fs'
+import { shouldServeSpaIndex } from '../server/http/spa-fallback'
 import { fail, ok } from '../server/response'
 import { StorageLocatorRepository, type DataDirResolution } from './storage-locator'
 import { initializeStorageRoot } from './storage-initializer'
@@ -230,6 +231,9 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     })
     app.notFound((c) => {
       if (c.req.path.startsWith('/api/')) {
+        return c.json(fail(404, 'Not Found', { error: 'Not Found' }), 404)
+      }
+      if (!shouldServeSpaIndex(c.req.raw, c.req.path)) {
         return c.json(fail(404, 'Not Found', { error: 'Not Found' }), 404)
       }
       return c.html(readFileSync(join(staticDir, 'index.html'), 'utf8'))
