@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import test from 'node:test'
@@ -29,7 +29,7 @@ test('runtime Node directory is prepended and PATH entries remain deduplicated',
       hostHome: join(root, 'home'),
       platform: 'linux'
     })
-    assert.deepEqual(augmented.split(':'), [binDir, '/usr/bin'])
+    assert.deepEqual(augmented.split(':'), [realpathSync.native(binDir), '/usr/bin'])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -47,7 +47,7 @@ test('discovers Volta Node from the host profile when inherited PATH omits it', 
         hostHome: home,
         platform: 'linux'
       }),
-      [voltaBin]
+      [realpathSync.native(voltaBin)]
     )
   } finally {
     rmSync(home, { recursive: true, force: true })
@@ -72,8 +72,8 @@ test('sandbox policy grants read access to discovered host Volta binaries', () =
   process.env.CODETASK_HOST_HOME = home
   try {
     const roots = resolveProviderReadRoots('claude-code')
-    assert.ok(roots.includes(voltaBin))
-    assert.ok(roots.includes(join(home, '.volta')))
+    assert.ok(roots.includes(realpathSync.native(voltaBin)))
+    assert.ok(roots.includes(realpathSync.native(join(home, '.volta'))))
   } finally {
     if (previousHostHome === undefined) delete process.env.CODETASK_HOST_HOME
     else process.env.CODETASK_HOST_HOME = previousHostHome
