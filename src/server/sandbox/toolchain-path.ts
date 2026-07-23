@@ -1,5 +1,6 @@
 import { constants, accessSync, existsSync, realpathSync, statSync } from 'fs'
 import { basename, delimiter, dirname, join, normalize } from 'path'
+import { processHostEnvironmentSource } from '../host-environment'
 
 interface ToolchainPathOptions {
   env?: Record<string, string | undefined>
@@ -63,17 +64,11 @@ function canonicalDirectory(path: string): string {
  * the whole host home to sandboxed providers.
  */
 export function resolveHostNodeBinDirs(options: ToolchainPathOptions = {}): string[] {
-  const env = options.env ?? process.env
+  const env = options.env ?? processHostEnvironmentSource.snapshot()
   const platform = options.platform ?? process.platform
   const execPath = options.execPath ?? process.execPath
-  const hostHome =
-    options.hostHome ??
-    env.CODETASK_HOST_HOME?.trim() ??
-    env.HOME?.trim() ??
-    env.USERPROFILE?.trim() ??
-    ''
+  const hostHome = options.hostHome ?? env.HOME?.trim() ?? env.USERPROFILE?.trim() ?? ''
   const candidates = [
-    env.CODETASK_NODE_BIN,
     execPath,
     env.VOLTA_HOME ? join(env.VOLTA_HOME, 'bin') : undefined,
     hostHome ? join(hostHome, '.volta', 'bin') : undefined,

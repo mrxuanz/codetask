@@ -5,6 +5,7 @@ import type { SupportedCoreCode } from '../conversation/cores'
 import { dataPaths, jobTaskRuntimeDirPath } from '../data-paths'
 import { ensureIsolatedProviderDirs } from './env'
 import { getAgentTurnProvider } from './providers'
+import { getProviderRegistry } from '../providers/access'
 import { isTestFakeProvider } from './providers/test-overrides'
 import { resolveRoleMcpToolNames, type ConversationRole } from './roles'
 import { compactTurnChunkForIpc } from './chunk-ipc'
@@ -172,12 +173,18 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
   const mcpToolNames = input.mcpToolNames ?? resolveRoleMcpToolNames(input.role)
   const provider = getAgentTurnProvider(input.provider)
   const useFakeInProcess = isTestFakeProvider(provider)
+  const driver = useFakeInProcess ? null : getProviderRegistry().get(input.provider)
   const workspaceLease = input.workspaceLease ?? getWorkspaceLeaseContext()
   const workloadRunId = input.workloadRunId ?? getExecutionRunContext()?.runId
   assertCapabilityProfileMatchesRole(input.role, input.capabilityProfile)
   if (!useFakeInProcess) {
     assertProviderSupportsCapability(input.provider, input.capabilityProfile)
   }
+  const installation = driver ? ((await driver.discover()) ?? undefined) : undefined
+  if (driver && !installation) {
+    throw new Error(`${driver.descriptor.label} is disabled or no executable was found`)
+  }
+  const providerSettings = driver?.settings
   const userMcpServers = capabilityProfileIsReadOnly(input.capabilityProfile)
     ? {}
     : (input.userMcpServers ?? resolveUserMcpServersMap(input.provider, input.role))
@@ -244,9 +251,12 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
       signal: sandboxAbort.signal,
       readRoots: input.readRoots,
       jobId: input.jobId,
+      providerRuntimeScopeId: input.providerRuntimeScopeId,
       idempotencyKey: input.idempotencyKey,
       workspaceAccess: input.workspaceAccess,
-      capabilityProfile: input.capabilityProfile
+      capabilityProfile: input.capabilityProfile,
+      installation: installation!,
+      providerSettings: providerSettings!
     })
     try {
       yield* withSandboxLeaseRefresh(sandboxStream, {
@@ -274,7 +284,10 @@ async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator
     mcpToolNames,
     userMcpServers,
     capabilityProfile: input.capabilityProfile,
+    installation,
+    providerSettings,
     jobId: input.jobId,
+    providerRuntimeScopeId: input.providerRuntimeScopeId,
     workloadRunId: input.workloadRunId,
     idempotencyKey: input.idempotencyKey
   }

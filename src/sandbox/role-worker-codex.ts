@@ -1,4 +1,5 @@
-import { streamCodexTurn } from '../server/agent-runtime/providers/codex-sdk'
+import { getAgentTurnProvider } from '../server/agent-runtime/providers'
 import { runRoleWorker } from './role-worker-common'
 
-runRoleWorker({ code: 'codex', protocol: 'sdk', streamTurn: streamCodexTurn })
+/** Codex sandboxed worker — production route is Registry/CodexDriver (PRU-07-08). */
+runRoleWorker(getAgentTurnProvider('codex'))

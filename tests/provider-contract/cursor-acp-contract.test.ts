@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { createCursorPermissionHandler } from '../../src/server/agent-runtime/cursor-acp/permissions'
-import { buildCursorTurnPlan } from '../../src/server/agent-runtime/providers/cursor-policy'
+import { buildCursorTurnPlan } from '../../src/server/providers/cursor/turn-plan'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'
 
 const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-acp-'))

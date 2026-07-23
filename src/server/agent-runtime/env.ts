@@ -2,6 +2,7 @@ import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { resolveCursorWorkspaceProjectSlug } from './cursor-acp/cursor-workspace'
 import { augmentPathWithHostNode } from '../sandbox/toolchain-path'
+import { processHostEnvironmentSource } from '../host-environment'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -207,9 +208,12 @@ function applyIsolatedWindowsProfile(runtimeRoot: string, env: Record<string, st
   applyWindowsCrashReporterEnv(env)
 }
 
-function copyHostAuthEnv(env: Record<string, string>): void {
+function copyHostAuthEnv(
+  env: Record<string, string>,
+  hostEnvironment = processHostEnvironmentSource.snapshot()
+): void {
   for (const key of PROVIDER_AUTH_ENV_KEYS) {
-    const value = process.env[key]
+    const value = hostEnvironment[key]
     if (typeof value === 'string' && value.trim()) {
       env[key] = value
     }
@@ -217,10 +221,7 @@ function copyHostAuthEnv(env: Record<string, string>): void {
 }
 
 export function buildSandboxPreparedProviderEnv(): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === 'string') env[key] = value
-  }
+  const env: Record<string, string> = { ...processHostEnvironmentSource.snapshot() }
   env.PATH = augmentPathWithHostNode(env.PATH)
 
   for (const name of BLOCKED_ENV) {
@@ -240,24 +241,24 @@ export function buildProviderChildEnv(
 ): Record<string, string> {
   const preserveHost = options?.preserveHostIdentity ?? true
   ensureIsolatedProviderDirs(runtimeRoot)
+  const hostEnvironment = processHostEnvironmentSource.snapshot()
 
   const hostHome =
-    process.env.HOME ?? process.env.USERPROFILE ?? process.env.HOMEPATH ?? runtimeRoot
+    hostEnvironment.HOME ?? hostEnvironment.USERPROFILE ?? hostEnvironment.HOMEPATH ?? runtimeRoot
 
   const env: Record<string, string> = {
-    PATH: augmentPathWithHostNode(process.env.PATH),
-    LANG: process.env.LANG ?? 'C.UTF-8',
-    CODETASK_RUNTIME_ROOT: runtimeRoot
+    PATH: augmentPathWithHostNode(hostEnvironment.PATH, { env: hostEnvironment }),
+    LANG: hostEnvironment.LANG ?? 'C.UTF-8'
   }
 
   if (preserveHost) {
     env.HOME = hostHome
-    if (process.env.USERPROFILE) env.USERPROFILE = process.env.USERPROFILE
-    if (process.env.HOMEDRIVE) env.HOMEDRIVE = process.env.HOMEDRIVE
-    if (process.env.HOMEPATH) env.HOMEPATH = process.env.HOMEPATH
-    if (process.env.APPDATA) env.APPDATA = process.env.APPDATA
-    if (process.env.LOCALAPPDATA) env.LOCALAPPDATA = process.env.LOCALAPPDATA
-    env.TMPDIR = process.env.TMPDIR ?? process.env.TEMP ?? join(runtimeRoot, 'tmp')
+    if (hostEnvironment.USERPROFILE) env.USERPROFILE = hostEnvironment.USERPROFILE
+    if (hostEnvironment.HOMEDRIVE) env.HOMEDRIVE = hostEnvironment.HOMEDRIVE
+    if (hostEnvironment.HOMEPATH) env.HOMEPATH = hostEnvironment.HOMEPATH
+    if (hostEnvironment.APPDATA) env.APPDATA = hostEnvironment.APPDATA
+    if (hostEnvironment.LOCALAPPDATA) env.LOCALAPPDATA = hostEnvironment.LOCALAPPDATA
+    env.TMPDIR = hostEnvironment.TMPDIR ?? hostEnvironment.TEMP ?? join(runtimeRoot, 'tmp')
   } else if (process.platform === 'win32') {
     applyIsolatedWindowsProfile(runtimeRoot, env)
   } else {
@@ -268,14 +269,14 @@ export function buildProviderChildEnv(
     env.XDG_DATA_HOME = join(runtimeRoot, 'data')
   }
 
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(hostEnvironment)) {
     if (typeof value !== 'string') continue
     if (key in env) continue
     if (!preserveHost && HOST_PROFILE_ENV_KEYS.has(key)) continue
     env[key] = value
   }
 
-  copyHostAuthEnv(env)
+  copyHostAuthEnv(env, hostEnvironment)
 
   for (const name of BLOCKED_ENV) {
     delete env[name]
@@ -291,9 +292,5 @@ export function buildProviderChildEnv(
 export function buildSandboxAuthPassthrough(): Record<string, string> {
   const env: Record<string, string> = {}
   copyHostAuthEnv(env)
-  const hostProfile = process.env.USERPROFILE ?? process.env.HOME
-  if (hostProfile) {
-    env.CODETASK_SANDBOX_HOST_PROFILE = hostProfile
-  }
   return env
 }

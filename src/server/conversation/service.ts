@@ -49,7 +49,7 @@ import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
 import { ensureConversationRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
-import { buildConversationCursorRuntimeScope } from '../agent-runtime/cursor-acp/runtime-registry'
+import { buildConversationProviderRuntimeScopeId } from '../../shared/providers/capabilities'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
 import type {
   ChatSseEvent,
@@ -149,7 +149,7 @@ export async function prepareConversationTurn(input: {
     throw AppError.conflict('Project or thread is being deleted', undefined, 'thread.deleting')
   }
 
-  let threadRow = await getThreadRow(username, threadId)
+  const threadRow = await getThreadRow(username, threadId)
   if (!threadRow) {
     throw AppError.notFound('Thread not found', 'thread.not_found')
   }
@@ -631,10 +631,10 @@ export async function* executePreparedTurn(
 
     const mcpToolNames =
       createTaskMode && wizardStage ? toolsForWizardPhase(wizardStage) : undefined
-    const cursorRuntimeScope =
-      core.code === 'cursorcli' && createTaskMode
-        ? buildConversationCursorRuntimeScope(thread.id, conversationKind)
-        : undefined
+    const providerRuntimeScopeId = buildConversationProviderRuntimeScopeId(
+      thread.id,
+      conversationKind
+    )
 
     const attachmentReadRoots = resolveTurnAttachmentReadRoots({
       threadId: thread.id,
@@ -663,7 +663,7 @@ export async function* executePreparedTurn(
         mcpUrl,
         mcpToolNames,
         readRoots: attachmentReadRoots.length > 0 ? attachmentReadRoots : undefined,
-        jobId: cursorRuntimeScope,
+        providerRuntimeScopeId,
         signal: options?.signal,
         workspaceAccess: prepared.workspaceAccess,
         workspaceLease:

@@ -3,13 +3,21 @@ import {
   applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv
-} from '../env'
-import { buildCodexSdkConfig, type CodexSdkConfig } from '../mcp'
-import type { AgentTurnInput } from '../types'
-import { resolveProviderOuterSandbox } from '../provider-policy'
-import { resolveRoleMcpToolNames, roleRequiresOuterSandbox, type ConversationRole } from '../roles'
+} from '../../agent-runtime/env'
+import { buildCodexSdkConfig, type CodexSdkConfig } from '../../agent-runtime/mcp'
+import type { AgentTurnInput } from '../../agent-runtime/types'
+import { resolveProviderOuterSandbox } from '../../agent-runtime/provider-policy'
+import {
+  resolveRoleMcpToolNames,
+  roleRequiresOuterSandbox,
+  type ConversationRole
+} from '../../agent-runtime/roles'
 import { createTurnError } from '../../../shared/turn-errors.ts'
-import { capabilityProfileIsReadOnly, resolveInputCapabilityProfile } from '../capabilities'
+import {
+  capabilityProfileIsReadOnly,
+  resolveInputCapabilityProfile
+} from '../../agent-runtime/capabilities'
+import { resolveProviderExecutable } from '../executable'
 
 export type CodexSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only'
 
@@ -30,6 +38,9 @@ export interface CodexTurnPlan {
   env: Record<string, string>
   sdkConfig: CodexSdkConfig | undefined
   threadOptions: CodexThreadOptions
+  /** Same installation path detect/discover resolved — passed to SDK codexPathOverride. */
+  readonly codexPathOverride?: string | undefined
+  readonly installationId?: string | undefined
 }
 
 export const resolveCodexOuterSandbox = resolveProviderOuterSandbox
@@ -41,6 +52,29 @@ export function resolveCodexMcpToolNamesForTurn(
   return resolveRoleMcpToolNames(input.role)
 }
 
+/**
+ * Prefer the driver-discovered installation; fall back to the shared resolver so
+ * detect and SDK launch share one path identity.
+ */
+export function resolveCodexPathOverride(input: AgentTurnInput): {
+  readonly codexPathOverride?: string
+  readonly installationId?: string
+} {
+  if (input.installation) {
+    return {
+      codexPathOverride: input.installation.invocation.executable,
+      installationId: input.installation.id
+    }
+  }
+  const resolved = resolveProviderExecutable('codex')
+  if (!resolved) return {}
+  return {
+    codexPathOverride: resolved.executable,
+    installationId: resolved.installationId
+  }
+}
+
+/** CodexDriver-owned turn plan builder (PRU-07-05). */
 export function buildCodexTurnPlan(
   input: AgentTurnInput,
   options: {
@@ -57,6 +91,7 @@ export function buildCodexTurnPlan(
   const mcpToolNames = resolveCodexMcpToolNamesForTurn(input)
   const capabilityProfile = resolveInputCapabilityProfile(input)
   const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
+  const pathOverride = resolveCodexPathOverride(input)
 
   const sdkConfig = buildCodexSdkConfig({
     mcpUrl: input.mcpUrl,
@@ -93,6 +128,7 @@ export function buildCodexTurnPlan(
     mcpToolNames,
     env,
     sdkConfig,
-    threadOptions
+    threadOptions,
+    ...pathOverride
   }
 }

@@ -1,9 +1,14 @@
-import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
-import { streamCursorSessionTurn } from '../cursor-acp/stream-session-turn'
+import type { AgentTurnInput, AgentTurnChunk } from '../types'
+import {
+  streamCursorSessionTurn,
+  type StreamCursorSessionTurnOptions
+} from '../cursor-acp/stream-session-turn'
+
+export type { StreamCursorSessionTurnOptions }
 
 export async function* streamCursorAcpTurn(
   input: AgentTurnInput,
-  options?: AgentTurnOptions
+  options?: StreamCursorSessionTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
   yield* streamCursorSessionTurn(input, options)
 }

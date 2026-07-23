@@ -14,10 +14,8 @@ function writeChunk(role: AgentTurnInput['role'], chunk: AgentTurnChunk): void {
 }
 
 async function runTurn(provider: AgentTurnProvider, input: AgentTurnInput): Promise<void> {
-  const outerSandbox = process.env.CODETASK_OUTER_SANDBOX === '1'
-  if (!outerSandbox) {
-    throw new Error('role-worker must run inside outer sandbox (CODETASK_OUTER_SANDBOX=1)')
-  }
+  // Role workers are only launched inside the OS outer sandbox; pass the control
+  // explicitly on the turn options (PRU-12-05) — do not read CODETASK_OUTER_SANDBOX.
   if (input.provider !== provider.code) {
     throw new Error(`role-worker-${provider.code} cannot run provider ${input.provider}`)
   }

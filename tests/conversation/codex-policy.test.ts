@@ -7,7 +7,7 @@ import {
   buildCodexTurnPlan,
   resolveCodexMcpToolNamesForTurn,
   resolveCodexOuterSandbox
-} from '../../src/server/agent-runtime/providers/codex-policy'
+} from '../../src/server/providers/codex/turn-plan.ts'
 import { applyLoopbackNoProxyEnv } from '../../src/server/agent-runtime/env'
 import { resolveCodexMcpStartupTurnError } from '../../src/server/agent-runtime/providers/codex-sdk'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'

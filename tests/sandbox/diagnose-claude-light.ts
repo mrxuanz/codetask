@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareProviderAuth } from '../../src/server/sandbox/provider-auth/bridge'
-import { resolveClaudeSettingSources } from '../../src/server/agent-runtime/providers/claude-policy'
+import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
+import { resolveClaudeSettingSources } from '../../src/server/providers/claude/turn-options'
 import { resolveClaudeHostConfigDir } from '../../src/server/sandbox/provider-auth/paths'
 
 const TURN_TIMEOUT_MS = 3 * 60_000
@@ -72,7 +72,7 @@ async function runStatic(runtimeRoot: string): Promise<{
   injectedAuthKeys: string[]
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderAuth('claude-code', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
   const env = buildMergedEnv(prepared.envPatch)
   const claudeDir = env.CLAUDE_CONFIG_DIR ?? join(runtimeRoot, '.claude')
   const hostConfigDir = resolveClaudeHostConfigDir().toLowerCase()
@@ -114,7 +114,7 @@ async function runStatic(runtimeRoot: string): Promise<{
 }
 
 async function runHello(runtimeRoot: string, workspace: string): Promise<unknown> {
-  const prepared = prepareProviderAuth('claude-code', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
   const env = buildMergedEnv(prepared.envPatch)
   if (!claudeAuthPresent(env)) {
     return { skipped: true, reason: 'no ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN' }
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuth('claude-code', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
 
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {

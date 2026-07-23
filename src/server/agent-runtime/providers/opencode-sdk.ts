@@ -1,15 +1,9 @@
-import type { Config, Event, Part, TextPart } from '@opencode-ai/sdk/v2'
+import type { Event, Part, TextPart } from '@opencode-ai/sdk/v2'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import { spawnSync, type ChildProcessWithoutNullStreams } from 'child_process'
-import { createRequire } from 'module'
 import { createServer } from 'net'
-import { buildOpencodeMcpServers } from '../mcp'
-import { resolveOpencodeExecutable } from '../../sandbox/provider-auth/paths'
-import {
-  applyTaskIdempotencyEnv,
-  buildSandboxPreparedProviderEnv,
-  buildProviderChildEnv
-} from '../env'
+import { buildOpenCodeServerPlan } from '../../providers/opencode/server-plan'
+import { spawnProviderInvocation } from '../../providers/spawn'
 import { throwSdkTurnError } from '../errors'
 import {
   createTurnError,
@@ -18,7 +12,6 @@ import {
   type TurnError
 } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
-import { roleRequiresOuterSandbox } from '../roles'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
 import { extractLooseReasoningText } from '../reasoning-text'
 import {
@@ -30,11 +23,10 @@ import { abortReason, createProviderTurnScope } from '../provider-turn'
 import {
   buildOpencodeAutoQuestionAnswers,
   parseOpencodeQuestions,
-  resolveOpencodePermissionConfig,
   resolveOpencodeToolsConfig,
   type OpencodeQuestionDto
 } from './opencode-config'
-import { capabilityProfileIsReadOnly, resolveInputCapabilityProfile } from '../capabilities'
+import { resolveInputCapabilityProfile } from '../capabilities'
 import {
   createOpencodeLongTurnFetch,
   isTransientOpencodeTransportDetail
@@ -42,32 +34,10 @@ import {
 
 export { isTransientOpencodeTransportDetail } from './opencode-transport'
 
-type NodeSpawn = typeof import('child_process').spawn
-
-const nodeRequire = createRequire(import.meta.url)
-const crossSpawn = nodeRequire('cross-spawn') as NodeSpawn
-
 interface OpencodeServerHandle {
   url: string
   close(): void
   processExit: Promise<never>
-}
-
-function buildOpencodeConfig(input: AgentTurnInput): Config {
-  const userMcpServers = input.userMcpServers ?? {}
-  const capabilityProfile = resolveInputCapabilityProfile(input)
-  const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
-
-  const mcpEntries = buildOpencodeMcpServers(input.mcpUrl, userMcpServers)
-  const mcp = Object.keys(mcpEntries).length > 0 ? (mcpEntries as Config['mcp']) : undefined
-
-  return {
-    permission: resolveOpencodePermissionConfig(capabilityProfile),
-    tools: resolveOpencodeToolsConfig(capabilityProfile),
-    ...(readOnly ? { plugin: [], instructions: [] } : {}),
-    ...(input.model !== undefined ? { model: input.model } : {}),
-    ...(mcp ? { mcp } : {})
-  }
 }
 
 /**
@@ -169,10 +139,6 @@ function stopProcessTree(proc: ChildProcessWithoutNullStreams): void {
   proc.kill()
 }
 
-function resolveOpencodeSpawnBin(): string {
-  return process.env.CODETASK_OPENCODE_BIN?.trim() || resolveOpencodeExecutable()
-}
-
 function formatServerStartFailure(
   message: string,
   output: string,
@@ -207,27 +173,29 @@ async function startOpencodeServer(options: {
   hostname: string
   port: number
   cwd: string
-  config: Config
+  config: import('@opencode-ai/sdk/v2').Config
   env: Record<string, string>
+  executable: string
+  prefixArgs: readonly string[]
   signal?: AbortSignal | undefined
-  pure?: boolean | undefined
+  serveArgs: readonly string[]
   timeoutMs?: number | undefined
 }): Promise<OpencodeServerHandle> {
-  const args = ['serve', `--hostname=${options.hostname}`, `--port=${options.port}`]
-  if (options.pure) args.push('--pure')
-  if (options.config.logLevel) args.push(`--log-level=${options.config.logLevel}`)
-
   const env = {
     ...options.env,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(options.config)
   }
   // Pin OS cwd to the project workspace so a ignored/mismatched `directory`
   // query cannot fall back to the CodeTask process cwd (program directory).
-  const proc = crossSpawn(resolveOpencodeSpawnBin(), args, {
-    cwd: options.cwd,
-    env,
-    windowsHide: true
-  }) as ChildProcessWithoutNullStreams
+  const proc = spawnProviderInvocation(
+    { executable: options.executable, prefixArgs: options.prefixArgs },
+    options.serveArgs,
+    {
+      cwd: options.cwd,
+      env,
+      stdio: 'pipe'
+    }
+  ) as ChildProcessWithoutNullStreams
 
   let clearAbort = (): void => {}
   let output = ''
@@ -380,28 +348,21 @@ export async function* streamOpencodeTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
-  const outerSandbox = options?.outerSandbox ?? false
-  if (!outerSandbox && roleRequiresOuterSandbox(input.role)) {
-    throw createTurnError('sandbox.required', {
-      detail: 'OpenCode requires OS outer sandbox'
-    })
-  }
   const { createOpencodeClient } = await import('@opencode-ai/sdk/v2/client')
+  const plan = buildOpenCodeServerPlan(input, { outerSandbox: options?.outerSandbox })
   const capabilityProfile = resolveInputCapabilityProfile(input)
-  const config = buildOpencodeConfig(input)
-  const env = outerSandbox
-    ? buildSandboxPreparedProviderEnv()
-    : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
-  applyTaskIdempotencyEnv(env, input.idempotencyKey)
+  const port = await pickEphemeralPort()
 
   const server = await startOpencodeServer({
-    hostname: '127.0.0.1',
-    port: await pickEphemeralPort(),
-    cwd: input.cwd,
-    config,
-    env,
-    signal: options?.signal,
-    pure: capabilityProfileIsReadOnly(capabilityProfile)
+    hostname: plan.hostname,
+    port,
+    cwd: plan.cwd,
+    config: plan.config,
+    env: plan.env,
+    executable: plan.executable,
+    prefixArgs: plan.prefixArgs,
+    serveArgs: plan.buildServeArgs(port),
+    signal: options?.signal
   })
 
   // Node undici's default 300s bodyTimeout aborts long session.prompt waits;

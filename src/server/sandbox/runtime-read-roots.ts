@@ -2,6 +2,10 @@ import { execFileSync } from 'child_process'
 import { dirname, join, normalize } from 'path'
 import { existsSync, realpathSync } from 'fs'
 import { resolveMainSandboxScript } from './packaged-paths'
+import {
+  processHostEnvironmentSource,
+  type HostEnvironmentSnapshot
+} from '../host-environment'
 
 function safeRealpath(path: string): string {
   try {
@@ -23,14 +27,18 @@ function addRoot(roots: Map<string, string>, path: string | null | undefined): v
   roots.set(real.toLowerCase(), real)
 }
 
-export function resolveRuntimeReadRoots(): string[] {
+export function resolveRuntimeReadRoots(
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+): string[] {
   const roots = new Map<string, string>()
 
   addRoot(roots, process.execPath)
   addRoot(roots, dirname(process.execPath))
 
-  if (process.env.NODE_PATH) {
-    for (const segment of process.env.NODE_PATH.split(process.platform === 'win32' ? ';' : ':')) {
+  if (hostEnvironment.NODE_PATH) {
+    for (const segment of hostEnvironment.NODE_PATH.split(
+      process.platform === 'win32' ? ';' : ':'
+    )) {
       addRoot(roots, segment.trim())
     }
   }
@@ -47,17 +55,20 @@ export function resolveRuntimeReadRoots(): string[] {
     for (const certPath of ['/etc/ssl/certs', '/etc/pki/tls/certs', '/etc/ca-certificates']) {
       addRoot(roots, certPath)
     }
-    addRoot(roots, process.env.npm_config_cache)
-    addRoot(roots, join(process.env.HOME ?? '', '.npm'))
+    addRoot(roots, hostEnvironment.npm_config_cache)
+    addRoot(roots, join(hostEnvironment.HOME ?? '', '.npm'))
   } else {
-    addRoot(roots, process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'npm-cache') : null)
+    addRoot(
+      roots,
+      hostEnvironment.LOCALAPPDATA ? join(hostEnvironment.LOCALAPPDATA, 'npm-cache') : null
+    )
   }
 
   try {
     const npmRoot = execFileSync(process.execPath, ['-p', 'require.resolve.paths("module")'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      env: { ...hostEnvironment, ELECTRON_RUN_AS_NODE: '1' }
     }).trim()
     if (npmRoot) addRoot(roots, npmRoot)
   } catch {

@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareProviderAuth } from '../../src/server/sandbox/provider-auth/bridge'
+import { getProviderDriverForTest, prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import {
   materializeOpencodeAuth,
   opencodeRuntimeLayout
 } from '../../src/server/sandbox/provider-auth/materialize'
-import { resolveOpencodeExecutable } from '../../src/server/sandbox/provider-auth/paths'
+import { spawnProviderInvocation } from '../../src/server/providers/spawn'
 
 const SERVER_TIMEOUT_MS = 30_000
 const args = process.argv.slice(2)
@@ -18,6 +18,7 @@ function readArg(name: string): string | undefined {
 
 const skipLive = args.includes('--skip-live')
 const caseFilter = readArg('--case') ?? 'all'
+const executablePath = readArg('--bin')
 
 function log(step: string, message: string, extra?: unknown): void {
   const prefix = `[opencode-light:${step}]`
@@ -69,13 +70,13 @@ async function runStatic(runtimeRoot: string): Promise<{
     XDG_CONFIG_HOME: string | undefined
     XDG_DATA_HOME: string | undefined
     XDG_STATE_HOME: string | undefined
-    CODETASK_OPENCODE_BIN: string | undefined
+    executableMode: 'auto' | 'path'
   }
   runtimeIsolated: boolean
 }> {
   const layout = opencodeRuntimeLayout(runtimeRoot)
   const materialized = materializeOpencodeAuth(runtimeRoot)
-  const prepared = prepareProviderAuth('opencode', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
   const env = buildMergedEnv(prepared.envPatch)
 
   const report = {
@@ -92,7 +93,7 @@ async function runStatic(runtimeRoot: string): Promise<{
       XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
       XDG_DATA_HOME: env.XDG_DATA_HOME,
       XDG_STATE_HOME: env.XDG_STATE_HOME,
-      CODETASK_OPENCODE_BIN: env.CODETASK_OPENCODE_BIN
+      executableMode: executablePath ? 'path' : 'auto'
     },
     runtimeIsolated:
       prepared.diagnostics.mode === 'runtime-copy' &&
@@ -113,17 +114,21 @@ async function runStatic(runtimeRoot: string): Promise<{
 }
 
 async function runServerProbe(runtimeRoot: string): Promise<unknown> {
-  const prepared = prepareProviderAuth('opencode', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
   const env = buildMergedEnv(prepared.envPatch)
-  const bin = env.CODETASK_OPENCODE_BIN?.trim() || resolveOpencodeExecutable()
-
-  if (!existsSync(bin) && bin === 'opencode') {
+  const driver = getProviderDriverForTest('opencode')
+  const installation = await driver.discover({
+    settings: executablePath
+      ? {
+          ...driver.settings,
+          executable: { mode: 'path', path: executablePath }
+        }
+      : driver.settings
+  })
+  if (!installation) {
     return { skipped: true, reason: 'opencode binary not found on PATH' }
   }
 
-  const { createRequire } = await import('node:module')
-  const nodeRequire = createRequire(import.meta.url)
-  const crossSpawn = nodeRequire('cross-spawn') as typeof import('child_process').spawn
   const { createServer } = await import('node:net')
 
   const port = await new Promise<number>((resolve, reject) => {
@@ -140,13 +145,18 @@ async function runServerProbe(runtimeRoot: string): Promise<unknown> {
   })
 
   const turnConfig = { permission: 'allow' as const }
-  const proc = crossSpawn(bin, ['serve', '--hostname=127.0.0.1', `--port=${port}`], {
-    env: {
-      ...env,
-      OPENCODE_CONFIG_CONTENT: JSON.stringify(turnConfig)
-    },
-    windowsHide: true
-  })
+  const proc = spawnProviderInvocation(
+    installation.invocation,
+    ['serve', '--hostname=127.0.0.1', `--port=${port}`],
+    {
+      cwd: runtimeRoot,
+      env: {
+        ...env,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify(turnConfig)
+      },
+      windowsHide: true
+    }
+  )
 
   const started = Date.now()
   let output = ''
@@ -211,7 +221,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuth('opencode', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
 
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {

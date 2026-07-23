@@ -159,7 +159,7 @@ Notes:
 
 ### Requirements
 
-- Node.js 22+
+- Node.js 24.x
 - Rust toolchain (for sandbox native components)
 - At least one Agent CLI installed and logged in: Codex, Claude Code, OpenCode, or Cursor CLI
 - Windows / macOS / Linux (sandbox capabilities vary by platform)

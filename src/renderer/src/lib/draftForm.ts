@@ -63,15 +63,9 @@ export interface AbilitySelection {
   coreCode: string
 }
 
-const CORE_LABELS: Record<string, string> = {
-  codex: 'Codex',
-  'claude-code': 'Claude Code',
-  opencode: 'OpenCode',
-  cursorcli: 'Cursor CLI'
-}
-
+/** Prefer control-plane / listCores labels; fall back to the raw code (PRU-11-05). */
 export function coreLabel(code: string, cores: ConversationCore[]): string {
-  return cores.find((core) => core.code === code)?.label ?? CORE_LABELS[code] ?? code
+  return cores.find((core) => core.code === code)?.label ?? code
 }
 
 export function buildAbilitySelections(

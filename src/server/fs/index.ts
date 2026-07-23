@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { AppError } from '../error'
+import { processHostEnvironmentSource } from '../host-environment'
 
 export interface BrowseEntry {
   name: string
@@ -14,7 +15,7 @@ export interface BrowseResult {
 }
 
 function userHome(): string {
-  const home = process.env.USERPROFILE || homedir()
+  const home = processHostEnvironmentSource.snapshot().USERPROFILE || homedir()
   if (!home) {
     throw AppError.internal('Unable to resolve user home directory', 'project.home_not_found')
   }

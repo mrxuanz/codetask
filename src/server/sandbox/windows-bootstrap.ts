@@ -1,17 +1,19 @@
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { dataPaths } from '../data-paths'
+import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import { loadSandboxNative, resolveRunnerEntryScript, resolveSetupEntryScript } from './native'
 
 let initPromise: Promise<void> | null = null
 
 export function fixedSandboxHome(dataDir: string): string {
-  if (process.env.CODETASK_SANDBOX_HOME?.trim()) {
-    return process.env.CODETASK_SANDBOX_HOME.trim()
+  const hostEnv = processHostEnvironmentSource.snapshot()
+  if (hostEnv.CODETASK_SANDBOX_HOME?.trim()) {
+    return hostEnv.CODETASK_SANDBOX_HOME.trim()
   }
   if (process.platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA
+    const localAppData = hostEnv.LOCALAPPDATA
     if (localAppData) {
       return join(localAppData, 'codetask', 'sandbox-home')
     }

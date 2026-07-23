@@ -1,5 +1,6 @@
 import { realpathSync, existsSync, lstatSync } from 'fs'
 import { resolve, normalize, sep } from 'path'
+import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { FileRule, AnySandboxPolicy, SandboxPolicy, SandboxPolicyV2 } from './types'
 
@@ -56,7 +57,8 @@ function assertSafeWriteRoot(path: string): void {
       'sandbox.policy.dangerous_write_root'
     )
   }
-  const home = process.env.HOME ?? process.env.USERPROFILE
+  const hostEnv = processHostEnvironmentSource.snapshot()
+  const home = hostEnv.HOME ?? hostEnv.USERPROFILE
   if (home) {
     const homeCanon = canonicalizePath(home)
     if (path === homeCanon && !path.includes('runtime')) {

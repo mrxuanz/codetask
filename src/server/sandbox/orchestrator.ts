@@ -1,5 +1,6 @@
 import type { AgentTurnChunk } from '../agent-runtime/types'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
+import { processHostEnvironmentSource } from '../host-environment'
 
 import { streamSandboxedTurnViaSupervisor } from './supervisor-client'
 
@@ -49,9 +50,10 @@ function abortJobTurns(jobId: string, reason: string): void {
 }
 
 export function shouldUseSandboxSupervisor(): boolean {
-  if (process.env.CODETASK_SANDBOX_SUPERVISOR === '0') return false
+  const hostEnv = processHostEnvironmentSource.snapshot()
+  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') return false
 
-  if (process.env.CODETASK_SANDBOX_SUPERVISOR_WORKER === '1') return false
+  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR_WORKER === '1') return false
 
   return true
 }
