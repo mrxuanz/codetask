@@ -299,7 +299,7 @@ test('deleteUserDraft removes its aggregate and keeps an independently published
       draftMessageId: taskMessageId,
       title: 'Launched draft',
       summary: '',
-      status: 'running',
+      status: 'completed',
       workspacePath: join(dataDir, 'workspace'),
       planConfirmedAt: now,
       designSessionId,

@@ -1,11 +1,7 @@
 import { writeSync } from 'fs'
 import { turnErrorChunk } from '../server/agent-runtime/errors'
 import { compactTurnChunkForIpc } from '../server/agent-runtime/chunk-ipc'
-import { streamCodexTurn } from '../server/agent-runtime/providers/codex-sdk'
-import { streamClaudeTurn } from '../server/agent-runtime/providers/claude-sdk'
-import { streamOpencodeTurn } from '../server/agent-runtime/providers/opencode-sdk'
-import { streamCursorAcpTurn } from '../server/agent-runtime/providers/cursor-acp'
-import { closeJobCursorRuntime } from '../server/agent-runtime/cursor-acp/stream-session-turn'
+import { getAgentTurnProvider } from '../server/agent-runtime/providers'
 import type { AgentTurnChunk, AgentTurnInput } from '../server/agent-runtime/types'
 
 function writeChunk(role: AgentTurnInput['role'], chunk: AgentTurnChunk): void {
@@ -15,35 +11,11 @@ function writeChunk(role: AgentTurnInput['role'], chunk: AgentTurnChunk): void {
 }
 
 async function runTurn(input: AgentTurnInput): Promise<void> {
-  const outerSandbox = process.env.CODETASK_OUTER_SANDBOX === '1'
-  if (!outerSandbox) {
-    throw new Error('role-worker must run inside outer sandbox (CODETASK_OUTER_SANDBOX=1)')
-  }
-
-  let stream: AsyncGenerator<AgentTurnChunk>
-  if (input.provider === 'codex') {
-    stream = streamCodexTurn(input, { outerSandbox: true })
-  } else if (input.provider === 'claude-code') {
-    stream = streamClaudeTurn(input, { outerSandbox: true })
-  } else if (input.provider === 'opencode') {
-    stream = streamOpencodeTurn(input, { outerSandbox: true })
-  } else if (input.provider === 'cursorcli') {
-    stream = streamCursorAcpTurn(input, { outerSandbox: true })
-  } else {
-    throw new Error(`unsupported provider: ${input.provider}`)
-  }
-
-  try {
-    for await (const chunk of stream) {
-      writeChunk(input.role, chunk)
-    }
-  } finally {
-    // Task workers carry a jobId, so Cursor's in-process registry would otherwise retain the ACP
-    // child until process.exit(). Close it explicitly to make the one-turn ownership observable
-    // and to avoid orphaning a poisoned Cursor permission service.
-    if (input.provider === 'cursorcli' && input.jobId?.trim()) {
-      await closeJobCursorRuntime(input.jobId).catch(() => {})
-    }
+  // Role workers are only launched inside the OS outer sandbox; pass the control
+  // explicitly on the turn options (PRU-12-05) — do not read CODETASK_OUTER_SANDBOX.
+  const provider = getAgentTurnProvider(input.provider)
+  for await (const chunk of provider.streamTurn(input, { outerSandbox: true })) {
+    writeChunk(input.role, chunk)
   }
 }
 

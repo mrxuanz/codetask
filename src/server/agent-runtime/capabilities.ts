@@ -2,14 +2,12 @@ import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import type { SupportedCoreCode } from '../conversation/cores'
 import type { ConversationRole } from './roles'
+import {
+  getProviderDescriptor,
+  type ProviderCapabilityProfile
+} from '../../shared/providers'
 
-export type AgentCapabilityProfile =
-  | 'chat-write'
-  | 'chat-read'
-  | 'create-task-read'
-  | 'planner-read'
-  | 'task-sandbox'
-  | 'verifier-sandbox'
+export type AgentCapabilityProfile = ProviderCapabilityProfile
 
 export const READ_ONLY_CAPABILITY_PROFILES: readonly AgentCapabilityProfile[] = [
   'chat-read',
@@ -46,7 +44,7 @@ export function resolveAgentCapabilityProfile(input: {
 
 export function resolveInputCapabilityProfile(input: {
   role: ConversationRole
-  capabilityProfile?: AgentCapabilityProfile
+  capabilityProfile?: AgentCapabilityProfile | undefined
 }): AgentCapabilityProfile {
   return (
     input.capabilityProfile ??
@@ -78,23 +76,12 @@ export function assertCapabilityProfileMatchesRole(
   })
 }
 
-/**
- * Read-only support is opt-in per provider. Codex exposes SDK `sandboxMode:
- * "read-only"` with `approvalPolicy: "never"` for non-interactive use (and MCP
- * tool pre-approvals), matching the official CI read-only preset.
- */
-const VERIFIED_READ_ONLY_PROVIDERS = new Set<SupportedCoreCode>([
-  'codex',
-  'claude-code',
-  'cursorcli',
-  'opencode'
-])
-
 export function providerSupportsCapability(
   provider: SupportedCoreCode,
   profile: AgentCapabilityProfile
 ): boolean {
-  return !capabilityProfileIsReadOnly(profile) || VERIFIED_READ_ONLY_PROVIDERS.has(provider)
+  // Production drivers mirror descriptor.supportedProfiles via ProviderDriver.supports.
+  return getProviderDescriptor(provider).capabilities.supportedProfiles.includes(profile)
 }
 
 export function assertProviderSupportsCapability(

@@ -6,6 +6,7 @@ import {
   type SupervisorCommand,
   type SupervisorEvent
 } from '../../sandbox/supervisor-protocol'
+import { processHostEnvironmentSource } from '../host-environment'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { SandboxError } from './types'
 
@@ -61,10 +62,11 @@ export class SandboxSupervisorManager extends EventEmitter {
       this.starting = true
       this.lastError = undefined
       const entry = resolveSupervisorEntryPath()
+      const hostEnv = processHostEnvironmentSource.snapshot()
       const child = fork(entry, [], {
         execPath: process.execPath,
         env: {
-          ...process.env,
+          ...hostEnv,
           ELECTRON_RUN_AS_NODE: '1',
           CODETASK_SANDBOX_SUPERVISOR_WORKER: '1'
         },

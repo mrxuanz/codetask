@@ -6,6 +6,8 @@ import type { SettingsStore } from './settings-store'
 import type { ApplicationRuntime } from '../application/application-runtime'
 import type { McpSecretProvider } from '../settings/mcp-secret-provider'
 import type { AppConfig } from '../config/app-config'
+import type { ProviderRegistry } from '../providers/registry'
+import type { ProviderRuntimeManager } from '../providers/lifecycle'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
@@ -22,6 +24,8 @@ export interface AppContext {
   eventBus: JobEventBus
   runtimeRegistry: RuntimeRegistry
   executionRuntime: JobExecutionRuntimeRegistry
+  providerRegistry: ProviderRegistry
+  providerRuntimeManager: ProviderRuntimeManager
   security: SecurityContext
   bootId: string
   applicationRuntime: ApplicationRuntime | null

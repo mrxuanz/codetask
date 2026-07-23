@@ -25,16 +25,24 @@ test('application startup does not require sandbox supervisor readiness', () => 
   assert.doesNotMatch(source, /getSandboxSupervisorManager/)
 })
 
-test('Cursor task work uses a one-shot sandbox worker and closes its ACP runtime', () => {
+test('Cursor task work uses a one-shot sandbox worker and ephemeral ACP runtime', () => {
   const orchestrator = readFileSync(
     join(process.cwd(), 'src/server/sandbox/orchestrator-local.ts'),
     'utf8'
   )
   const worker = readFileSync(join(process.cwd(), 'src/sandbox/role-worker.ts'), 'utf8')
+  const lifecycle = readFileSync(join(process.cwd(), 'src/server/providers/lifecycle.ts'), 'utf8')
+  const cursorStream = readFileSync(
+    join(process.cwd(), 'src/server/agent-runtime/cursor-acp/stream-session-turn.ts'),
+    'utf8'
+  )
 
   assert.doesNotMatch(orchestrator, /streamJobCursorSandboxTurn|usePersistentCursorPool/)
   assert.match(orchestrator, /launchSandboxedWorker/)
-  assert.match(worker, /closeJobCursorRuntime\(input\.jobId\)/)
+  assert.match(worker, /getAgentTurnProvider\(input\.provider\)/)
+  assert.match(lifecycle, /role !== 'conversation'/)
+  assert.match(cursorStream, /const ephemeral = !reusable/)
+  assert.match(cursorStream, /await runtime\.close\(\)/)
 })
 
 test('Cursor ACP turns have a bounded no-update wait', () => {
@@ -63,7 +71,12 @@ test('legacy queues resume only after the normal HTTP listener is ready', () => 
 })
 
 test('permission-changing ordinary chat turns do not reuse Provider sessions', () => {
-  const source = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
-  assert.match(source, /const phaseRuntimeId = createTaskMode[\s\S]*?: null/)
-  assert.match(source, /core\.code === 'cursorcli' && createTaskMode/)
+  const conversation = readFileSync(
+    join(process.cwd(), 'src/server/conversation/service.ts'),
+    'utf8'
+  )
+  const lifecycle = readFileSync(join(process.cwd(), 'src/server/providers/lifecycle.ts'), 'utf8')
+  assert.match(conversation, /const phaseRuntimeId = createTaskMode[\s\S]*?: null/)
+  assert.match(conversation, /providerRuntimeScopeId/)
+  assert.match(lifecycle, /capabilityProfile === 'chat-write'/)
 })

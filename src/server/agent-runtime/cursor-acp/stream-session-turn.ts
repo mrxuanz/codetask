@@ -1,8 +1,7 @@
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
-import { buildCursorTurnPlan } from '../providers/cursor-policy'
+import { buildCursorTurnPlan } from '../../providers/cursor/turn-plan'
 import { probeCursorAgentAuth } from './errors'
 import { createTurnError } from '../../../shared/turn-errors.ts'
-import { resolveCursorAgentExecutable, resolveCursorAgentCommand } from './command'
 import {
   buildConversationCursorRuntimeScope,
   buildCursorRuntimeKey,
@@ -20,18 +19,23 @@ export interface StreamCursorSessionTurnInput extends AgentTurnInput {
   jobId?: string | undefined
 }
 
+export type StreamCursorSessionTurnOptions = AgentTurnOptions & {
+  endpoint?: string | undefined
+  approveMcps?: boolean | undefined
+}
+
 export async function* streamCursorSessionTurn(
   input: StreamCursorSessionTurnInput,
-  options?: AgentTurnOptions
+  options?: StreamCursorSessionTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
   const userMcpServers = input.userMcpServers ?? {}
   const plan = buildCursorTurnPlan(input, {
     outerSandbox: options?.outerSandbox,
-    userMcpServers
+    userMcpServers,
+    endpoint: options?.endpoint,
+    approveMcps: options?.approveMcps
   })
-  const command = resolveCursorAgentCommand()
-  const executable = resolveCursorAgentExecutable(command, plan.env)
-  const authIssue = probeCursorAgentAuth(executable, plan.env)
+  const authIssue = probeCursorAgentAuth(plan.executable, plan.env)
   if (authIssue) {
     throw createTurnError(authIssue.code, {
       params: authIssue.params,
@@ -59,12 +63,17 @@ export async function* streamCursorSessionTurn(
     cwd: input.cwd,
     env: plan.env,
     cliArgs: plan.cliArgs,
-    capabilityProfile: plan.capabilityProfile
+    capabilityProfile: plan.capabilityProfile,
+    executable: plan.executable,
+    prefixArgs: plan.prefixArgs,
+    resolvedPath: input.installation?.resolvedPath ?? plan.executable
   }
 
   const mcpProfile = buildTaskMcpProfile(input.mcpUrl)
-  const runtimeScopeId = input.jobId?.trim() || ''
-  const ephemeral = !runtimeScopeId
+  const runtimeScope = input.providerRuntimeScope
+  const reusable = runtimeScope?.reusePolicy === 'conversation-scoped'
+  const runtimeScopeId = reusable ? runtimeScope.id : ''
+  const ephemeral = !reusable
 
   let runtime
   let registryKey: string | null = null

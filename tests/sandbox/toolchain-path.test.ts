@@ -67,16 +67,12 @@ test('sandbox worker PATH always exposes the Node runtime that launched CodeTask
 test('sandbox policy grants read access to discovered host Volta binaries', () => {
   const home = mkdtempSync(join(tmpdir(), 'codetask-provider-volta-'))
   const voltaBin = join(home, '.volta', 'bin')
-  const previousHostHome = process.env.CODETASK_HOST_HOME
   createExecutableNode(voltaBin)
-  process.env.CODETASK_HOST_HOME = home
   try {
-    const roots = resolveProviderReadRoots('claude-code')
+    const roots = resolveProviderReadRoots('claude-code', Object.freeze({ HOME: home, PATH: '' }))
     assert.ok(roots.includes(realpathSync.native(voltaBin)))
     assert.ok(roots.includes(realpathSync.native(join(home, '.volta'))))
   } finally {
-    if (previousHostHome === undefined) delete process.env.CODETASK_HOST_HOME
-    else process.env.CODETASK_HOST_HOME = previousHostHome
     rmSync(home, { recursive: true, force: true })
   }
 })

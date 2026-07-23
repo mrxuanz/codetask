@@ -1,8 +1,7 @@
 import { roleRequiresOuterSandbox, type ConversationRole } from './roles'
-import { appendCursorApiEndpointArgs } from './cursor-acp/config'
-import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from './capabilities'
+import type { ProviderAuthMode } from '../../shared/providers/capabilities'
 
-export type ProviderAuthMode = 'runtime-copy' | 'env-token' | 'host-identity-dev-only'
+export type { ProviderAuthMode }
 
 export interface ProviderRunPolicy {
   outerSandbox: boolean
@@ -13,16 +12,17 @@ export interface ProviderRunPolicy {
 }
 
 export function resolveProviderRunPolicy(input: {
-  outerSandbox?: boolean
+  /** Explicit control — must not be inferred from process.env. */
+  outerSandbox: boolean
   runtimeRoot: string
 }): ProviderRunPolicy {
-  const outerSandbox = input.outerSandbox ?? process.env.CODETASK_OUTER_SANDBOX === '1'
   return {
-    outerSandbox,
+    outerSandbox: input.outerSandbox,
     innerAccess: 'full-access',
     approvals: 'auto',
     stateRoot: input.runtimeRoot,
-    authMode: outerSandbox ? 'runtime-copy' : 'host-identity-dev-only'
+    // Outer sandbox → runtime-copy; direct host turns → host-identity (shared enum).
+    authMode: input.outerSandbox ? 'runtime-copy' : 'host-identity'
   }
 }
 
@@ -38,31 +38,4 @@ export function resolveProviderOuterSandbox(
   }
   if (optionsOuterSandbox === true) return true
   return false
-}
-
-export function buildCursorAcpCliArgs(input: {
-  outerSandbox: boolean
-  cwd?: string
-  capabilityProfile?: AgentCapabilityProfile
-}): string[] {
-  if (!input.outerSandbox) {
-    const args: string[] = []
-    if (input.capabilityProfile && capabilityProfileIsReadOnly(input.capabilityProfile)) {
-      args.push('--mode', 'ask')
-    }
-    if (
-      (!input.capabilityProfile || !capabilityProfileIsReadOnly(input.capabilityProfile)) &&
-      process.env.CODETASK_CURSOR_APPROVE_MCPS !== '0'
-    ) {
-      args.push('--approve-mcps')
-    }
-    return appendCursorApiEndpointArgs([...args, 'acp'])
-  }
-
-  const args = ['--trust', '--force', '--sandbox', 'disabled', '--approve-mcps']
-  const cwd = input.cwd?.trim()
-  if (cwd) {
-    args.push('--workspace', cwd)
-  }
-  return appendCursorApiEndpointArgs([...args, 'acp'])
 }

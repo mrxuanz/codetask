@@ -34,6 +34,12 @@ import {
   type AppConfig,
   type AppConfigOverrides
 } from './config/app-config'
+import {
+  mergeProvidersConfigOverrides,
+  parseProvidersConfigOverrides
+} from '../shared/providers/settings'
+import { createProviderRegistry } from './providers/composition'
+import { ProviderRuntimeManager } from './providers/lifecycle'
 
 export type { AppContext } from './context'
 
@@ -122,9 +128,20 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       mcpSecrets.pruneExcept(new Set())
     }
     const bootId = randomUUID()
+    const persistedProviderValue = settings.readNamespace('provider_runtime').value
+    const persistedProviderOverrides = parseProvidersConfigOverrides(
+      persistedProviderValue?.providers ?? persistedProviderValue ?? {}
+    )
+    const config = createAppConfig({
+      ...options.config,
+      providers: mergeProvidersConfigOverrides(
+        persistedProviderOverrides,
+        options.config?.providers
+      )
+    })
 
     const nextContext: AppContext = {
-      config: createAppConfig(options.config),
+      config,
       dataDir: options.dataDir,
       db,
       settings,
@@ -136,12 +153,12 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       eventBus: new JobEventBus(),
       runtimeRegistry: new RuntimeRegistry(),
       executionRuntime: new JobExecutionRuntimeRegistry(),
+      providerRegistry: createProviderRegistry(config.providers),
+      providerRuntimeManager: new ProviderRuntimeManager(),
       bootId,
       applicationRuntime: null,
       ...(options.storage ? { storage: options.storage } : {})
     }
-    process.env.CODETASK_DATA_DIR = options.dataDir
-
     appContext = nextContext
 
     startRetentionJanitor()
@@ -189,7 +206,15 @@ export async function shutdownRuntime(
 ): Promise<void> {
   const ctx = appContext
   if (!ctx) return
+  // Reject new Provider turns first, let the application drain active owners,
+  // then close any remaining turn handles and shared protocol transports.
+  ctx.providerRuntimeManager.beginDrain()
   await shutdownApplicationRuntime(ctx, reason)
+  await ctx.providerRuntimeManager.closeAll().catch((error: unknown) => {
+    bootstrapLogger.warn('provider runtime shutdown failed', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+  })
 }
 
 export async function resetAppContextForTests(): Promise<void> {
@@ -199,6 +224,7 @@ export async function resetAppContextForTests(): Promise<void> {
 
   const ctx = appContext
   if (ctx) {
+    await ctx.providerRuntimeManager.closeAll().catch(() => undefined)
     await waitForPlanningToDrainForTests(ctx)
     await resetApplicationRuntimeForTests(ctx)
   }

@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runAcpBootstrapProbe, type AcpBootstrapProbeResult } from './acp-bootstrap-probe'
-import { prepareProviderAuth } from '../../src/server/sandbox/provider-auth/bridge'
-import { runProviderAuthPreflight } from '../../src/server/sandbox/provider-auth/preflight'
+import { getProviderDriverForTest, prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import { buildSandboxEnv } from '../../src/server/sandbox/env'
 import {
   applyProviderReadRoots,
@@ -398,16 +397,21 @@ async function main(): Promise<void> {
 
   log('setup', 'fixture', { workspace, runtimeRoot, projectRoot: process.cwd() })
 
-  const authPrepared = prepareProviderAuth('cursorcli', runtimeRoot, { workspaceRoot: workspace })
+  const cursorDriver = getProviderDriverForTest('cursorcli')
+  const authPrepared = prepareProviderAuthForTest('cursorcli', runtimeRoot, {
+    workspaceRoot: workspace
+  })
   let providerPreflightOk = true
   let providerPreflightError: string | undefined
   try {
-    runProviderAuthPreflight('cursorcli', authPrepared)
-    log('setup', 'runProviderAuthPreflight OK')
+    const installation = await cursorDriver.discover()
+    if (!installation) throw new Error('Cursor CLI installation was not discovered')
+    cursorDriver.preflight({ preparedAuth: authPrepared, installation })
+    log('setup', 'CursorDriver.preflight OK')
   } catch (error) {
     providerPreflightOk = false
     providerPreflightError = error instanceof Error ? error.message : String(error)
-    log('setup', 'runProviderAuthPreflight FAIL', providerPreflightError)
+    log('setup', 'CursorDriver.preflight FAIL', providerPreflightError)
   }
 
   const dataDir = process.env.CODETASK_DATA_DIR?.trim() || join(process.cwd(), 'data')

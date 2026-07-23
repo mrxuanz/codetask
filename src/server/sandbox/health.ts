@@ -1,5 +1,6 @@
 import { existsSync } from 'fs'
 import { spawnSync } from 'child_process'
+import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { SandboxBackend, SandboxBootstrapInfo } from './types'
 import { isOuterSandboxEnabled } from './outer-sandbox-flag'
@@ -117,7 +118,8 @@ function checkWindowsSetup(dataDir?: string): SandboxHealthCheck {
 }
 
 function checkSupervisor(): SandboxHealthCheck {
-  if (process.env.CODETASK_SANDBOX_SUPERVISOR === '0') {
+  const hostEnv = processHostEnvironmentSource.snapshot()
+  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') {
     return { ok: true, message: 'supervisor disabled (direct native path)' }
   }
   const manager = getSandboxSupervisorManager()

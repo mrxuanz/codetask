@@ -6,6 +6,10 @@ import {
   upsertConversationCursorBinding
 } from './conversation-cursor-directory'
 import type { AgentCapabilityProfile } from '../capabilities'
+import {
+  buildConversationProviderRuntimeScopeId,
+  type ProviderConversationScopeKind
+} from '../../../shared/providers/capabilities'
 
 export interface JobCursorRuntimeKeyInput {
   jobId: string
@@ -25,7 +29,7 @@ export interface CursorRuntimeKeyInput {
   capabilityProfile?: AgentCapabilityProfile | undefined
 }
 
-export type ConversationCursorKind = 'chat' | 'create_task'
+export type ConversationCursorKind = ProviderConversationScopeKind
 
 export const CONVERSATION_CURSOR_IDLE_MS = 30 * 60 * 1000
 
@@ -33,7 +37,7 @@ export function buildConversationCursorRuntimeScope(
   threadId: string,
   kind: ConversationCursorKind
 ): string {
-  return `conversation:${kind}:${threadId}`
+  return buildConversationProviderRuntimeScopeId(threadId, kind)
 }
 
 export function isConversationCursorScope(scopeId: string): boolean {

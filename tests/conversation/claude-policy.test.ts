@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   resolveClaudeSettingSources,
   resolveClaudeSystemPrompt
-} from '../../src/server/agent-runtime/providers/claude-policy'
+} from '../../src/server/providers/claude/turn-options'
 
 test('resolveClaudeSettingSources clears only for outer sandbox', () => {
   assert.deepEqual(resolveClaudeSettingSources(true), [])

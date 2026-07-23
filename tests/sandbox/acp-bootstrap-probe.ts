@@ -8,7 +8,7 @@ import {
   PROTOCOL_VERSION,
   type ClientContext
 } from '@agentclientprotocol/sdk'
-import { buildCursorAcpCliArgs } from '../../src/server/agent-runtime/provider-policy'
+import { buildCursorAcpCliArgs } from '../../src/server/providers/cursor/turn-plan'
 import { stripElectronInheritedEnv } from '../../src/server/agent-runtime/env'
 import {
   classifyCursorAcpError,

@@ -10,10 +10,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareProviderAuth } from '../../src/server/sandbox/provider-auth/bridge'
+import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import { runtimeCodexHome } from '../../src/server/sandbox/provider-auth/paths'
 import { buildOuterSandboxCodexConfigOverrides } from '../../src/server/agent-runtime/mcp'
-import { buildCodexTurnPlan } from '../../src/server/agent-runtime/providers/codex-policy'
+import { buildCodexTurnPlan } from '../../src/server/providers/codex/turn-plan'
 import type { ConversationRole } from '../../src/server/agent-runtime/roles'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'
 
@@ -361,7 +361,7 @@ async function runStaticForRole(
     { outerSandbox }
   )
 
-  const prepared = outerSandbox ? prepareProviderAuth('codex', runtimeRoot) : null
+  const prepared = outerSandbox ? prepareProviderAuthForTest('codex', runtimeRoot) : null
   const codexHome = outerSandbox
     ? (prepared!.envPatch.CODEX_HOME ?? runtimeCodexHome(runtimeRoot))
     : join(process.env.CODEX_HOME ?? join(process.env.HOME ?? runtimeRoot, '.codex'))
@@ -464,7 +464,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuth('codex', runtimeRoot)
+  const prepared = prepareProviderAuthForTest('codex', runtimeRoot)
 
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {

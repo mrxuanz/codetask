@@ -6,15 +6,7 @@ import { ESLint } from 'eslint'
 const repositoryRoot = resolve(import.meta.dirname, '../..')
 const maximumWarnings = 459
 
-const knownErrors = [
-  {
-    id: 'BUSINESS-001',
-    file: 'src/server/conversation/service.ts',
-    ruleId: 'prefer-const',
-    message: "'threadRow' is never reassigned. Use 'const' instead.",
-    sourceLine: 'let threadRow = await getThreadRow(username, threadId)'
-  }
-]
+const knownErrors = []
 
 function repositoryPath(filePath) {
   return relative(repositoryRoot, filePath).split(sep).join('/')

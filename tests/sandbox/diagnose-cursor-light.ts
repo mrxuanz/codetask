@@ -14,8 +14,8 @@ import {
   type McpServer,
   type StopReason
 } from '@agentclientprotocol/sdk'
-import { prepareProviderAuth } from '../../src/server/sandbox/provider-auth/bridge'
-import { buildCursorAcpCliArgs } from '../../src/server/agent-runtime/provider-policy'
+import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
+import { buildCursorAcpCliArgs } from '../../src/server/providers/cursor/turn-plan'
 import {
   probeCursorAgentAuth,
   CURSOR_CLI_MISSING_MESSAGE,
@@ -425,7 +425,9 @@ async function runStatic(
   authIssue: string | null
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderAuth('cursorcli', runtimeRoot, { workspaceRoot: workspace })
+  const prepared = prepareProviderAuthForTest('cursorcli', runtimeRoot, {
+    workspaceRoot: workspace
+  })
   const cliArgs = buildCursorAcpCliArgs({ outerSandbox: true, cwd: workspace })
   const env = buildMergedEnv(prepared.envPatch)
   const command = resolveCursorAgentCommand()
@@ -484,7 +486,9 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuth('cursorcli', runtimeRoot, { workspaceRoot: workspace })
+  const prepared = prepareProviderAuthForTest('cursorcli', runtimeRoot, {
+    workspaceRoot: workspace
+  })
 
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {

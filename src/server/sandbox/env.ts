@@ -6,7 +6,13 @@ import {
   buildSandboxAuthPassthrough,
   ensureIsolatedProviderDirs
 } from '../agent-runtime/env'
+import { snapshotHostEnv, stripCodeTaskTransientEnv } from '../providers/launch-env'
 import { augmentPathWithHostNode } from './toolchain-path'
+import type { ProviderAuthMode } from './provider-auth/types'
+import {
+  processHostEnvironmentSource,
+  type HostEnvironmentSnapshot
+} from '../host-environment'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -43,7 +49,11 @@ function materializeSandboxTlsCaBundle(runtimeRoot: string): string {
   return caPath
 }
 
-function applyWindowsSandboxSystemEnv(env: Record<string, string>, runtimeRoot: string): void {
+function applyWindowsSandboxSystemEnv(
+  env: Record<string, string>,
+  runtimeRoot: string,
+  hostEnvironment: HostEnvironmentSnapshot
+): void {
   env.ELECTRON_RUN_AS_NODE = '1'
   applyWindowsCrashReporterEnv(env)
   if (!env.USERPROFILE) env.USERPROFILE = runtimeRoot
@@ -53,7 +63,7 @@ function applyWindowsSandboxSystemEnv(env: Record<string, string>, runtimeRoot: 
     env.BREAKPAD_DUMP_LOCATION = join(runtimeRoot, 'tmp', 'crashpad')
   }
   for (const key of WINDOWS_SYSTEM_ENV_KEYS) {
-    const value = process.env[key]
+    const value = hostEnvironment[key]
     if (value) env[key] = value
   }
   if (!env.HOMEDRIVE && /^[A-Za-z]:/.test(env.HOME ?? runtimeRoot)) {
@@ -67,23 +77,21 @@ function applyWindowsSandboxSystemEnv(env: Record<string, string>, runtimeRoot: 
 export function buildSandboxEnv(input: {
   runtimeRoot: string
   providerEnv?: Record<string, string> | undefined
+  authMode?: ProviderAuthMode | undefined
   mcpToken?: string | undefined
 }): Record<string, string> {
   ensureIsolatedProviderDirs(input.runtimeRoot)
 
-  const providerEnv = input.providerEnv ?? {}
+  const host = snapshotHostEnv()
+  const providerEnv = stripCodeTaskTransientEnv({ ...(input.providerEnv ?? {}) })
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? '',
-    LANG: process.env.LANG ?? 'C.UTF-8',
-    CODETASK_OUTER_SANDBOX: '1',
+    PATH: host.PATH ?? '',
+    LANG: host.LANG ?? 'C.UTF-8',
     ...buildSandboxAuthPassthrough(),
     ...providerEnv
   }
   env.PATH = augmentPathWithHostNode(env.PATH)
 
-  if (!env.CODETASK_RUNTIME_ROOT) {
-    env.CODETASK_RUNTIME_ROOT = input.runtimeRoot
-  }
   if (!env.HOME) {
     env.HOME = input.runtimeRoot
     env.TMPDIR = join(input.runtimeRoot, 'tmp')
@@ -95,12 +103,12 @@ export function buildSandboxEnv(input: {
   }
 
   if (process.platform === 'win32') {
-    applyWindowsSandboxSystemEnv(env, input.runtimeRoot)
+    applyWindowsSandboxSystemEnv(env, input.runtimeRoot, processHostEnvironmentSource.snapshot())
   } else {
     env.ELECTRON_RUN_AS_NODE = '1'
   }
 
-  if (env.CODETASK_PROVIDER_AUTH_MODE === 'host-identity') {
+  if (input.authMode === 'host-identity') {
     delete env.CLAUDE_CONFIG_DIR
   }
 

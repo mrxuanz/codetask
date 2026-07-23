@@ -1,3 +1,5 @@
+import { processHostEnvironmentSource } from '../host-environment'
+
 let seq = 0
 const t0 = Date.now()
 
@@ -16,7 +18,7 @@ function formatDetail(detail: unknown): string {
 }
 
 export function plannerSandboxDebug(step: string, detail?: unknown): void {
-  if (process.env.CODETASK_DEBUG_PLANNER_SANDBOX === '0') return
+  if (processHostEnvironmentSource.snapshot().CODETASK_DEBUG_PLANNER_SANDBOX === '0') return
   seq += 1
   const elapsedMs = Date.now() - t0
   console.log(

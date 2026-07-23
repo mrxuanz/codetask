@@ -1,6 +1,6 @@
 import { throwSdkTurnError } from '../errors'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
-import { buildCodexTurnPlan } from './codex-policy'
+import { buildCodexTurnPlan } from '../../providers/codex/turn-plan'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot } from '../delta-emit'
@@ -92,11 +92,14 @@ export async function* streamCodexTurn(
     role: plan.role,
     outerSandbox: plan.outerSandbox,
     sandboxMode: plan.threadOptions.sandboxMode,
-    mcpToolNames: plan.mcpToolNames
+    mcpToolNames: plan.mcpToolNames,
+    installationId: plan.installationId,
+    codexPathOverride: plan.codexPathOverride
   })
 
   const codex = new Codex({
     env: plan.env,
+    ...(plan.codexPathOverride ? { codexPathOverride: plan.codexPathOverride } : {}),
     ...(plan.sdkConfig
       ? {
           config: plan.sdkConfig as NonNullable<

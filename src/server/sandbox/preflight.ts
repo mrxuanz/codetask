@@ -1,8 +1,9 @@
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import { assertSandboxReadyForExecution } from './health'
+import { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export function preflightSandbox(): void {
-  if (process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
+  if (!isOuterSandboxEnabled()) {
     sandboxTurnDebug('preflightSandbox: skipped (CODETASK_DISABLE_OUTER_SANDBOX=1)')
     return
   }

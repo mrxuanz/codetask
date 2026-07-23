@@ -12,8 +12,7 @@ export default defineConfig(
       '**/out',
       'data/**',
       'tests/business-e2e/.runtime/**',
-      'tests/business/.runtime/**',
-      'scripts/tmp-query-m1s2.cjs'
+      'tests/business/.runtime/**'
     ]
   },
   tseslint.configs.recommended,

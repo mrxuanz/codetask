@@ -1,4 +1,5 @@
-import { streamClaudeTurn } from '../server/agent-runtime/providers/claude-sdk'
+import { getAgentTurnProvider } from '../server/agent-runtime/providers'
 import { runRoleWorker } from './role-worker-common'
 
-runRoleWorker({ code: 'claude-code', protocol: 'sdk', streamTurn: streamClaudeTurn })
+/** Claude sandboxed worker — production route is Registry/ClaudeDriver (PRU-08-08). */
+runRoleWorker(getAgentTurnProvider('claude-code'))
