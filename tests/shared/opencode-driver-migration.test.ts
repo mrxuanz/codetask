@@ -33,7 +33,8 @@ const installation: ProviderInstallation = Object.freeze({
   command: 'opencode',
   source: 'path',
   invocation: Object.freeze({ executable: '/bin/opencode', prefixArgs: Object.freeze([]) }),
-  resolvedPath: '/bin/opencode'
+  resolvedPath: '/bin/opencode',
+  canonicalPath: '/bin/opencode'
 })
 
 function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
@@ -135,7 +136,8 @@ test('OpenCodeDriver.discover returns a stable installationId matching the resol
     assert.ok(viaResolver)
     assert.equal(first.id, second.id)
     assert.equal(first.id, viaResolver.installationId)
-    assert.equal(first.resolvedPath, realpathSync(bin))
+    assert.equal(first.resolvedPath, bin)
+    assert.equal(first.canonicalPath, realpathSync(bin))
     assert.equal(first.source, 'app-config')
     assert.equal(first.provider, 'opencode')
   } finally {
@@ -206,7 +208,7 @@ test('detect installation path is used for OpenCode server spawn with same insta
 
     assert.equal(plan.installationId, discovered.id)
     assert.equal(plan.executable, discovered.invocation.executable)
-    assert.equal(plan.executable, realpathSync(bin))
+    assert.equal(plan.executable, bin)
     assert.equal(plan.pure, true)
     assert.deepEqual(
       [...plan.buildServeArgs(4123)],

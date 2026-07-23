@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, chmodSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -42,7 +42,7 @@ test('typed OpenCode executable path is used for detect resolution', () => {
       installDirs: []
     })
     assert.ok(resolved, 'expected opencode executable to resolve')
-    assert.equal(resolved.executable, realpathSync(bin))
+    assert.equal(resolved.executable, bin)
     assert.equal(resolved.source, 'app-config')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -66,7 +66,7 @@ test('typed Cursor executable path is used for detect resolution', () => {
       installDirs: []
     })
     assert.ok(resolved, 'expected cursorcli executable to resolve')
-    assert.equal(resolved.executable, realpathSync(bin))
+    assert.equal(resolved.executable, bin)
     assert.equal(resolved.source, 'app-config')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -90,7 +90,7 @@ test('typed executable path wins over PATH resolution for Codex', () => {
       installDirs: []
     })
     assert.ok(resolved)
-    assert.equal(resolved.executable, realpathSync(bin))
+    assert.equal(resolved.executable, bin)
     assert.equal(resolved.source, 'app-config')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -136,7 +136,7 @@ test('repeated detect resolution returns the same Cursor installation identity',
     assert.ok(first)
     assert.ok(second)
     assert.equal(first.installationId, second.installationId)
-    assert.equal(first.executable, realpathSync(bin))
+    assert.equal(first.executable, bin)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

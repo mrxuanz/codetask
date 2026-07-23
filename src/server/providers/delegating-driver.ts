@@ -162,6 +162,7 @@ export class DelegatingProviderDriver implements ProviderDriver {
     return {
       readRoots: [
         dirname(context.installation.resolvedPath),
+        dirname(context.installation.canonicalPath),
         ...this.installDirs(context.hostEnvironment),
         ...context.preparedAuth.readRoots
       ],
@@ -201,7 +202,8 @@ export function createTestOverrideDriver(
           command: 'test-fake',
           source: 'path',
           invocation: { executable: 'test-fake', prefixArgs: [] },
-          resolvedPath: 'test-fake'
+          resolvedPath: 'test-fake',
+          canonicalPath: 'test-fake'
         }
       return createPreparedProviderTurn({
         installation,

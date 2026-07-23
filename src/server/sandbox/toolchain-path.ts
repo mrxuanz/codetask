@@ -1,11 +1,10 @@
 import { constants, accessSync, existsSync, realpathSync, statSync } from 'fs'
-import { basename, delimiter, dirname, join, normalize } from 'path'
+import { basename, delimiter, dirname, join, normalize, parse } from 'path'
 import { processHostEnvironmentSource } from '../host-environment'
 
 interface ToolchainPathOptions {
   env?: Record<string, string | undefined>
   execPath?: string
-  hostHome?: string
   platform?: NodeJS.Platform
 }
 
@@ -58,22 +57,48 @@ function canonicalDirectory(path: string): string {
   }
 }
 
+function pathValue(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform
+): string | undefined {
+  if (platform !== 'win32') return env.PATH
+  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === 'path')
+  return key ? env[key] : undefined
+}
+
+function pathEntries(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform
+): string[] {
+  const separator = platform === 'win32' ? ';' : ':'
+  return (pathValue(env, platform) ?? '')
+    .split(separator)
+    .map((entry) => entry.trim().replace(/^"|"$/g, ''))
+    .filter(Boolean)
+}
+
+/**
+ * Generic manager/toolchain root derived from conventional executable-entry
+ * directories. No version-manager name or user-home layout is assumed.
+ */
+export function resolveToolchainContainerRoot(directory: string): string | null {
+  const normalized = normalize(directory)
+  const leaf = basename(normalized).toLowerCase()
+  if (leaf !== 'bin' && leaf !== 'shims') return null
+  const parent = dirname(normalized)
+  return parent === normalized || parent === parse(normalized).root ? null : parent
+}
+
 /**
  * Resolve only host directories that contain an executable Node entry point.
- * This deliberately avoids importing an interactive shell profile or exposing
- * the whole host home to sandboxed providers.
+ * The host environment has already been hydrated at runtime startup, so this
+ * only consumes standard PATH entries and the executable that launched CodeTask.
  */
 export function resolveHostNodeBinDirs(options: ToolchainPathOptions = {}): string[] {
   const env = options.env ?? processHostEnvironmentSource.snapshot()
   const platform = options.platform ?? process.platform
   const execPath = options.execPath ?? process.execPath
-  const hostHome = options.hostHome ?? env.HOME?.trim() ?? env.USERPROFILE?.trim() ?? ''
-  const candidates = [
-    execPath,
-    env.VOLTA_HOME ? join(env.VOLTA_HOME, 'bin') : undefined,
-    hostHome ? join(hostHome, '.volta', 'bin') : undefined,
-    env.NVM_SYMLINK
-  ]
+  const candidates = [execPath, ...pathEntries(env, platform)]
 
   const seen = new Set<string>()
   const directories: string[] = []

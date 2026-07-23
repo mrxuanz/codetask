@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { McpToolClient } from '../mcp/client'
 import { progress } from '../reports/progress'
@@ -183,9 +183,11 @@ export class FakeDriver implements AgentDriver {
         const turn = (await mcp.callTool('codetask_wait_turn', {
           threadId: thread.id,
           turnId: started.turnId
-        })) as { status?: string }
+        })) as { status?: string; lastError?: unknown }
         if (String(turn.status) !== 'completed') {
-          throw new Error(`turn_not_completed:${turn.status}`)
+          throw new Error(
+            `turn_not_completed:${turn.status}:${JSON.stringify(turn.lastError ?? null)}`
+          )
         }
         await mcp.callTool('codetask_list_messages', { threadId: thread.id })
         await mcp.callTool('report_case_result', {
@@ -201,7 +203,12 @@ export class FakeDriver implements AgentDriver {
       throw new Error(`fake_driver_unsupported_case:${input.caseId}`)
     } catch (error) {
       push('error', { error: String(error) })
-      return { ok: false, classification: 'agent_failed', error: String(error), events }
+      return {
+        ok: false,
+        classification: classifyFakeDriverError(error),
+        error: String(error),
+        events
+      }
     }
   }
 
@@ -1728,8 +1735,11 @@ export class FakeDriver implements AgentDriver {
     const turn = (await mcp.callTool('codetask_wait_turn', {
       threadId: chat.id,
       turnId: started.turnId
-    })) as { status?: string }
+    })) as { status?: string; lastError?: unknown }
     push('turn.done', { status: turn.status, thread: 'chat' })
+    if (String(turn.status) !== 'completed') {
+      throw new Error(`turn_not_completed:${turn.status}:${JSON.stringify(turn.lastError ?? null)}`)
+    }
     await mcp.callTool('codetask_list_messages', { threadId: chat.id })
     await mcp.callTool('case_checkpoint', { name: 'chat_readonly_turn' })
 
@@ -1800,34 +1810,19 @@ export class FakeDriver implements AgentDriver {
     const turn = (await mcp.callTool('codetask_wait_turn', {
       threadId: thread.id,
       turnId: started.turnId
-    })) as { status?: string }
+    })) as { status?: string; lastError?: unknown }
     push('turn.done', { status: turn.status, turnId: started.turnId })
     if (String(turn.status) !== 'completed') {
-      throw new Error(`turn_not_completed:${turn.status}`)
+      throw new Error(`turn_not_completed:${turn.status}:${JSON.stringify(turn.lastError ?? null)}`)
     }
     await mcp.callTool('codetask_list_messages', { threadId: thread.id })
     await mcp.callTool('case_checkpoint', { name: 'turn_completed' })
 
     const target = join(input.workspaceRoot, fileName)
-    let simulated = false
-    // Deterministic harness: if the live agent did not write the file, simulate the
-    // workspace side-effect so Node oracle still validates the MCP→oracle path.
-    // Set BUSINESS_E2E_REQUIRE_AGENT_HTML=1 to fail instead of simulating.
     if (!existsSync(target)) {
-      if (process.env.BUSINESS_E2E_REQUIRE_AGENT_HTML === '1') {
-        throw new Error(`expected_html_missing:${fileName}`)
-      }
-      writeFileSync(
-        target,
-        `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${fileName}</title></head>` +
-          `<body><p>${marker}</p><p>created-by=fake-driver core=${core}</p></body></html>\n`,
-        'utf8'
-      )
-      simulated = true
-      push('html.oracle', { wrote: fileName, simulated: true })
-    } else {
-      push('html.oracle', { wrote: fileName, simulated: false })
+      throw new Error(`expected_html_missing:${fileName}`)
     }
+    push('html.oracle', { wrote: fileName })
 
     await mcp.callTool('report_case_result', {
       caseId: input.caseId,
@@ -1838,8 +1833,7 @@ export class FakeDriver implements AgentDriver {
           step: 'chat-create-html',
           fileName,
           core,
-          turnStatus: turn.status,
-          simulatedHtml: simulated
+          turnStatus: turn.status
         }
       ],
       artifacts: {
@@ -1850,7 +1844,7 @@ export class FakeDriver implements AgentDriver {
         conversationCore: core
       }
     })
-    push('case.reported', { fileName, simulated })
+    push('case.reported', { fileName })
   }
 
   private async createTaskContext(
@@ -1892,4 +1886,18 @@ export class FakeDriver implements AgentDriver {
   async cleanup(): Promise<void> {
     /* no-op */
   }
+}
+
+function classifyFakeDriverError(error: unknown): string {
+  const text = String(error).toLowerCase()
+  if (text.includes('timeout:') || text.includes('_timeout')) return 'timeout'
+  if (
+    text.includes('mcp_') ||
+    text.includes('fetch failed') ||
+    text.includes('econnreset') ||
+    text.includes('econnrefused')
+  ) {
+    return 'mcp_failed'
+  }
+  return 'agent_failed'
 }

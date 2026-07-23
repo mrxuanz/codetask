@@ -31,6 +31,7 @@ async function main(): Promise<void> {
     agentRoot: input.agentRoot,
     fixture,
     timeoutMs: input.timeoutMs,
+    noTimeout: input.noTimeout,
     conversationCore: input.conversationCore,
     expectedHtmlFile: input.expectedHtmlFile,
     probeMcpUrl: input.probeMcpUrl,

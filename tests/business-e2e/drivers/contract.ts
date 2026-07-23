@@ -7,8 +7,14 @@ export type DriverStartInput = {
   workspaceRoot: string
   agentRoot: string
   fixture?: Record<string, unknown>
-  /** Worker kill budget; <=0 means wait for driver exit / CodeTask terminal only. */
+  /**
+   * Worker / driver budget.
+   * `<=0` means use staged defaults (never infinite).
+   * Infinite wait requires explicit `noTimeout: true` (`--no-timeout`, forbidden in CI).
+   */
   timeoutMs: number
+  /** Explicit infinite mode for local debugging only. */
+  noTimeout?: boolean
   /** Selected SUT conversation SDK / core for every thread created by this case. */
   conversationCore: string
   expectedHtmlFile?: string

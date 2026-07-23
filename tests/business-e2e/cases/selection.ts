@@ -6,6 +6,7 @@
  */
 
 import { tCase, tPart, tStep } from '../i18n'
+import { MANIFESTS } from './catalog'
 
 export type AcceptancePart = 'bootstrap' | 'conversation' | 'draft-job' | 'settings-mcp'
 
@@ -227,6 +228,9 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
 
   if (input.caseId) {
     const resolved = resolveInternalCaseId(input.caseId)
+    if (!MANIFESTS[resolved]) {
+      throw new Error(`unknown_case:${input.caseId}:use --list for valid case slugs`)
+    }
     if (/^G\d/i.test(input.caseId) && CASE_SLUG_BY_ID[resolved]) {
       warnings.push(`deprecated_case_id:${input.caseId}:prefer --case ${CASE_SLUG_BY_ID[resolved]}`)
     } else if (/^G\d/i.test(input.caseId)) {

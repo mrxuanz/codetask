@@ -29,7 +29,8 @@ const installation: ProviderInstallation = Object.freeze({
   command: 'codex',
   source: 'path',
   invocation: Object.freeze({ executable: '/bin/codex', prefixArgs: Object.freeze([]) }),
-  resolvedPath: '/bin/codex'
+  resolvedPath: '/bin/codex',
+  canonicalPath: '/bin/codex'
 })
 
 function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
@@ -131,7 +132,8 @@ test('CodexDriver.discover returns a stable installationId matching the resolver
     assert.ok(viaResolver)
     assert.equal(first.id, second.id)
     assert.equal(first.id, viaResolver.installationId)
-    assert.equal(first.resolvedPath, realpathSync(bin))
+    assert.equal(first.resolvedPath, bin)
+    assert.equal(first.canonicalPath, realpathSync(bin))
     assert.equal(first.source, 'app-config')
     assert.equal(first.provider, 'codex')
   } finally {
@@ -196,7 +198,7 @@ test('detect installation path is passed to SDK as codexPathOverride with same i
 
     assert.equal(plan.installationId, discovered.id)
     assert.equal(plan.codexPathOverride, discovered.invocation.executable)
-    assert.equal(plan.codexPathOverride, realpathSync(bin))
+    assert.equal(plan.codexPathOverride, bin)
 
     const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/codex-sdk.ts'), 'utf8')
     assert.match(sdk, /codexPathOverride:\s*plan\.codexPathOverride/)

@@ -2,6 +2,7 @@ import { gracefulShutdown, startAppServer, type ServerInfo } from '../main/serve
 import { parseServerCliArgs } from '../main/cli'
 import { createShutdownSignalHandler } from '../main/shutdown-signal'
 import { createNodeServerPlatform } from './platform'
+import { initializeProcessHostEnvironment } from '../server/host-environment'
 
 let shutdownPromise: Promise<void> | null = null
 
@@ -25,6 +26,7 @@ async function runSmokeTest(server: ServerInfo): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await initializeProcessHostEnvironment()
   const cli = parseServerCliArgs()
   const platform = createNodeServerPlatform()
   if (!platform.isDev && !platform.staticDir) {

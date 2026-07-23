@@ -20,7 +20,8 @@ const installation: ProviderInstallation = {
   command: process.execPath,
   source: 'app-config',
   invocation: { executable: process.execPath, prefixArgs: [] },
-  resolvedPath: process.execPath
+  resolvedPath: process.execPath,
+  canonicalPath: process.execPath
 }
 
 function createDriver(events: string[], seen: ProviderTurnContext[]): ProviderDriver {
