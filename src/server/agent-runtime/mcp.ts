@@ -1,4 +1,5 @@
 import type { SupportedCoreCode } from '../conversation/cores'
+import { getProviderDescriptor } from '../../shared/providers/descriptors'
 import {
   CODETEAM_MANAGER_MCP_SERVER,
   MCP_HTTP_ACCEPT_HEADER_VALUE
@@ -244,11 +245,5 @@ export function listMergedMcpServerNames(
 }
 
 export function cliMcpRootKey(coreCode: SupportedCoreCode): string {
-  const keys: Record<SupportedCoreCode, string> = {
-    'claude-code': 'mcpServers',
-    codex: 'mcp_servers',
-    cursorcli: 'mcpServers',
-    opencode: 'mcp'
-  }
-  return keys[coreCode]
+  return getProviderDescriptor(coreCode).mcpRootKey
 }

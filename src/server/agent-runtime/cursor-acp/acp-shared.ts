@@ -16,8 +16,8 @@ import { resolveCursorAcpModelId } from '../../conversation/models'
 import type { CursorAcpMcpServer } from '../mcp'
 import { autoAnswerCursorAskQuestion, type CursorAskQuestionRequest } from './extensions'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
-import { resolveCursorAgentBin, appendCursorApiEndpointArgs } from './config'
-import { spawnCursorAgent } from './command'
+import { resolveCursorAgentBin } from './config'
+import { spawnCursorAgent, spawnCursorAgentInvocation } from './command'
 import { createCursorPermissionHandler } from './permissions'
 import type { AgentCapabilityProfile } from '../capabilities'
 import { classifyCursorAcpError } from './errors'
@@ -162,11 +162,32 @@ export function attachAcpSession(ctx: ClientContext, response: NewSessionRespons
 export function spawnCursorAcpProcess(
   cwd: string,
   env: Record<string, string>,
-  cliArgs: string[]
+  cliArgs: readonly string[],
+  launch?: {
+    executable?: string | undefined
+    prefixArgs?: readonly string[] | undefined
+    /** Agent binary path for PATH enrichment (may differ from argv0 for `.ps1`). */
+    resolvedPath?: string | undefined
+  }
 ): ChildProcess {
-  const command = resolveCursorAgentBin()
-  const args = appendCursorApiEndpointArgs(cliArgs)
-  return spawnCursorAgent(command, args, {
+  // Turn-plan already embeds optional `-e` endpoint in cliArgs — do not re-append here.
+  if (launch?.executable?.trim()) {
+    return spawnCursorAgentInvocation(
+      {
+        executable: launch.executable,
+        prefixArgs: launch.prefixArgs,
+        pathForEnv: launch.resolvedPath
+      },
+      cliArgs,
+      {
+        cwd,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
+      }
+    )
+  }
+  return spawnCursorAgent(resolveCursorAgentBin(), [...cliArgs], {
     cwd,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],

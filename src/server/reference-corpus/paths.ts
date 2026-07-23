@@ -3,6 +3,7 @@ import { homedir } from 'os'
 import { isAbsolute, join, resolve, sep } from 'path'
 import { threadAttachmentsDir } from '../data-paths'
 import { cleanDisplayPath } from '../fs/index'
+import { processHostEnvironmentSource } from '../host-environment'
 import { detectSandboxReadCapabilities } from './sandbox-capabilities'
 
 export class ReferencePathError extends Error {
@@ -14,13 +15,14 @@ export class ReferencePathError extends Error {
 
 function expandTildePath(input: string): string {
   const trimmed = cleanDisplayPath(input.trim())
+  const hostEnv = processHostEnvironmentSource.snapshot()
   if (trimmed === '~') {
-    const home = process.env.USERPROFILE || homedir()
+    const home = hostEnv.USERPROFILE || homedir()
     if (!home) throw new ReferencePathError('Unable to resolve user home directory')
     return home
   }
   if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    const home = process.env.USERPROFILE || homedir()
+    const home = hostEnv.USERPROFILE || homedir()
     if (!home) throw new ReferencePathError('Unable to resolve user home directory')
     return join(home, trimmed.slice(2))
   }

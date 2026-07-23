@@ -1,6 +1,7 @@
 import type { SupportedCoreCode } from '../../conversation/cores'
+import type { ProviderAuthMode } from '../../../shared/providers/capabilities'
 
-export type ProviderAuthMode = 'runtime-copy' | 'host-identity'
+export type { ProviderAuthMode }
 
 export interface ProviderAuthDiagnostics {
   provider: SupportedCoreCode
@@ -11,7 +12,29 @@ export interface ProviderAuthDiagnostics {
   warnings: string[]
 }
 
+/**
+ * Log-safe auth summary: presence and mode only — never env values or token text.
+ * Paths are omitted so home directories / filenames cannot leak into debug streams.
+ */
+export interface ProviderAuthLogDto {
+  provider: SupportedCoreCode
+  mode: ProviderAuthMode
+  authMaterialPresent: boolean
+  warningCount: number
+}
+
+export function toProviderAuthLogDto(diagnostics: ProviderAuthDiagnostics): ProviderAuthLogDto {
+  return {
+    provider: diagnostics.provider,
+    mode: diagnostics.mode,
+    authMaterialPresent: diagnostics.authMaterialPresent,
+    warningCount: diagnostics.warnings.length
+  }
+}
+
 export interface ProviderAuthPrepared {
+  mode: ProviderAuthMode
+  runtimeRoot: string
   envPatch: Record<string, string>
   readRoots: string[]
 

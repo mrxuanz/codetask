@@ -1,4 +1,9 @@
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from '../sandbox/session-state'
+import {
+  createProvidersConfig,
+  type ProvidersConfig,
+  type ProvidersConfigOverrides
+} from '../../shared/providers/settings'
 
 export interface HttpConfig {
   readonly requestTimeoutMs: number
@@ -30,6 +35,7 @@ export interface AppConfig {
   readonly http: HttpConfig
   readonly turn: TurnConfig
   readonly execution: ExecutionConfig
+  readonly providers: ProvidersConfig
 }
 
 export interface AppConfigOverrides {
@@ -38,6 +44,7 @@ export interface AppConfigOverrides {
   execution?: Partial<Omit<ExecutionConfig, 'runLifecycle'>> & {
     runLifecycle?: Partial<RunLifecycleConfig>
   }
+  providers?: ProvidersConfigOverrides
 }
 
 /**
@@ -65,7 +72,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
       cancelGraceMs: 10_000,
       killGraceMs: 5_000
     }
-  }
+  },
+  providers: createProvidersConfig()
 }
 
 export function createAppConfig(overrides: AppConfigOverrides = {}): AppConfig {
@@ -85,6 +93,7 @@ export function createAppConfig(overrides: AppConfigOverrides = {}): AppConfig {
         ...DEFAULT_APP_CONFIG.execution.runLifecycle,
         ...overrides.execution?.runLifecycle
       }
-    }
+    },
+    providers: createProvidersConfig(overrides.providers)
   }
 }

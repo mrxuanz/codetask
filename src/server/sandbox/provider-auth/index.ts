@@ -1,9 +1,11 @@
-export { prepareProviderAuth, type PrepareProviderAuthOptions } from './bridge'
 export {
-  ProviderAuthError,
-  providerAuthFailureMessage,
-  runProviderAuthPreflight
-} from './preflight'
+  prepareClaudeAuth,
+  prepareCodexAuth,
+  prepareCursorAuth,
+  prepareOpenCodeAuth,
+  type ProviderAuthPreparationOptions
+} from './bridge'
+export { ProviderAuthError } from './errors'
 export {
   filterCodexConfigToml,
   materializeCodexAuth,
@@ -37,9 +39,11 @@ export {
 } from './paths'
 export type {
   ProviderAuthDiagnostics,
+  ProviderAuthLogDto,
   ProviderAuthMode,
   ProviderAuthPrepared,
   ProviderFilesystemProfile,
   CredentialSnapshotSpec,
   ProviderAuthPreflightResult
 } from './types'
+export { toProviderAuthLogDto } from './types'

@@ -18,6 +18,7 @@ import {
   resolveCursorHostConfigDir,
   resolveCursorHostCursorHome,
   resolveHostProfilePaths,
+  type HostProfilePaths,
   resolveOpencodeHostConfigDir,
   resolveOpencodeHostDataDir,
   runtimeCodexHome,
@@ -25,6 +26,10 @@ import {
   runtimeCursorConfigDir,
   runtimeCursorHome
 } from './paths'
+import {
+  processHostEnvironmentSource,
+  type HostEnvironmentSnapshot
+} from '../../host-environment'
 import {
   scrubCredentialSnapshotManifest,
   writeCredentialSnapshotManifest
@@ -138,8 +143,11 @@ export interface MaterializeCodexResult {
   cleanup: () => void
 }
 
-export function materializeCodexAuth(runtimeRoot: string): MaterializeCodexResult {
-  const hostAuthPath = resolveCodexHostAuthPath()
+export function materializeCodexAuth(
+  runtimeRoot: string,
+  profile: HostProfilePaths = resolveHostProfilePaths()
+): MaterializeCodexResult {
+  const hostAuthPath = resolveCodexHostAuthPath(profile)
   const codexHome = runtimeCodexHome(runtimeRoot)
   const runtimeAuthPath = join(codexHome, 'auth.json')
 
@@ -158,7 +166,7 @@ export function materializeCodexAuth(runtimeRoot: string): MaterializeCodexResul
     cleanupPaths.push(runtimeAuthPath)
   }
 
-  const hostConfigPath = resolveCodexHostConfigPath()
+  const hostConfigPath = resolveCodexHostConfigPath(profile)
   const runtimeConfigPath = join(codexHome, 'config.toml')
 
   if (existsSync(hostConfigPath)) {
@@ -221,8 +229,11 @@ function mirrorCursorAuthFiles(source: string, runtimeRoot: string): string[] {
   return written
 }
 
-function readDarwinCursorKeychainPassword(service: string): string | null {
-  const hostHome = resolveHostProfilePaths().home
+function readDarwinCursorKeychainPassword(
+  service: string,
+  profile: HostProfilePaths,
+  hostEnvironment: HostEnvironmentSnapshot
+): string | null {
   const result = spawnSync(
     'security',
     ['find-generic-password', '-s', service, '-a', 'cursor-user', '-w'],
@@ -230,8 +241,8 @@ function readDarwinCursorKeychainPassword(service: string): string | null {
       encoding: 'utf8',
       timeout: 15_000,
       env: {
-        ...process.env,
-        HOME: hostHome
+        ...hostEnvironment,
+        HOME: profile.home
       }
     }
   )
@@ -240,13 +251,24 @@ function readDarwinCursorKeychainPassword(service: string): string | null {
   return value.length > 0 ? value : null
 }
 
-function readDarwinCursorKeychainTokens(): {
+function readDarwinCursorKeychainTokens(
+  profile: HostProfilePaths,
+  hostEnvironment: HostEnvironmentSnapshot
+): {
   accessToken: string
   refreshToken: string
 } | null {
   if (process.platform !== 'darwin') return null
-  const accessToken = readDarwinCursorKeychainPassword('cursor-access-token')
-  const refreshToken = readDarwinCursorKeychainPassword('cursor-refresh-token')
+  const accessToken = readDarwinCursorKeychainPassword(
+    'cursor-access-token',
+    profile,
+    hostEnvironment
+  )
+  const refreshToken = readDarwinCursorKeychainPassword(
+    'cursor-refresh-token',
+    profile,
+    hostEnvironment
+  )
   if (!accessToken || !refreshToken) return null
   return { accessToken, refreshToken }
 }
@@ -255,7 +277,11 @@ function readDarwinCursorKeychainTokens(): {
  * Ensure runtime has a file-store auth.json the Cursor CLI can read under HOME=runtimeRoot.
  * Prefer host auth.json, then macOS Keychain export (host HOME), then existing runtime copies.
  */
-export function ensureCursorRuntimeAuth(runtimeRoot: string): boolean {
+export function ensureCursorRuntimeAuth(
+  runtimeRoot: string,
+  profile: HostProfilePaths = resolveHostProfilePaths(),
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+): boolean {
   const cliAuthPath = runtimeCursorCliAuthPath(runtimeRoot)
   const legacyAuthPath = runtimeCursorAuthPath(runtimeRoot)
 
@@ -269,13 +295,13 @@ export function ensureCursorRuntimeAuth(runtimeRoot: string): boolean {
     return true
   }
 
-  const hostAuthPath = resolveCursorHostAuthPath()
+  const hostAuthPath = resolveCursorHostAuthPath(profile)
   if (existsSync(hostAuthPath)) {
     mirrorCursorAuthFiles(hostAuthPath, runtimeRoot)
     return true
   }
 
-  const tokens = readDarwinCursorKeychainTokens()
+  const tokens = readDarwinCursorKeychainTokens(profile, hostEnvironment)
   if (tokens) {
     writeCursorRuntimeAuthPayload(runtimeRoot, tokens)
     return true
@@ -286,11 +312,12 @@ export function ensureCursorRuntimeAuth(runtimeRoot: string): boolean {
 
 export function materializeCursorAuth(
   runtimeRoot: string,
-  workspaceRoot: string
+  workspaceRoot: string,
+  profile: HostProfilePaths = resolveHostProfilePaths(),
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
 ): MaterializeCursorResult {
-  const hostAuthPath = resolveCursorHostAuthPath()
+  const hostAuthPath = resolveCursorHostAuthPath(profile)
   const runtimeAuthPath = runtimeCursorAuthPath(runtimeRoot)
-  const profile = resolveHostProfilePaths()
   const hostCursorHome = resolveCursorHostCursorHome(profile)
   const hostConfigDir = resolveCursorHostConfigDir(profile)
 
@@ -344,7 +371,7 @@ export function materializeCursorAuth(
     copiedPaths.push(runtime)
   }
 
-  const authCopied = ensureCursorRuntimeAuth(runtimeRoot)
+  const authCopied = ensureCursorRuntimeAuth(runtimeRoot, profile, hostEnvironment)
   if (authCopied) {
     for (const path of [runtimeCursorCliAuthPath(runtimeRoot), runtimeAuthPath]) {
       if (existsSync(path)) copiedPaths.push(path)
@@ -393,9 +420,12 @@ export function opencodeRuntimeLayout(runtimeRoot: string): {
   }
 }
 
-export function materializeOpencodeAuth(runtimeRoot: string): MaterializeOpencodeResult {
-  const hostConfigDir = resolveOpencodeHostConfigDir()
-  const hostDataDir = resolveOpencodeHostDataDir()
+export function materializeOpencodeAuth(
+  runtimeRoot: string,
+  profile: HostProfilePaths = resolveHostProfilePaths()
+): MaterializeOpencodeResult {
+  const hostConfigDir = resolveOpencodeHostConfigDir(profile)
+  const hostDataDir = resolveOpencodeHostDataDir(profile)
   const layout = opencodeRuntimeLayout(runtimeRoot)
   const { configDir: runtimeConfigDir, dataDir: runtimeDataDir } = layout
 

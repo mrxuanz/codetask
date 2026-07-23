@@ -1,8 +1,11 @@
-import { execFileSync } from 'child_process'
 import { createTurnError } from '../../shared/turn-errors.ts'
+import {
+  SUPPORTED_CORE_CODES,
+  normalizeProviderCode,
+  type SupportedCoreCode
+} from '../../shared/providers'
 
-export const SUPPORTED_CORE_CODES = ['codex', 'claude-code', 'opencode', 'cursorcli'] as const
-export type SupportedCoreCode = (typeof SUPPORTED_CORE_CODES)[number]
+export { SUPPORTED_CORE_CODES, type SupportedCoreCode }
 
 export interface AgentCoreAvailability {
   code: SupportedCoreCode
@@ -16,48 +19,9 @@ export interface AgentCoreAvailability {
   executablePath?: string | null | undefined
 }
 
-const CORE_META: Record<
-  SupportedCoreCode,
-  { label: string; description: string; commands: string[] }
-> = {
-  codex: {
-    label: 'Codex',
-    description: 'OpenAI Codex CLI',
-    commands: ['codex']
-  },
-  'claude-code': {
-    label: 'Claude Code',
-    description: 'Anthropic Claude Code CLI',
-    commands: ['claude', 'claude-code']
-  },
-  opencode: {
-    label: 'OpenCode',
-    description: 'OpenCode CLI',
-    commands: ['opencode']
-  },
-  cursorcli: {
-    label: 'Cursor CLI',
-    description: 'Cursor Agent CLI',
-    commands: ['agent', 'cursor-agent']
-  }
-}
-
 export function normalizeCoreCode(value: string): SupportedCoreCode {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === 'claude' || normalized === 'claude_code') {
-    return 'claude-code'
-  }
-  if (
-    normalized === 'cursor' ||
-    normalized === 'cursor-cli' ||
-    normalized === 'cursor-agent' ||
-    normalized === 'cursor_cli'
-  ) {
-    return 'cursorcli'
-  }
-  if ((SUPPORTED_CORE_CODES as readonly string[]).includes(normalized)) {
-    return normalized as SupportedCoreCode
-  }
+  const normalized = normalizeProviderCode(value)
+  if (normalized) return normalized
   throw createTurnError('provider.cli_auth_failed', {
     detail: `Unsupported CLI: ${value}`
   })
@@ -75,22 +39,6 @@ export function resetCoreAvailabilityStubForTests(): void {
   coreAvailabilityStub = null
 }
 
-function resolveCommand(command: string): string | null {
-  try {
-    if (process.platform === 'win32') {
-      const output = execFileSync('where', [command], {
-        encoding: 'utf8',
-        windowsHide: true
-      }).trim()
-      return output.split(/\r?\n/)[0]?.trim() || null
-    }
-    const output = execFileSync('which', [command], { encoding: 'utf8' }).trim()
-    return output || null
-  } catch {
-    return null
-  }
-}
-
 export async function getAgentCore(code: string): Promise<AgentCoreAvailability | null> {
   let normalized: SupportedCoreCode
   try {
@@ -99,47 +47,46 @@ export async function getAgentCore(code: string): Promise<AgentCoreAvailability 
     return null
   }
 
-  const meta = CORE_META[normalized]
   if (coreAvailabilityStub) {
     const stubbed = coreAvailabilityStub(normalized)
     if (stubbed !== undefined) {
       return stubbed
     }
   }
-  for (const command of meta.commands) {
-    const path = resolveCommand(command)
-    if (path) {
-      return {
-        code: normalized,
-        label: meta.label,
-        description: meta.description,
-        available: true,
-        detectedCommand: command,
-        launchCommand: command,
-        executablePath: path
-      }
+
+  const { getProviderRegistry } = await import('../providers/access')
+  const driver = getProviderRegistry().get(normalized)
+  const descriptor = driver.descriptor
+  const installation = await driver.discover()
+
+  if (installation) {
+    return {
+      code: normalized,
+      label: descriptor.label,
+      description: descriptor.description,
+      available: true,
+      readOnlyCapable: driver.supports('chat-read'),
+      detectedCommand: installation.command,
+      launchCommand: installation.command,
+      executablePath: installation.resolvedPath
     }
   }
 
+  const fallbackCommand = descriptor.defaultCommands[0]
   return {
     code: normalized,
-    label: meta.label,
-    description: meta.description,
+    label: descriptor.label,
+    description: descriptor.description,
     available: false,
-    reason: `${meta.label} is not installed or not on PATH`,
-    launchCommand: meta.commands[0]
+    readOnlyCapable: driver.supports('chat-read'),
+    reason: `${descriptor.label} is not installed or not on PATH`,
+    launchCommand: fallbackCommand
   }
 }
 
 export async function listChatCores(): Promise<AgentCoreAvailability[]> {
-  const { providerSupportsCapability } = await import('../agent-runtime/capabilities')
   const cores = await Promise.all(SUPPORTED_CORE_CODES.map((code) => getAgentCore(code)))
-  return cores
-    .filter((core): core is AgentCoreAvailability => core !== null)
-    .map((core) => ({
-      ...core,
-      readOnlyCapable: providerSupportsCapability(core.code, 'chat-read')
-    }))
+  return cores.filter((core): core is AgentCoreAvailability => core !== null)
 }
 
 export async function ensureCoreAvailable(code: string): Promise<AgentCoreAvailability> {

@@ -45,6 +45,9 @@ export interface CursorAcpSessionRuntimeOptions {
   env: Record<string, string>
   cliArgs: string[]
   capabilityProfile: AgentCapabilityProfile
+  executable?: string | undefined
+  prefixArgs?: readonly string[] | undefined
+  resolvedPath?: string | undefined
 }
 
 type CursorAcpErrorDto = {
@@ -161,7 +164,11 @@ export class CursorAcpSessionRuntime {
       cliArgs: this.options.cliArgs
     })
 
-    const child = spawnCursorAcpProcess(this.options.cwd, this.options.env, this.options.cliArgs)
+    const child = spawnCursorAcpProcess(this.options.cwd, this.options.env, this.options.cliArgs, {
+      executable: this.options.executable,
+      prefixArgs: this.options.prefixArgs,
+      resolvedPath: this.options.resolvedPath
+    })
     const diagnostics = createChildDiagnostics(child)
     this.child = child
     this.diagnostics = diagnostics

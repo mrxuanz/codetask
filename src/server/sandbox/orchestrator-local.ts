@@ -3,6 +3,7 @@ import type { ConversationRole } from '../agent-runtime/roles'
 import type { AgentTurnInput, AgentTurnChunk } from '../agent-runtime/types'
 import { formatSdkTurnError } from '../agent-runtime/errors'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
+import { buildLaunchSpec } from '../providers/launch-env'
 import { buildSandboxEnv } from './env'
 import {
   awaitSandboxWorkerAttestation,
@@ -14,8 +15,8 @@ import {
 import { policyForRoleV2, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { preflightSandbox } from './preflight'
-import { prepareProviderAuth, runProviderAuthPreflight } from './provider-auth'
-import { mergeProviderReadRoots, resolveProviderReadRoots } from './provider-read-roots'
+import { toProviderAuthLogDto } from './provider-auth/types'
+import { mergeProviderReadRoots, resolveHostToolchainReadRoots } from './provider-read-roots'
 import { resolveRuntimeReadRoots } from './runtime-read-roots'
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from './session-state'
 import { SandboxError } from './types'
@@ -23,6 +24,9 @@ import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { throwIfSandboxTurnAborted } from './turn-guards'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
+import type { ProviderInstallation } from '../../shared/providers/installation'
+import type { ProviderSettings } from '../../shared/providers/settings'
+import { processHostEnvironmentSource } from '../host-environment'
 export { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export interface RunSandboxedTurnInput {
@@ -41,9 +45,14 @@ export interface RunSandboxedTurnInput {
   signal?: AbortSignal | undefined
   readRoots?: string[] | undefined
   jobId?: string | undefined
+  providerRuntimeScopeId?: string | undefined
   idempotencyKey?: string | undefined
   workspaceAccess?: WorkspaceAccessMode | undefined
   capabilityProfile: AgentCapabilityProfile
+  /** Selected in the application process and preserved through supervisor IPC. */
+  installation: ProviderInstallation
+  /** Typed settings snapshot paired with `installation`. */
+  providerSettings: ProviderSettings
 }
 
 function resolveRoleWorkerPath(): string {
@@ -62,6 +71,7 @@ async function* readWorkerJsonl(
   let stderr = ''
   let streamEnded = false
   let sdkFailed = false
+  let completed: Extract<AgentTurnChunk, { type: 'completed' }> | null = null
 
   sandboxTurnDebug('sandbox orchestrator: readWorkerJsonl start')
 
@@ -91,11 +101,12 @@ async function* readWorkerJsonl(
         sdkFailed = true
         throw sandboxErrorFromErrorChunk(chunk)
       }
-      yield chunk
       if (chunk.type === 'completed') {
+        completed = chunk
         streamEnded = true
         break
       }
+      yield chunk
     }
     sandboxTurnDebug('sandbox orchestrator: stdout drained', { lineCount })
     if (lineCount === 0) {
@@ -147,6 +158,10 @@ async function* readWorkerJsonl(
       )
     }
   }
+
+  if (completed) {
+    yield completed
+  }
 }
 
 export async function* streamSandboxedConversationTurnLocal(
@@ -164,7 +179,7 @@ export async function* streamSandboxedConversationTurnLocal(
   throwIfSandboxTurnAborted(input.signal)
   if (process.platform === 'win32') {
     const { ensureWindowsSandboxReady } = await import('./windows-bootstrap')
-    await ensureWindowsSandboxReady(process.env.CODETASK_DATA_DIR ?? input.runtimeRoot)
+    await ensureWindowsSandboxReady(input.runtimeRoot)
   }
   preflightSandbox()
   throwIfSandboxTurnAborted(input.signal)
@@ -182,24 +197,60 @@ export async function* streamSandboxedConversationTurnLocal(
     mcpToolNames: input.mcpToolNames,
     userMcpServers: input.userMcpServers,
     capabilityProfile: input.capabilityProfile,
+    installation: input.installation,
+    providerSettings: input.providerSettings,
     jobId: input.jobId,
+    providerRuntimeScopeId: input.providerRuntimeScopeId,
     idempotencyKey: input.idempotencyKey
   }
 
   const workerPath = resolveRoleWorkerPath()
 
-  const authPrepared = prepareProviderAuth(input.coreCode, input.runtimeRoot, {
-    workspaceRoot: input.workspaceRoot
+  // The supervisor process uses the same Driver implementation, while the
+  // installation/settings snapshot itself comes from the application process.
+  const { getProviderRegistry } = await import('../providers/access')
+  const driver = getProviderRegistry().get(input.coreCode)
+  const hostEnvironment = processHostEnvironmentSource.snapshot()
+  const authPrepared = driver.prepareAuth({
+    runtimeRoot: input.runtimeRoot,
+    workspaceRoot: input.workspaceRoot,
+    hostEnvironment
   })
   throwIfSandboxTurnAborted(input.signal)
-  runProviderAuthPreflight(input.coreCode, authPrepared)
+
+  // PRU-11-06 / PRU-11-08: preflight + sandbox roots come from the Registry driver.
+  const installation = input.installation
+  if (installation.provider !== input.coreCode) {
+    throw new SandboxError(
+      `Provider installation mismatch: expected ${input.coreCode}, got ${installation.provider}`,
+      'sandbox.sdk.error'
+    )
+  }
+  await driver.preflight({ installation, preparedAuth: authPrepared })
   throwIfSandboxTurnAborted(input.signal)
 
-  const providerReadRoots = mergeProviderReadRoots(resolveProviderReadRoots(input.coreCode), [
-    ...authPrepared.readRoots,
-    ...resolveRuntimeReadRoots(),
-    ...(input.readRoots ?? [])
-  ])
+  try {
+    const launchSpec = buildLaunchSpec(input.coreCode, {
+      cwd: input.workspaceRoot,
+      env: authPrepared.envPatch,
+      providerOverlay: authPrepared.envPatch,
+      installation,
+      providerSettings: input.providerSettings
+    })
+    sandboxTurnDebug('launch-spec', { summary: launchSpec.redactedSummary })
+  } catch {
+    // Executable may be unresolved here; the worker launch path will surface the error.
+  }
+
+  const contribution = driver.contributeSandboxPolicy({
+    installation,
+    preparedAuth: authPrepared,
+    hostEnvironment
+  })
+  const providerReadRoots = mergeProviderReadRoots(
+    [...contribution.readRoots, ...resolveHostToolchainReadRoots(hostEnvironment)],
+    [...resolveRuntimeReadRoots(hostEnvironment), ...(input.readRoots ?? [])]
+  )
 
   // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
   // Conversation/planner roles can read the project and write runtime/provider state only;
@@ -209,21 +260,21 @@ export async function* streamSandboxedConversationTurnLocal(
     workspaceRoot: input.workspaceRoot,
     runtimeRoot: input.runtimeRoot,
     providerReadRoots,
-    ...(authPrepared.writeRoots ? { providerWriteRoots: authPrepared.writeRoots } : {}),
+    ...(contribution.writeRoots.length > 0
+      ? { providerWriteRoots: [...contribution.writeRoots] }
+      : {}),
     ...(input.readRoots ? { attachmentReadRoots: input.readRoots } : {}),
     ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {})
   })
 
-  sandboxTurnDebug('sandbox orchestrator: provider auth prepared', {
-    provider: input.coreCode,
-    mode: authPrepared.diagnostics.mode,
-    authPresent: authPrepared.diagnostics.authMaterialPresent,
-    warnings: authPrepared.diagnostics.warnings
-  })
+  sandboxTurnDebug(
+    'sandbox orchestrator: provider auth prepared',
+    toProviderAuthLogDto(authPrepared.diagnostics)
+  )
 
   const env = buildSandboxEnv({
     runtimeRoot: input.runtimeRoot,
-    providerEnv: authPrepared.envPatch,
+    providerEnv: { ...contribution.environment },
     mcpToken: input.mcpToken
   })
   const readRoots = collectPolicyReadRoots(policy)

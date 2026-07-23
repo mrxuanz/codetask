@@ -23,6 +23,8 @@ import {
   startStorageMigration
 } from '../storage/migration'
 import { validateStorageTarget } from '../../main/storage-validation'
+import { SettingsRevisionConflictError } from '../context/settings-store'
+import { loadProviderSettings, saveProviderSettings } from '../settings/providers'
 
 function unwrapSettings<T extends object>(body: T | { settings?: T }): T {
   if ('settings' in body && body.settings !== undefined) return body.settings
@@ -94,6 +96,59 @@ export function createSettingsRoutes(ctx: AppContext): Hono {
       throw AppError.badRequest(
         error instanceof Error ? error.message : 'Failed to save MCP settings',
         'settings.mcp.save_failed'
+      )
+    }
+  })
+
+  routes.get('/providers', async (c) => {
+    await requireUsername(c.req.header('Authorization'))
+    return c.json(ok(loadProviderSettings()))
+  })
+
+  routes.put('/providers', async (c) => {
+    await requireUsername(c.req.header('Authorization'))
+    const rawBody = await c.req.json<unknown>()
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      throw AppError.badRequest(
+        'Provider settings payload must be an object',
+        'settings.providers.invalid_payload'
+      )
+    }
+    const body = rawBody as Record<string, unknown>
+    for (const key of Object.keys(body)) {
+      if (key !== 'providers' && key !== 'expectedRevision') {
+        throw AppError.badRequest(
+          `Provider settings field ${key} is not supported`,
+          'settings.providers.invalid_payload'
+        )
+      }
+    }
+    if (!Object.prototype.hasOwnProperty.call(body, 'providers')) {
+      throw AppError.badRequest('providers is required', 'settings.providers.invalid_payload')
+    }
+    if (
+      body.expectedRevision !== undefined &&
+      (!Number.isInteger(body.expectedRevision) || Number(body.expectedRevision) < 0)
+    ) {
+      throw AppError.badRequest(
+        'expectedRevision must be a non-negative integer',
+        'settings.providers.invalid_revision'
+      )
+    }
+    try {
+      return c.json(
+        ok(saveProviderSettings(body.providers, body.expectedRevision as number | undefined))
+      )
+    } catch (error) {
+      if (error instanceof SettingsRevisionConflictError) {
+        throw AppError.conflict('Provider settings were updated by another request', {
+          expectedRevision: error.expectedRevision,
+          currentRevision: error.actualRevision
+        })
+      }
+      throw AppError.badRequest(
+        error instanceof Error ? error.message : 'Failed to save Provider settings',
+        'settings.providers.save_failed'
       )
     }
   })

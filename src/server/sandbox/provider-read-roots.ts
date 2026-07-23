@@ -2,29 +2,22 @@ import { execFileSync } from 'child_process'
 import { dirname, normalize, parse, sep } from 'path'
 import { existsSync, realpathSync, statSync } from 'fs'
 import type { SupportedCoreCode } from '../conversation/cores'
+import { resolveProviderExecutable } from '../providers/executable'
+import { getProviderRegistry } from '../providers/access'
 import {
-  resolveCursorAgentInstallDirs,
-  resolveCodexInstallDirs,
-  resolveClaudeInstallDirs,
-  resolveOpencodeInstallDirs
-} from './provider-auth/paths'
+  processHostEnvironmentSource,
+  type HostEnvironmentSnapshot
+} from '../host-environment'
 import { resolveHostNodeBinDirs } from './toolchain-path'
 
-const PROVIDER_COMMANDS: Record<SupportedCoreCode, string[]> = {
-  codex: ['codex'],
-  'claude-code': ['claude', 'claude-code'],
-  opencode: ['opencode'],
-  cursorcli: ['agent', 'cursor-agent', 'cursor']
-}
-
-const RUNTIME_COMMANDS = ['node']
 const TOOL_HOME_ENV_KEYS = ['VOLTA_HOME', 'NVM_SYMLINK'] as const
 
-function whereCommand(command: string): string[] {
+function whereNode(hostEnvironment: HostEnvironmentSnapshot): string[] {
   if (process.platform === 'win32') {
     try {
-      const output = execFileSync('where', [command], {
+      const output = execFileSync('where', ['node'], {
         encoding: 'utf8',
+        env: { ...hostEnvironment },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore']
       })
@@ -38,8 +31,9 @@ function whereCommand(command: string): string[] {
   }
 
   try {
-    const output = execFileSync('which', [command], {
+    const output = execFileSync('which', ['node'], {
       encoding: 'utf8',
+      env: { ...hostEnvironment },
       stdio: ['ignore', 'pipe', 'ignore']
     })
     const line = output.trim()
@@ -111,48 +105,63 @@ function addRoot(roots: Map<string, string>, path: string | null | undefined): v
   }
 }
 
-export function resolveProviderReadRoots(provider: SupportedCoreCode): string[] {
+/** Host toolchain roots shared by every Provider (no Provider switch). */
+export function resolveHostToolchainReadRoots(
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+): string[] {
   const roots = new Map<string, string>()
-  const commands = [...PROVIDER_COMMANDS[provider], ...RUNTIME_COMMANDS]
 
-  for (const command of commands) {
-    for (const candidate of whereCommand(command)) {
-      const dir = existingDirectoryFor(candidate)
-      addRoot(roots, dir)
-      addRoot(roots, dir ? ancestorNamed(dir, 'Volta') : null)
-    }
+  for (const candidate of whereNode(hostEnvironment)) {
+    const dir = existingDirectoryFor(candidate)
+    addRoot(roots, dir)
+    addRoot(roots, dir ? ancestorNamed(dir, 'Volta') : null)
   }
 
   for (const key of TOOL_HOME_ENV_KEYS) {
-    addRoot(roots, process.env[key])
+    addRoot(roots, hostEnvironment[key])
   }
-  for (const dir of resolveHostNodeBinDirs()) {
+  const hostHome = hostEnvironment.HOME ?? hostEnvironment.USERPROFILE
+  for (const dir of resolveHostNodeBinDirs({
+    env: hostEnvironment,
+    ...(hostHome ? { hostHome } : {})
+  })) {
     addRoot(roots, dir)
     addRoot(roots, ancestorNamed(dir, 'Volta'))
   }
 
-  if (provider === 'cursorcli') {
-    for (const dir of resolveCursorAgentInstallDirs()) {
-      addRoot(roots, dir)
-    }
+  return [...roots.values()]
+}
+
+/**
+ * Compatibility helper for diagnostics. Production orchestration merges the
+ * selected driver's contribution directly.
+ */
+export function resolveProviderReadRoots(
+  provider: SupportedCoreCode,
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+): string[] {
+  const roots = new Map<string, string>()
+  const driver = getProviderRegistry().get(provider)
+  const installDirs = driver.installDirs(hostEnvironment)
+
+  for (const path of resolveHostToolchainReadRoots(hostEnvironment)) {
+    addRoot(roots, path)
   }
 
-  if (provider === 'codex') {
-    for (const dir of resolveCodexInstallDirs()) {
-      addRoot(roots, dir)
-    }
+  // Prefer unified resolver so detect/launch/read-roots share one path.
+  const resolved = resolveProviderExecutable(provider, {
+    env: hostEnvironment,
+    settings: driver.settings,
+    installDirs
+  })
+  if (resolved) {
+    const dir = existingDirectoryFor(resolved.executable)
+    addRoot(roots, dir)
+    addRoot(roots, dir ? ancestorNamed(dir, 'Volta') : null)
   }
 
-  if (provider === 'claude-code') {
-    for (const dir of resolveClaudeInstallDirs()) {
-      addRoot(roots, dir)
-    }
-  }
-
-  if (provider === 'opencode') {
-    for (const dir of resolveOpencodeInstallDirs()) {
-      addRoot(roots, dir)
-    }
+  for (const dir of installDirs) {
+    addRoot(roots, dir)
   }
 
   return [...roots.values()]

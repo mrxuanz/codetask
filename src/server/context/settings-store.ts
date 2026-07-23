@@ -7,6 +7,7 @@ const NAMESPACE_TO_PROPERTY = {
   prompts: 'prompts',
   retention: 'retention',
   user_mcp: 'userMcp',
+  provider_runtime: 'providerRuntime',
   ui_server_preferences: 'uiServerPreferences'
 } as const
 

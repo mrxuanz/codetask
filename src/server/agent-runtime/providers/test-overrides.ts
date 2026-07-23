@@ -1,22 +1,27 @@
 import type { SupportedCoreCode } from '../../conversation/cores'
 import type { AgentTurnProvider } from '../types'
+import { getProviderRegistry } from '../../providers/access'
+import { createTestOverrideDriver } from '../../providers/delegating-driver'
+import type { ProviderRegistry } from '../../providers/registry'
 
-let testProviderOverrides: Partial<Record<SupportedCoreCode, AgentTurnProvider>> | null = null
+let testProviderRegistry: ProviderRegistry | null = null
 
 export function setTestAgentTurnProviders(
   overrides: Partial<Record<SupportedCoreCode, AgentTurnProvider>>
 ): void {
-  testProviderOverrides = { ...overrides }
+  const base = getProviderRegistry()
+  const drivers = Object.entries(overrides).map(([code, provider]) =>
+    createTestOverrideDriver(base.get(code as SupportedCoreCode), provider as AgentTurnProvider)
+  )
+  testProviderRegistry = base.withOverrides(drivers)
 }
 
 export function resetTestAgentTurnProviders(): void {
-  testProviderOverrides = null
+  testProviderRegistry = null
 }
 
-export function getTestAgentTurnProviderOverride(
-  code: SupportedCoreCode
-): AgentTurnProvider | undefined {
-  return testProviderOverrides?.[code]
+export function getTestProviderRegistryOverride(): ProviderRegistry | null {
+  return testProviderRegistry
 }
 
 export function isTestFakeProvider(provider: AgentTurnProvider): boolean {
@@ -24,7 +29,7 @@ export function isTestFakeProvider(provider: AgentTurnProvider): boolean {
 }
 
 export function isTestFakeAgentModeActive(): boolean {
-  return testProviderOverrides !== null && Object.keys(testProviderOverrides).length > 0
+  return testProviderRegistry !== null
 }
 
 let taskEvidenceWaitTimeoutMs: number | undefined

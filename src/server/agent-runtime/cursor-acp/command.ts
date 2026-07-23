@@ -7,13 +7,12 @@ import {
 import { existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join, normalize } from 'node:path'
+import { spawnProviderCommandSync, spawnProviderInvocation } from '../../providers/spawn'
+import { processHostEnvironmentSource } from '../../host-environment'
 
-type NodeSpawn = typeof import('node:child_process').spawn
-type CrossSpawn = NodeSpawn & { sync: typeof spawnSync }
 type StringEnv = Record<string, string | undefined>
 
 const nodeRequire = createRequire(import.meta.url)
-const crossSpawn = nodeRequire('cross-spawn') as CrossSpawn
 
 const WINDOWS_AGENT_BIN_NAMES = [
   'agent.cmd',
@@ -40,8 +39,10 @@ function envValue(env: StringEnv, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function withProcessEnv(env: StringEnv = process.env): NodeJS.ProcessEnv {
-  const merged: NodeJS.ProcessEnv = { ...process.env }
+function withProcessEnv(
+  env: StringEnv = processHostEnvironmentSource.snapshot()
+): NodeJS.ProcessEnv {
+  const merged: NodeJS.ProcessEnv = { ...processHostEnvironmentSource.snapshot() }
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === 'string') merged[key] = value
   }
@@ -49,22 +50,17 @@ function withProcessEnv(env: StringEnv = process.env): NodeJS.ProcessEnv {
 }
 
 function resolveHostHome(env: StringEnv): string | undefined {
-  return (
-    envValue(env, 'CODETASK_HOST_HOME') || envValue(env, 'USERPROFILE') || envValue(env, 'HOME')
-  )
+  return envValue(env, 'USERPROFILE') || envValue(env, 'HOME')
 }
 
 function resolveHostLocalAppData(env: StringEnv): string | undefined {
-  const explicit = envValue(env, 'CODETASK_HOST_LOCALAPPDATA') || envValue(env, 'LOCALAPPDATA')
+  const explicit = envValue(env, 'LOCALAPPDATA')
   if (explicit) return explicit
   const home = resolveHostHome(env)
   return home ? join(home, 'AppData', 'Local') : undefined
 }
 
 function resolveKnownCursorAgentDirs(env: StringEnv): string[] {
-  const override = envValue(env, 'CODETASK_CURSOR_AGENT_DIR')
-  if (override) return [override]
-
   if (process.platform !== 'win32') return []
 
   const localAppData = resolveHostLocalAppData(env)
@@ -133,15 +129,26 @@ function pathContains(pathValue: string, dir: string): boolean {
     .some((entry) => normalize(entry).toLowerCase() === normalized.toLowerCase())
 }
 
-export function resolveCursorAgentCommand(): string {
-  return process.env.CODETASK_CURSOR_AGENT_BIN?.trim() || 'agent'
+export function resolveCursorAgentCommand(
+  env: StringEnv = processHostEnvironmentSource.snapshot()
+): string {
+  try {
+    const { resolveProviderExecutable } = nodeRequire(
+      '../../providers/executable.ts'
+    ) as typeof import('../../providers/executable')
+    const resolved = resolveProviderExecutable('cursorcli', { env })
+    if (resolved?.command) return resolved.command
+  } catch {
+    // Fall through.
+  }
+  return 'agent'
 }
 
 export function resolveCursorAgentExecutable(
-  command = resolveCursorAgentCommand(),
-  env: StringEnv = process.env
+  command?: string,
+  env: StringEnv = processHostEnvironmentSource.snapshot()
 ): string {
-  const trimmed = cleanCommand(command)
+  const trimmed = cleanCommand(command ?? resolveCursorAgentCommand(env))
   if (process.platform !== 'win32' || hasPathSeparator(trimmed)) return trimmed
 
   for (const candidate of whereCommand(trimmed, env)) {
@@ -191,11 +198,41 @@ export function spawnCursorAgent(
   options: SpawnOptions & { env: Record<string, string> }
 ): ChildProcess {
   const prepared = prepareCursorAgentProcess(command, options.env)
-  return crossSpawn(prepared.executable, args, {
-    ...options,
-    env: prepared.env,
-    windowsHide: true
-  }) as ChildProcess
+  const { cwd, env: _env, shell: _shell, ...rest } = options
+  return spawnProviderInvocation({ executable: prepared.executable, prefixArgs: [] }, args, {
+    ...rest,
+    cwd: typeof cwd === 'string' ? cwd : process.cwd(),
+    env: prepared.env
+  })
+}
+
+/**
+ * Spawn using a driver-discovered installation invocation (Windows `.cmd` / `.ps1` safe).
+ * `pathForEnv` is the agent binary path used only to enrich PATH, not necessarily the spawn argv0.
+ */
+export function spawnCursorAgentInvocation(
+  launch: {
+    executable: string
+    prefixArgs?: readonly string[] | undefined
+    pathForEnv?: string | undefined
+  },
+  args: readonly string[],
+  options: SpawnOptions & { env: Record<string, string> }
+): ChildProcess {
+  const env = withCursorAgentPath(options.env, launch.pathForEnv?.trim() || launch.executable)
+  const { cwd, env: _env, shell: _shell, ...rest } = options
+  return spawnProviderInvocation(
+    {
+      executable: launch.executable,
+      prefixArgs: launch.prefixArgs ?? []
+    },
+    args,
+    {
+      ...rest,
+      cwd: typeof cwd === 'string' ? cwd : process.cwd(),
+      env
+    }
+  )
 }
 
 export function spawnCursorAgentSync(
@@ -205,9 +242,10 @@ export function spawnCursorAgentSync(
 ): ReturnType<typeof spawnSync> {
   const baseEnv = options.env ?? (withProcessEnv() as Record<string, string>)
   const prepared = prepareCursorAgentProcess(command, baseEnv)
-  return crossSpawn.sync(prepared.executable, args, {
-    ...options,
-    env: prepared.env,
-    windowsHide: true
+  const { cwd, env: _env, shell: _shell, encoding: _encoding, ...rest } = options
+  return spawnProviderCommandSync({ executable: prepared.executable, prefixArgs: [] }, args, {
+    ...rest,
+    cwd: typeof cwd === 'string' ? cwd : process.cwd(),
+    env: prepared.env
   })
 }

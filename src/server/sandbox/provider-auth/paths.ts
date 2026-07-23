@@ -3,6 +3,9 @@ import { execFileSync } from 'child_process'
 import { existsSync, readFileSync, realpathSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
+import { processHostEnvironmentSource } from '../../host-environment'
+
+type HostEnvironment = Readonly<Record<string, string | undefined>>
 
 export interface HostProfilePaths {
   home: string
@@ -10,64 +13,45 @@ export interface HostProfilePaths {
   localAppData: string
 }
 
-export function resolveHostProfilePaths(): HostProfilePaths {
-  const home =
-    process.env.CODETASK_HOST_HOME?.trim() ||
-    process.env.HOME?.trim() ||
-    process.env.USERPROFILE?.trim() ||
-    homedir()
+export function resolveHostProfilePaths(
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
+): HostProfilePaths {
+  const home = env.HOME?.trim() || env.USERPROFILE?.trim() || homedir()
 
   if (process.platform === 'win32') {
-    const appData =
-      process.env.CODETASK_HOST_APPDATA?.trim() ||
-      process.env.APPDATA?.trim() ||
-      join(home, 'AppData', 'Roaming')
-    const localAppData =
-      process.env.CODETASK_HOST_LOCALAPPDATA?.trim() ||
-      process.env.LOCALAPPDATA?.trim() ||
-      join(home, 'AppData', 'Local')
+    const appData = env.APPDATA?.trim() || join(home, 'AppData', 'Roaming')
+    const localAppData = env.LOCALAPPDATA?.trim() || join(home, 'AppData', 'Local')
     return { home, appData, localAppData }
   }
 
   if (process.platform === 'darwin') {
     return {
       home,
-      appData:
-        process.env.CODETASK_HOST_APPDATA?.trim() || join(home, 'Library', 'Application Support'),
-      localAppData:
-        process.env.CODETASK_HOST_LOCALAPPDATA?.trim() || join(home, 'Library', 'Caches')
+      appData: join(home, 'Library', 'Application Support'),
+      localAppData: join(home, 'Library', 'Caches')
     }
   }
 
   return {
     home,
-    appData: process.env.CODETASK_HOST_APPDATA?.trim() || join(home, '.config'),
-    localAppData: process.env.CODETASK_HOST_LOCALAPPDATA?.trim() || join(home, '.local', 'share')
+    appData: join(home, '.config'),
+    localAppData: join(home, '.local', 'share')
   }
 }
 
 export function resolveCodexHostAuthPath(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CODEX_AUTH_PATH?.trim()
-  if (override) return override
   return join(resolveCodexHostHome(profile), 'auth.json')
 }
 
 export function resolveCodexHostHome(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CODEX_HOME?.trim()
-  if (override) return override
   return join(profile.home, '.codex')
 }
 
 export function resolveCodexHostConfigPath(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CODEX_CONFIG_PATH?.trim()
-  if (override) return override
   return join(resolveCodexHostHome(profile), 'config.toml')
 }
 
 export function resolveCursorHostAuthPathCandidates(profile = resolveHostProfilePaths()): string[] {
-  const override = process.env.CODETASK_CURSOR_AUTH_PATH?.trim()
-  if (override) return [override]
-
   if (process.platform === 'win32') {
     return [join(profile.appData, 'Cursor', 'auth.json')]
   }
@@ -93,7 +77,10 @@ export interface CodexHostAuthSnapshot {
   sources: string[]
 }
 
-export function snapshotCodexHostAuth(profile = resolveHostProfilePaths()): CodexHostAuthSnapshot {
+export function snapshotCodexHostAuth(
+  profile = resolveHostProfilePaths(),
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
+): CodexHostAuthSnapshot {
   const codexHome = resolveCodexHostHome(profile)
   const sources: string[] = []
 
@@ -102,7 +89,7 @@ export function snapshotCodexHostAuth(profile = resolveHostProfilePaths()): Code
     if (existsSync(path)) sources.push(path)
   }
 
-  const hasEnvKey = Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.CODEX_API_KEY?.trim())
+  const hasEnvKey = Boolean(env.OPENAI_API_KEY?.trim() || env.CODEX_API_KEY?.trim())
 
   return {
     present: sources.some((path) => path.endsWith('auth.json')) || hasEnvKey,
@@ -120,7 +107,8 @@ export interface CursorHostAuthSnapshot {
 }
 
 export function snapshotCursorHostAuth(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
 ): CursorHostAuthSnapshot {
   const authCandidates = resolveCursorHostAuthPathCandidates(profile)
   const authPath =
@@ -143,7 +131,7 @@ export function snapshotCursorHostAuth(
     if (existsSync(path)) sources.push(path)
   }
 
-  const hasEnvKey = Boolean(process.env.CURSOR_API_KEY?.trim())
+  const hasEnvKey = Boolean(env.CURSOR_API_KEY?.trim())
 
   return {
     present: authCandidates.some((candidate) => existsSync(candidate)) || hasEnvKey,
@@ -155,8 +143,6 @@ export function snapshotCursorHostAuth(
 }
 
 export function resolveClaudeHostConfigDir(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CLAUDE_CONFIG_DIR?.trim()
-  if (override) return override
   return join(profile.home, '.claude')
 }
 
@@ -283,14 +269,10 @@ export function resolveClaudeConfigReadRoots(
 }
 
 export function resolveOpencodeHostConfigDir(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_OPENCODE_CONFIG_DIR?.trim()
-  if (override) return override
   return join(profile.home, '.config', 'opencode')
 }
 
 export function resolveOpencodeHostDataDir(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_OPENCODE_DATA_DIR?.trim()
-  if (override) return override
   return join(profile.home, '.local', 'share', 'opencode')
 }
 
@@ -323,12 +305,6 @@ export function snapshotOpencodeHostAuth(
 
 export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths()): string[] {
   const dirs: string[] = []
-  const override = process.env.CODETASK_CURSOR_AGENT_DIR?.trim()
-  if (override) {
-    dirs.push(override)
-    return dirs
-  }
-
   if (process.platform === 'win32') {
     dirs.push(join(profile.localAppData, 'cursor-agent'))
     dirs.push(join(profile.localAppData, 'Programs', 'cursor-agent'))
@@ -398,11 +374,6 @@ export function resolveCodexInstallDirs(): string[] {
     // ignore
   }
 
-  const override = process.env.CODETASK_CODEX_INSTALL_DIR?.trim()
-  if (override) {
-    addExistingDir(dirs, override)
-  }
-
   return [...dirs.values()]
 }
 
@@ -443,11 +414,6 @@ export function resolveClaudeInstallDirs(): string[] {
     }
   } catch {
     // ignore
-  }
-
-  const override = process.env.CODETASK_CLAUDE_INSTALL_DIR?.trim()
-  if (override) {
-    addExistingDir(dirs, override)
   }
 
   return [...dirs.values()]
@@ -515,17 +481,25 @@ export function resolveOpencodeInstallDirs(): string[] {
     // ignore
   }
 
-  const override = process.env.CODETASK_OPENCODE_INSTALL_DIR?.trim()
-  if (override) {
-    addExistingDir(dirs, override)
-  }
-
   return [...dirs.values()]
 }
 
-export function resolveOpencodeExecutable(): string {
-  const fromEnv = process.env.CODETASK_OPENCODE_BIN?.trim()
-  if (fromEnv && existsSync(fromEnv)) return fromEnv
+export function resolveOpencodeExecutable(
+  env:
+    | NodeJS.ProcessEnv
+    | Record<string, string | undefined> = processHostEnvironmentSource.snapshot()
+): string {
+  // Prefer unified ProviderInstallation resolution; BIN env is no longer a config source.
+  try {
+    const nodeRequire = createRequire(__filename)
+    const { resolveProviderExecutable } = nodeRequire(
+      '../../providers/executable.ts'
+    ) as typeof import('../../providers/executable')
+    const resolved = resolveProviderExecutable('opencode', { env })
+    if (resolved?.executable) return resolved.executable
+  } catch {
+    // Fall through to install-dir / bare command.
+  }
 
   const exeNames = process.platform === 'win32' ? ['opencode.exe'] : ['opencode', 'opencode.exe']
   for (const dir of resolveOpencodeInstallDirs()) {

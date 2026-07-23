@@ -1,7 +1,7 @@
 let seq = 0
 
 export function isMemoryDebugEnabled(): boolean {
-  return process.env.CODETASK_DEBUG_MEMORY === '1'
+  return processHostEnvironmentSource.snapshot().CODETASK_DEBUG_MEMORY === '1'
 }
 
 export function memoryDebug(step: string, detail?: Record<string, unknown>): void {
@@ -18,3 +18,4 @@ export function memoryDebug(step: string, detail?: Record<string, unknown>): voi
   }
   console.error(`[CODETASK_DEBUG:memory] ${step} ${JSON.stringify(payload)}`)
 }
+import { processHostEnvironmentSource } from '../host-environment'
