@@ -68,7 +68,20 @@ function isExecutableFile(path: string, platform: NodeJS.Platform): boolean {
   }
 }
 
-function validateConfiguredPath(path: string, platform: NodeJS.Platform): string {
+interface ExecutableEntry {
+  readonly path: string
+  readonly canonicalPath: string
+}
+
+function executableEntry(path: string): ExecutableEntry {
+  const normalized = normalize(path)
+  return {
+    path: normalized,
+    canonicalPath: normalize(safeRealpath(normalized))
+  }
+}
+
+function validateConfiguredPath(path: string, platform: NodeJS.Platform): ExecutableEntry {
   if (!existsSync(path)) {
     throw new ProviderInstallationError('configured-path-missing', path)
   }
@@ -84,7 +97,7 @@ function validateConfiguredPath(path: string, platform: NodeJS.Platform): string
   if (!isExecutableFile(path, platform)) {
     throw new ProviderInstallationError('configured-path-not-executable', path)
   }
-  return safeRealpath(path)
+  return executableEntry(path)
 }
 
 function windowsExtensions(env: Readonly<Record<string, string | undefined>>): readonly string[] {
@@ -108,7 +121,7 @@ function findOnPath(
   commands: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform
-): { command: string; path: string } | null {
+): ({ command: string } & ExecutableEntry) | null {
   const path = pathValue(env, 'PATH')
   if (!path) return null
   const separator = platform === 'win32' ? ';' : ':'
@@ -117,7 +130,7 @@ function findOnPath(
       for (const name of candidateNames(command, platform, env)) {
         const candidate = join(dir.replace(/^"|"$/g, ''), name)
         if (isExecutableFile(candidate, platform)) {
-          return { command, path: safeRealpath(candidate) }
+          return { command, ...executableEntry(candidate) }
         }
       }
     }
@@ -130,7 +143,7 @@ function findInInstallDirs(
   dirs: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   platform: NodeJS.Platform
-): { command: string; path: string } | null {
+): ({ command: string } & ExecutableEntry) | null {
   for (const dirOrFile of dirs) {
     if (isExecutableFile(dirOrFile, platform)) {
       const name = basename(dirOrFile)
@@ -138,13 +151,13 @@ function findInInstallDirs(
         commands.find((candidate) => name.toLowerCase().startsWith(candidate.toLowerCase())) ??
         commands[0] ??
         name
-      return { command, path: safeRealpath(dirOrFile) }
+      return { command, ...executableEntry(dirOrFile) }
     }
     for (const command of commands) {
       for (const name of candidateNames(command, platform, env)) {
         const candidate = join(dirOrFile, name)
         if (isExecutableFile(candidate, platform)) {
-          return { command, path: safeRealpath(candidate) }
+          return { command, ...executableEntry(candidate) }
         }
       }
     }
@@ -167,11 +180,19 @@ function installationId(
   provider: SupportedCoreCode,
   source: ProviderInstallationSource,
   invocation: CommandInvocation,
-  resolvedPath: string
+  resolvedPath: string,
+  canonicalPath: string
 ): string {
   const digest = createHash('sha256')
     .update(
-      [provider, source, resolvedPath, invocation.executable, ...invocation.prefixArgs].join('\0')
+      [
+        provider,
+        source,
+        resolvedPath,
+        canonicalPath,
+        invocation.executable,
+        ...invocation.prefixArgs
+      ].join('\0')
     )
     .digest('hex')
     .slice(0, 20)
@@ -183,12 +204,14 @@ function createInstallation(input: {
   source: ProviderInstallationSource
   command: string
   resolvedPath: string
+  canonicalPath: string
   platform: NodeJS.Platform
 }): ProviderInstallation {
   const resolvedPath = normalize(input.resolvedPath)
+  const canonicalPath = normalize(input.canonicalPath)
   const invocation = invocationFor(resolvedPath, input.platform)
   return Object.freeze({
-    id: installationId(input.provider, input.source, invocation, resolvedPath),
+    id: installationId(input.provider, input.source, invocation, resolvedPath, canonicalPath),
     provider: input.provider,
     command: input.command,
     source: input.source,
@@ -196,7 +219,8 @@ function createInstallation(input: {
       executable: invocation.executable,
       prefixArgs: Object.freeze([...invocation.prefixArgs])
     }),
-    resolvedPath
+    resolvedPath,
+    canonicalPath
   })
 }
 
@@ -210,12 +234,13 @@ export class DefaultProviderInstallationResolver implements ProviderInstallation
     const platform = context.platform ?? process.platform
 
     if (context.settings.executable.mode === 'path') {
-      const resolvedPath = validateConfiguredPath(context.settings.executable.path, platform)
+      const entry = validateConfiguredPath(context.settings.executable.path, platform)
       return createInstallation({
         provider,
         source: 'app-config',
-        command: basename(resolvedPath),
-        resolvedPath,
+        command: basename(entry.path),
+        resolvedPath: entry.path,
+        canonicalPath: entry.canonicalPath,
         platform
       })
     }
@@ -232,6 +257,7 @@ export class DefaultProviderInstallationResolver implements ProviderInstallation
         source: 'install-dir',
         command: fromInstall.command,
         resolvedPath: fromInstall.path,
+        canonicalPath: fromInstall.canonicalPath,
         platform
       })
     }
@@ -243,6 +269,7 @@ export class DefaultProviderInstallationResolver implements ProviderInstallation
       source: 'path',
       command: fromPath.command,
       resolvedPath: fromPath.path,
+      canonicalPath: fromPath.canonicalPath,
       platform
     })
   }

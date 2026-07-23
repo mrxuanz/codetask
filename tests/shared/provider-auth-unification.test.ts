@@ -137,7 +137,8 @@ test('provider auth preflight probes only: no credential writes, no parent env m
           command: process.execPath,
           source: 'app-config',
           invocation: { executable: process.execPath, prefixArgs: [] },
-          resolvedPath: process.execPath
+          resolvedPath: process.execPath,
+          canonicalPath: process.execPath
         }
       })
     } catch {

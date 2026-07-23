@@ -16,9 +16,9 @@ export type CaseManifest = {
   workspaceFixture?: string
   stagedFixture?: string
   /**
-   * Optional worker kill timer. Omit or <=0 (default) to wait until the driver
-   * exits on CodeTask API terminal state. Positive values are for rare harness
-   * probes only — not for normal agent turns/jobs.
+   * Optional overall worker budget.
+   * Omit or <=0 → use staged OpenCode/driver defaults (never infinite).
+   * Positive values shrink stage budgets to fit. Infinite requires `--no-timeout`.
    */
   timeoutMs?: number
   skipReason?: string

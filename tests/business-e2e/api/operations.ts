@@ -139,13 +139,16 @@ export async function getTurn(
     undefined,
     { operationId: 'conversation.get_turn' }
   )
+  if (result.status >= 400) {
+    throw new Error(`turn.get_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
   return { turn: (result.data?.turn ?? {}) as Record<string, unknown> }
 }
 
 /**
  * Poll until CodeTask marks the turn terminal.
- * Pass a positive timeoutMs only for intentional short negative probes;
- * omit / <=0 waits forever for product completion or error.
+ * A positive timeoutMs supports intentional short probes. Omitted / <=0 uses
+ * the harness worker budget, so an unavailable SUT can never poll forever.
  */
 export async function waitTurnTerminal(
   client: PublicApiClient,
@@ -153,16 +156,11 @@ export async function waitTurnTerminal(
   turnId: string,
   timeoutMs?: number
 ): Promise<Record<string, unknown>> {
-  const deadline = typeof timeoutMs === 'number' && timeoutMs > 0 ? Date.now() + timeoutMs : null
-  for (;;) {
-    const { turn } = await getTurn(client, threadId, turnId)
-    const status = String(turn.status ?? '')
-    if (['completed', 'failed', 'cancelled'].includes(status)) return turn
-    if (deadline !== null && Date.now() >= deadline) {
-      throw new Error(`timeout:turn_${turnId}`)
-    }
-    await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.turnPollMs))
-  }
+  return pollTerminal(
+    async () => (await getTurn(client, threadId, turnId)).turn,
+    `turn_${turnId}`,
+    timeoutMs
+  )
 }
 
 export async function listMessages(
@@ -345,8 +343,8 @@ export async function getTaskEvidence(
 
 /**
  * Poll until CodeTask marks the job terminal.
- * Pass a positive timeoutMs only for intentional short negative probes;
- * omit / <=0 waits forever for product completion or error.
+ * A positive timeoutMs supports intentional short probes. Omitted / <=0 uses
+ * the harness worker budget, so an unavailable SUT can never poll forever.
  */
 export async function waitJobTerminal(
   client: PublicApiClient,
@@ -354,16 +352,52 @@ export async function waitJobTerminal(
   jobId: string,
   timeoutMs?: number
 ): Promise<Record<string, unknown>> {
-  const deadline = typeof timeoutMs === 'number' && timeoutMs > 0 ? Date.now() + timeoutMs : null
+  return pollTerminal(() => getJob(client, threadId, jobId), `job_${jobId}`, timeoutMs)
+}
+
+async function pollTerminal(
+  load: () => Promise<Record<string, unknown>>,
+  label: string,
+  timeoutMs?: number
+): Promise<Record<string, unknown>> {
+  const budget = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : TIMEOUTS.caseWorkerMs
+  const deadline = Date.now() + budget
+  let lastTransientError: unknown
   for (;;) {
-    const job = await getJob(client, threadId, jobId)
-    const status = String(job.status ?? '')
-    if (['completed', 'failed', 'cancelled'].includes(status)) return job
-    if (deadline !== null && Date.now() >= deadline) {
-      throw new Error(`timeout:job_${jobId}`)
+    try {
+      const entity = await load()
+      const status = String(entity.status ?? '')
+      if (['completed', 'failed', 'cancelled'].includes(status)) return entity
+      lastTransientError = undefined
+    } catch (error) {
+      if (!isTransientPollError(error)) throw error
+      lastTransientError = error
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `timeout:${label}${lastTransientError ? `:${formatPollError(lastTransientError)}` : ''}`
+      )
     }
     await new Promise((resolve) => setTimeout(resolve, TIMEOUTS.turnPollMs))
   }
+}
+
+function isTransientPollError(error: unknown): boolean {
+  const text = formatPollError(error).toLowerCase()
+  return /fetch failed|econnreset|econnrefused|etimedout|socket|network|aborterror/.test(text)
+}
+
+function formatPollError(error: unknown): string {
+  if (error instanceof Error) {
+    const cause =
+      error.cause instanceof Error
+        ? `:${error.cause.name}:${error.cause.message}`
+        : error.cause
+          ? `:${String(error.cause)}`
+          : ''
+    return `${error.name}:${error.message}${cause}`
+  }
+  return String(error)
 }
 
 export async function updateDraft(

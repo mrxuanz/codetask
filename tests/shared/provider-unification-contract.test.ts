@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -16,6 +24,7 @@ import {
   DefaultProviderInstallationResolver,
   ProviderInstallationError
 } from '../../src/server/providers/installation.ts'
+import { spawnProviderCommandSync } from '../../src/server/providers/spawn.ts'
 
 test('provider aliases normalize from one shared source', () => {
   assert.equal(normalizeProviderCode(' CLAUDE_CODE '), 'claude-code')
@@ -174,7 +183,9 @@ test('resolver returns stable IDs for explicit POSIX executables', () => {
     assert.ok(second)
     assert.equal(first.id, second.id)
     assert.equal(first.source, 'app-config')
-    assert.equal(first.invocation.executable, realpathSync(path))
+    assert.equal(first.resolvedPath, path)
+    assert.equal(first.invocation.executable, path)
+    assert.equal(first.canonicalPath, realpathSync(path))
     assert.deepEqual(first.invocation.prefixArgs, [])
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -193,15 +204,119 @@ test('Windows PATH resolution represents cmd shims without shell strings', () =>
         executable: { mode: 'auto' },
         approveMcps: true
       },
-      hostEnv: { PATH: root, PATHEXT: '.EXE;.CMD' },
+      hostEnv: { Path: root, PATHEXT: '.EXE;.CMD' },
       platform: 'win32',
       installDirs: []
     })
     assert.ok(installation)
-    assert.equal(installation.resolvedPath.toLowerCase(), realpathSync(path).toLowerCase())
-    assert.equal(installation.invocation.executable.toLowerCase(), realpathSync(path).toLowerCase())
+    assert.equal(installation.resolvedPath.toLowerCase(), path.toLowerCase())
+    assert.equal(installation.invocation.executable.toLowerCase(), path.toLowerCase())
+    assert.equal(installation.canonicalPath.toLowerCase(), realpathSync(path).toLowerCase())
     assert.deepEqual(installation.invocation.prefixArgs, [])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('configured Windows PowerShell shims use a structured invocation', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cctask-provider-resolver-ps1-'))
+  const path = join(root, 'opencode.ps1')
+  writeFileSync(path, 'exit 0\r\n')
+  const resolver = new DefaultProviderInstallationResolver()
+  try {
+    const installation = resolver.resolve('opencode', {
+      settings: {
+        enabled: true,
+        executable: { mode: 'path', path },
+        approveMcps: false
+      },
+      hostEnv: {},
+      platform: 'win32',
+      installDirs: []
+    })
+    assert.ok(installation)
+    assert.equal(installation.resolvedPath, path)
+    assert.equal(installation.canonicalPath, realpathSync(path))
+    assert.deepEqual(installation.invocation, {
+      executable: 'powershell.exe',
+      prefixArgs: ['-NoProfile', '-NonInteractive', '-File', path]
+    })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test(
+  'PATH resolution preserves a symlink shim as argv0 while retaining canonical metadata',
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'cctask-provider-resolver-shim-'))
+    const shim = join(root, 'provider-dispatcher')
+    const entry = join(root, 'opencode')
+    writeFileSync(
+      shim,
+      '#!/bin/sh\nif [ "${0##*/}" = "opencode" ]; then printf "shim-ok"; exit 0; fi\nexit 41\n'
+    )
+    chmodSync(shim, 0o755)
+    symlinkSync(shim, entry)
+    const resolver = new DefaultProviderInstallationResolver()
+
+    try {
+      const installation = resolver.resolve('opencode', {
+        settings: {
+          enabled: true,
+          executable: { mode: 'auto' },
+          approveMcps: false
+        },
+        hostEnv: { PATH: root },
+        platform: process.platform,
+        installDirs: []
+      })
+      assert.ok(installation)
+      assert.equal(installation.resolvedPath, entry)
+      assert.equal(installation.invocation.executable, entry)
+      assert.equal(installation.canonicalPath, realpathSync(shim))
+
+      const result = spawnProviderCommandSync(installation.invocation, [], {
+        cwd: root,
+        env: { PATH: root }
+      })
+      assert.equal(result.status, 0)
+      assert.equal(result.stdout, 'shim-ok')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+)
+
+test(
+  'configured symlink paths remain launch entries instead of canonical targets',
+  { skip: process.platform === 'win32' },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'cctask-provider-configured-shim-'))
+    const target = join(root, 'dispatcher')
+    const entry = join(root, 'codex')
+    writeFileSync(target, '#!/bin/sh\nexit 0\n')
+    chmodSync(target, 0o755)
+    symlinkSync(target, entry)
+    const resolver = new DefaultProviderInstallationResolver()
+
+    try {
+      const installation = resolver.resolve('codex', {
+        settings: {
+          enabled: true,
+          executable: { mode: 'path', path: entry },
+          approveMcps: false
+        },
+        hostEnv: {},
+        platform: process.platform
+      })
+      assert.ok(installation)
+      assert.equal(installation.resolvedPath, entry)
+      assert.equal(installation.invocation.executable, entry)
+      assert.equal(installation.canonicalPath, realpathSync(target))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+)

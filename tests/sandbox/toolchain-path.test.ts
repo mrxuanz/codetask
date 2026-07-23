@@ -10,9 +10,9 @@ import {
   resolveHostNodeBinDirs
 } from '../../src/server/sandbox/toolchain-path'
 
-function createExecutableNode(binDir: string): string {
+function createExecutableNode(binDir: string, name = 'node'): string {
   mkdirSync(binDir, { recursive: true })
-  const nodePath = join(binDir, 'node')
+  const nodePath = join(binDir, name)
   writeFileSync(nodePath, '#!/bin/sh\nexit 0\n', 'utf8')
   chmodSync(nodePath, 0o755)
   return nodePath
@@ -26,7 +26,6 @@ test('runtime Node directory is prepended and PATH entries remain deduplicated',
     const augmented = augmentPathWithHostNode(`${binDir}:/usr/bin`, {
       env: {},
       execPath: nodePath,
-      hostHome: join(root, 'home'),
       platform: 'linux'
     })
     assert.deepEqual(augmented.split(':'), [realpathSync.native(binDir), '/usr/bin'])
@@ -35,22 +34,39 @@ test('runtime Node directory is prepended and PATH entries remain deduplicated',
   }
 })
 
-test('discovers Volta Node from the host profile when inherited PATH omits it', () => {
-  const home = mkdtempSync(join(tmpdir(), 'codetask-volta-home-'))
-  const voltaBin = join(home, '.volta', 'bin')
-  createExecutableNode(voltaBin)
+test('discovers Node from an arbitrary manager directory already present on host PATH', () => {
+  const home = mkdtempSync(join(tmpdir(), 'codetask-toolchain-home-'))
+  const managerBin = join(home, 'future-manager', 'shims')
+  createExecutableNode(managerBin)
   try {
     assert.deepEqual(
       resolveHostNodeBinDirs({
-        env: {},
+        env: { PATH: managerBin },
         execPath: join(home, 'missing-runtime'),
-        hostHome: home,
         platform: 'linux'
       }),
-      [realpathSync.native(voltaBin)]
+      [realpathSync.native(managerBin)]
     )
   } finally {
     rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('Windows discovery accepts case-insensitive Path and a node.exe entry', () => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-windows-node-path-'))
+  const managerBin = join(root, 'future-manager', 'bin')
+  createExecutableNode(managerBin, 'node.exe')
+  try {
+    assert.deepEqual(
+      resolveHostNodeBinDirs({
+        env: { Path: managerBin },
+        execPath: join(root, 'missing-runtime.exe'),
+        platform: 'win32'
+      }),
+      [realpathSync.native(managerBin)]
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
 
@@ -64,14 +80,18 @@ test('sandbox worker PATH always exposes the Node runtime that launched CodeTask
   }
 })
 
-test('sandbox policy grants read access to discovered host Volta binaries', () => {
-  const home = mkdtempSync(join(tmpdir(), 'codetask-provider-volta-'))
-  const voltaBin = join(home, '.volta', 'bin')
-  createExecutableNode(voltaBin)
+test('sandbox policy grants read access to a generic PATH toolchain container', () => {
+  const home = mkdtempSync(join(tmpdir(), 'codetask-provider-toolchain-'))
+  const managerRoot = join(home, 'future-manager')
+  const managerBin = join(managerRoot, 'bin')
+  createExecutableNode(managerBin)
   try {
-    const roots = resolveProviderReadRoots('claude-code', Object.freeze({ HOME: home, PATH: '' }))
-    assert.ok(roots.includes(realpathSync.native(voltaBin)))
-    assert.ok(roots.includes(realpathSync.native(join(home, '.volta'))))
+    const roots = resolveProviderReadRoots(
+      'claude-code',
+      Object.freeze({ HOME: home, PATH: managerBin })
+    )
+    assert.ok(roots.includes(realpathSync.native(managerBin)))
+    assert.ok(roots.includes(realpathSync.native(managerRoot)))
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

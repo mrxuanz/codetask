@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ProcessRegistry } from './process-registry'
 import { writeJson } from './run-layout'
+import { resolveCaseWorkerBudget } from '../config/timeouts'
 
 export type CaseWorkerInput = {
   caseId: string
@@ -16,6 +17,8 @@ export type CaseWorkerInput = {
   skillPaths: string[]
   fixturePath?: string
   timeoutMs: number
+  /** Explicit infinite mode (`--no-timeout`). Forbidden in CI. */
+  noTimeout?: boolean
   resultPath: string
   /** Selected SUT conversation SDK / core used for thread creation and HTML naming. */
   conversationCore: string
@@ -72,10 +75,14 @@ export async function runCaseWorker(
   child.stdout.on('data', (chunk) => forward(process.stdout, chunk))
   child.stderr.on('data', (chunk) => forward(process.stderr, chunk))
 
+  const workerBudget = resolveCaseWorkerBudget({
+    timeoutMs: input.timeoutMs,
+    noTimeout: input.noTimeout
+  })
+
   const exitCode: number | null = await new Promise((resolve) => {
-    // timeoutMs <= 0 means no worker kill timer — wait until the driver exits on API state.
     const timer =
-      input.timeoutMs > 0
+      Number.isFinite(workerBudget) && workerBudget > 0 && workerBudget < Number.MAX_SAFE_INTEGER
         ? setTimeout(() => {
             try {
               if (child.pid) options.registry.stopExact(child.pid)
@@ -83,7 +90,7 @@ export async function runCaseWorker(
               /* ignore */
             }
             resolve(null)
-          }, input.timeoutMs + 5_000)
+          }, workerBudget + 5_000)
         : null
     child.on('exit', (code) => {
       if (timer) clearTimeout(timer)

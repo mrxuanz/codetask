@@ -18,8 +18,17 @@ export function progress(scope: string, step: string, detail?: unknown): void {
       : typeof detail === 'string'
         ? ` ${detail}`
         : ` ${compactDetail(detail)}`
-  const line = `[${tBanner()}] ${scopeLabel} · ${stepLabel}${suffix}`
+  const line = `[${tBanner()}][${localStamp()}] ${scopeLabel} · ${stepLabel}${suffix}`
   process.stdout.write(`${line}\n`)
+}
+
+/** Local wall clock for live logs, e.g. `0723-21.13`. */
+export function localStamp(now: Date = new Date()): string {
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mi = String(now.getMinutes()).padStart(2, '0')
+  return `${mm}${dd}-${hh}.${mi}`
 }
 
 function humanizeScope(scope: string): string {

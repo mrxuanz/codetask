@@ -9,6 +9,7 @@ import { resolveDataDirSelection } from './data-dir'
 import { discoverRunningService } from './service-discovery'
 import { createElectronServerPlatform } from './electron-server-platform'
 import { createShutdownSignalHandler } from './shutdown-signal'
+import { initializeProcessHostEnvironment } from '../server/host-environment'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
 
@@ -108,6 +109,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
+    await initializeProcessHostEnvironment()
     if (cli.mode === 'desktop') {
       const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
       serverInfo = await discoverRunningService(

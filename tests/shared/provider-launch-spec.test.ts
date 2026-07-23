@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, realpathSync, writeFileSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -30,7 +30,7 @@ test('buildLaunchSpec resolves typed executable path and preserves explicit args
         approveMcps: false
       }
     })
-    assert.equal(spec.executable, realpathSync(bin))
+    assert.equal(spec.executable, bin)
     assert.deepEqual(spec.args, ['exec'])
     assert.equal(spec.cwd, cwd)
     assert.equal('CODETASK_CODEX_BIN' in spec.env, false)
@@ -54,7 +54,7 @@ test('buildLaunchSpec redactedSummary never contains secret overlay values', () 
     for (const entry of spec.redactedSummary.envVars) {
       assert.equal('value' in entry, false)
     }
-    assert.equal(spec.executable, realpathSync(bin))
+    assert.equal(spec.executable, bin)
   })
 })
 
