@@ -13,7 +13,16 @@ export interface ProviderInstallation {
   readonly command: string
   readonly source: ProviderInstallationSource
   readonly invocation: CommandInvocation
+  /**
+   * Executable entry selected from PATH or app configuration.
+   * This may be a shim or symlink and must be preserved for process launch.
+   */
   readonly resolvedPath: string
+  /**
+   * Filesystem identity behind `resolvedPath`.
+   * Diagnostic/sandbox metadata only — never use this path as argv[0].
+   */
+  readonly canonicalPath: string
 }
 
 export type ProviderPreflightErrorCode =

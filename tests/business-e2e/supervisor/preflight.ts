@@ -30,7 +30,6 @@ export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: b
   })
 
   killLeftoverBusinessProcesses(runtimeRoot)
-  killLeftoverOpencodeServe()
 
   // Explicit DB wipe first (in case dir delete is partial)
   const dbRemoved = wipeTestDatabases(e2eRoot)
@@ -178,34 +177,6 @@ function killLeftoverBusinessProcesses(runtimeRoot: string): void {
   })
 }
 
-function killLeftoverOpencodeServe(): void {
-  const isOpencodeServe = (commandLine: string): boolean => {
-    const compact = commandLine.toLowerCase().replace(/["']+/g, ' ').replace(/\s+/g, ' ')
-    return compact.includes('opencode') && /\sserve(\s|$)/.test(compact)
-  }
-
-  let signaled = 0
-  for (const row of processListMatching(['opencode', 'opencode.exe'])) {
-    if (!isOpencodeServe(row.commandLine)) continue
-    if (killPid(row.pid, false)) signaled += 1
-  }
-  sleepMs(500)
-  const leftover = processListMatching(['opencode', 'opencode.exe']).filter((row) =>
-    isOpencodeServe(row.commandLine)
-  )
-  for (const row of leftover) {
-    if (killPid(row.pid, true)) signaled += 1
-  }
-  if (leftover.length > 0) sleepMs(300)
-  const remaining = processListMatching(['opencode', 'opencode.exe']).filter((row) =>
-    isOpencodeServe(row.commandLine)
-  ).length
-  progress('supervisor', 'preflight.opencode_serve_cleared', {
-    patternsSignaled: signaled,
-    remaining
-  })
-}
-
 function killProcessesMatching(patterns: string[], force = false): number {
   const selfPid = process.pid
   const parentPid = process.ppid
@@ -293,14 +264,21 @@ function killPid(pid: number, force = false): boolean {
   }
 
   try {
-    process.kill(pid, force ? 'SIGKILL' : 'SIGTERM')
+    // E2E workers are process-group leaders. Signal their group first so
+    // provider descendants cannot survive an interrupted previous run.
+    process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM')
     return true
   } catch {
-    const result = spawnSync('kill', [force ? '-9' : '-TERM', String(pid)], {
-      encoding: 'utf8',
-      stdio: 'ignore'
-    })
-    return (result.status ?? 1) === 0
+    try {
+      process.kill(pid, force ? 'SIGKILL' : 'SIGTERM')
+      return true
+    } catch {
+      const result = spawnSync('kill', [force ? '-9' : '-TERM', String(pid)], {
+        encoding: 'utf8',
+        stdio: 'ignore'
+      })
+      return (result.status ?? 1) === 0
+    }
   }
 }
 
@@ -322,7 +300,6 @@ function clearDirectoryWithRetries(dir: string, runtimeRoot: string): void {
       error: 'EPERM_or_busy'
     })
     killLeftoverBusinessProcesses(runtimeRoot)
-    killLeftoverOpencodeServe()
     sleepMs(300 + attempt * 200)
   }
 }

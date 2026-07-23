@@ -37,7 +37,8 @@ const installation: ProviderInstallation = Object.freeze({
   command: 'agent',
   source: 'path',
   invocation: Object.freeze({ executable: '/bin/agent', prefixArgs: Object.freeze([]) }),
-  resolvedPath: '/bin/agent'
+  resolvedPath: '/bin/agent',
+  canonicalPath: '/bin/agent'
 })
 
 function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
@@ -139,7 +140,8 @@ test('CursorDriver.discover returns a stable installationId matching the resolve
     assert.ok(viaResolver)
     assert.equal(first.id, second.id)
     assert.equal(first.id, viaResolver.installationId)
-    assert.equal(first.resolvedPath, realpathSync(bin))
+    assert.equal(first.resolvedPath, bin)
+    assert.equal(first.canonicalPath, realpathSync(bin))
     assert.equal(first.source, 'app-config')
     assert.equal(first.provider, 'cursorcli')
   } finally {
@@ -165,7 +167,8 @@ test('CursorDriver.discover keeps Windows .cmd shim prefixArgs empty and stable 
       installDirs: []
     })
     assert.ok(installation)
-    assert.equal(installation.invocation.executable, realpathSync(cmd))
+    assert.equal(installation.invocation.executable, cmd)
+    assert.equal(installation.canonicalPath, realpathSync(cmd))
     assert.deepEqual([...installation.invocation.prefixArgs], [])
 
     const driver = new CursorDriver(settings)
@@ -254,7 +257,7 @@ test('detect installation path is passed into ACP spawn plan with same installat
 
     assert.equal(plan.installationId, discovered.id)
     assert.equal(plan.executable, discovered.invocation.executable)
-    assert.equal(plan.executable, realpathSync(bin))
+    assert.equal(plan.executable, bin)
     assert.deepEqual(plan.cliArgs.slice(0, 2), ['-e', 'https://cursor.example/api'])
     assert.ok(plan.cliArgs.includes('acp'))
 

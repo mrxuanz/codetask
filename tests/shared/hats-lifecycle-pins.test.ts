@@ -11,7 +11,8 @@ const TEST_CODEX_INSTALLATION = {
   command: process.execPath,
   source: 'app-config' as const,
   invocation: { executable: process.execPath, prefixArgs: [] },
-  resolvedPath: process.execPath
+  resolvedPath: process.execPath,
+  canonicalPath: process.execPath
 }
 
 function readSource(...segments: string[]): string {

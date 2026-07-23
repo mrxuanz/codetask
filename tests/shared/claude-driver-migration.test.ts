@@ -33,7 +33,8 @@ const installation: ProviderInstallation = Object.freeze({
   command: 'claude',
   source: 'path',
   invocation: Object.freeze({ executable: '/bin/claude', prefixArgs: Object.freeze([]) }),
-  resolvedPath: '/bin/claude'
+  resolvedPath: '/bin/claude',
+  canonicalPath: '/bin/claude'
 })
 
 function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
@@ -135,7 +136,8 @@ test('ClaudeDriver.discover returns a stable installationId matching the resolve
     assert.ok(viaResolver)
     assert.equal(first.id, second.id)
     assert.equal(first.id, viaResolver.installationId)
-    assert.equal(first.resolvedPath, realpathSync(bin))
+    assert.equal(first.resolvedPath, bin)
+    assert.equal(first.canonicalPath, realpathSync(bin))
     assert.equal(first.source, 'app-config')
     assert.equal(first.provider, 'claude-code')
   } finally {
@@ -203,7 +205,7 @@ test('detect installation path is passed as pathToClaudeCodeExecutable with same
 
     assert.equal(plan.installationId, discovered.id)
     assert.equal(plan.pathToClaudeCodeExecutable, discovered.invocation.executable)
-    assert.equal(plan.pathToClaudeCodeExecutable, realpathSync(bin))
+    assert.equal(plan.pathToClaudeCodeExecutable, bin)
 
     const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/claude-sdk.ts'), 'utf8')
     assert.match(sdk, /pathToClaudeCodeExecutable:\s*plan\.pathToClaudeCodeExecutable/)

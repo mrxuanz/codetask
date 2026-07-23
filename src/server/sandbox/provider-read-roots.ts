@@ -1,47 +1,10 @@
-import { execFileSync } from 'child_process'
-import { dirname, normalize, parse, sep } from 'path'
+import { dirname, normalize, parse } from 'path'
 import { existsSync, realpathSync, statSync } from 'fs'
 import type { SupportedCoreCode } from '../conversation/cores'
-import { resolveProviderExecutable } from '../providers/executable'
 import { getProviderRegistry } from '../providers/access'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../host-environment'
-import { resolveHostNodeBinDirs } from './toolchain-path'
-
-const TOOL_HOME_ENV_KEYS = ['VOLTA_HOME', 'NVM_SYMLINK'] as const
-
-function whereNode(hostEnvironment: HostEnvironmentSnapshot): string[] {
-  if (process.platform === 'win32') {
-    try {
-      const output = execFileSync('where', ['node'], {
-        encoding: 'utf8',
-        env: { ...hostEnvironment },
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'ignore']
-      })
-      return output
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    } catch {
-      return []
-    }
-  }
-
-  try {
-    const output = execFileSync('which', ['node'], {
-      encoding: 'utf8',
-      env: { ...hostEnvironment },
-      stdio: ['ignore', 'pipe', 'ignore']
-    })
-    const line = output.trim()
-    return line ? [line] : []
-  } catch {
-    return []
-  }
-}
+import { providerInstallationResolver } from '../providers/installation'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
+import { resolveHostNodeBinDirs, resolveToolchainContainerRoot } from './toolchain-path'
 
 function safeRealpath(path: string): string {
   try {
@@ -64,22 +27,6 @@ function existingDirectoryFor(path: string): string | null {
   } catch {
     return null
   }
-}
-
-function ancestorNamed(path: string, segment: string): string | null {
-  const normalized = normalize(path)
-  const parsed = parse(normalized)
-  const parts = normalized
-    .slice(parsed.root.length)
-    .split(/[\\/]+/)
-    .filter(Boolean)
-  const expected = segment.toLowerCase()
-  const index = parts.findIndex((part) => {
-    const candidate = part.toLowerCase()
-    return candidate === expected || candidate === `.${expected}`
-  })
-  if (index === -1) return null
-  return safeRealpath(`${parsed.root}${parts.slice(0, index + 1).join(sep)}`)
 }
 
 function isSafeReadRoot(path: string): boolean {
@@ -111,22 +58,11 @@ export function resolveHostToolchainReadRoots(
 ): string[] {
   const roots = new Map<string, string>()
 
-  for (const candidate of whereNode(hostEnvironment)) {
-    const dir = existingDirectoryFor(candidate)
-    addRoot(roots, dir)
-    addRoot(roots, dir ? ancestorNamed(dir, 'Volta') : null)
-  }
-
-  for (const key of TOOL_HOME_ENV_KEYS) {
-    addRoot(roots, hostEnvironment[key])
-  }
-  const hostHome = hostEnvironment.HOME ?? hostEnvironment.USERPROFILE
   for (const dir of resolveHostNodeBinDirs({
-    env: hostEnvironment,
-    ...(hostHome ? { hostHome } : {})
+    env: hostEnvironment
   })) {
     addRoot(roots, dir)
-    addRoot(roots, ancestorNamed(dir, 'Volta'))
+    addRoot(roots, resolveToolchainContainerRoot(dir))
   }
 
   return [...roots.values()]
@@ -148,16 +84,18 @@ export function resolveProviderReadRoots(
     addRoot(roots, path)
   }
 
-  // Prefer unified resolver so detect/launch/read-roots share one path.
-  const resolved = resolveProviderExecutable(provider, {
-    env: hostEnvironment,
+  // Prefer unified installation resolution so entry/canonical read roots match launch.
+  const installation = providerInstallationResolver.resolve(provider, {
+    hostEnv: hostEnvironment,
     settings: driver.settings,
     installDirs
   })
-  if (resolved) {
-    const dir = existingDirectoryFor(resolved.executable)
-    addRoot(roots, dir)
-    addRoot(roots, dir ? ancestorNamed(dir, 'Volta') : null)
+  if (installation) {
+    for (const path of [installation.resolvedPath, installation.canonicalPath]) {
+      const dir = existingDirectoryFor(path)
+      addRoot(roots, dir)
+      addRoot(roots, dir ? resolveToolchainContainerRoot(dir) : null)
+    }
   }
 
   for (const dir of installDirs) {

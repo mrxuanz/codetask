@@ -32,6 +32,8 @@ export {
 export type { EnvironmentCompileInput, EnvironmentCompiler } from './environment'
 export {
   processHostEnvironmentSource,
+  initializeProcessHostEnvironment,
+  resolveHostEnvironment,
   processHostAuthSource,
   ProcessHostAuthSource,
   ProcessHostEnvironmentSource
@@ -39,6 +41,8 @@ export {
 export type {
   HostEnvironmentSnapshot,
   HostEnvironmentSource,
+  HostEnvironmentCommandRunner,
+  ResolveHostEnvironmentOptions,
   HostAuthSource,
   HostAuthKeyPresence
 } from '../host-environment'

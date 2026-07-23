@@ -43,9 +43,11 @@ import { startDedicatedServer, type ServerHandle } from './server-process'
 import { runPreflightCleanup } from './preflight'
 import { assertWorkspaceCopied, copyFixtureWorkspace } from './workspace-copy'
 import type { FixturePhaseState } from '../mcp/capabilities'
-import { progress } from '../reports/progress'
+import { localStamp, progress } from '../reports/progress'
 import { setLang, tFailure, tSuccess } from '../i18n'
 import { htmlFileNameForConversationCore } from '../config/sdk-html'
+import { assertNoTimeoutAllowed } from '../config/timeouts'
+import { runOpencodeCanary, type OpencodeCanaryResult } from '../drivers/opencode-canary'
 
 function readFlag(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name)
@@ -74,9 +76,17 @@ Examples:
   npm run business:e2e -- --providers codex --part conversation
   npm run business:e2e -- --providers cursor,opencode --case chat-basic --lang en
   npm run business:e2e -- --providers all --suite both
+
+OpenCode driver uses the host OpenCode installation, authentication, and default model.
+
+Timeouts: timeoutMs=0 uses staged defaults (never infinite).
+  --no-timeout enables infinite wait (forbidden when CI=1/true).
 `)
     process.exit(0)
   }
+
+  const noTimeout = hasFlag(argv, '--no-timeout')
+  assertNoTimeoutAllowed(noTimeout)
 
   const providerQueue = resolveProviderQueue({
     providers: readFlag(argv, '--providers'),
@@ -89,7 +99,7 @@ Examples:
     gate: readFlag(argv, '--gate')
   })
   for (const warning of selection.warnings) {
-    console.warn(`[business-e2e] warn · ${warning}`)
+    console.warn(`[business-e2e][${localStamp()}] warn · ${warning}`)
   }
   const caseIds =
     selection.legacyGate != null
@@ -97,6 +107,9 @@ Examples:
       : selection.caseIds.length > 0
         ? selection.caseIds
         : resolveCaseIds({})
+  if (caseIds.length === 0) {
+    throw new Error('business_e2e_selection_empty:use --list for valid cases, parts, and suites')
+  }
   const keepRuntime =
     hasFlag(argv, '--keep-runtime') || process.env.BUSINESS_E2E_KEEP_RUNTIME === '1'
   const runStartedAt = new Date().toISOString()
@@ -177,6 +190,18 @@ Examples:
       })
     }
 
+    const needsOpencodeDriver = caseIds.some((id) => MANIFESTS[id]?.driver === 'opencode')
+    let opencodeCanary: OpencodeCanaryResult | null = null
+    if (needsOpencodeDriver && mcp) {
+      const canaryWorkspace = join(runRoot, 'canary-workspace')
+      mkdirSync(canaryWorkspace, { recursive: true })
+      writeFileSync(join(canaryWorkspace, 'README.md'), 'business-e2e opencode canary\n', 'utf8')
+      opencodeCanary = await runOpencodeCanary({
+        mcpUrl: mcp.url,
+        workspaceRoot: canaryWorkspace
+      })
+    }
+
     for (const slot of providerQueue) {
       const profile = slot.profile
       if (slot.skipReason) {
@@ -249,6 +274,37 @@ Examples:
           continue
         }
 
+        if (manifest.driver === 'opencode' && opencodeCanary && !opencodeCanary.ok) {
+          report = {
+            runId,
+            caseRunId,
+            caseId: id,
+            driverProvider: profile.driverProvider,
+            roleProviders: profile.roleProviders,
+            agentReportedCompleted: false,
+            requiredOperationsObserved: false,
+            oraclePassed: false,
+            noProcessLeak: true,
+            classification: opencodeCanary.classification ?? 'provider_unavailable',
+            summary: `opencode_canary_failed:${opencodeCanary.error ?? 'unknown'}`,
+            durationMs: Date.now() - started,
+            serverPid: server?.pid,
+            error: opencodeCanary.error
+          }
+          progress(scope, 'case.skipped', {
+            reason: 'opencode_canary_failed',
+            classification: report.classification,
+            error: opencodeCanary.error
+          })
+          caseSummaries.push({
+            caseId: `${labelForCaseId(id)}/${slot.alias}`,
+            classification: report.classification
+          })
+          failed += 1
+          reports.writeCase(report)
+          continue
+        }
+
         try {
           if (!server || !isAlive(server.pid)) {
             throw Object.assign(new Error('sut_crash'), { classification: 'sut_crash' })
@@ -268,7 +324,8 @@ Examples:
             ledger,
             registry,
             probeMcpUrl: settingsProbe?.url,
-            probeMcpName: settingsProbe?.name ?? PROBE_SERVER_NAME
+            probeMcpName: settingsProbe?.name ?? PROBE_SERVER_NAME,
+            noTimeout
           })
         } catch (error) {
           const classification = classifyError(error)
@@ -376,6 +433,7 @@ async function executeCase(ctx: {
   registry: ProcessRegistry
   probeMcpUrl?: string
   probeMcpName?: string
+  noTimeout?: boolean
 }): Promise<CaseReport> {
   const {
     manifest,
@@ -390,7 +448,8 @@ async function executeCase(ctx: {
     repoRoot,
     layout,
     probeMcpUrl,
-    probeMcpName
+    probeMcpName,
+    noTimeout
   } = ctx
   const started = Date.now()
   const caseDir = join(layout.cases, caseRunId)
@@ -499,8 +558,9 @@ async function executeCase(ctx: {
   const resultPath = join(caseDir, 'worker-result.json')
   progress(scopeLabelForCaseId(manifest.caseId), 'worker.start', {
     driver: manifest.driver,
-    // <=0: no worker kill timer — wait for driver / CodeTask terminal state.
+    // <=0: use staged defaults (never infinite). Infinite requires --no-timeout.
     timeoutMs: manifest.timeoutMs ?? 0,
+    noTimeout: Boolean(noTimeout),
     ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {})
   })
   const workerResult = await runCaseWorker(
@@ -515,6 +575,7 @@ async function executeCase(ctx: {
       skillPaths: manifest.skills.map((name) => skillPath(repoRoot, name)),
       fixturePath: manifest.fixture ? fixturePath(repoRoot, manifest.fixture) : undefined,
       timeoutMs: manifest.timeoutMs ?? 0,
+      noTimeout,
       resultPath,
       conversationCore,
       expectedHtmlFile,
