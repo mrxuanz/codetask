@@ -146,9 +146,9 @@ export async function getTurn(
 }
 
 /**
- * Poll until CodeTask marks the turn terminal.
- * A positive timeoutMs supports intentional short probes. Omitted / <=0 uses
- * the harness worker budget, so an unavailable SUT can never poll forever.
+ * Poll until CodeTask marks the turn terminal (completed|failed|cancelled).
+ * Omit timeoutMs (or pass <=0) to wait for the business API forever.
+ * Pass a positive timeoutMs only for intentional short negative probes.
  */
 export async function waitTurnTerminal(
   client: PublicApiClient,
@@ -342,9 +342,9 @@ export async function getTaskEvidence(
 }
 
 /**
- * Poll until CodeTask marks the job terminal.
- * A positive timeoutMs supports intentional short probes. Omitted / <=0 uses
- * the harness worker budget, so an unavailable SUT can never poll forever.
+ * Poll until CodeTask marks the job terminal (completed|failed|cancelled).
+ * Omit timeoutMs (or pass <=0) to wait for the business API forever.
+ * Pass a positive timeoutMs only for intentional short negative probes.
  */
 export async function waitJobTerminal(
   client: PublicApiClient,
@@ -360,8 +360,8 @@ async function pollTerminal(
   label: string,
   timeoutMs?: number
 ): Promise<Record<string, unknown>> {
-  const budget = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : TIMEOUTS.caseWorkerMs
-  const deadline = Date.now() + budget
+  const hasDeadline = typeof timeoutMs === 'number' && timeoutMs > 0
+  const deadline = hasDeadline ? Date.now() + timeoutMs : Number.POSITIVE_INFINITY
   let lastTransientError: unknown
   for (;;) {
     try {

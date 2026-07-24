@@ -110,19 +110,20 @@ test('classifyDriverCatchError maps agent_no_report and mcp failures', () => {
   )
 })
 
-test('timeoutMs 0 resolves to staged defaults (never infinite)', () => {
+test('timeoutMs 0 keeps finite OpenCode stages but unbounded workerMs', () => {
   const budgets = resolveOpencodeBudgets({ timeoutMs: 0 })
   assert.equal(budgets.noTimeout, false)
   assert.equal(budgets.startupMs, TIMEOUTS.agentStartupMs)
   assert.equal(budgets.promptMs, TIMEOUTS.opencodePromptMs)
   assert.equal(budgets.capabilityReportMs, TIMEOUTS.capabilityReportMs)
-  assert.equal(budgets.workerMs, TIMEOUTS.caseWorkerMs)
+  assert.equal(budgets.workerMs, Number.MAX_SAFE_INTEGER)
   assert.ok(Number.isFinite(budgets.capabilityReportMs))
   assert.ok(budgets.capabilityReportMs <= 30_000)
 })
 
-test('every case worker receives a finite default budget', () => {
-  assert.equal(resolveCaseWorkerBudget({ timeoutMs: 0 }), TIMEOUTS.caseWorkerMs)
+test('case worker default budget is unbounded (business API terminal)', () => {
+  assert.equal(resolveCaseWorkerBudget({ timeoutMs: 0 }), Number.MAX_SAFE_INTEGER)
+  assert.equal(resolveCaseWorkerBudget({}), Number.MAX_SAFE_INTEGER)
   assert.equal(resolveCaseWorkerBudget({ timeoutMs: 12_345 }), 12_345)
   assert.equal(resolveCaseWorkerBudget({ timeoutMs: 0, noTimeout: true }), Number.MAX_SAFE_INTEGER)
 })

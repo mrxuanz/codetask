@@ -79,8 +79,10 @@ Examples:
 
 OpenCode driver uses the host OpenCode installation, authentication, and default model.
 
-Timeouts: timeoutMs=0 uses staged defaults (never infinite).
-  --no-timeout enables infinite wait (forbidden when CI=1/true).
+Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
+  (completed|failed|cancelled). Case workers are not wall-clock-killed by default.
+  OpenCode startup/prompt/report stages stay finite unless --no-timeout
+  (forbidden when CI=1/true). Positive timeoutMs is for short probes / overall caps.
 `)
     process.exit(0)
   }
@@ -124,10 +126,11 @@ Timeouts: timeoutMs=0 uses staged defaults (never infinite).
       core: p.core,
       skip: p.skipReason ?? null
     })),
-    阶段: selection.part?.map(labelForPart) ?? null,
-    套件: selection.suite,
-    用例: caseIds.map((id) => scopeLabelForCaseId(id)),
-    数量: caseIds.length
+    // Stable English keys; values already go through i18n labels.
+    parts: selection.part?.map(labelForPart) ?? null,
+    suite: selection.suite,
+    cases: caseIds.map((id) => scopeLabelForCaseId(id)),
+    count: caseIds.length
   })
 
   const runId = createRunId()
@@ -558,7 +561,7 @@ async function executeCase(ctx: {
   const resultPath = join(caseDir, 'worker-result.json')
   progress(scopeLabelForCaseId(manifest.caseId), 'worker.start', {
     driver: manifest.driver,
-    // <=0: use staged defaults (never infinite). Infinite requires --no-timeout.
+    // <=0: unbounded case wait (business API terminal). Positive = explicit ceiling.
     timeoutMs: manifest.timeoutMs ?? 0,
     noTimeout: Boolean(noTimeout),
     ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {})

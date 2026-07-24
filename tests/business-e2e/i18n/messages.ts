@@ -13,6 +13,8 @@ export type MessageBag = {
   parts: Record<string, string>
   cases: Record<string, string>
   steps: Record<string, string>
+  /** Progress detail `note` payloads (not step titles). */
+  notes: Record<string, string>
 }
 
 export const MESSAGES: Record<Lang, MessageBag> = {
@@ -110,7 +112,17 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'settings.mcp.reserved_rejected': '保留名已拒绝',
       'settings.mcp.probe_self_ok': '探针自检通过',
       'settings.mcp.restored': '已恢复MCP设置',
-      'settings.probe.ready': '设置探针就绪'
+      'settings.probe.ready': '设置探针就绪',
+      'opencode.canary.start': 'OpenCode金丝雀开始',
+      'opencode.canary.ok': 'OpenCode金丝雀通过',
+      'opencode.canary.failed': 'OpenCode金丝雀失败'
+    },
+    notes: {
+      'preflight.keep_runtime':
+        '启动仍强制清空测试数据库与.runtime；如需留档请先自行拷贝',
+      'preflight.database_reset_begin': '开始清空业务测试数据库与运行数据',
+      'preflight.database_cleared': '测试数据库已清空',
+      'preflight.runtime_cleared': '已重置运行目录；本次将使用全新空库'
     }
   },
   en: {
@@ -207,7 +219,17 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'settings.mcp.reserved_rejected': 'reserved name rejected',
       'settings.mcp.probe_self_ok': 'probe self-check ok',
       'settings.mcp.restored': 'MCP settings restored',
-      'settings.probe.ready': 'settings probe ready'
+      'settings.probe.ready': 'settings probe ready',
+      'opencode.canary.start': 'OpenCode canary start',
+      'opencode.canary.ok': 'OpenCode canary ok',
+      'opencode.canary.failed': 'OpenCode canary failed'
+    },
+    notes: {
+      'preflight.keep_runtime':
+        'Startup still wipes the test database and .runtime; copy archives before rerun if needed',
+      'preflight.database_reset_begin': 'clearing business-e2e test database and runtime data',
+      'preflight.database_cleared': 'test database cleared',
+      'preflight.runtime_cleared': 'runtime reset; this run uses a fresh empty database'
     }
   },
   ja: {
@@ -304,7 +326,17 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'settings.mcp.reserved_rejected': '予約名拒否',
       'settings.mcp.probe_self_ok': 'プローブ自己検査OK',
       'settings.mcp.restored': 'MCP設定復元',
-      'settings.probe.ready': '設定プローブ準備完了'
+      'settings.probe.ready': '設定プローブ準備完了',
+      'opencode.canary.start': 'OpenCodeカナリア開始',
+      'opencode.canary.ok': 'OpenCodeカナリア成功',
+      'opencode.canary.failed': 'OpenCodeカナリア失敗'
+    },
+    notes: {
+      'preflight.keep_runtime':
+        '起動時はテストDBと.runtimeを強制消去します；残す場合は再実行前にコピーしてください',
+      'preflight.database_reset_begin': '業務e2eのテストDBとランタイムデータを消去開始',
+      'preflight.database_cleared': 'テストDBを消去済み',
+      'preflight.runtime_cleared': 'ランタイムを初期化；今回は空の新規DBを使用'
     }
   }
 }
