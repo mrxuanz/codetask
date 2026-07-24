@@ -9,11 +9,13 @@ export type DriverStartInput = {
   fixture?: Record<string, unknown>
   /**
    * Worker / driver budget.
-   * `<=0` means use staged defaults (never infinite).
-   * Infinite wait requires explicit `noTimeout: true` (`--no-timeout`, forbidden in CI).
+   * `<=0` → unbounded case wait (CodeTask business API terminal); OpenCode
+   * startup/prompt/report stages stay finite.
+   * Positive value → explicit overall ceiling.
+   * `noTimeout: true` unlocks OpenCode stage ceilings (`--no-timeout`, forbidden in CI).
    */
   timeoutMs: number
-  /** Explicit infinite mode for local debugging only. */
+  /** Explicit infinite OpenCode stage ceilings for local debugging only. */
   noTimeout?: boolean
   /** Selected SUT conversation SDK / core for every thread created by this case. */
   conversationCore: string

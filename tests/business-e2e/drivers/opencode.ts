@@ -11,10 +11,11 @@ import { runIsolatedOpencodePrompt, waitForCapabilityReport } from './opencode-p
  * OpenCode SDK driver: one server + one session per case.
  * Injects only the case-scoped Test MCP as a remote MCP server.
  *
- * Staged hard timeouts (see resolveOpencodeBudgets):
- * - startup / prompt / capability-report / worker
- * - `timeoutMs <= 0` uses defaults (never infinite)
- * - infinite only via explicit `noTimeout` (forbidden in CI)
+ * Staged budgets (see resolveOpencodeBudgets):
+ * - startup / prompt / capability-report stay finite by default
+ * - workerMs is unbounded by default (wait for business API / case report)
+ * - positive `timeoutMs` shrinks all stages under one ceiling
+ * - `--no-timeout` unlocks stage ceilings (forbidden in CI)
  */
 export class OpenCodeDriver implements AgentDriver {
   readonly name = 'opencode'

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { tNote } from '../i18n'
 import { progress } from '../reports/progress'
 
 /**
@@ -21,12 +22,12 @@ export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: b
 
   if (options.keepRuntime) {
     progress('supervisor', 'preflight.keep_runtime', {
-      note: '启动仍强制清空测试数据库与.runtime；如需留档请先自行拷贝'
+      note: tNote('preflight.keep_runtime')
     })
   }
 
   progress('supervisor', 'preflight.database_reset_begin', {
-    note: '开始清空业务测试数据库与运行数据'
+    note: tNote('preflight.database_reset_begin')
   })
 
   killLeftoverBusinessProcesses(runtimeRoot)
@@ -35,7 +36,7 @@ export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: b
   const dbRemoved = wipeTestDatabases(e2eRoot)
   progress('supervisor', 'preflight.database_cleared', {
     removed: dbRemoved,
-    note: '测试数据库已清空'
+    note: tNote('preflight.database_cleared')
   })
 
   const cleared: Array<{ path: string; removed: number }> = []
@@ -67,7 +68,7 @@ export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: b
   progress('supervisor', 'preflight.runtime_cleared', {
     path: runtimeRoot,
     cleared,
-    note: '已重置运行目录；本次将使用全新空库'
+    note: tNote('preflight.runtime_cleared')
   })
 }
 

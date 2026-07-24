@@ -17,8 +17,10 @@ export type CaseManifest = {
   stagedFixture?: string
   /**
    * Optional overall worker budget.
-   * Omit or <=0 → use staged OpenCode/driver defaults (never infinite).
-   * Positive values shrink stage budgets to fit. Infinite requires `--no-timeout`.
+   * Omit or <=0 → unbounded case wait for CodeTask business API terminal;
+   * OpenCode startup/prompt/report stages stay finite.
+   * Positive values shrink stage budgets to fit.
+   * `--no-timeout` unlocks OpenCode stage ceilings (forbidden in CI).
    */
   timeoutMs?: number
   skipReason?: string

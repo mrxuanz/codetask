@@ -111,7 +111,7 @@ export const TOOL_DEFS: Array<{
   {
     name: 'codetask_wait_turn',
     description:
-      'Poll until turn reaches a terminal status (completed|failed|cancelled). Omit timeoutMs to wait for CodeTask; pass a positive timeoutMs only for short negative probes.',
+      'Poll until turn reaches a terminal status (completed|failed|cancelled) from the CodeTask business API. Omit timeoutMs to wait indefinitely for that status; pass a positive timeoutMs only for short negative probes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -256,7 +256,7 @@ export const TOOL_DEFS: Array<{
   {
     name: 'codetask_wait_job',
     description:
-      'Poll until job reaches a terminal status (completed|failed|cancelled). Omit timeoutMs to wait for CodeTask; pass a positive timeoutMs only for short negative probes.',
+      'Poll until job reaches a terminal status (completed|failed|cancelled) from the CodeTask business API. Omit timeoutMs to wait indefinitely for that status; pass a positive timeoutMs only for short negative probes.',
     inputSchema: {
       type: 'object',
       properties: {
