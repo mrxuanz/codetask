@@ -218,6 +218,81 @@ test('Windows PATH resolution represents cmd shims without shell strings', () =>
   }
 })
 
+test('Windows PATH ignores an extensionless POSIX shim and selects the PATHEXT launcher', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cctask-provider-resolver-win-npm-shim-'))
+  const unixShim = join(root, 'claude')
+  const cmdShim = join(root, 'claude.cmd')
+  writeFileSync(unixShim, '#!/bin/sh\nexec node cli.js "$@"\n')
+  writeFileSync(cmdShim, '@echo off\r\nnode cli.js %*\r\n')
+  const resolver = new DefaultProviderInstallationResolver()
+  try {
+    const installation = resolver.resolve('claude-code', {
+      settings: {
+        enabled: true,
+        executable: { mode: 'auto' },
+        approveMcps: false
+      },
+      hostEnv: { Path: root, PATHEXT: '.EXE;CMD' },
+      platform: 'win32',
+      installDirs: []
+    })
+    assert.ok(installation)
+    assert.equal(installation.resolvedPath.toLowerCase(), cmdShim.toLowerCase())
+    assert.equal(installation.invocation.executable.toLowerCase(), cmdShim.toLowerCase())
+    assert.notEqual(installation.resolvedPath.toLowerCase(), unixShim.toLowerCase())
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('Windows auto discovery rejects a lone extensionless POSIX shim', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cctask-provider-resolver-win-bare-shim-'))
+  writeFileSync(join(root, 'claude'), '#!/bin/sh\nexit 0\n')
+  const resolver = new DefaultProviderInstallationResolver()
+  try {
+    const installation = resolver.resolve('claude-code', {
+      settings: {
+        enabled: true,
+        executable: { mode: 'auto' },
+        approveMcps: false
+      },
+      hostEnv: { Path: root, PATHEXT: '.EXE;.CMD' },
+      platform: 'win32',
+      installDirs: []
+    })
+    assert.equal(installation, null)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('an explicitly configured Windows extensionless executable remains authoritative', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cctask-provider-resolver-win-explicit-'))
+  const path = join(root, 'claude')
+  writeFileSync(path, 'explicit executable')
+  const resolver = new DefaultProviderInstallationResolver()
+  try {
+    const installation = resolver.resolve('claude-code', {
+      settings: {
+        enabled: true,
+        executable: { mode: 'path', path },
+        approveMcps: false
+      },
+      hostEnv: {},
+      platform: 'win32',
+      installDirs: []
+    })
+    assert.ok(installation)
+    assert.equal(installation.resolvedPath, path)
+    assert.deepEqual(installation.invocation, {
+      executable: path,
+      prefixArgs: []
+    })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('configured Windows PowerShell shims use a structured invocation', () => {
   const root = mkdtempSync(join(tmpdir(), 'cctask-provider-resolver-ps1-'))
   const path = join(root, 'opencode.ps1')
