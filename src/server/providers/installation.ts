@@ -102,10 +102,15 @@ function validateConfiguredPath(path: string, platform: NodeJS.Platform): Execut
 
 function windowsExtensions(env: Readonly<Record<string, string | undefined>>): readonly string[] {
   const raw = pathValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD'
-  return raw
-    .split(';')
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
+  return [
+    ...new Set(
+      raw
+        .split(';')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+        .map((value) => (value.startsWith('.') ? value : `.${value}`))
+    )
+  ]
 }
 
 function candidateNames(
@@ -114,7 +119,20 @@ function candidateNames(
   env: Readonly<Record<string, string | undefined>>
 ): readonly string[] {
   if (platform !== 'win32' || extname(command)) return [command]
-  return [command, ...windowsExtensions(env).map((extension) => `${command}${extension}`)]
+  // Windows command lookup is PATHEXT-based. npm/nvm-style bin directories
+  // commonly contain both an extensionless POSIX shell script and a .cmd
+  // launcher; the bare script is a file but is not a Windows executable.
+  return windowsExtensions(env).map((extension) => `${command}${extension}`)
+}
+
+function isAutomaticExecutableFile(
+  path: string,
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform
+): boolean {
+  if (!isExecutableFile(path, platform)) return false
+  if (platform !== 'win32') return true
+  return windowsExtensions(env).includes(extname(path).toLowerCase())
 }
 
 function findOnPath(
@@ -129,7 +147,7 @@ function findOnPath(
     for (const dir of path.split(separator).filter(Boolean)) {
       for (const name of candidateNames(command, platform, env)) {
         const candidate = join(dir.replace(/^"|"$/g, ''), name)
-        if (isExecutableFile(candidate, platform)) {
+        if (isAutomaticExecutableFile(candidate, env, platform)) {
           return { command, ...executableEntry(candidate) }
         }
       }
@@ -145,7 +163,7 @@ function findInInstallDirs(
   platform: NodeJS.Platform
 ): ({ command: string } & ExecutableEntry) | null {
   for (const dirOrFile of dirs) {
-    if (isExecutableFile(dirOrFile, platform)) {
+    if (isAutomaticExecutableFile(dirOrFile, env, platform)) {
       const name = basename(dirOrFile)
       const command =
         commands.find((candidate) => name.toLowerCase().startsWith(candidate.toLowerCase())) ??
@@ -156,7 +174,7 @@ function findInInstallDirs(
     for (const command of commands) {
       for (const name of candidateNames(command, platform, env)) {
         const candidate = join(dirOrFile, name)
-        if (isExecutableFile(candidate, platform)) {
+        if (isAutomaticExecutableFile(candidate, env, platform)) {
           return { command, ...executableEntry(candidate) }
         }
       }

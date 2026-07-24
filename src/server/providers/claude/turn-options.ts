@@ -12,6 +12,7 @@ import {
 import { buildClaudeMcpServers } from '../../agent-runtime/mcp'
 import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '../../agent-runtime/roles'
 import type { AgentTurnInput } from '../../agent-runtime/types'
+import type { CommandInvocation } from '../../../shared/providers/installation'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import { resolveProviderExecutable } from '../executable'
 
@@ -58,18 +59,24 @@ export function resolveClaudeSettingSources(
 export function resolveClaudePathOverride(input: AgentTurnInput): {
   readonly pathToClaudeCodeExecutable?: string
   readonly installationId?: string
+  readonly executableInvocation?: CommandInvocation
 } {
   if (input.installation) {
     return {
       pathToClaudeCodeExecutable: input.installation.invocation.executable,
-      installationId: input.installation.id
+      installationId: input.installation.id,
+      executableInvocation: input.installation.invocation
     }
   }
   const resolved = resolveProviderExecutable('claude-code')
   if (!resolved) return {}
   return {
     pathToClaudeCodeExecutable: resolved.executable,
-    installationId: resolved.installationId
+    installationId: resolved.installationId,
+    executableInvocation: {
+      executable: resolved.executable,
+      prefixArgs: resolved.prefixArgs
+    }
   }
 }
 
@@ -88,6 +95,7 @@ export interface ClaudeTurnOptionsPlan {
   readonly resume?: string | undefined
   readonly pathToClaudeCodeExecutable?: string | undefined
   readonly installationId?: string | undefined
+  readonly executableInvocation?: CommandInvocation | undefined
 }
 
 /** ClaudeDriver-owned turn options builder (PRU-08-05). */

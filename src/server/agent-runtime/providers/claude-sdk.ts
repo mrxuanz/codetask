@@ -10,6 +10,14 @@ import {
 } from '../turn-scope'
 import { abortReason, createProviderTurnScope, forwardAbortSignal } from '../provider-turn'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
+import {
+  requiresClaudeSdkSpawnGateway,
+  spawnClaudeSdkInvocation
+} from '../../providers/claude/sdk-spawn'
+import type {
+  SpawnOptions as ClaudeSdkSpawnOptions,
+  SpawnedProcess
+} from '@anthropic-ai/claude-agent-sdk'
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
@@ -17,6 +25,12 @@ export async function* streamClaudeTurn(
 ): AsyncGenerator<AgentTurnChunk> {
   const plan = buildClaudeTurnOptions(input, { outerSandbox: options?.outerSandbox })
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
+  const executableInvocation = plan.executableInvocation
+  const spawnClaudeCodeProcess =
+    executableInvocation && requiresClaudeSdkSpawnGateway(executableInvocation)
+      ? (spawnOptions: ClaudeSdkSpawnOptions): SpawnedProcess =>
+          spawnClaudeSdkInvocation(executableInvocation, spawnOptions) as SpawnedProcess
+      : undefined
   let reply = ''
   let thinking = ''
 
@@ -25,6 +39,7 @@ export async function* streamClaudeTurn(
     readOnly: plan.readOnly,
     installationId: plan.installationId,
     pathToClaudeCodeExecutable: plan.pathToClaudeCodeExecutable,
+    structuredSpawn: Boolean(spawnClaudeCodeProcess),
     settingSources: plan.settingSources,
     pinMcpConfig: plan.pinMcpConfig
   })
@@ -56,6 +71,7 @@ export async function* streamClaudeTurn(
       ...(plan.pathToClaudeCodeExecutable
         ? { pathToClaudeCodeExecutable: plan.pathToClaudeCodeExecutable }
         : {}),
+      ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
       ...(plan.pinMcpConfig
         ? {
             mcpServers: plan.mcpServers as NonNullable<
