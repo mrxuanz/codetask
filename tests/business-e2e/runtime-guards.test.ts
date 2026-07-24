@@ -29,6 +29,45 @@ test('terminal polling survives a transient SUT fetch failure', async () => {
   assert.equal(calls, 2)
 })
 
+test('terminal polling without timeoutMs waits until CodeTask API terminal', async () => {
+  let calls = 0
+  const client = {
+    async request() {
+      calls += 1
+      if (calls < 3) {
+        return {
+          status: 200,
+          data: { turn: { id: 'turn-1', status: 'running' } },
+          raw: {}
+        }
+      }
+      return {
+        status: 200,
+        data: { turn: { id: 'turn-1', status: 'completed' } },
+        raw: {}
+      }
+    }
+  } as unknown as PublicApiClient
+
+  const turn = await waitTurnTerminal(client, 'thread-1', 'turn-1')
+  assert.equal(turn.status, 'completed')
+  assert.equal(calls, 3)
+})
+
+test('terminal polling with short timeoutMs still fails for probes', async () => {
+  const client = {
+    async request() {
+      return {
+        status: 200,
+        data: { id: 'job-1', status: 'running' },
+        raw: {}
+      }
+    }
+  } as unknown as PublicApiClient
+
+  await assert.rejects(waitJobTerminal(client, 'thread-1', 'job-1', 50), /timeout:job_job-1/)
+})
+
 test('terminal polling does not hide non-transport API failures', async () => {
   let calls = 0
   const client = {
