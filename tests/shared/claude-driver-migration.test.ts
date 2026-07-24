@@ -24,6 +24,10 @@ import {
   createClaudeStreamFactory
 } from '../../src/server/providers/claude/driver.ts'
 import { buildClaudeTurnOptions } from '../../src/server/providers/claude/turn-options.ts'
+import {
+  buildClaudeSdkCommandInvocation,
+  requiresClaudeSdkSpawnGateway
+} from '../../src/server/providers/claude/sdk-spawn.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -206,12 +210,37 @@ test('detect installation path is passed as pathToClaudeCodeExecutable with same
     assert.equal(plan.installationId, discovered.id)
     assert.equal(plan.pathToClaudeCodeExecutable, discovered.invocation.executable)
     assert.equal(plan.pathToClaudeCodeExecutable, bin)
+    assert.equal(plan.executableInvocation, discovered.invocation)
 
     const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/claude-sdk.ts'), 'utf8')
     assert.match(sdk, /pathToClaudeCodeExecutable:\s*plan\.pathToClaudeCodeExecutable/)
+    assert.match(sdk, /spawnClaudeCodeProcess/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('Claude SDK routes Windows command wrappers through the structured spawn gateway', () => {
+  const cmdInvocation = {
+    executable: 'C:\\nvm4w\\nodejs\\claude.cmd',
+    prefixArgs: [] as string[]
+  }
+  assert.equal(requiresClaudeSdkSpawnGateway(cmdInvocation, 'win32'), true)
+  assert.equal(requiresClaudeSdkSpawnGateway(cmdInvocation, 'linux'), false)
+  assert.deepEqual(buildClaudeSdkCommandInvocation(cmdInvocation, cmdInvocation.executable), {
+    executable: cmdInvocation.executable,
+    prefixArgs: []
+  })
+
+  const powershellInvocation = {
+    executable: 'powershell.exe',
+    prefixArgs: ['-NoProfile', '-NonInteractive', '-File', 'C:\\tools\\claude.ps1']
+  }
+  assert.equal(requiresClaudeSdkSpawnGateway(powershellInvocation, 'win32'), true)
+  assert.deepEqual(buildClaudeSdkCommandInvocation(powershellInvocation, 'powershell.exe'), {
+    executable: 'powershell.exe',
+    prefixArgs: powershellInvocation.prefixArgs
+  })
 })
 
 test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async () => {
