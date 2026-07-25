@@ -17,6 +17,7 @@ export type TurnErrorCode =
   | 'sandbox.worker.busy'
   | 'workspace.busy'
   | 'workspace.lease_lost'
+  | 'workspace.path_invalid'
   | 'runtime.draining'
   | 'sandbox.worker.missing'
   | 'sandbox.required'
@@ -44,6 +45,7 @@ export type TurnErrorCode =
   | 'provider.opencode.server_exited'
   | 'provider.opencode.stream_disconnected'
   | 'provider.opencode.session_error'
+  | 'provider.workspace_mismatch'
   | 'provider.rate_limited'
   | 'provider.capability_unsupported'
   | 'provider.cli_auth_failed'
@@ -175,6 +177,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'workspace.busy': 'Workspace is busy; another task is using this project folder',
   'workspace.lease_lost':
     'Workspace lease is not held by this run; cannot execute without single-writer admission',
+  'workspace.path_invalid': 'Project workspace path is invalid',
   'runtime.draining': 'Runtime is shutting down; try again after restart',
   'sandbox.worker.missing': 'Sandbox worker not available',
   'sandbox.required': 'Sandbox is required for this operation',
@@ -212,6 +215,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'provider.opencode.stream_disconnected':
     'OpenCode stream disconnected before completion (network or HTTP timeout)',
   'provider.opencode.session_error': 'OpenCode session error',
+  'provider.workspace_mismatch': '{provider} session is bound to a different project workspace',
   'provider.rate_limited': 'Rate limited; retry later',
   'provider.capability_unsupported':
     'Selected provider does not support the required capability profile',

@@ -14,6 +14,9 @@ export type CursorPermissionRequestParams = {
 }
 
 export function selectAllowOption(options: Array<{ optionId: string }>): { optionId: string } {
+  const allowOnce = options.find((option) => option.optionId === 'allow-once')
+  if (allowOnce) return allowOnce
+
   const allowAlways = options.find((option) => option.optionId === 'allow-always')
   if (allowAlways) return allowAlways
 
@@ -21,9 +24,6 @@ export function selectAllowOption(options: Array<{ optionId: string }>): { optio
     (option) => option.optionId.includes('always') && /allow|accept|approve/i.test(option.optionId)
   )
   if (allowAlwaysFuzzy) return allowAlwaysFuzzy
-
-  const allowOnce = options.find((option) => option.optionId === 'allow-once')
-  if (allowOnce) return allowOnce
 
   return (
     options.find((option) => /allow|accept|approve/i.test(option.optionId)) ??

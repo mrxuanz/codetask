@@ -19,6 +19,10 @@ import {
   resolveProviderExecutableStrategy,
   type ProviderExecutableStrategy
 } from '../runtime-executable'
+import type {
+  PermissionMode as ClaudePermissionMode,
+  SandboxSettings as ClaudeSandboxSettings
+} from '@anthropic-ai/claude-agent-sdk'
 
 export type ClaudeSettingSource = 'user' | 'project' | 'local'
 
@@ -112,6 +116,9 @@ export interface ClaudeTurnOptionsPlan {
   readonly env: Record<string, string>
   readonly mcpServers: Record<string, unknown>
   readonly pinMcpConfig: boolean
+  readonly permissionMode: ClaudePermissionMode
+  readonly allowDangerouslySkipPermissions: boolean
+  readonly sandbox: ClaudeSandboxSettings
   readonly model?: string | undefined
   readonly resume?: string | undefined
   readonly pathToClaudeCodeExecutable?: string | undefined
@@ -149,6 +156,10 @@ export function buildClaudeTurnOptions(
 
   const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
   const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
+  const nativeWorkspaceSandbox = !outerSandbox && !readOnly
+  const permissionMode: ClaudePermissionMode = nativeWorkspaceSandbox
+    ? 'acceptEdits'
+    : 'bypassPermissions'
 
   return {
     outerSandbox,
@@ -163,6 +174,19 @@ export function buildClaudeTurnOptions(
     env,
     mcpServers,
     pinMcpConfig,
+    permissionMode,
+    allowDangerouslySkipPermissions: permissionMode === 'bypassPermissions',
+    sandbox: nativeWorkspaceSandbox
+      ? {
+          enabled: true,
+          failIfUnavailable: true,
+          allowUnsandboxedCommands: false,
+          autoAllowBashIfSandboxed: true,
+          filesystem: {
+            allowWrite: [input.cwd]
+          }
+        }
+      : { enabled: false },
     ...(input.model !== undefined ? { model: input.model } : {}),
     ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),
     ...pathOverride

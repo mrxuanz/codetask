@@ -22,6 +22,7 @@ test('conversation workspace is writable only with exclusive workspace access', 
   })
   assert.equal(readOnly.filesystem.allowedReadRoots.includes(canonicalWorkspace), true)
   assert.equal(readOnly.filesystem.allowedWriteRoots.includes(canonicalWorkspace), false)
+  assert.equal(readOnly.filesystem.protectedNames.includes('.git'), true)
 
   const writable = policyForRoleV2({
     role: 'conversation',
@@ -30,4 +31,20 @@ test('conversation workspace is writable only with exclusive workspace access', 
     workspaceAccess: 'exclusive-write'
   })
   assert.equal(writable.filesystem.allowedWriteRoots.includes(canonicalWorkspace), true)
+})
+
+test('sandbox policy rejects relative workspace roots instead of resolving process cwd', () => {
+  assert.throws(
+    () =>
+      policyForRoleV2({
+        role: 'task-worker',
+        workspaceRoot: 'relative-workspace',
+        runtimeRoot: 'relative-runtime',
+        workspaceAccess: 'exclusive-write'
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      (error as { code?: string }).code === 'sandbox.path.relative'
+  )
 })

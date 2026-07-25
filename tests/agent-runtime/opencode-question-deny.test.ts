@@ -4,6 +4,7 @@ import {
   OPENCODE_AUTO_QUESTION_GUIDANCE,
   buildOpencodeAutoQuestionAnswers,
   resolveOpencodePermissionConfig,
+  resolveOpencodeSessionPermissionRules,
   resolveOpencodeToolsConfig
 } from '../../src/server/agent-runtime/providers/opencode-config.ts'
 
@@ -11,16 +12,27 @@ describe('OpenCode question policy', () => {
   it('denies interactive question while allowing other tools', () => {
     const permission = resolveOpencodePermissionConfig()
     assert.ok(permission && typeof permission === 'object')
-    const rules = permission as { '*'?: string; question?: string }
+    const rules = permission as {
+      '*'?: string
+      external_directory?: string
+      question?: string
+    }
     assert.equal(rules['*'], 'allow')
+    assert.equal(rules.external_directory, 'deny')
     assert.equal(rules.question, 'deny')
     assert.equal(resolveOpencodeToolsConfig().question, false)
+    const sessionRules = resolveOpencodeSessionPermissionRules()
+    assert.deepEqual(sessionRules.slice(-2), [
+      { permission: 'external_directory', pattern: '*', action: 'deny' },
+      { permission: 'question', pattern: '*', action: 'deny' }
+    ])
   })
 
   it('denies executable tools for read-only capability profiles', () => {
     const permission = resolveOpencodePermissionConfig('planner-read') as Record<string, string>
     const tools = resolveOpencodeToolsConfig('planner-read') as Record<string, boolean>
     assert.equal(permission['*'], 'deny')
+    assert.equal(permission.external_directory, 'deny')
     for (const name of ['read', 'glob', 'grep', 'list', 'lsp']) {
       assert.equal(permission[name], 'allow', name)
       assert.equal(tools[name], true, name)

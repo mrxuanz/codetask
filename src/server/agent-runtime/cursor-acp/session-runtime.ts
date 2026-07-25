@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process'
-import { RequestError, type ActiveSession, type ClientContext } from '@agentclientprotocol/sdk'
+import { RequestError, type ClientContext, type InitializeResponse } from '@agentclientprotocol/sdk'
 import type { ConversationRole } from '../roles'
 import type { CursorAcpMcpServer } from '../mcp'
 import type { AgentTurnChunk } from '../types'
@@ -13,6 +13,7 @@ import {
   bootstrapCursorAcp,
   cancelCursorAcpSession,
   CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS,
+  CursorAcpSessionRouter,
   createChildAcpStream,
   createChildDiagnostics,
   createCodetaskAcpClient,
@@ -22,7 +23,8 @@ import {
   waitForChildExit,
   openCursorAcpSession,
   spawnCursorAcpProcess,
-  type ChildDiagnostics
+  type ChildDiagnostics,
+  type CursorAcpSessionHandle
 } from './acp-shared'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../delta-emit'
 import { assertTaskWorkerAcpCompletion } from './turn-guards'
@@ -57,7 +59,7 @@ type CursorAcpErrorDto = {
   detail?: string
 }
 
-type CursorSessionUpdate = Awaited<ReturnType<ActiveSession['nextUpdate']>>
+type CursorSessionUpdate = Awaited<ReturnType<CursorAcpSessionHandle['nextUpdate']>>
 const CURSOR_ACP_CONNECTION_CLOSE_TIMEOUT_MS = 2_000
 
 async function waitForConnectionClose(connectionDone: Promise<void>): Promise<void> {
@@ -72,10 +74,7 @@ async function waitForConnectionClose(connectionDone: Promise<void>): Promise<vo
   if (timer !== undefined) clearTimeout(timer)
 }
 
-function waitForCursorUpdateOrPrompt(
-  session: ActiveSession,
-  promptPromise: Promise<unknown>
-): Promise<{ kind: 'session-update'; message: CursorSessionUpdate } | { kind: 'prompt-settled' }> {
+function waitForCursorUpdate(session: CursorAcpSessionHandle): Promise<CursorSessionUpdate> {
   return new Promise((resolve, reject) => {
     let settled = false
     const timer = setTimeout(() => {
@@ -97,11 +96,7 @@ function waitForCursorUpdateOrPrompt(
     }
 
     session.nextUpdate().then(
-      (message) => finish(() => resolve({ kind: 'session-update', message })),
-      (error) => finish(() => reject(error))
-    )
-    promptPromise.then(
-      () => finish(() => resolve({ kind: 'prompt-settled' })),
+      (message) => finish(() => resolve(message)),
       (error) => finish(() => reject(error))
     )
   })
@@ -122,9 +117,11 @@ export class CursorAcpSessionRuntime {
   private child: ChildProcess | null = null
   private diagnostics: ChildDiagnostics | null = null
   private ctx: ClientContext | null = null
+  private initialized: InitializeResponse | null = null
+  private readonly sessionRouter = new CursorAcpSessionRouter()
   private closed = false
   private starting: Promise<void> | null = null
-  private activeTaskSession: ActiveSession | null = null
+  private activeTaskSession: CursorAcpSessionHandle | null = null
   private loadedSessionKey: string | null = null
   private promptInFlight = false
   private executable = ''
@@ -193,13 +190,17 @@ export class CursorAcpSessionRuntime {
     this.connectionDone = connectionDone
     this.releaseConnection = releaseConnection
 
-    const app = createCodetaskAcpClient(() => this.closed, this.options.capabilityProfile)
+    const app = createCodetaskAcpClient(
+      () => this.closed,
+      this.options.capabilityProfile,
+      (notification) => this.sessionRouter.route(notification)
+    )
     void app
       .connectWith(createChildAcpStream(child), async (ctx) => {
         this.ctx = ctx
         debugCursor('runtime connected')
         try {
-          await bootstrapCursorAcp(ctx)
+          this.initialized = await bootstrapCursorAcp(ctx)
           debugCursor('runtime authenticated')
           readyResolve()
           await connectionDone
@@ -237,9 +238,10 @@ export class CursorAcpSessionRuntime {
     return `${input.cwd}\0${input.runtimeSessionId ?? ''}\0${mcpSignature}\0${this.options.capabilityProfile}`
   }
 
-  private async openTaskSession(input: CursorPromptInput): Promise<ActiveSession> {
+  private async openTaskSession(input: CursorPromptInput): Promise<CursorAcpSessionHandle> {
     const ctx = this.ctx
-    if (!ctx) {
+    const initialized = this.initialized
+    if (!ctx || !initialized) {
       throw createTurnError('provider.cursor.acp_failed', {
         detail: 'Cursor ACP runtime not connected'
       })
@@ -274,6 +276,8 @@ export class CursorAcpSessionRuntime {
       this.activeTaskSession = null
       const session = await openCursorAcpSession(
         ctx,
+        initialized,
+        this.sessionRouter,
         input.cwd,
         input.runtimeSessionId,
         input.mcpServers
@@ -299,6 +303,8 @@ export class CursorAcpSessionRuntime {
 
     const session = await openCursorAcpSession(
       ctx,
+      initialized,
+      this.sessionRouter,
       input.cwd,
       input.runtimeSessionId,
       input.mcpServers
@@ -457,28 +463,21 @@ export class CursorAcpSessionRuntime {
 
     let reply = ''
     let thinking = ''
-    let promptSettled = false
     let promptSettledError: unknown | null = null
     const openToolIds = new Set<string>()
 
     debugCursor('runtime prompt sending', { promptChars: userPrompt.length })
     const promptPromise = session.prompt(userPrompt).then(
-      (result) => {
-        promptSettled = true
-        return result
-      },
+      (result) => result,
       (error) => {
-        promptSettled = true
         promptSettledError = error
         throw error
       }
     )
 
     const pumpUpdates = async (): Promise<void> => {
-      while (!promptSettled && !aborted) {
-        const next = await turnScope.race(waitForCursorUpdateOrPrompt(session, promptPromise))
-        if (next.kind === 'prompt-settled') break
-        const message = next.message
+      while (!aborted) {
+        const message = await turnScope.race(waitForCursorUpdate(session))
 
         if (message.kind === 'session_update') {
           turnScope.recordProgress('provider_event')
@@ -518,10 +517,11 @@ export class CursorAcpSessionRuntime {
 
         if (message.kind === 'stop') {
           turnScope.recordProgress('heartbeat')
-          debugCursor('runtime stop event (ignored for completion)', {
+          debugCursor('runtime stop event', {
             stopReason: message.stopReason,
             replyChars: reply.length
           })
+          return
         }
       }
     }
@@ -611,6 +611,7 @@ export class CursorAcpSessionRuntime {
       }
     }
     this.ctx = null
+    this.initialized = null
     this.diagnostics = null
     this.closed = true
     debugCursor('runtime closed')

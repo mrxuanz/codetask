@@ -78,7 +78,16 @@ test('resolveRoleMcpToolNames per role', () => {
 })
 
 test('buildCursorAcpCliArgs sandbox matrix', () => {
-  assert.deepEqual(buildCursorAcpCliArgs({ outerSandbox: false }), ['--approve-mcps', 'acp'])
+  assert.deepEqual(buildCursorAcpCliArgs({ outerSandbox: false, cwd: '/workspace/proj' }), [
+    '--trust',
+    '--force',
+    '--sandbox',
+    'enabled',
+    '--approve-mcps',
+    '--workspace',
+    '/workspace/proj',
+    'acp'
+  ])
   assert.deepEqual(
     buildCursorAcpCliArgs({
       outerSandbox: true,

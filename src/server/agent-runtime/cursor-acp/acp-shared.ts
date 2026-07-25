@@ -5,11 +5,13 @@ import {
   methods,
   ndJsonStream,
   PROTOCOL_VERSION,
-  type ActiveSession,
+  type ActiveSessionMessage,
   type ClientApp,
   type ClientContext,
+  type InitializeResponse,
   type McpServer,
-  type NewSessionResponse,
+  type PromptResponse,
+  type SessionNotification,
   type Stream
 } from '@agentclientprotocol/sdk'
 import { resolveCursorAcpModelId } from '../../conversation/models'
@@ -149,14 +151,137 @@ export function waitForChildExit(child: ChildProcess, timeoutMs = 10_000): Promi
   })
 }
 
-export function attachAcpSession(ctx: ClientContext, response: NewSessionResponse): ActiveSession {
-  const attachSession = Reflect.get(ctx, 'attachSession')
-  if (typeof attachSession !== 'function') {
-    throw createTurnError('provider.cursor.acp_failed', {
-      detail: 'Cursor ACP client does not support attaching an existing session'
+interface CursorSessionQueueEntry {
+  readonly kind: 'value' | 'error'
+  readonly value: ActiveSessionMessage | unknown
+}
+
+class CursorSessionQueue {
+  private readonly values: CursorSessionQueueEntry[] = []
+  private readonly waiters: Array<{
+    resolve: (value: ActiveSessionMessage) => void
+    reject: (error: unknown) => void
+  }> = []
+  private disposed = false
+
+  enqueue(value: ActiveSessionMessage): void {
+    if (this.disposed) return
+    const waiter = this.waiters.shift()
+    if (waiter) {
+      waiter.resolve(value)
+      return
+    }
+    this.values.push({ kind: 'value', value })
+  }
+
+  reject(error: unknown): void {
+    if (this.disposed) return
+    const waiter = this.waiters.shift()
+    if (waiter) {
+      waiter.reject(error)
+      return
+    }
+    this.values.push({ kind: 'error', value: error })
+  }
+
+  clearErrors(): void {
+    for (let index = this.values.length - 1; index >= 0; index -= 1) {
+      if (this.values[index]?.kind === 'error') this.values.splice(index, 1)
+    }
+  }
+
+  next(): Promise<ActiveSessionMessage> {
+    const entry = this.values.shift()
+    if (entry?.kind === 'error') return Promise.reject(entry.value)
+    if (entry?.kind === 'value') return Promise.resolve(entry.value as ActiveSessionMessage)
+    if (this.disposed) {
+      return Promise.reject(new Error('Cursor ACP session update routing was disposed'))
+    }
+    return new Promise((resolve, reject) => {
+      this.waiters.push({ resolve, reject })
     })
   }
-  return Reflect.apply(attachSession, ctx, [response])
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    const error = new Error('Cursor ACP session update routing was disposed')
+    for (const waiter of this.waiters.splice(0)) waiter.reject(error)
+    this.values.length = 0
+  }
+}
+
+export interface CursorAcpSessionHandle {
+  readonly sessionId: string
+  prompt(prompt: string): Promise<PromptResponse>
+  nextUpdate(): Promise<ActiveSessionMessage>
+  dispose(): void
+}
+
+class RoutedCursorAcpSession implements CursorAcpSessionHandle {
+  private readonly queue = new CursorSessionQueue()
+  private disposed = false
+
+  constructor(
+    private readonly ctx: ClientContext,
+    readonly sessionId: string,
+    private readonly unregister: () => void
+  ) {}
+
+  accept(notification: SessionNotification): void {
+    this.queue.enqueue({
+      kind: 'session_update',
+      notification,
+      update: notification.update
+    })
+  }
+
+  prompt(prompt: string): Promise<PromptResponse> {
+    this.queue.clearErrors()
+    const request = this.ctx.request(methods.agent.session.prompt, {
+      sessionId: this.sessionId,
+      prompt: [{ type: 'text', text: prompt }]
+    })
+    void request.then(
+      (response) => {
+        this.queue.enqueue({
+          kind: 'stop',
+          response,
+          stopReason: response.stopReason
+        })
+      },
+      (error) => this.queue.reject(error)
+    )
+    return request
+  }
+
+  nextUpdate(): Promise<ActiveSessionMessage> {
+    return this.queue.next()
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.unregister()
+    this.queue.dispose()
+  }
+}
+
+export class CursorAcpSessionRouter {
+  private readonly sessions = new Map<string, RoutedCursorAcpSession>()
+
+  route(notification: SessionNotification): void {
+    this.sessions.get(notification.sessionId)?.accept(notification)
+  }
+
+  attach(ctx: ClientContext, sessionId: string): CursorAcpSessionHandle {
+    this.sessions.get(sessionId)?.dispose()
+    const session = new RoutedCursorAcpSession(ctx, sessionId, () => {
+      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId)
+    })
+    this.sessions.set(sessionId, session)
+    return session
+  }
 }
 
 export function spawnCursorAcpProcess(
@@ -210,7 +335,8 @@ function parseExtensionParams<Params>(params: unknown): Params {
 
 export function createCodetaskAcpClient(
   isAborted: () => boolean,
-  capabilityProfile: AgentCapabilityProfile
+  capabilityProfile: AgentCapabilityProfile,
+  onSessionUpdate?: (notification: SessionNotification) => void
 ): ClientApp {
   const approvePermission = createCursorPermissionHandler(capabilityProfile)
   return client({ name: 'codetask' })
@@ -246,11 +372,14 @@ export function createCodetaskAcpClient(
       debugCursor('extension request', { method: 'cursor/create_plan' })
       return { accepted: true }
     })
+    .onNotification(methods.client.session.update, ({ params }) => {
+      onSessionUpdate?.(params)
+    })
 }
 
-export async function bootstrapCursorAcp(ctx: ClientContext): Promise<void> {
+export async function bootstrapCursorAcp(ctx: ClientContext): Promise<InitializeResponse> {
   debugCursor('initialize start')
-  await acpRequestWithTimeout(
+  const initialized = await acpRequestWithTimeout(
     'initialize',
     ctx.request(methods.agent.initialize, {
       protocolVersion: PROTOCOL_VERSION,
@@ -271,6 +400,7 @@ export async function bootstrapCursorAcp(ctx: ClientContext): Promise<void> {
     CURSOR_ACP_AUTH_TIMEOUT_MS
   )
   debugCursor('authenticate done')
+  return initialized
 }
 
 export function toAcpMcpServers(servers: CursorAcpMcpServer[]): McpServer[] {
@@ -297,43 +427,50 @@ export function toAcpMcpServers(servers: CursorAcpMcpServer[]): McpServer[] {
 
 export async function openCursorAcpSession(
   ctx: ClientContext,
+  initialized: InitializeResponse,
+  router: CursorAcpSessionRouter,
   cwd: string,
   runtimeSessionId: string | null | undefined,
   mcpServers: CursorAcpMcpServer[]
-): Promise<ActiveSession> {
+): Promise<CursorAcpSessionHandle> {
   const acpMcpServers = toAcpMcpServers(mcpServers)
-  if (runtimeSessionId) {
+  if (runtimeSessionId && initialized.agentCapabilities?.loadSession) {
     try {
-      const loaded = await acpRequestWithTimeout(
+      await acpRequestWithTimeout(
         'session.load',
         ctx.request(methods.agent.session.load, {
           sessionId: runtimeSessionId,
           cwd,
+          additionalDirectories: [],
           mcpServers: acpMcpServers
         })
       )
-      if (loaded && typeof loaded === 'object' && 'sessionId' in loaded) {
-        debugCursor('session/load ok', { sessionId: runtimeSessionId })
-        return attachAcpSession(ctx, loaded as NewSessionResponse)
-      }
     } catch (error) {
-      debugCursor('session/load failed, fallback session/new', {
-        sessionId: runtimeSessionId,
-        message: error instanceof Error ? error.message : String(error)
+      throw createTurnError('provider.cursor.acp_failed', {
+        detail: `Cursor ACP refused to load session ${runtimeSessionId} in ${cwd}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       })
     }
+    debugCursor('session/load ok', { sessionId: runtimeSessionId, cwd })
+    return router.attach(ctx, runtimeSessionId)
   }
 
-  debugCursor('session/new', { mcpServers: mcpServers.map((s) => s.name) })
-  return acpRequestWithTimeout(
+  debugCursor('session/new', { cwd, mcpServers: mcpServers.map((s) => s.name) })
+  const created = await acpRequestWithTimeout(
     'session.new',
-    ctx.buildSession({ cwd, mcpServers: acpMcpServers }).start()
+    ctx.request(methods.agent.session.new, {
+      cwd,
+      additionalDirectories: [],
+      mcpServers: acpMcpServers
+    })
   )
+  return router.attach(ctx, created.sessionId)
 }
 
 export async function applyCursorModel(
   ctx: ClientContext,
-  session: ActiveSession,
+  session: Pick<CursorAcpSessionHandle, 'sessionId'>,
   model?: string
 ): Promise<void> {
   const modelId = resolveCursorAcpModelId(model)

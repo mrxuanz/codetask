@@ -15,6 +15,7 @@ import {
   type AgentCapabilityProfile
 } from '../../agent-runtime/capabilities'
 import { resolveProviderExecutable } from '../executable'
+import { createTurnError } from '../../../shared/turn-errors.ts'
 
 /**
  * Prefer typed settings / explicit options. No CODETASK_CURSOR_* env fallback (PRU-12-06).
@@ -62,24 +63,29 @@ export function resolveCursorPathOverride(input: AgentTurnInput): {
 
 export function buildCursorAcpCliArgs(input: {
   outerSandbox: boolean
-  cwd?: string
+  cwd: string
   capabilityProfile?: AgentCapabilityProfile
   endpoint?: string | undefined
   approveMcps?: boolean | undefined
 }): string[] {
   const approveMcps = input.approveMcps ?? true
+  const cwd = input.cwd.trim()
+  if (!cwd) {
+    throw createTurnError('workspace.path_invalid', {
+      detail: 'Cursor ACP requires an explicit absolute workspace path'
+    })
+  }
 
   if (!input.outerSandbox) {
-    const args: string[] = []
-    if (input.capabilityProfile && capabilityProfileIsReadOnly(input.capabilityProfile)) {
-      args.push('--mode', 'ask')
-    }
-    if (
-      (!input.capabilityProfile || !capabilityProfileIsReadOnly(input.capabilityProfile)) &&
-      approveMcps
-    ) {
+    const readOnly =
+      input.capabilityProfile !== undefined && capabilityProfileIsReadOnly(input.capabilityProfile)
+    const args: string[] = readOnly
+      ? ['--mode', 'ask']
+      : ['--trust', '--force', '--sandbox', 'enabled']
+    if (!readOnly && approveMcps) {
       args.push('--approve-mcps')
     }
+    args.push('--workspace', cwd)
     return appendCursorApiEndpointArgs([...args, 'acp'], input.endpoint)
   }
 
@@ -87,10 +93,7 @@ export function buildCursorAcpCliArgs(input: {
   if (approveMcps) {
     args.push('--approve-mcps')
   }
-  const cwd = input.cwd?.trim()
-  if (cwd) {
-    args.push('--workspace', cwd)
-  }
+  args.push('--workspace', cwd)
   return appendCursorApiEndpointArgs([...args, 'acp'], input.endpoint)
 }
 
