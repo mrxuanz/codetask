@@ -17,10 +17,7 @@ import {
 } from './paths'
 import { materializeCodexAuth, materializeOpencodeAuth, opencodeRuntimeLayout } from './materialize'
 import type { ProviderAuthDiagnostics, ProviderAuthPrepared } from './types'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../../host-environment'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
 
 const RUNTIME_AUTH_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
@@ -195,19 +192,23 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
     ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
     CODEX_HOME: codexHome
   }
+  const authMaterialPresent = materialized.authCopied || hostAuth.present
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'codex',
     mode: 'runtime-copy',
-    authMaterialPresent: materialized.authCopied || materialized.configCopied || hostAuth.present,
+    authMaterialPresent,
     hostAuthPath,
     runtimeAuthPath: materialized.runtimeAuthPath,
-    warnings:
-      materialized.authCopied || materialized.configCopied
-        ? [
-            'Codex auth/config snapshotted to runtime (config.toml filtered for MCP/sandbox); inner danger-full-access + approval_policy=never.'
-          ]
-        : [`Host Codex auth file not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`]
+    warnings: authMaterialPresent
+      ? [
+          'Codex auth/config snapshotted to runtime (config.toml filtered for MCP/sandbox); inner danger-full-access + approval_policy=never.'
+        ]
+      : [
+          materialized.configCopied
+            ? `Codex config snapshotted, but no auth material was found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
+            : `Host Codex auth file not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
+        ]
   }
 
   const readRoots = uniqueRoots([...resolveCodexInstallDirs()])

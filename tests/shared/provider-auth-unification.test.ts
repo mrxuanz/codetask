@@ -98,7 +98,7 @@ test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)'
   )
 })
 
-test('provider auth preflight probes only: no credential writes, no parent env mutation (PRU-05-08)', () => {
+test('provider auth preflight is read-only: no credential writes or parent env mutation (PRU-05-08)', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'pru-05-08-preflight-'))
   const markerKey = 'CODETASK_PRU_0508_PARENT_ENV'
   const previous = process.env[markerKey]
@@ -156,14 +156,21 @@ test('provider auth preflight probes only: no credential writes, no parent env m
     assert.equal(afterContent, [...beforeFiles][0])
     assert.ok(!afterContent.includes('should-not-leak-into-credential-files'))
 
-    // Preflight modules must not call writeFile.
+    // Preflight modules must not call writeFile. External-CLI providers may
+    // probe their selected executable; SDK-bundled providers validate the
+    // authoritative runtime auth snapshot without probing a different host CLI.
     for (const name of ['codex', 'claude', 'cursor', 'opencode'] as const) {
       const source = readFileSync(
         join(process.cwd(), `src/server/providers/${name}/preflight.ts`),
         'utf8'
       )
       assert.doesNotMatch(source, /writeFile(Sync)?\(/)
-      assert.match(source, /spawnProviderCommandSync/)
+      if (name === 'cursor' || name === 'opencode') {
+        assert.match(source, /spawnProviderCommandSync/)
+      } else {
+        assert.doesNotMatch(source, /spawnProviderCommandSync/)
+        assert.match(source, /authMaterialPresent/)
+      }
     }
 
     // spawn gateway rejects shell:true overrides by construction (options omit shell).

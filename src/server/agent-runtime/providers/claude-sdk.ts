@@ -38,6 +38,7 @@ export async function* streamClaudeTurn(
     outerSandbox: plan.outerSandbox,
     readOnly: plan.readOnly,
     installationId: plan.installationId,
+    executableStrategy: plan.executableStrategy,
     pathToClaudeCodeExecutable: plan.pathToClaudeCodeExecutable,
     structuredSpawn: Boolean(spawnClaudeCodeProcess),
     settingSources: plan.settingSources,

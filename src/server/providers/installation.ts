@@ -119,7 +119,7 @@ function candidateNames(
   env: Readonly<Record<string, string | undefined>>
 ): readonly string[] {
   if (platform !== 'win32' || extname(command)) return [command]
-  // Windows command lookup is PATHEXT-based. npm/nvm-style bin directories
+  // Windows command lookup is PATHEXT-based. Package-manager bin directories
   // commonly contain both an extensionless POSIX shell script and a .cmd
   // launcher; the bare script is a file but is not a Windows executable.
   return windowsExtensions(env).map((extension) => `${command}${extension}`)

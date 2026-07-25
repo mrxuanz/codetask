@@ -24,6 +24,10 @@ import { processHostEnvironmentSource, type HostEnvironmentSource } from '../hos
 import { resolveProviderReusePolicy } from './lifecycle'
 import type { HostEnvironmentSnapshot } from '../host-environment'
 import type { ProviderAuthPrepared } from '../sandbox/provider-auth/types'
+import {
+  resolveExecutableEnvironmentAffinity,
+  resolveProviderExecutableStrategy
+} from './runtime-executable'
 
 export type ProviderStreamFactory = (
   input: AgentTurnInput,
@@ -159,15 +163,32 @@ export class DelegatingProviderDriver implements ProviderDriver {
   }
 
   contributeSandboxPolicy(context: SandboxPolicyContext): ProviderSandboxContribution {
+    const hostEnvironment = context.hostEnvironment ?? this.hostEnvironmentSource.snapshot()
+    const executableStrategy = resolveProviderExecutableStrategy(
+      context.installation.provider,
+      context.installation.source
+    )
+    const executableAffinity = resolveExecutableEnvironmentAffinity(
+      context.installation,
+      hostEnvironment
+    )
+    const installationRoots =
+      executableStrategy === 'installation'
+        ? [
+            dirname(context.installation.resolvedPath),
+            dirname(context.installation.canonicalPath),
+            ...this.installDirs(hostEnvironment),
+            ...executableAffinity.readRoots
+          ]
+        : []
+
     return {
-      readRoots: [
-        dirname(context.installation.resolvedPath),
-        dirname(context.installation.canonicalPath),
-        ...this.installDirs(context.hostEnvironment),
-        ...context.preparedAuth.readRoots
-      ],
+      readRoots: [...installationRoots, ...context.preparedAuth.readRoots],
       writeRoots: context.preparedAuth.writeRoots ?? [],
-      environment: context.preparedAuth.envPatch,
+      environment: {
+        ...executableAffinity.environment,
+        ...context.preparedAuth.envPatch
+      },
       credentialSnapshots: context.preparedAuth.filesystemProfile.credentialSnapshots
     }
   }

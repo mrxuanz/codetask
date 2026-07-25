@@ -18,6 +18,10 @@ import {
   resolveInputCapabilityProfile
 } from '../../agent-runtime/capabilities'
 import { resolveProviderExecutable } from '../executable'
+import {
+  resolveProviderExecutableStrategy,
+  type ProviderExecutableStrategy
+} from '../runtime-executable'
 
 export type CodexSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only'
 
@@ -38,9 +42,10 @@ export interface CodexTurnPlan {
   env: Record<string, string>
   sdkConfig: CodexSdkConfig | undefined
   threadOptions: CodexThreadOptions
-  /** Same installation path detect/discover resolved — passed to SDK codexPathOverride. */
+  /** Present only when the user explicitly configured an executable path. */
   readonly codexPathOverride?: string | undefined
   readonly installationId?: string | undefined
+  readonly executableStrategy: ProviderExecutableStrategy
 }
 
 export const resolveCodexOuterSandbox = resolveProviderOuterSandbox
@@ -52,25 +57,39 @@ export function resolveCodexMcpToolNamesForTurn(
   return resolveRoleMcpToolNames(input.role)
 }
 
-/**
- * Prefer the driver-discovered installation; fall back to the shared resolver so
- * detect and SDK launch share one path identity.
- */
+/** Use the SDK-bundled native CLI unless the user explicitly selected a path. */
 export function resolveCodexPathOverride(input: AgentTurnInput): {
   readonly codexPathOverride?: string
   readonly installationId?: string
+  readonly executableStrategy: ProviderExecutableStrategy
 } {
   if (input.installation) {
+    const executableStrategy = resolveProviderExecutableStrategy('codex', input.installation.source)
+    if (executableStrategy === 'sdk-bundled') {
+      return {
+        installationId: input.installation.id,
+        executableStrategy
+      }
+    }
     return {
       codexPathOverride: input.installation.invocation.executable,
-      installationId: input.installation.id
+      installationId: input.installation.id,
+      executableStrategy
     }
   }
   const resolved = resolveProviderExecutable('codex')
-  if (!resolved) return {}
+  if (!resolved) return { executableStrategy: 'sdk-bundled' }
+  const executableStrategy = resolveProviderExecutableStrategy('codex', resolved.source)
+  if (executableStrategy === 'sdk-bundled') {
+    return {
+      installationId: resolved.installationId,
+      executableStrategy
+    }
+  }
   return {
     codexPathOverride: resolved.executable,
-    installationId: resolved.installationId
+    installationId: resolved.installationId,
+    executableStrategy
   }
 }
 

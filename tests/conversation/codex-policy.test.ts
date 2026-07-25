@@ -9,7 +9,10 @@ import {
   resolveCodexOuterSandbox
 } from '../../src/server/providers/codex/turn-plan.ts'
 import { applyLoopbackNoProxyEnv } from '../../src/server/agent-runtime/env'
-import { resolveCodexMcpStartupTurnError } from '../../src/server/agent-runtime/providers/codex-sdk'
+import {
+  resolveCodexConfigTurnError,
+  resolveCodexMcpStartupTurnError
+} from '../../src/server/agent-runtime/providers/codex-sdk'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'
 
 const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-policy-'))
@@ -145,6 +148,19 @@ test('resolveCodexMcpStartupTurnError maps required system MCP startup failures 
     ),
     null
   )
+})
+
+test('Codex config failures are classified from the SDK runtime that actually launched', () => {
+  assert.equal(
+    resolveCodexConfigTurnError(new Error('Failed to load configuration: invalid TOML at line 3'))
+      ?.code,
+    'provider.codex.config_invalid'
+  )
+  assert.equal(
+    resolveCodexConfigTurnError(new Error('config.toml parse error near model_provider'))?.code,
+    'provider.codex.config_invalid'
+  )
+  assert.equal(resolveCodexConfigTurnError(new Error('model overloaded')), null)
 })
 
 test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {
