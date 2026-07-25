@@ -1,5 +1,5 @@
 import { realpathSync, existsSync, lstatSync } from 'fs'
-import { resolve, normalize, sep } from 'path'
+import { isAbsolute, resolve, normalize, sep } from 'path'
 import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { FileRule, AnySandboxPolicy, SandboxPolicy, SandboxPolicyV2 } from './types'
@@ -11,7 +11,7 @@ export function canonicalizePath(input: string): string {
   if (!trimmed) {
     throw new SandboxError('Path cannot be empty', 'sandbox.path.empty')
   }
-  if (trimmed.includes('..')) {
+  if (!isAbsolute(trimmed) || trimmed.split(/[\\/]+/).includes('..')) {
     throw new SandboxError(
       `Relative path or path containing .. is not allowed: ${input}`,
       'sandbox.path.relative'

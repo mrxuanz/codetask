@@ -27,6 +27,7 @@ import {
   capabilityProfileRequiresOuterSandbox,
   type AgentCapabilityProfile
 } from './capabilities'
+import { appendWorkspaceAuthorityPrompt, resolveWorkspaceBinding } from './workspace-binding'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
   const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
@@ -169,7 +170,22 @@ export async function* streamConversationTurn(input: {
   yield* streamAgentTurn({ ...input, provider: input.coreCode })
 }
 
-async function* streamAgentTurnOnce(input: AgentTurnRunnerInput): AsyncGenerator<AgentTurnChunk> {
+async function* streamAgentTurnOnce(
+  rawInput: AgentTurnRunnerInput
+): AsyncGenerator<AgentTurnChunk> {
+  const workspaceBinding = resolveWorkspaceBinding({
+    workspaceRoot: rawInput.workspaceRoot,
+    runtimeRoot: rawInput.runtimeRoot
+  })
+  const input: AgentTurnRunnerInput = {
+    ...rawInput,
+    workspaceRoot: workspaceBinding.workspaceRoot,
+    runtimeRoot: workspaceBinding.runtimeRoot,
+    systemPrompt: appendWorkspaceAuthorityPrompt(
+      rawInput.systemPrompt,
+      workspaceBinding.workspaceRoot
+    )
+  }
   const mcpToolNames = input.mcpToolNames ?? resolveRoleMcpToolNames(input.role)
   const provider = getAgentTurnProvider(input.provider)
   const useFakeInProcess = isTestFakeProvider(provider)

@@ -432,7 +432,14 @@ test('Cursor turn plan parity snapshots stay stable for permissions/MCP/endpoint
     assert.ok(task.cliArgs.includes('--sandbox'))
     assert.deepEqual(task.cliArgs.slice(0, 2), ['-e', 'https://api.example'])
 
-    assert.deepEqual(buildCursorAcpCliArgs({ outerSandbox: false, approveMcps: false }), ['acp'])
+    assert.deepEqual(
+      buildCursorAcpCliArgs({
+        outerSandbox: false,
+        cwd: '/workspace',
+        approveMcps: false
+      }),
+      ['--trust', '--force', '--sandbox', 'enabled', '--workspace', '/workspace', 'acp']
+    )
   } finally {
     rmSync(runtimeRoot, { recursive: true, force: true })
   }

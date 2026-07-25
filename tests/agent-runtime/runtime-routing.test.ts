@@ -52,7 +52,7 @@ test('Cursor ACP turns have a bounded no-update wait', () => {
   )
   assert.match(source, /CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS/)
   assert.match(source, /provider\.cursor\.acp_keepalive_timeout/)
-  assert.match(source, /waitForCursorUpdateOrPrompt/)
+  assert.match(source, /waitForCursorUpdate/)
 })
 
 test('legacy queues resume only after the normal HTTP listener is ready', () => {

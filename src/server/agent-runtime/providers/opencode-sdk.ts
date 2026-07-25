@@ -23,6 +23,7 @@ import { abortReason, createProviderTurnScope } from '../provider-turn'
 import {
   buildOpencodeAutoQuestionAnswers,
   parseOpencodeQuestions,
+  resolveOpencodeSessionPermissionRules,
   resolveOpencodeToolsConfig,
   type OpencodeQuestionDto
 } from './opencode-config'
@@ -31,6 +32,7 @@ import {
   createOpencodeLongTurnFetch,
   isTransientOpencodeTransportDetail
 } from './opencode-transport'
+import { assertProviderWorkspace, workspacePathsEqual } from '../workspace-binding'
 
 export { isTransientOpencodeTransportDetail } from './opencode-transport'
 
@@ -318,29 +320,60 @@ async function loadLatestAssistantText(
   return ''
 }
 
-async function ensureOpencodeSession(
+export async function ensureOpencodeSession(
   client: OpencodeClient,
   cwd: string,
+  capabilityProfile: ReturnType<typeof resolveInputCapabilityProfile>,
   runtimeSessionId?: string | null
 ): Promise<string> {
+  const permission = resolveOpencodeSessionPermissionRules(capabilityProfile)
   if (runtimeSessionId) {
     const existing = await client.session.get({
       sessionID: runtimeSessionId,
       directory: cwd
     })
     if (!existing.error && existing.data?.id) {
-      return existing.data.id
+      let sessionId = existing.data.id
+      if (!workspacePathsEqual(cwd, existing.data.directory)) {
+        const forked = await client.session.fork({
+          sessionID: existing.data.id,
+          directory: cwd
+        })
+        if (forked.error || !forked.data?.id) {
+          throw createOpencodeSessionTurnError(
+            `OpenCode refused to rebind session ${existing.data.id} from ${existing.data.directory} to ${cwd}: ${formatOpencodeError(
+              forked.error ?? 'session fork failed'
+            )}`
+          )
+        }
+        assertProviderWorkspace('OpenCode', cwd, forked.data.directory)
+        sessionId = forked.data.id
+      }
+
+      const updated = await client.session.update({
+        sessionID: sessionId,
+        directory: cwd,
+        permission
+      })
+      if (updated.error) {
+        throw createOpencodeSessionTurnError(
+          `Unable to pin OpenCode session permissions: ${formatOpencodeError(updated.error)}`
+        )
+      }
+      return sessionId
     }
   }
 
   const created = await client.session.create({
-    directory: cwd
+    directory: cwd,
+    permission
   })
   if (created.error || !created.data?.id) {
     throw createOpencodeSessionTurnError(
       formatOpencodeError(created.error ?? 'OpenCode session creation failed')
     )
   }
+  assertProviderWorkspace('OpenCode', cwd, created.data.directory)
   return created.data.id
 }
 
@@ -374,6 +407,24 @@ export async function* streamOpencodeTurn(
     directory: input.cwd,
     fetch: longTurnFetch.fetch
   })
+  try {
+    const providerPaths = await client.path.get({ directory: input.cwd })
+    if (providerPaths.error || !providerPaths.data?.directory) {
+      throw createOpencodeSessionTurnError(
+        `Unable to verify OpenCode workspace: ${formatOpencodeError(
+          providerPaths.error ?? 'missing provider directory'
+        )}`
+      )
+    }
+    assertProviderWorkspace('OpenCode', input.cwd, providerPaths.data.directory)
+  } catch (error) {
+    longTurnFetch.close()
+    server.close()
+    if (isTurnError(error)) throw error
+    throw createOpencodeSessionTurnError(
+      `Unable to verify OpenCode workspace: ${formatOpencodeError(error)}`
+    )
+  }
 
   const turnScope = createProviderTurnScope(input.role, options, {
     processExit: server.processExit
@@ -393,7 +444,12 @@ export async function* streamOpencodeTurn(
   let thinking = ''
 
   try {
-    sessionId = await ensureOpencodeSession(client, input.cwd, input.runtimeSessionId)
+    sessionId = await ensureOpencodeSession(
+      client,
+      input.cwd,
+      capabilityProfile,
+      input.runtimeSessionId
+    )
     reply = ''
     thinking = ''
 

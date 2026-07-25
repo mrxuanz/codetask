@@ -1,4 +1,4 @@
-import type { Config, QuestionAnswer } from '@opencode-ai/sdk/v2'
+import type { Config, PermissionRuleset, QuestionAnswer } from '@opencode-ai/sdk/v2'
 import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
 import { allCreateTaskMcpToolNames } from '../../wizard/tools'
 import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
@@ -59,6 +59,7 @@ export function resolveOpencodePermissionConfig(
   if (!capabilityProfile || !capabilityProfileIsReadOnly(capabilityProfile)) {
     return {
       '*': 'allow',
+      external_directory: 'deny',
       question: 'deny'
     }
   }
@@ -80,8 +81,32 @@ export function resolveOpencodePermissionConfig(
     list: 'allow',
     lsp: 'allow',
     ...auditedMcpRules,
+    external_directory: 'deny',
     question: 'deny'
   }
+}
+
+export function resolveOpencodeSessionPermissionRules(
+  capabilityProfile?: AgentCapabilityProfile
+): PermissionRuleset {
+  const config = resolveOpencodePermissionConfig(capabilityProfile) as Record<string, unknown>
+  return Object.entries(config).flatMap(([permission, action]) => {
+    if (typeof action === 'string') {
+      return [{ permission, pattern: '*', action: action as 'allow' | 'deny' | 'ask' }]
+    }
+    if (!action || typeof action !== 'object') return []
+    return Object.entries(action as Record<string, unknown>).flatMap(([pattern, nestedAction]) =>
+      typeof nestedAction === 'string'
+        ? [
+            {
+              permission,
+              pattern,
+              action: nestedAction as 'allow' | 'deny' | 'ask'
+            }
+          ]
+        : []
+    )
+  })
 }
 
 /** Best-effort tool disable; still pair with auto-reply on `question.asked`. */

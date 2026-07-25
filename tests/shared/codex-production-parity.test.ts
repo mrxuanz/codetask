@@ -111,7 +111,7 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
 
     assert.deepEqual(conversation, {
       outerSandbox: false,
-      sandboxMode: 'danger-full-access',
+      sandboxMode: 'workspace-write',
       networkAccessEnabled: true,
       approvalPolicy: 'never',
       model: 'gpt-test-model',

@@ -3,7 +3,7 @@ import type { AgentRole, AnySandboxPolicy, SandboxPolicyV2 } from './types'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
 
-const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam'] as const
+const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam', '.git'] as const
 
 function mergeUniqueRoots(existing: string[], extra: string[]): string[] {
   const seen = new Set(existing.map((path) => path.toLowerCase()))
@@ -30,8 +30,8 @@ export function policyForRole(input: {
   verifierOutputRoot?: string
   workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicyV2 {
-  const workspaceRoot = resolve(input.workspaceRoot)
-  const runtimeRoot = resolve(input.runtimeRoot)
+  const workspaceRoot = canonicalizePath(input.workspaceRoot)
+  const runtimeRoot = canonicalizePath(input.runtimeRoot)
 
   const allowedReadRoots = [workspaceRoot, runtimeRoot]
   const allowedWriteRoots = [runtimeRoot]
@@ -186,8 +186,8 @@ export function policyForRoleV2(input: {
   attachmentReadRoots?: string[]
   workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicyV2 {
-  const workspaceRoot = resolve(input.workspaceRoot)
-  const runtimeRoot = resolve(input.runtimeRoot)
+  const workspaceRoot = canonicalizePath(input.workspaceRoot)
+  const runtimeRoot = canonicalizePath(input.runtimeRoot)
 
   const allowedReadRoots = [
     workspaceRoot,
@@ -224,7 +224,7 @@ export function policyForRoleV2(input: {
       defaultAccess: 'none',
       allowedReadRoots: uniqueRead,
       allowedWriteRoots: allowedWriteRoots.map((root) => canonicalizePath(root)),
-      protectedNames: [...PROTECTED_NAMES, '.git'],
+      protectedNames: [...PROTECTED_NAMES],
       allowSystemRuntime: true
     },
     network: {

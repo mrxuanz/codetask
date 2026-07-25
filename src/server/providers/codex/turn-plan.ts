@@ -129,7 +129,7 @@ export function buildCodexTurnPlan(
     ? 'danger-full-access'
     : readOnly
       ? 'read-only'
-      : 'danger-full-access'
+      : 'workspace-write'
 
   const threadOptions: CodexThreadOptions = {
     workingDirectory: input.cwd,
@@ -137,8 +137,7 @@ export function buildCodexTurnPlan(
     approvalPolicy: 'never',
     sandboxMode,
     networkAccessEnabled: !readOnly,
-    ...(input.model !== undefined ? { model: input.model } : {}),
-    ...(!outerSandbox && !readOnly ? { additionalDirectories: [input.runtimeRoot] } : {})
+    ...(input.model !== undefined ? { model: input.model } : {})
   }
 
   return {
