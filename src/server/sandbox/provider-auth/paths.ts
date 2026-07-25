@@ -1,6 +1,7 @@
 import { createRequire } from 'module'
 import { execFileSync } from 'child_process'
-import { existsSync, readFileSync, realpathSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs'
+import type { Dirent } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { processHostEnvironmentSource } from '../../host-environment'
@@ -320,55 +321,100 @@ export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths(
   return dirs
 }
 
-const CODEX_NATIVE_TARGET_BY_PLATFORM: Partial<Record<string, string>> = {
-  'win32-x64': 'x86_64-pc-windows-msvc',
-  'win32-arm64': 'aarch64-pc-windows-msvc',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'linux-x64': 'x86_64-unknown-linux-musl',
-  'linux-arm64': 'aarch64-unknown-linux-musl'
-}
-
-const CODEX_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
-  'x86_64-pc-windows-msvc': '@openai/codex-win32-x64',
-  'aarch64-pc-windows-msvc': '@openai/codex-win32-arm64',
-  'x86_64-apple-darwin': '@openai/codex-darwin-x64',
-  'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
-  'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
-  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64'
-}
-
 function addExistingDir(dirs: Set<string>, path: string | null | undefined): void {
   if (!path || !existsSync(path)) return
   dirs.add(path)
 }
 
-export function resolveCodexInstallDirs(): string[] {
-  const dirs = new Set<string>()
-  const targetTriple = CODEX_NATIVE_TARGET_BY_PLATFORM[`${process.platform}-${process.arch}`]
-  const platformPackage = targetTriple ? CODEX_PLATFORM_PACKAGE_BY_TARGET[targetTriple] : undefined
+interface PackageMetadata {
+  readonly name?: string
+  readonly optionalDependencies?: Readonly<Record<string, string>>
+}
+
+function readPackageMetadata(packageJson: string): PackageMetadata | null {
+  try {
+    return JSON.parse(readFileSync(packageJson, 'utf8')) as PackageMetadata
+  } catch {
+    return null
+  }
+}
+
+function resolvePackageJson(packageName: string, from: string): string | null {
+  const req = createRequire(from)
+  try {
+    return req.resolve(`${packageName}/package.json`)
+  } catch {
+    // Some SDKs export their entry point but intentionally hide package.json.
+  }
 
   try {
-    const req = createRequire(__filename)
-    const codexPkgJson = req.resolve('@openai/codex/package.json')
+    let directory = dirname(req.resolve(packageName))
+    while (true) {
+      const packageJson = join(directory, 'package.json')
+      if (readPackageMetadata(packageJson)?.name === packageName) return packageJson
+      const parent = dirname(directory)
+      if (parent === directory) return null
+      directory = parent
+    }
+  } catch {
+    return null
+  }
+}
+
+function resolveInstalledOptionalPackageRoots(packageJson: string): string[] {
+  const metadata = readPackageMetadata(packageJson)
+  const req = createRequire(packageJson)
+  const roots: string[] = []
+  for (const packageName of Object.keys(metadata?.optionalDependencies ?? {})) {
+    const dependencyPackageJson = resolvePackageJson(packageName, packageJson)
+    if (!dependencyPackageJson) continue
+    // Resolve from the owning package as well as the application root; this
+    // supports npm's flat layout and pnpm's nested/linked layout.
+    try {
+      roots.push(dirname(req.resolve(`${packageName}/package.json`)))
+    } catch {
+      roots.push(dirname(dependencyPackageJson))
+    }
+  }
+  return roots
+}
+
+function addExecutableParentDirs(
+  dirs: Set<string>,
+  root: string,
+  executableNames: ReadonlySet<string>,
+  maxDepth = 6
+): void {
+  const visit = (directory: string, depth: number): void => {
+    if (depth > maxDepth) return
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    if (entries.some((entry) => entry.isFile() && executableNames.has(entry.name.toLowerCase()))) {
+      addExistingDir(dirs, directory)
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) visit(join(directory, entry.name), depth + 1)
+    }
+  }
+  visit(root, 0)
+}
+
+export function resolveCodexInstallDirs(): string[] {
+  const dirs = new Set<string>()
+
+  try {
+    const codexPkgJson = resolvePackageJson('@openai/codex', __filename)
+    if (!codexPkgJson) return []
     const codexRoot = dirname(codexPkgJson)
     addExistingDir(dirs, codexRoot)
     addExistingDir(dirs, join(codexRoot, 'bin'))
-
-    if (platformPackage) {
-      const codexReq = createRequire(codexPkgJson)
-      const nativePkgJson = codexReq.resolve(`${platformPackage}/package.json`)
-      const nativeRoot = dirname(nativePkgJson)
+    for (const nativeRoot of resolveInstalledOptionalPackageRoots(codexPkgJson)) {
       addExistingDir(dirs, nativeRoot)
-      const vendorRoot = join(nativeRoot, 'vendor')
-      addExistingDir(dirs, vendorRoot)
-      if (targetTriple) {
-        const tripleRoot = join(vendorRoot, targetTriple)
-        addExistingDir(dirs, tripleRoot)
-        addExistingDir(dirs, join(tripleRoot, 'bin'))
-        addExistingDir(dirs, join(tripleRoot, 'codex-path'))
-        addExistingDir(dirs, join(tripleRoot, 'codex-resources'))
-      }
+      addExecutableParentDirs(dirs, nativeRoot, new Set(['codex', 'codex.exe']))
     }
   } catch {
     // ignore
@@ -377,40 +423,17 @@ export function resolveCodexInstallDirs(): string[] {
   return [...dirs.values()]
 }
 
-const CLAUDE_NATIVE_TARGET_BY_PLATFORM: Partial<Record<string, string>> = {
-  'win32-x64': 'x86_64-pc-windows-msvc',
-  'win32-arm64': 'aarch64-pc-windows-msvc',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'linux-x64': 'x86_64-unknown-linux-gnu',
-  'linux-arm64': 'aarch64-unknown-linux-gnu'
-}
-
-const CLAUDE_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
-  'x86_64-pc-windows-msvc': '@anthropic-ai/claude-agent-sdk-win32-x64',
-  'aarch64-pc-windows-msvc': '@anthropic-ai/claude-agent-sdk-win32-arm64',
-  'x86_64-apple-darwin': '@anthropic-ai/claude-agent-sdk-darwin-x64',
-  'aarch64-apple-darwin': '@anthropic-ai/claude-agent-sdk-darwin-arm64',
-  'x86_64-unknown-linux-gnu': '@anthropic-ai/claude-agent-sdk-linux-x64',
-  'aarch64-unknown-linux-gnu': '@anthropic-ai/claude-agent-sdk-linux-arm64'
-}
-
 export function resolveClaudeInstallDirs(): string[] {
   const dirs = new Set<string>()
-  const targetTriple = CLAUDE_NATIVE_TARGET_BY_PLATFORM[`${process.platform}-${process.arch}`]
-  const platformPackage = targetTriple ? CLAUDE_PLATFORM_PACKAGE_BY_TARGET[targetTriple] : undefined
 
   try {
-    const req = createRequire(__filename)
-    const sdkPkgJson = req.resolve('@anthropic-ai/claude-agent-sdk/package.json')
+    const sdkPkgJson = resolvePackageJson('@anthropic-ai/claude-agent-sdk', __filename)
+    if (!sdkPkgJson) return []
     const sdkRoot = dirname(sdkPkgJson)
     addExistingDir(dirs, sdkRoot)
-
-    if (platformPackage) {
-      const sdkReq = createRequire(sdkPkgJson)
-      const nativePkgJson = sdkReq.resolve(`${platformPackage}/package.json`)
-      const nativeRoot = dirname(nativePkgJson)
+    for (const nativeRoot of resolveInstalledOptionalPackageRoots(sdkPkgJson)) {
       addExistingDir(dirs, nativeRoot)
+      addExecutableParentDirs(dirs, nativeRoot, new Set(['claude', 'claude.exe']))
     }
   } catch {
     // ignore

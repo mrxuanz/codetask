@@ -20,6 +20,7 @@ import { buildProviderTurnContext } from '../../src/server/providers/driver.ts'
 import { resolveProviderExecutable } from '../../src/server/providers/executable.ts'
 import { createProviderRegistry } from '../../src/server/providers/composition.ts'
 import { CodexDriver, createCodexStreamFactory } from '../../src/server/providers/codex/driver.ts'
+import { resolveCodexPathOverride } from '../../src/server/providers/codex/turn-plan.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -167,7 +168,7 @@ test('buildCodexTurnPlan lives in Codex driver module; runner does not import po
   assert.match(driverSource, /export \{\s*buildCodexTurnPlan/s)
 })
 
-test('detect installation path is passed to SDK as codexPathOverride with same installationId', async () => {
+test('explicit Codex path is passed to the SDK with the same installationId', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cctask-codex-path-override-'))
   const bin = join(dir, 'codex-sdk-path')
   writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
@@ -199,11 +200,36 @@ test('detect installation path is passed to SDK as codexPathOverride with same i
     assert.equal(plan.installationId, discovered.id)
     assert.equal(plan.codexPathOverride, discovered.invocation.executable)
     assert.equal(plan.codexPathOverride, bin)
+    assert.equal(plan.executableStrategy, 'installation')
 
     const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/codex-sdk.ts'), 'utf8')
     assert.match(sdk, /codexPathOverride:\s*plan\.codexPathOverride/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('automatic Codex discovery never overrides the SDK-bundled native CLI', async () => {
+  const automaticEntries = [
+    { source: 'path' as const, path: '/Users/example/.tool/bin/codex' },
+    { source: 'install-dir' as const, path: '/opt/example/bin/codex' },
+    { source: 'path' as const, path: 'C:\\tools\\nodejs\\codex.cmd' }
+  ]
+
+  for (const [index, entry] of automaticEntries.entries()) {
+    const automaticInstallation: ProviderInstallation = {
+      id: `codex:auto-${index}`,
+      provider: 'codex',
+      command: 'codex',
+      source: entry.source,
+      invocation: { executable: entry.path, prefixArgs: [] },
+      resolvedPath: entry.path,
+      canonicalPath: entry.path
+    }
+    const selection = resolveCodexPathOverride(baseInput({ installation: automaticInstallation }))
+    assert.equal(selection.executableStrategy, 'sdk-bundled')
+    assert.equal(selection.installationId, automaticInstallation.id)
+    assert.equal(selection.codexPathOverride, undefined)
   }
 })
 

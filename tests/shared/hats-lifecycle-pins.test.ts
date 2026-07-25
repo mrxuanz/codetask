@@ -100,18 +100,26 @@ test('conversation Cursor reuse follows ProviderRuntimeScope selected by Runtime
 })
 
 // H6-02 / H7-05 — preflight failure must not write credential files
-test('provider auth preflight probes only and never writes credential files', () => {
+test('provider auth preflight is read-only and probes only external CLI runtimes', () => {
   const spawnSource = readSource('src/server/providers/spawn.ts')
   const driver = readSource('src/server/providers/driver.ts')
-  const providerPreflights = [
+  const sdkPreflights = [
     readSource('src/server/providers/codex/preflight.ts'),
-    readSource('src/server/providers/claude/preflight.ts'),
+    readSource('src/server/providers/claude/preflight.ts')
+  ]
+  const externalCliPreflights = [
     readSource('src/server/providers/cursor/preflight.ts'),
     readSource('src/server/providers/opencode/preflight.ts')
   ]
   assert.match(driver, /preflight\(context:/)
   assert.match(spawnSource, /shell:\s*false/)
-  for (const source of providerPreflights) {
+  for (const source of sdkPreflights) {
+    assert.doesNotMatch(source, /spawnProviderCommandSync/)
+    assert.match(source, /authMaterialPresent/)
+    assert.doesNotMatch(source, /writeFile(Sync)?\(/)
+    assert.match(source, /throw new ProviderAuthError/)
+  }
+  for (const source of externalCliPreflights) {
     assert.match(source, /spawnProviderCommandSync/)
     assert.doesNotMatch(source, /writeFile(Sync)?\(/)
     assert.match(source, /throw new ProviderAuthError/)

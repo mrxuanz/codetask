@@ -23,7 +23,10 @@ import {
   ClaudeDriver,
   createClaudeStreamFactory
 } from '../../src/server/providers/claude/driver.ts'
-import { buildClaudeTurnOptions } from '../../src/server/providers/claude/turn-options.ts'
+import {
+  buildClaudeTurnOptions,
+  resolveClaudePathOverride
+} from '../../src/server/providers/claude/turn-options.ts'
 import {
   buildClaudeSdkCommandInvocation,
   requiresClaudeSdkSpawnGateway
@@ -179,7 +182,7 @@ test('buildClaudeTurnOptions lives in Claude driver module; runner does not impo
   assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/claude-policy.ts')), false)
 })
 
-test('detect installation path is passed as pathToClaudeCodeExecutable with same installationId', async () => {
+test('explicit Claude path is passed to the SDK with the same installationId', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cctask-claude-path-override-'))
   const bin = join(dir, 'claude-sdk-path')
   writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
@@ -211,6 +214,7 @@ test('detect installation path is passed as pathToClaudeCodeExecutable with same
     assert.equal(plan.pathToClaudeCodeExecutable, discovered.invocation.executable)
     assert.equal(plan.pathToClaudeCodeExecutable, bin)
     assert.equal(plan.executableInvocation, discovered.invocation)
+    assert.equal(plan.executableStrategy, 'installation')
 
     const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/claude-sdk.ts'), 'utf8')
     assert.match(sdk, /pathToClaudeCodeExecutable:\s*plan\.pathToClaudeCodeExecutable/)
@@ -220,9 +224,34 @@ test('detect installation path is passed as pathToClaudeCodeExecutable with same
   }
 })
 
+test('automatic Claude discovery never overrides the SDK-bundled native CLI', () => {
+  const automaticEntries = [
+    { source: 'path' as const, path: '/Users/example/.tool/bin/claude' },
+    { source: 'install-dir' as const, path: '/opt/example/bin/claude' },
+    { source: 'path' as const, path: 'C:\\tools\\nodejs\\claude.cmd' }
+  ]
+
+  for (const [index, entry] of automaticEntries.entries()) {
+    const automaticInstallation: ProviderInstallation = {
+      id: `claude-code:auto-${index}`,
+      provider: 'claude-code',
+      command: 'claude',
+      source: entry.source,
+      invocation: { executable: entry.path, prefixArgs: [] },
+      resolvedPath: entry.path,
+      canonicalPath: entry.path
+    }
+    const selection = resolveClaudePathOverride(baseInput({ installation: automaticInstallation }))
+    assert.equal(selection.executableStrategy, 'sdk-bundled')
+    assert.equal(selection.installationId, automaticInstallation.id)
+    assert.equal(selection.pathToClaudeCodeExecutable, undefined)
+    assert.equal(selection.executableInvocation, undefined)
+  }
+})
+
 test('Claude SDK routes Windows command wrappers through the structured spawn gateway', () => {
   const cmdInvocation = {
-    executable: 'C:\\nvm4w\\nodejs\\claude.cmd',
+    executable: 'C:\\tool-manager\\bin\\claude.cmd',
     prefixArgs: [] as string[]
   }
   assert.equal(requiresClaudeSdkSpawnGateway(cmdInvocation, 'win32'), true)

@@ -15,6 +15,10 @@ import type { AgentTurnInput } from '../../agent-runtime/types'
 import type { CommandInvocation } from '../../../shared/providers/installation'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import { resolveProviderExecutable } from '../executable'
+import {
+  resolveProviderExecutableStrategy,
+  type ProviderExecutableStrategy
+} from '../runtime-executable'
 
 export type ClaudeSettingSource = 'user' | 'project' | 'local'
 
@@ -52,31 +56,48 @@ export function resolveClaudeSettingSources(
   return outerSandbox ? [] : ['user', 'project', 'local']
 }
 
-/**
- * Prefer the driver-discovered installation; fall back to the shared resolver so
- * detect and SDK launch share one path identity.
- */
+/** Use the SDK-bundled native CLI unless the user explicitly selected a path. */
 export function resolveClaudePathOverride(input: AgentTurnInput): {
   readonly pathToClaudeCodeExecutable?: string
   readonly installationId?: string
   readonly executableInvocation?: CommandInvocation
+  readonly executableStrategy: ProviderExecutableStrategy
 } {
   if (input.installation) {
+    const executableStrategy = resolveProviderExecutableStrategy(
+      'claude-code',
+      input.installation.source
+    )
+    if (executableStrategy === 'sdk-bundled') {
+      return {
+        installationId: input.installation.id,
+        executableStrategy
+      }
+    }
     return {
       pathToClaudeCodeExecutable: input.installation.invocation.executable,
       installationId: input.installation.id,
-      executableInvocation: input.installation.invocation
+      executableInvocation: input.installation.invocation,
+      executableStrategy
     }
   }
   const resolved = resolveProviderExecutable('claude-code')
-  if (!resolved) return {}
+  if (!resolved) return { executableStrategy: 'sdk-bundled' }
+  const executableStrategy = resolveProviderExecutableStrategy('claude-code', resolved.source)
+  if (executableStrategy === 'sdk-bundled') {
+    return {
+      installationId: resolved.installationId,
+      executableStrategy
+    }
+  }
   return {
     pathToClaudeCodeExecutable: resolved.executable,
     installationId: resolved.installationId,
     executableInvocation: {
       executable: resolved.executable,
       prefixArgs: resolved.prefixArgs
-    }
+    },
+    executableStrategy
   }
 }
 
@@ -96,6 +117,7 @@ export interface ClaudeTurnOptionsPlan {
   readonly pathToClaudeCodeExecutable?: string | undefined
   readonly installationId?: string | undefined
   readonly executableInvocation?: CommandInvocation | undefined
+  readonly executableStrategy: ProviderExecutableStrategy
 }
 
 /** ClaudeDriver-owned turn options builder (PRU-08-05). */
