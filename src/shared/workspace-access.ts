@@ -4,6 +4,17 @@
  */
 export type WorkspaceAccessMode = 'metadata' | 'snapshot-read' | 'live-read' | 'exclusive-write'
 
+/**
+ * Opaque proof that the application control plane granted one Job exclusive
+ * ownership of a workspace. The sandbox validates the identity again before
+ * adding the real workspace to its write roots.
+ */
+export interface WorkspaceWriteLease {
+  readonly leaseId: string
+  readonly ownerKind: 'job'
+  readonly ownerId: string
+}
+
 export function requiresExclusiveWorkspaceLease(mode: WorkspaceAccessMode): boolean {
   return mode === 'exclusive-write'
 }

@@ -208,6 +208,127 @@ export interface JobIntakeAttachmentRecord {
   readonly createdAtMs: number
 }
 
+export type JobStateRecord =
+  | 'queued'
+  | 'running'
+  | 'pause_requested'
+  | 'paused'
+  | 'succeeded'
+  | 'failed'
+  | 'deleted'
+
+export interface JobSettingsRecord {
+  readonly userId: string
+  readonly maxConcurrentJobs: 1 | 2
+  readonly workProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
+  readonly workModel: string | null
+  readonly workPrompt: string | null
+  readonly workSkillsManual: string | null
+  readonly workValidationEnabled: boolean
+  readonly workValidationProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
+  readonly workValidationModel: string | null
+  readonly workValidationPrompt: string | null
+  readonly workValidationSkillsManual: string | null
+  readonly sliceValidationEnabled: boolean
+  readonly sliceValidationProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
+  readonly sliceValidationModel: string | null
+  readonly sliceValidationPrompt: string | null
+  readonly sliceValidationSkillsManual: string | null
+  readonly milestoneValidationEnabled: boolean
+  readonly milestoneValidationProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
+  readonly milestoneValidationModel: string | null
+  readonly milestoneValidationPrompt: string | null
+  readonly milestoneValidationSkillsManual: string | null
+  readonly revision: number
+  readonly updatedAtMs: number
+}
+
+export interface JobRecord {
+  readonly id: string
+  readonly userId: string
+  readonly sourceHandoffId: string
+  readonly workspaceId: string
+  readonly title: string
+  readonly summary: string
+  readonly state: JobStateRecord
+  readonly revision: number
+  readonly queueOrder: number
+  readonly activeItemId: string | null
+  readonly sourceSnapshotJson: string
+  readonly executionTreeJson: string
+  readonly lastErrorCode: string | null
+  readonly lastErrorMessage: string | null
+  readonly createdAtMs: number
+  readonly updatedAtMs: number
+  readonly startedAtMs: number | null
+  readonly finishedAtMs: number | null
+  readonly deletedAtMs: number | null
+}
+
+export type JobItemKindRecord =
+  | 'work'
+  | 'work_validation'
+  | 'slice_validation'
+  | 'milestone_validation'
+
+export interface JobWorkItemRecord {
+  readonly id: string
+  readonly jobId: string
+  readonly sequence: number
+  readonly kind: JobItemKindRecord
+  readonly treeTaskId: string | null
+  readonly scopeId: string
+  readonly parentItemId: string | null
+  readonly title: string
+  readonly objective: string
+  readonly filesJson: string
+  readonly acceptanceCriteriaJson: string
+  readonly attachmentIdsJson: string
+  readonly state: 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped'
+  readonly attempt: number
+  readonly repairGeneration: number
+  readonly providerCode: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
+  readonly model: string | null
+  readonly promptSnapshot: string
+  readonly skillsManualSnapshot: string
+  readonly resultJson: string | null
+  readonly errorCode: string | null
+  readonly errorMessage: string | null
+  readonly startedAtMs: number | null
+  readonly finishedAtMs: number | null
+  readonly createdAtMs: number
+  readonly updatedAtMs: number
+}
+
+export interface JobAttachmentRecord {
+  readonly id: string
+  readonly jobId: string
+  readonly sourceAttachmentId: string
+  readonly displayName: string
+  readonly mediaType: string
+  readonly sizeBytes: number
+  readonly sha256: string
+  readonly storageRelativePath: string
+  readonly createdAtMs: number
+}
+
+export interface JobWorkspaceLeaseRecord {
+  readonly workspaceId: string
+  readonly jobId: string
+  readonly leaseId: string
+  readonly acquiredAtMs: number
+  readonly heartbeatAtMs: number
+}
+
+export interface JobEventRecord {
+  readonly id: number
+  readonly userId: string
+  readonly jobId: string | null
+  readonly eventType: string
+  readonly payloadJson: string
+  readonly createdAtMs: number
+}
+
 export interface ConversationRepository {
   getSettings(userId: string): ConversationSettingsRecord | null
   putSettings(record: ConversationSettingsRecord): void
@@ -288,10 +409,72 @@ export interface DraftRepository {
  * Draft planning can only append immutable pending handoffs; it cannot execute them.
  */
 export interface JobIntakeRepository {
+  getById(handoffId: string): JobIntakeHandoffRecord | null
   getBySourceDraftId(sourceDraftId: string): JobIntakeHandoffRecord | null
+  listPending(): JobIntakeHandoffRecord[]
   insertHandoff(record: JobIntakeHandoffRecord): void
+  markAccepted(handoffId: string, acceptedAtMs: number): boolean
   insertAttachment(record: JobIntakeAttachmentRecord): void
   listAttachments(handoffId: string): JobIntakeAttachmentRecord[]
+}
+
+export interface JobRepository {
+  getSettings(userId: string): JobSettingsRecord | null
+  putSettings(record: JobSettingsRecord, expectedRevision: number | null): boolean
+  nextQueueOrder(): number
+  insertJob(record: JobRecord): void
+  getJob(userId: string, jobId: string): JobRecord | null
+  getJobByHandoff(handoffId: string): JobRecord | null
+  listJobs(userId: string, includeDeleted?: boolean): JobRecord[]
+  listRunnableJobs(limit: number): JobRecord[]
+  updateJob(input: {
+    readonly jobId: string
+    readonly expectedRevision: number
+    readonly expectedStates: readonly JobStateRecord[]
+    readonly state: JobStateRecord
+    readonly activeItemId: string | null
+    readonly queueOrder?: number | undefined
+    readonly lastErrorCode?: string | null | undefined
+    readonly lastErrorMessage?: string | null | undefined
+    readonly startedAtMs?: number | null | undefined
+    readonly finishedAtMs?: number | null | undefined
+    readonly deletedAtMs?: number | null | undefined
+    readonly updatedAtMs: number
+  }): boolean
+  insertWorkItems(records: readonly JobWorkItemRecord[]): void
+  listWorkItems(jobId: string): JobWorkItemRecord[]
+  getWorkItem(jobId: string, itemId: string): JobWorkItemRecord | null
+  getNextQueuedWorkItem(jobId: string): JobWorkItemRecord | null
+  updateWorkItem(input: {
+    readonly jobId: string
+    readonly itemId: string
+    readonly expectedStates: readonly JobWorkItemRecord['state'][]
+    readonly state: JobWorkItemRecord['state']
+    readonly attempt?: number | undefined
+    readonly repairGeneration?: number | undefined
+    readonly resultJson?: string | null | undefined
+    readonly errorCode?: string | null | undefined
+    readonly errorMessage?: string | null | undefined
+    readonly startedAtMs?: number | null | undefined
+    readonly finishedAtMs?: number | null | undefined
+    readonly updatedAtMs: number
+  }): boolean
+  insertWorkItemsBefore(
+    jobId: string,
+    beforeSequence: number,
+    records: readonly JobWorkItemRecord[]
+  ): void
+  resetInterrupted(nowMs: number): number
+  insertAttachment(record: JobAttachmentRecord): void
+  listAttachments(jobId: string): JobAttachmentRecord[]
+  tryAcquireLease(record: JobWorkspaceLeaseRecord): boolean
+  getLeaseByWorkspace(workspaceId: string): JobWorkspaceLeaseRecord | null
+  getLeaseByJob(jobId: string): JobWorkspaceLeaseRecord | null
+  heartbeatLease(jobId: string, heartbeatAtMs: number): boolean
+  releaseLease(jobId: string): boolean
+  releaseAllLeases(): number
+  appendEvent(record: Omit<JobEventRecord, 'id'>): number
+  listEvents(userId: string, afterId: number, limit: number): JobEventRecord[]
 }
 
 export interface AuthRepository {
@@ -332,6 +515,7 @@ export interface KernelTransaction {
   readonly conversation: ConversationRepository
   readonly draft: DraftRepository
   readonly jobIntake: JobIntakeRepository
+  readonly job: JobRepository
 }
 
 export interface UnitOfWork {

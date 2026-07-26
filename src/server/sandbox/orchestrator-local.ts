@@ -12,7 +12,7 @@ import {
   readSandboxStdoutLines,
   reapSandboxChild
 } from './launcher'
-import { policyForRoleV2, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
+import { createSandboxPolicy, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { preflightSandbox } from './preflight'
 import { toProviderAuthLogDto } from './provider-auth/types'
@@ -23,10 +23,12 @@ import { SandboxError } from './types'
 import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { throwIfSandboxTurnAborted } from './turn-guards'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type { WorkspaceWriteLease } from '../../shared/workspace-access.ts'
 import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
 import type { ProviderInstallation } from '../../shared/providers/installation'
 import type { ProviderSettings } from '../../shared/providers/settings'
 import { processHostEnvironmentSource } from '../host-environment'
+import { assertSandboxWorkspaceAccess } from './workspace-access'
 export { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export interface RunSandboxedTurnInput {
@@ -48,6 +50,7 @@ export interface RunSandboxedTurnInput {
   providerRuntimeScopeId?: string | undefined
   idempotencyKey?: string | undefined
   workspaceAccess?: WorkspaceAccessMode | undefined
+  workspaceLease?: WorkspaceWriteLease | undefined
   capabilityProfile: AgentCapabilityProfile
   /** Selected in the application process and preserved through supervisor IPC. */
   installation: ProviderInstallation
@@ -177,6 +180,7 @@ export async function* streamSandboxedConversationTurnLocal(
   })
 
   throwIfSandboxTurnAborted(input.signal)
+  assertSandboxWorkspaceAccess(input)
   if (process.platform === 'win32') {
     const { ensureWindowsSandboxReady } = await import('./windows-bootstrap')
     await ensureWindowsSandboxReady(input.runtimeRoot)
@@ -255,7 +259,7 @@ export async function* streamSandboxedConversationTurnLocal(
   // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
   // Conversation/planner roles can read the project and write runtime/provider state only;
   // task-worker remains the sole role that may write the real workspace.
-  const policy = policyForRoleV2({
+  const policy = createSandboxPolicy({
     role: input.role,
     workspaceRoot: input.workspaceRoot,
     runtimeRoot: input.runtimeRoot,

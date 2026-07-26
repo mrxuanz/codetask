@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppHeader from '@renderer/components/AppHeader.vue'
 import ExecutionTreeView from '@renderer/components/draft/ExecutionTreeView.vue'
@@ -28,6 +29,7 @@ import {
 import { fetchConversationWorkspaces, type ConversationWorkspace } from '@renderer/api/conversation'
 
 const { t } = useI18n()
+const router = useRouter()
 const { data } = useBootstrap()
 const workspaces = ref<ConversationWorkspace[]>([])
 const drafts = ref<DraftRecord[]>([])
@@ -221,13 +223,14 @@ async function confirmTree(): Promise<void> {
   confirming.value = true
   error.value = null
   try {
-    await confirmDraftExecutionTree(
+    const result = await confirmDraftExecutionTree(
       current.draft.id,
       current.draft.revision,
       current.executionTree.id
     )
     await loadDrafts(current.draft.id)
     success.value = t('drafts.submitted')
+    await router.push({ path: '/jobs', query: { selected: result.data.job.id } })
   } catch (cause) {
     reportError(cause)
   } finally {

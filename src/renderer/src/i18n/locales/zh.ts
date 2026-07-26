@@ -94,6 +94,7 @@ export default {
     setupRequired: '请先完成初始化',
     invalidCredentials: '用户名或密码错误',
     requestFailed: '请求失败',
+    workspaceRetainedByJob: '该工作区已被 Job 历史引用，暂时不能删除',
     unauthorized: '未登录',
     sessionExpired: '会话已过期',
     projectNotFound: '项目不存在',
@@ -657,7 +658,7 @@ export default {
     }
   },
   conversation: {
-    nav: { chat: '对话', drafts: '草案', settings: '设置' },
+    nav: { chat: '对话', drafts: '草案', jobs: 'Jobs', settings: '设置' },
     title: '普通对话',
     workspaces: '工作区',
     addFolder: '添加文件夹',
@@ -676,6 +677,7 @@ export default {
     send: '发送',
     stop: '停止',
     cancelled: '本次回复已停止',
+    jobReadOnly: '当前工作区正由 Job 的 Work 独占写入；普通对话仍可读取和分析，但不能修改文件。',
     folderDialogTitle: '选择工作文件夹',
     folderDialogDescription: '可以选择已有文件夹，或在当前目录下创建一个新文件夹。',
     confirmRemoveWorkspace: '从 CodeTask 移除“{name}”？本地文件不会被删除。',
@@ -706,6 +708,73 @@ export default {
       saving: '保存中…',
       saved: '已保存',
       refreshStatus: '刷新登录状态'
+    }
+  },
+  jobs: {
+    title: 'Job 执行',
+    description: '最多两个 Job 并发；每个 Job 内严格逐项执行。',
+    executionPool: '执行池',
+    waitingQueue: '待执行队列',
+    retained: '暂停与历史',
+    poolEmpty: '执行池当前为空',
+    queueEmpty: '没有等待中的 Job',
+    emptyTitle: '还没有 Job',
+    emptyDescription: '确认草案执行树后，会在这里创建按序执行的 Job。',
+    goDrafts: '前往草案',
+    queuePosition: '队列位置：#{position}',
+    progress: '已完成 {completed}/{total} 项',
+    timeline: '顺序执行时间线',
+    timelineHint: '同一 Job 中一次只运行一项；修复 Work 会插在原校验之前。',
+    pause: '当前项完成后暂停',
+    cancelPause: '取消暂停',
+    continue: '继续执行',
+    deletePrompt: '删除 Job“{title}”？运行中的沙箱会先停止，执行记录将保留为已删除。',
+    repair: '修复',
+    attempt: '第 {count} 次尝试',
+    states: {
+      queued: '待执行',
+      running: '执行中',
+      pause_requested: '等待当前项结束后暂停',
+      paused: '已暂停',
+      succeeded: '已完成',
+      failed: '失败',
+      deleted: '已删除'
+    },
+    itemStates: {
+      queued: '待执行',
+      running: '执行中',
+      succeeded: '通过',
+      failed: '失败',
+      skipped: '已跳过'
+    },
+    kinds: {
+      work: 'Work',
+      work_validation: 'Work 校验',
+      slice_validation: 'Slice 校验',
+      milestone_validation: 'Milestone 校验'
+    },
+    settings: {
+      title: 'Job 执行与校验',
+      description: '分别设置 Work、三级校验的宿主执行器、提示词和 Skills 操作手册。',
+      concurrency: '并发 Job 数',
+      concurrencyHint: '只允许 1 或 2；同一工作区始终只能有一个写入 Job。',
+      workTitle: 'Work 执行',
+      workDescription: '按顺序修改工作区；必须持有与 Job 匹配的独占写租约。',
+      workValidationTitle: 'Work 校验',
+      workValidationDescription: '只读核对单个 Work，可提出有界修复任务。',
+      sliceValidationTitle: 'Slice 校验',
+      sliceValidationDescription: '只读核对 Slice 内 Work 的组合结果。',
+      milestoneValidationTitle: 'Milestone 校验',
+      milestoneValidationDescription: '只读核对跨 Slice 的里程碑结果。',
+      enabled: '启用',
+      provider: '宿主执行器',
+      model: '模型（留空使用宿主默认）',
+      prompt: '任务提示词',
+      skills: 'Skills 操作手册',
+      resetDefault: '恢复默认',
+      fixedProtocolHint: '固定 JSON 结果协议和沙箱权限由服务端维护，不能被此处文本覆盖。',
+      protocolHint:
+        '设置只影响之后确认的新 Job；每个执行项都会保存快照。暂停、继续和重启不会让旧 Job 漂移到新设置。'
     }
   },
   drafts: {
@@ -760,7 +829,7 @@ export default {
     },
     handoff: {
       title: 'Job Intake 已接收',
-      pending: '移交信封状态为 pending。Job 执行模块尚未实现，因此不会自动开始执行。',
+      pending: '移交已被 Job 模块接收，并按队列顺序进入执行池。',
       attachments: '已独立保存 {count} 个附件副本'
     },
     settings: {

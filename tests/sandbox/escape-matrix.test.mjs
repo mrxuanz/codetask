@@ -23,16 +23,16 @@ import {
   loadNative,
   outsideWriteProbePath,
   platformRuntimeReadCommand,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   ptraceHostCommand,
   runInSandbox,
-  sandboxTestsEnabled,
+  sandboxRuntimeTestsEnabled,
   shellQuote,
   spawnHostSentinel,
   symlinkEscapeWriteCommand
 } from './sandbox-test-utils.mjs'
 
-const gate = sandboxTestsEnabled()
+const gate = sandboxRuntimeTestsEnabled()
 const describe = gate.enabled ? nodeDescribe : nodeDescribe.skip
 
 function writeCmd(target, content = 'hacked') {
@@ -66,7 +66,7 @@ describe('role matrix: filesystem permissions', () => {
     const probe = join(fixture.workspace, 'probe.txt')
     writeFileSync(probe, 'readable')
 
-    const policy = policyForRoleV2('planner', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('planner', fixture.workspace, fixture.runtime)
     await assertSucceeds(runInSandbox(native, policy, readCmd(probe)), 'planner can read workspace')
     await assertFails(
       runInSandbox(native, policy, writeCmd(probe)),
@@ -77,7 +77,7 @@ describe('role matrix: filesystem permissions', () => {
   it('conversation can read but cannot write workspace under outer sandbox', async () => {
     const probe = join(fixture.workspace, 'chat-probe.txt')
     writeFileSync(probe, 'readable')
-    const policy = policyForRoleV2('conversation', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('conversation', fixture.workspace, fixture.runtime)
     await assertSucceeds(
       runInSandbox(native, policy, readCmd(probe)),
       'conversation can read workspace'
@@ -92,7 +92,7 @@ describe('role matrix: filesystem permissions', () => {
   it('task-worker can write workspace and runtime', async () => {
     const probe = join(fixture.workspace, 'task-probe.txt')
     const runtimeProbe = join(fixture.runtime, 'runtime-probe.txt')
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
 
     await assertSucceeds(
       runInSandbox(native, policy, writeCmd(probe, 'ok')),
@@ -105,10 +105,33 @@ describe('role matrix: filesystem permissions', () => {
     assert.equal(readFileSync(probe, 'utf8').trim(), 'ok')
   })
 
+  it('work-verifier can read but cannot write workspace and can write verifier output', async () => {
+    const probe = join(fixture.workspace, 'work-verifier-probe.txt')
+    const outProbe = join(fixture.verifierOutput, 'work-report.txt')
+    writeFileSync(probe, 'readable')
+    const policy = sandboxPolicyForRole('work-verifier', fixture.workspace, fixture.runtime, {
+      verifierOutputRoot: fixture.verifierOutput
+    })
+
+    await assertSucceeds(
+      runInSandbox(native, policy, readCmd(probe)),
+      'work-verifier can read workspace'
+    )
+    await assertFails(
+      runInSandbox(native, policy, writeCmd(probe, 'blocked')),
+      'work-verifier cannot write workspace'
+    )
+    await assertSucceeds(
+      runInSandbox(native, policy, writeCmd(outProbe, 'report')),
+      'work-verifier can write verifier output'
+    )
+    assert.equal(readFileSync(probe, 'utf8'), 'readable')
+  })
+
   it('slice-verifier cannot write workspace but can write verifier output root', async () => {
     const probe = join(fixture.workspace, 'verifier-probe.txt')
     const outProbe = join(fixture.verifierOutput, 'report.txt')
-    const policy = policyForRoleV2('slice-verifier', fixture.workspace, fixture.runtime, {
+    const policy = sandboxPolicyForRole('slice-verifier', fixture.workspace, fixture.runtime, {
       verifierOutputRoot: fixture.verifierOutput
     })
 
@@ -125,7 +148,7 @@ describe('role matrix: filesystem permissions', () => {
   it('milestone-verifier cannot modify workspace files', async () => {
     const probe = join(fixture.workspace, 'milestone-probe.txt')
     writeFileSync(probe, 'original')
-    const policy = policyForRoleV2('milestone-verifier', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('milestone-verifier', fixture.workspace, fixture.runtime)
 
     await assertFails(
       runInSandbox(native, policy, writeCmd(probe)),
@@ -136,7 +159,7 @@ describe('role matrix: filesystem permissions', () => {
 
   it('task-worker cannot write outside allowed roots', async () => {
     const outside = outsideWriteProbePath()
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
 
     await assertFails(
       runInSandbox(native, policy, writeCmd(outside)),
@@ -149,7 +172,7 @@ describe('role matrix: filesystem permissions', () => {
     mkdirSync(secretDir, { recursive: true })
     writeFileSync(join(secretDir, 'secret.txt'), 'protected')
     const secret = join(secretDir, 'secret.txt')
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
 
     await assertFails(
       runInSandbox(native, policy, writeCmd(secret)),
@@ -159,7 +182,7 @@ describe('role matrix: filesystem permissions', () => {
   })
 
   it('roles can read platform runtime paths (hosts file)', async () => {
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     await assertSucceeds(
       runInSandbox(native, policy, platformRuntimeReadCommand()),
       'task-worker can read platform runtime path'
@@ -183,7 +206,7 @@ describe('escape prevention: host process isolation', () => {
     const fixture = createSandboxFixture('codeteam-sentinel-')
     t.after(() => fixture.cleanup())
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     await assertFails(
       runInSandbox(native, policy, killHostFromSandboxCommand(sentinel.pid)),
       'task-worker cannot kill host sentinel'
@@ -203,9 +226,11 @@ describe('escape prevention: host process isolation', () => {
     const fixture = createSandboxFixture('codeteam-ptrace-')
     t.after(() => fixture.cleanup())
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
-    const result = await runInSandbox(native, policy, ptraceHostCommand(sentinel.pid))
-    assert.notEqual(result.code, 0, 'ptrace/debug attach should fail inside sandbox')
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
+    await assertFails(
+      runInSandbox(native, policy, ptraceHostCommand(sentinel.pid)),
+      'task-worker cannot attach a debugger to the host sentinel'
+    )
     assert.ok(sentinel.isAlive(), 'host sentinel died during ptrace test')
   })
 
@@ -213,7 +238,7 @@ describe('escape prevention: host process isolation', () => {
     const fixture = createSandboxFixture('codeteam-own-child-')
     t.after(() => fixture.cleanup())
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     await assertSucceeds(
       runInSandbox(native, policy, killOwnChildInSandboxCommand()),
       'task-worker can kill own sandbox child'
@@ -250,7 +275,7 @@ describe('escape prevention: symlink and privileged IPC', () => {
     const linkPath = join(fixture.workspace, 'escape-link')
     symlinkSync(outside, linkPath)
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     await assertEscapeBlocked(
       runInSandbox(native, policy, writeCmd(linkPath)),
       'task-worker cannot write through symlink to outside file',
@@ -277,7 +302,7 @@ describe('escape prevention: symlink and privileged IPC', () => {
       }
     })
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     await assertEscapeBlocked(
       runInSandbox(native, policy, symlinkEscapeWriteCommand(fixture.workspace, outside)),
       'task-worker cannot symlink-escape write',
@@ -294,7 +319,7 @@ describe('escape prevention: symlink and privileged IPC', () => {
     const fixture = createSandboxFixture('codeteam-docker-')
     t.after(() => fixture.cleanup())
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     await assertFails(
       runInSandbox(native, policy, dockerSocketWriteCommand()),
       'task-worker cannot write docker IPC endpoint'
@@ -316,7 +341,7 @@ describe('attachment readRoots remain read-only inside sandbox', () => {
     const copiedPath = join(fixture.workspace, 'from-attachment.png')
     writeFileSync(heroPath, 'hero-bytes')
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime, {
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime, {
       extraReadRoots: [realpathSync(attachmentsRoot)]
     })
 

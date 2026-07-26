@@ -97,6 +97,7 @@ export default {
     setupRequired: 'Please complete setup first',
     invalidCredentials: 'Invalid username or password',
     requestFailed: 'Request failed',
+    workspaceRetainedByJob: 'This workspace is retained by Job history and cannot be deleted',
     unauthorized: 'Not signed in',
     sessionExpired: 'Session expired',
     projectNotFound: 'Project not found',
@@ -684,7 +685,7 @@ export default {
     }
   },
   conversation: {
-    nav: { chat: 'Chat', drafts: 'Drafts', settings: 'Settings' },
+    nav: { chat: 'Chat', drafts: 'Drafts', jobs: 'Jobs', settings: 'Settings' },
     title: 'Conversation',
     workspaces: 'Workspaces',
     addFolder: 'Add folder',
@@ -703,6 +704,8 @@ export default {
     send: 'Send',
     stop: 'Stop',
     cancelled: 'The response was stopped',
+    jobReadOnly:
+      'A Job Work currently owns this workspace for writing. Chat remains available for read-only inspection and analysis.',
     folderDialogTitle: 'Choose a workspace folder',
     folderDialogDescription: 'Select an existing folder or create a child folder here.',
     confirmRemoveWorkspace: 'Remove “{name}” from CodeTask? Local files will not be deleted.',
@@ -733,6 +736,76 @@ export default {
       saving: 'Saving…',
       saved: 'Saved',
       refreshStatus: 'Refresh login status'
+    }
+  },
+  jobs: {
+    title: 'Job execution',
+    description: 'Up to two Jobs run concurrently; each Job executes one item at a time.',
+    executionPool: 'Execution pool',
+    waitingQueue: 'Waiting queue',
+    retained: 'Paused and history',
+    poolEmpty: 'The execution pool is empty',
+    queueEmpty: 'No Jobs are waiting',
+    emptyTitle: 'No Jobs yet',
+    emptyDescription: 'Confirm a draft execution tree to create an ordered Job here.',
+    goDrafts: 'Go to drafts',
+    queuePosition: 'Queue position: #{position}',
+    progress: '{completed}/{total} items completed',
+    timeline: 'Ordered execution timeline',
+    timelineHint: 'Only one item runs per Job; repair Work is inserted before its original gate.',
+    pause: 'Pause after current item',
+    cancelPause: 'Cancel pause',
+    continue: 'Continue',
+    deletePrompt:
+      'Delete Job “{title}”? Its running sandbox will stop and the record will be retained as deleted.',
+    repair: 'Repair',
+    attempt: 'Attempt {count}',
+    states: {
+      queued: 'Queued',
+      running: 'Running',
+      pause_requested: 'Pausing after current item',
+      paused: 'Paused',
+      succeeded: 'Succeeded',
+      failed: 'Failed',
+      deleted: 'Deleted'
+    },
+    itemStates: {
+      queued: 'Queued',
+      running: 'Running',
+      succeeded: 'Succeeded',
+      failed: 'Failed',
+      skipped: 'Skipped'
+    },
+    kinds: {
+      work: 'Work',
+      work_validation: 'Work validation',
+      slice_validation: 'Slice validation',
+      milestone_validation: 'Milestone validation'
+    },
+    settings: {
+      title: 'Job execution and validation',
+      description:
+        'Configure host runners, prompts, and Skills manuals independently for Work and each validation gate.',
+      concurrency: 'Concurrent Jobs',
+      concurrencyHint: 'Only 1 or 2 are allowed; a workspace always has at most one writing Job.',
+      workTitle: 'Work execution',
+      workDescription: 'Mutates in sequence and requires the Job’s matching exclusive write lease.',
+      workValidationTitle: 'Work validation',
+      workValidationDescription: 'Read-only validation for one Work with bounded repair requests.',
+      sliceValidationTitle: 'Slice validation',
+      sliceValidationDescription: 'Read-only integration validation across a Slice.',
+      milestoneValidationTitle: 'Milestone validation',
+      milestoneValidationDescription: 'Read-only milestone validation across Slices.',
+      enabled: 'Enabled',
+      provider: 'Host runner',
+      model: 'Model (blank uses host default)',
+      prompt: 'Task prompt',
+      skills: 'Skills operating manual',
+      resetDefault: 'Reset to default',
+      fixedProtocolHint:
+        'The fixed JSON result protocol and sandbox permissions are server-owned and cannot be overridden here.',
+      protocolHint:
+        'Changes apply only to newly confirmed Jobs. Every item snapshots its settings, so pause, continue, and restart cannot drift an existing Job.'
     }
   },
   drafts: {
@@ -789,8 +862,7 @@ export default {
     },
     handoff: {
       title: 'Received by Job Intake',
-      pending:
-        'The handoff is pending. The Job execution module is not implemented, so execution will not start.',
+      pending: 'The Job module accepted this handoff and queued it for ordered execution.',
       attachments: '{count} independent attachment copies saved'
     },
     settings: {

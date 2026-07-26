@@ -11,6 +11,8 @@ import {
 import { createSecureAuthModule } from './composition/auth'
 import { createConversationModule } from './composition/conversation'
 import { createDraftModule } from './composition/draft'
+import { createJobModule } from './composition/job'
+import type { JobItemExecutor } from './composition/job'
 import type { AppContext } from './context'
 import { dataPaths } from './data-paths'
 import { processHostEnvironmentSource } from './host-environment'
@@ -24,6 +26,8 @@ export interface BootstrapOptions {
   readonly mode?: AppMode
   readonly authSecretPath?: string
   readonly authSecret?: string
+  /** Deterministic executor injection for contract/E2E tests; production omits it. */
+  readonly jobExecutor?: JobItemExecutor
   readonly storage?: {
     readonly bootstrapRoot: string
     readonly source: string
@@ -71,11 +75,6 @@ export function createRuntime(options: BootstrapOptions): ApplicationRuntime {
       authSecret,
       mode
     })
-    const conversation = createConversationModule({
-      database: kernelDb,
-      runtimeRoot: dataPaths(options.dataDir).conversationRuntime,
-      hostEnvironment: processHostEnvironmentSource.snapshot()
-    })
     const draft = createDraftModule({
       database: kernelDb,
       runtimeRoot: dataPaths(options.dataDir).draftRuntime,
@@ -83,12 +82,27 @@ export function createRuntime(options: BootstrapOptions): ApplicationRuntime {
       jobIntakeAssetsRoot: dataPaths(options.dataDir).jobIntakeAssets,
       hostEnvironment: processHostEnvironmentSource.snapshot()
     })
+    const job = createJobModule({
+      database: kernelDb,
+      runtimeRoot: dataPaths(options.dataDir).jobRuntime,
+      jobAssetsRoot: dataPaths(options.dataDir).jobIntakeAssets,
+      hostEnvironment: processHostEnvironmentSource.snapshot(),
+      executor: options.jobExecutor
+    })
+    const conversation = createConversationModule({
+      database: kernelDb,
+      runtimeRoot: dataPaths(options.dataDir).conversationRuntime,
+      hostEnvironment: processHostEnvironmentSource.snapshot(),
+      workspaceIsWriteLocked: (workspaceId) =>
+        job.service.workspaceHasActiveLease(workspaceId)
+    })
     const context: AppContext = {
       dataDir: options.dataDir,
       kernelDb,
       security: { mode, authSecret, auth },
       conversation,
       draft,
+      job,
       ...(options.storage ? { storage: options.storage } : {})
     }
     auth.service.cleanup()
@@ -103,11 +117,13 @@ export function createRuntime(options: BootstrapOptions): ApplicationRuntime {
         if (!validation.ok) {
           throw new Error(`auth_database.invalid:${validation.integrity}`)
         }
+        await job.start()
       },
       async shutdown(): Promise<void> {
         if (closed) return
         closed = true
         try {
+          await job.shutdown()
           await Promise.all([conversation.shutdown(), draft.shutdown()])
         } finally {
           try {

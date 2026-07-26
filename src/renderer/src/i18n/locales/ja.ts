@@ -95,6 +95,7 @@ export default {
     setupRequired: '先に初期設定を完了してください',
     invalidCredentials: 'ユーザー名またはパスワードが正しくありません',
     requestFailed: 'リクエストに失敗しました',
+    workspaceRetainedByJob: 'このワークスペースは Job 履歴に保持されているため削除できません',
     unauthorized: 'ログインしていません',
     sessionExpired: 'セッションの有効期限が切れました',
     projectNotFound: 'プロジェクトが見つかりません',
@@ -627,7 +628,7 @@ export default {
     }
   },
   conversation: {
-    nav: { chat: '会話', drafts: 'ドラフト', settings: '設定' },
+    nav: { chat: '会話', drafts: 'ドラフト', jobs: 'Jobs', settings: '設定' },
     title: '会話',
     workspaces: 'ワークスペース',
     addFolder: 'フォルダを追加',
@@ -646,6 +647,8 @@ export default {
     send: '送信',
     stop: '停止',
     cancelled: '応答を停止しました',
+    jobReadOnly:
+      'Job Work がこのワークスペースの書き込みを所有しています。会話では読み取りと分析のみ可能です。',
     folderDialogTitle: '作業フォルダを選択',
     folderDialogDescription: '既存フォルダを選択するか、子フォルダを新規作成できます。',
     confirmRemoveWorkspace:
@@ -677,6 +680,74 @@ export default {
       saving: '保存中…',
       saved: '保存しました',
       refreshStatus: 'ログイン状態を更新'
+    }
+  },
+  jobs: {
+    title: 'Job 実行',
+    description: '最大 2 Job を並列実行し、各 Job 内は 1 項目ずつ実行します。',
+    executionPool: '実行プール',
+    waitingQueue: '待機キュー',
+    retained: '一時停止と履歴',
+    poolEmpty: '実行中の Job はありません',
+    queueEmpty: '待機中の Job はありません',
+    emptyTitle: 'Job はまだありません',
+    emptyDescription: 'ドラフトの実行ツリーを確認すると、順序付き Job が作成されます。',
+    goDrafts: 'ドラフトへ',
+    queuePosition: 'キュー位置：#{position}',
+    progress: '{completed}/{total} 項目完了',
+    timeline: '順序実行タイムライン',
+    timelineHint: '各 Job は 1 項目ずつ実行し、修復 Work は元の検証直前に挿入されます。',
+    pause: '現在項目の後で一時停止',
+    cancelPause: '一時停止を取消',
+    continue: '続行',
+    deletePrompt: 'Job「{title}」を削除しますか？実行中のサンドボックスを停止します。',
+    repair: '修復',
+    attempt: '試行 {count}',
+    states: {
+      queued: '待機中',
+      running: '実行中',
+      pause_requested: '現在項目の後で停止',
+      paused: '一時停止',
+      succeeded: '完了',
+      failed: '失敗',
+      deleted: '削除済み'
+    },
+    itemStates: {
+      queued: '待機中',
+      running: '実行中',
+      succeeded: '成功',
+      failed: '失敗',
+      skipped: 'スキップ'
+    },
+    kinds: {
+      work: 'Work',
+      work_validation: 'Work 検証',
+      slice_validation: 'Slice 検証',
+      milestone_validation: 'Milestone 検証'
+    },
+    settings: {
+      title: 'Job 実行と検証',
+      description: 'Work と各検証のホスト実行器、プロンプト、Skills 手順を個別設定します。',
+      concurrency: '並列 Job 数',
+      concurrencyHint: '1 または 2。1 ワークスペースに書き込み Job は常に 1 つだけです。',
+      workTitle: 'Work 実行',
+      workDescription: '順番に変更し、Job と一致する排他的書き込みリースが必要です。',
+      workValidationTitle: 'Work 検証',
+      workValidationDescription: '単一 Work を読み取り専用で検証し、限定修復を提案できます。',
+      sliceValidationTitle: 'Slice 検証',
+      sliceValidationDescription: 'Slice 内の統合結果を読み取り専用で検証します。',
+      milestoneValidationTitle: 'Milestone 検証',
+      milestoneValidationDescription: 'Slice 横断結果を読み取り専用で検証します。',
+      enabled: '有効',
+      provider: 'ホスト実行器',
+      model: 'モデル（空欄はホスト既定）',
+      prompt: 'タスクプロンプト',
+      skills: 'Skills 操作手順',
+      resetDefault: '既定に戻す',
+      fixedProtocolHint:
+        '固定 JSON 結果プロトコルとサンドボックス権限はサーバー管理で、上書きできません。',
+      protocolHint:
+        '変更は新規 Job のみに適用されます。各項目は設定を保存するため、停止・再開・再起動でも変化しません。'
     }
   },
   drafts: {
@@ -732,7 +803,7 @@ export default {
     },
     handoff: {
       title: 'Job Intake が受領済み',
-      pending: '状態は pending です。Job 実行モジュールは未実装のため実行されません。',
+      pending: 'Job モジュールが受領し、順序付きキューへ登録しました。',
       attachments: '{count} 件の独立した添付コピーを保存'
     },
     settings: {

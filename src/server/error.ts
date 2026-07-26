@@ -4,6 +4,7 @@ import { AuthError } from './core/domain/auth'
 import { AuthSecurityCapacityError } from './core/application/ports'
 import { ConversationError } from './core/domain/conversation'
 import { DraftError } from './core/domain/draft'
+import { JobError } from './core/domain/job'
 
 export const code = {
   OK: 0,
@@ -99,6 +100,33 @@ export function resolveHttpStatus(error: unknown): number {
     if (
       error.code === 'draft.provider_unavailable' ||
       error.code === 'draft.provider_not_authenticated'
+    ) {
+      return 503
+    }
+    return 400
+  }
+  if (error instanceof JobError) {
+    if (
+      error.code === 'job.not_found' ||
+      error.code === 'job.handoff_not_found' ||
+      error.code === 'job.workspace_not_found'
+    ) {
+      return 404
+    }
+    if (
+      error.code === 'job.settings_conflict' ||
+      error.code === 'job.concurrent_update' ||
+      error.code === 'job.handoff_conflict' ||
+      error.code === 'job.handoff_not_pending' ||
+      error.code === 'job.pause_invalid' ||
+      error.code === 'job.continue_invalid' ||
+      error.code === 'job.workspace_retained'
+    ) {
+      return 409
+    }
+    if (
+      error.code === 'job.provider_unavailable' ||
+      error.code === 'job.provider_capability_unsupported'
     ) {
       return 503
     }
@@ -234,6 +262,18 @@ export function toErrorResponse(error: unknown): ApiResponse<Record<string, unkn
     return fail(status, error.code, { code: error.code, ...error.details })
   }
   if (error instanceof DraftError) {
+    const httpStatus = resolveHttpStatus(error)
+    const status =
+      httpStatus === 404
+        ? code.NOT_FOUND
+        : httpStatus === 409
+          ? code.CONFLICT
+          : httpStatus === 503
+            ? 50301
+            : code.BAD_REQUEST
+    return fail(status, error.code, { code: error.code, ...error.details })
+  }
+  if (error instanceof JobError) {
     const httpStatus = resolveHttpStatus(error)
     const status =
       httpStatus === 404

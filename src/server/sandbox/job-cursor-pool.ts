@@ -1,6 +1,6 @@
 import type { AgentTurnChunk } from '../agent-runtime/types'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
-import { SandboxError, type AnySandboxPolicy } from './types'
+import { SandboxError, type SandboxPolicy } from './types'
 import {
   awaitSandboxWorkerAttestation,
   launchSandboxedWorker,
@@ -90,7 +90,7 @@ async function* readTurnChunks(
 async function launchJobCursorSession(
   jobId: string,
   bootstrap: RunSandboxedTurnInput & {
-    policy: AnySandboxPolicy
+    policy: SandboxPolicy
     env: Record<string, string>
     readRoots: string[]
     writeRoots: string[]
@@ -142,7 +142,7 @@ export async function* streamJobCursorSandboxTurn(
   jobId: string,
   input: RunSandboxedTurnInput,
   bootstrap: {
-    policy: AnySandboxPolicy
+    policy: SandboxPolicy
     env: Record<string, string>
     readRoots: string[]
     writeRoots: string[]

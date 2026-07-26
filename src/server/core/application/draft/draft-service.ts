@@ -44,7 +44,7 @@ export interface JobIntakeHandoffView {
   readonly state: 'pending' | 'accepted' | 'rejected'
   readonly attachmentCount: number
   readonly createdAtMs: number
-  readonly jobModuleImplemented: false
+  readonly jobModuleImplemented: true
 }
 export interface DraftDetails {
   readonly draft: DraftRecord
@@ -97,7 +97,7 @@ function handoffView(
     state: record.state,
     attachmentCount: attachments.length,
     createdAtMs: record.createdAtMs,
-    jobModuleImplemented: false
+    jobModuleImplemented: true
   }
 }
 

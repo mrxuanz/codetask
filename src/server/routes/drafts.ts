@@ -165,13 +165,17 @@ export function createDraftRoutes(ctx: AppContext): Hono {
   })
   routes.post('/drafts/:draftId/confirm', async (c) => {
     const body = await c.req.json<{ expectedRevision?: number; treeId?: string }>()
+    const handoff = await service.confirmExecutionTree(
+      userIdFrom(c),
+      c.req.param('draftId'),
+      {
+        expectedRevision: number(body.expectedRevision, 'expectedRevision'),
+        treeId: body.treeId?.trim() ?? ''
+      }
+    )
+    const job = ctx.job.acceptHandoff(handoff.id)
     return c.json(
-      ok(
-        await service.confirmExecutionTree(userIdFrom(c), c.req.param('draftId'), {
-          expectedRevision: number(body.expectedRevision, 'expectedRevision'),
-          treeId: body.treeId?.trim() ?? ''
-        })
-      ),
+      ok({ handoff, job }),
       202
     )
   })

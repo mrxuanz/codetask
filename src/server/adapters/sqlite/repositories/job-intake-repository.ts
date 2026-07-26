@@ -70,6 +70,20 @@ function attachment(row: AttachmentRow): JobIntakeAttachmentRecord {
 export class SqliteJobIntakeRepository implements JobIntakeRepository {
   constructor(private readonly database: Database.Database) {}
 
+  getById(handoffId: string): JobIntakeHandoffRecord | null {
+    return handoff(
+      this.database
+        .prepare(
+          `SELECT id, source_draft_id, source_user_id, source_workspace_id, source_tree_id,
+                  source_draft_revision, source_tree_revision, state, draft_snapshot_json,
+                  execution_tree_json, created_at_ms, accepted_at_ms, rejected_at_ms,
+                  rejection_code
+           FROM job_intake_handoffs WHERE id = ?`
+        )
+        .get(handoffId) as HandoffRow | undefined
+    )
+  }
+
   getBySourceDraftId(sourceDraftId: string): JobIntakeHandoffRecord | null {
     return handoff(
       this.database
@@ -82,6 +96,22 @@ export class SqliteJobIntakeRepository implements JobIntakeRepository {
         )
         .get(sourceDraftId) as HandoffRow | undefined
     )
+  }
+
+  listPending(): JobIntakeHandoffRecord[] {
+    return (
+      this.database
+        .prepare(
+          `SELECT id, source_draft_id, source_user_id, source_workspace_id, source_tree_id,
+                  source_draft_revision, source_tree_revision, state, draft_snapshot_json,
+                  execution_tree_json, created_at_ms, accepted_at_ms, rejected_at_ms,
+                  rejection_code
+           FROM job_intake_handoffs
+           WHERE state = 'pending'
+           ORDER BY created_at_ms, id`
+        )
+        .all() as HandoffRow[]
+    ).map((row) => handoff(row)!)
   }
   insertHandoff(record: JobIntakeHandoffRecord): void {
     this.database
@@ -108,6 +138,18 @@ export class SqliteJobIntakeRepository implements JobIntakeRepository {
         record.rejectedAtMs,
         record.rejectionCode
       )
+  }
+
+  markAccepted(handoffId: string, acceptedAtMs: number): boolean {
+    return (
+      this.database
+        .prepare(
+          `UPDATE job_intake_handoffs
+           SET state = 'accepted', accepted_at_ms = ?
+           WHERE id = ? AND state = 'pending'`
+        )
+        .run(acceptedAtMs, handoffId).changes === 1
+    )
   }
   insertAttachment(record: JobIntakeAttachmentRecord): void {
     this.database

@@ -13,6 +13,7 @@ const SERVER_MESSAGE_KEYS: Record<string, string> = {
   'auth.password_reused': 'workspace.settings.security.passwordReused',
   'auth.session_invalid': 'errors.sessionExpired',
   'auth.rate_limited': 'errors.requestFailed',
+  'job.workspace_retained': 'errors.workspaceRetainedByJob',
   'workspaceRoot 不能为空': 'folderPicker.selectRequired',
   项目不存在: 'errors.projectNotFound',
   path_not_absolute: 'setup.errors.pathNotAbsolute',

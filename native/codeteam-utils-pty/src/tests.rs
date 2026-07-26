@@ -837,7 +837,7 @@ async fn pty_spawn_can_preserve_inherited_fds() -> anyhow::Result<()> {
         write_end.as_raw_fd().to_string(),
     );
 
-    let script = "printf __preserved__ >\"/dev/fd/$PRESERVED_FD\"";
+    let script = "printf __preserved__ >&\"$PRESERVED_FD\"";
     let spawned = spawn_process_with_inherited_fds(
         "/bin/sh",
         &["-c".to_string(), script.to_string()],
@@ -1075,7 +1075,7 @@ async fn pipe_spawn_no_stdin_can_preserve_inherited_fds() -> anyhow::Result<()> 
         write_end.as_raw_fd().to_string(),
     );
 
-    let script = "printf __pipe_preserved__ >\"/dev/fd/$PRESERVED_FD\"";
+    let script = "printf __pipe_preserved__ >&\"$PRESERVED_FD\"";
     let spawned = spawn_process_no_stdin_with_inherited_fds(
         "/bin/sh",
         &["-c".to_string(), script.to_string()],

@@ -25,8 +25,14 @@ const EXPECTED_TABLES = [
   'draft_generation_runs',
   'draft_settings',
   'drafts',
+  'job_attachments',
+  'job_events',
   'job_intake_attachments',
   'job_intake_handoffs',
+  'job_settings',
+  'job_work_items',
+  'job_workspace_leases',
+  'jobs',
   'kernel_schema_migrations'
 ]
 

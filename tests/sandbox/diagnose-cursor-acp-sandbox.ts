@@ -12,7 +12,7 @@ import {
   applyProviderWriteRoots,
   collectPolicyReadRoots,
   collectPolicyWriteRoots,
-  policyForRole
+  createSandboxPolicy
 } from '../../src/server/sandbox/policy'
 import { resolveProviderReadRoots } from '../../src/server/sandbox/provider-read-roots'
 import { probeCursorAgentAuth } from '../../src/server/agent-runtime/cursor-acp/errors'
@@ -88,9 +88,9 @@ function resolveSandboxRunner(): { command: string; args: string[]; extraReadRoo
   throw new Error('No runnable Node/Electron found for sandbox ACP probe')
 }
 
-function wirePolicy(policy: ReturnType<typeof policyForRole>): string {
+function wirePolicy(policy: ReturnType<typeof createSandboxPolicy>): string {
   return JSON.stringify({
-    version: policy.version,
+    version: 2,
     role: policy.role,
     cwd: policy.cwd,
     runtime_root: policy.runtimeRoot,
@@ -194,7 +194,7 @@ function runCliPreflight(
 
 async function runSandboxProbe(input: {
   label: string
-  policy: ReturnType<typeof policyForRole>
+  policy: ReturnType<typeof createSandboxPolicy>
   envRecord: Record<string, string>
   cwd: string
   runtimeRoot: string
@@ -284,7 +284,7 @@ async function runSandboxProbe(input: {
 
 function runSandboxCliPreflight(
   label: string,
-  policy: ReturnType<typeof policyForRole>,
+  policy: ReturnType<typeof createSandboxPolicy>,
   envRecord: Record<string, string>,
   cwd: string
 ): CliPreflightResult {
@@ -422,7 +422,7 @@ async function main(): Promise<void> {
     providerEnv: authPrepared.envPatch
   })
 
-  let policy = policyForRole({
+  let policy = createSandboxPolicy({
     role: 'task-worker',
     workspaceRoot: workspace,
     runtimeRoot
