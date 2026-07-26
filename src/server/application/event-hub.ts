@@ -1,5 +1,5 @@
 import type { SafeLogger } from './ports/safe-logger'
-import type { SseEnvelope } from '../http/v3/sse-envelope'
+import type { SseEnvelope } from './sse-envelope'
 
 export interface EventHubConfig {
   readonly maxQueueSize: number

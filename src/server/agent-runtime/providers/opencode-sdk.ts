@@ -3,7 +3,7 @@ import type { OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import { spawnSync, type ChildProcessWithoutNullStreams } from 'child_process'
 import { createServer } from 'net'
 import { buildOpenCodeServerPlan } from '../../providers/opencode/server-plan'
-import { spawnProviderInvocation } from '../../providers/spawn'
+import { spawnProtectedProviderInvocation } from '../../adapters/runtime/protected-spawn'
 import { throwSdkTurnError } from '../errors'
 import {
   createTurnError,
@@ -189,13 +189,15 @@ async function startOpencodeServer(options: {
   }
   // Pin OS cwd to the project workspace so a ignored/mismatched `directory`
   // query cannot fall back to the CodeTask process cwd (program directory).
-  const proc = spawnProviderInvocation(
+  const proc = spawnProtectedProviderInvocation(
     { executable: options.executable, prefixArgs: options.prefixArgs },
     options.serveArgs,
     {
       cwd: options.cwd,
       env,
-      stdio: 'pipe'
+      stdio: 'pipe',
+      providerCode: 'opencode',
+      ...(options.signal !== undefined ? { signal: options.signal } : {})
     }
   ) as ChildProcessWithoutNullStreams
 

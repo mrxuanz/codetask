@@ -124,7 +124,7 @@ export function createLegacyJobsApi(): JobsApi {
 
 export async function resolveJobsApi(): Promise<JobsApi> {
   const generation = await fetchControlPlaneGeneration()
-  return generation === 'v3_authoritative' ? createV3JobsApi() : createLegacyJobsApi()
+  return generation === 'cutover_blocked' ? createV3JobsApi() : createLegacyJobsApi()
 }
 
 export { newIdempotencyKey, type ThreadJob, type V3JobDto, type V3TaskJobDto }

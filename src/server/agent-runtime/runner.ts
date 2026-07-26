@@ -14,12 +14,12 @@ import { resolveUserMcpServersMap } from '../settings/mcp'
 import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './types'
 import { resolveDownstreamAbortSignal } from '../context/request-abort'
 import { getAppConfig } from '../bootstrap'
-import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
+import { getWorkspaceLeaseContext } from '../legacy-shim'
 import {
   isWorkspaceLeaseActive,
   refreshWorkspaceLease
-} from '../legacy-control-plane/workspace-lease-store'
-import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
+} from '../legacy-shim'
+import { getExecutionRunContext } from '../legacy-shim'
 import {
   assertCapabilityProfileMatchesRole,
   assertProviderSupportsCapability,
@@ -83,7 +83,7 @@ async function* withSandboxLeaseRefresh<T>(
   }
 ): AsyncGenerator<T> {
   const KEEPALIVE_INTERVAL_MS = 60_000
-  const { refreshWorkloadLease } = await import('../legacy-control-plane/workload-slot-store')
+  const { refreshWorkloadLease } = await import('../legacy-shim')
   let refreshPending = false
   const abortForLeaseLoss = (error: unknown): void => {
     const cause =
@@ -240,7 +240,7 @@ async function* streamAgentTurnOnce(
   if (capabilityProfileRequiresOuterSandbox(input.capabilityProfile) && !useFakeInProcess) {
     if (!isOuterSandboxEnabled()) {
       throw new SandboxError(
-        `${input.role} must run inside the OS outer sandbox via the Agent SDK; CODETASK_DISABLE_OUTER_SANDBOX=1 is not allowed`,
+        `${input.role} must run inside the OS outer sandbox via the Agent SDK; outer sandbox disabled via AppConfig (desktop only) is not allowed`,
         'sandbox.required'
       )
     }

@@ -4,7 +4,7 @@ import {
   isHumanDependencyPause,
   isRestartInterruptedPause,
   resolveStaleExecutionJobAction
-} from '../../src/server/legacy-control-plane/execution-recovery'
+} from '../../src/server/legacy-shim'
 import { requiresExclusiveWorkspaceLease } from '../../src/shared/workspace-access.ts'
 import type { ThreadJobDto } from '../../src/shared/contracts/jobs.ts'
 

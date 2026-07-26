@@ -20,29 +20,25 @@ import {
 } from '../../src/server/db/schema'
 import {
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import {
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
   claimExecutionSlotForJobTx,
-  resetWorkloadRunControllersForTests
-} from '../../src/server/legacy-control-plane/workload-slot-store'
-import {
+  resetWorkloadRunControllersForTests,
   acquireWorkspaceLease,
   findWorkspaceLeaseConflict,
   normalizeWorkspaceLeasePath,
   releaseWorkspaceLease,
   releaseWorkspaceLeaseForOwner,
   resetWorkspaceLeaseStateForTests
-} from '../../src/server/legacy-control-plane/workspace-lease-store'
+} from '../../src/server/legacy-shim'
 import { prepareConversationTurn } from '../../src/server/conversation/service'
 import { getProjectWorkspaceAccess } from '../../src/server/projects/service'
 import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
 
-const executorPath = join(process.cwd(), 'src/server/legacy-control-plane/executor.ts')
+const executorPath = join(process.cwd(), 'src/server/control-plane/executor.ts')
 const queueCoordinatorPath = join(
   process.cwd(),
-  'src/server/legacy-control-plane/queue-coordinator.ts'
+  'src/server/control-plane/queue-coordinator.ts'
 )
 const plannerPath = join(process.cwd(), 'src/server/design-session/planner.ts')
 

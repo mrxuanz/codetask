@@ -80,7 +80,7 @@ test('ClaudeDriver prepareTurn delegates to stream factory without altering chun
       input: baseInput(),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'host-identity'
     })
   )
 
@@ -304,7 +304,7 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
       input: baseInput({ role: 'task-worker', prompt: 'managed' }),
       options: { outerSandbox: true },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'host-identity'
     })
   )
 
@@ -341,7 +341,7 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
       input: baseInput({ prompt: 'ok' }),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'host-identity'
     })
   )) {
     chunks.push(chunk)
@@ -382,7 +382,7 @@ test('Claude registry production driver matches descriptor and settings slot', (
   assert.equal(driver.descriptor, CLAUDE_DESCRIPTOR)
   assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG['claude-code'])
   assert.equal(driver.descriptor.capabilities.protocol, 'sdk')
-  assert.equal(driver.descriptor.capabilities.authMode, 'runtime-copy')
+  assert.equal(driver.descriptor.capabilities.authMode, 'host-identity')
 })
 
 test('Claude turn options parity snapshots stay stable for settings/MCP/permissions', () => {

@@ -19,6 +19,7 @@ import {
   resolveCursorAgentExecutable,
   spawnCursorAgent
 } from '../../src/server/agent-runtime/cursor-acp/command'
+import { installLiveProtectedRuntimeStub } from '../../src/server/adapters/runtime/protected-spawn'
 import { createCursorPermissionHandler } from '../../src/server/agent-runtime/cursor-acp/permissions'
 
 const AUTH_TIMEOUT_MS = 120_000
@@ -116,6 +117,7 @@ export async function runAcpBootstrapProbe(input: {
     }
   }
 
+  installLiveProtectedRuntimeStub({ cwd: input.cwd, providerCode: 'cursor' })
   const child = spawnCursorAgent(command, cliArgs, {
     cwd: input.cwd,
     env,

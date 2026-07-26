@@ -13,7 +13,7 @@ import {
 import { validatePlanAbilityCodes } from '../plan-ability-validation'
 import { plannerMcpToolDefinitions } from './tools'
 import { getPlannerMcpSession } from './session'
-import { assertRunWritable } from '../../legacy-control-plane/workload-slot-store'
+import { assertRunWritable } from '../../legacy-shim'
 
 type JsonRpcId = string | number | null
 
@@ -398,7 +398,7 @@ async function finalizePlan(
 ): Promise<void> {
   try {
     if (!(await assertRunWritable(session.ownerKind, session.ownerId, session.runId))) {
-      const activeRun = await import('../../legacy-control-plane/workload-slot-store').then((m) =>
+      const activeRun = await import('../../legacy-shim').then((m) =>
         m.getActiveRun(session.ownerKind, session.ownerId)
       )
       logStructured('planner.finalizer.stale', {
@@ -419,7 +419,7 @@ async function finalizePlan(
     const commitOk = await invokePlanCommit(session, counts)
     if (!commitOk) {
       const stillActive = await assertRunWritable(session.ownerKind, session.ownerId, session.runId)
-      const activeRun = await import('../../legacy-control-plane/workload-slot-store').then((m) =>
+      const activeRun = await import('../../legacy-shim').then((m) =>
         m.getActiveRun(session.ownerKind, session.ownerId)
       )
       logStructured('planner.finalizer.rejected', {

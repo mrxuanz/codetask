@@ -4,18 +4,19 @@ import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
 import {
   resolveClaudeInstallDirs,
   resolveCodexHostAuthPath,
+  resolveCodexHostHome,
   resolveCodexInstallDirs,
   resolveCursorAgentInstallDirs,
   resolveCursorHostCursorHome,
   resolveHostProfilePaths,
+  resolveOpencodeHostConfigDir,
+  resolveOpencodeHostDataDir,
   resolveOpencodeInstallDirs,
-  runtimeCodexHome,
   snapshotClaudeHostSettings,
   snapshotCodexHostAuth,
   snapshotCursorHostAuth,
   snapshotOpencodeHostAuth
 } from './paths'
-import { materializeCodexAuth, materializeOpencodeAuth, opencodeRuntimeLayout } from './materialize'
 import type { ProviderAuthDiagnostics, ProviderAuthPrepared } from './types'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
 
@@ -92,41 +93,6 @@ function copyRuntimeAuthEnv(
   }
 }
 
-function buildRuntimeBaseEnv(
-  runtimeRoot: string,
-  hostEnvironment: HostEnvironmentSnapshot
-): Record<string, string> {
-  const tmp = join(runtimeRoot, 'tmp')
-  mkdirSync(tmp, { recursive: true })
-
-  const env: Record<string, string> = {
-    HOME: runtimeRoot,
-    TMPDIR: tmp,
-    TEMP: tmp,
-    TMP: tmp
-  }
-  copySelectedHostEnv(env, hostEnvironment, HOST_EXECUTION_ENV_KEYS)
-
-  if (process.platform === 'win32') {
-    env.USERPROFILE = runtimeRoot
-    env.APPDATA = join(runtimeRoot, 'AppData', 'Roaming')
-    env.LOCALAPPDATA = join(runtimeRoot, 'AppData', 'Local')
-    if (/^[A-Za-z]:/.test(runtimeRoot)) {
-      env.HOMEDRIVE = runtimeRoot.slice(0, 2)
-      env.HOMEPATH = runtimeRoot.slice(2) || '\\'
-    }
-    applyWindowsCrashReporterEnv(env)
-  } else {
-    env.XDG_CONFIG_HOME = join(runtimeRoot, 'config')
-    env.XDG_CACHE_HOME = join(runtimeRoot, 'cache')
-    env.XDG_DATA_HOME = join(runtimeRoot, 'data')
-    env.XDG_STATE_HOME = join(runtimeRoot, 'state')
-  }
-
-  copyRuntimeAuthEnv(env, hostEnvironment)
-  return env
-}
-
 function buildHostIdentityEnv(
   runtimeRoot: string,
   profile = resolveHostProfilePaths(),
@@ -185,51 +151,50 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
   const profile = resolveHostProfilePaths(hostEnvironment)
   const hostAuth = snapshotCodexHostAuth(profile, hostEnvironment)
   const hostAuthPath = resolveCodexHostAuthPath(profile)
-  const materialized = materializeCodexAuth(runtimeRoot, profile)
-  const codexHome = runtimeCodexHome(runtimeRoot)
+  const hostCodexHome = resolveCodexHostHome(profile)
+  // Host identity + precise ~/.codex allowlist — no credential file copy.
+  // Sessions/rollouts stay under host CODEX_HOME (same as a normal Codex CLI install).
 
   const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
-    CODEX_HOME: codexHome
+    ...buildHostIdentityEnv(runtimeRoot, profile, hostEnvironment),
+    CODEX_HOME: hostCodexHome
   }
-  const authMaterialPresent = materialized.authCopied || hostAuth.present
+  const hasAuthEnv = Boolean(
+    hostEnvironment.OPENAI_API_KEY?.trim() || hostEnvironment.CODEX_API_KEY?.trim()
+  )
+  const authMaterialPresent = hostAuth.present || hasAuthEnv
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'codex',
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     authMaterialPresent,
     hostAuthPath,
-    runtimeAuthPath: materialized.runtimeAuthPath,
-    warnings: authMaterialPresent
-      ? [
-          'Codex auth/config snapshotted to runtime (config.toml filtered for MCP/sandbox); inner danger-full-access + approval_policy=never.'
-        ]
-      : [
-          materialized.configCopied
-            ? `Codex config snapshotted, but no auth material was found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
-            : `Host Codex auth file not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
-        ]
+    runtimeAuthPath: hostAuthPath,
+    warnings: [
+      authMaterialPresent
+        ? `Codex uses host profile identity (${hostCodexHome}); outer sandbox allows precise path read/write. Inner danger-full-access + approval_policy=never.`
+        : `Host Codex auth not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
+    ]
   }
 
-  const readRoots = uniqueRoots([...resolveCodexInstallDirs()])
+  // Fail-closed allowlist: always declare precise host roots even when absent.
+  const readRoots = uniqueRoots([hostCodexHome, ...resolveCodexInstallDirs()])
+  const writeRoots = uniqueRoots([hostCodexHome])
   return {
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     runtimeRoot,
     envPatch,
     readRoots,
-    writeRoots: [],
-    cleanupPlan: () => materialized.cleanup(),
+    writeRoots,
+    cleanupPlan: () => undefined,
     diagnostics,
     filesystemProfile: {
       provider: 'codex',
       hostReadRoots: readRoots,
-      hostWriteRoots: [],
+      hostWriteRoots: writeRoots,
       runtimeEnv: envPatch,
-      credentialSnapshots: [
-        { relativePath: '.codex/auth.json', required: false },
-        { relativePath: '.codex/config.toml', required: false }
-      ],
-      scrubPatterns: ['.codex/auth.json', '.codex/config.toml']
+      credentialSnapshots: [],
+      scrubPatterns: []
     }
   }
 }
@@ -300,11 +265,13 @@ export function prepareClaudeAuth(input: ProviderAuthPreparationOptions): Provid
   const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
   const hostSettings = snapshotClaudeHostSettings(profile)
+  // Keep session/state under runtime (like Cursor CURSOR_DATA_DIR), but use host
+  // identity + settings env-inject — no credential file copy.
   const claudeDir = join(runtimeRoot, '.claude')
   mkdirSync(claudeDir, { recursive: true })
 
   const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
+    ...buildHostIdentityEnv(runtimeRoot, profile, hostEnvironment),
     CLAUDE_CONFIG_DIR: claudeDir,
     ...hostSettings.env
   }
@@ -318,31 +285,32 @@ export function prepareClaudeAuth(input: ProviderAuthPreparationOptions): Provid
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'claude-code',
-    mode: 'runtime-copy',
-    authMaterialPresent: hasAuthEnv,
+    mode: 'host-identity',
+    authMaterialPresent: hasAuthEnv || hostSettings.present,
     hostAuthPath: hostSettings.settingsPath,
     runtimeAuthPath: claudeDir,
     warnings: [
-      hasAuthEnv
-        ? `Claude host settings injected as auth env only; session state written to ${claudeDir}.`
+      hasAuthEnv || hostSettings.present
+        ? `Claude uses host profile identity with settings env-inject; session state written to ${claudeDir}.`
         : `No injectable Claude auth env found (${hostSettings.settingsPath}); ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN required.`,
       'Claude inner bypassPermissions + sandbox disabled; settingSources=[]; outer sandbox is the only boundary.'
     ]
   }
 
-  const readRoots = uniqueRoots([...resolveClaudeInstallDirs()])
+  const readRoots = uniqueRoots([hostSettings.configDir, ...resolveClaudeInstallDirs()])
+  const writeRoots = uniqueRoots([claudeDir])
   return {
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     runtimeRoot,
     envPatch,
     readRoots,
-    writeRoots: [],
+    writeRoots,
     cleanupPlan: () => undefined,
     diagnostics,
     filesystemProfile: {
       provider: 'claude-code',
       hostReadRoots: readRoots,
-      hostWriteRoots: [],
+      hostWriteRoots: writeRoots,
       runtimeEnv: envPatch,
       credentialSnapshots: [],
       scrubPatterns: []
@@ -354,53 +322,60 @@ export function prepareOpenCodeAuth(input: ProviderAuthPreparationOptions): Prov
   const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
   const hostAuth = snapshotOpencodeHostAuth(profile)
-  const materialized = materializeOpencodeAuth(runtimeRoot, profile)
-  const layout = opencodeRuntimeLayout(runtimeRoot)
+  const hostConfigDir = resolveOpencodeHostConfigDir(profile)
+  const hostDataDir = resolveOpencodeHostDataDir(profile)
+  // Host identity + precise XDG opencode paths — no credential file copy.
+  // Keep mutable state under runtime (like Claude CLAUDE_CONFIG_DIR / Cursor CURSOR_DATA_DIR).
+  const stateHome = join(runtimeRoot, '.local', 'state')
+  mkdirSync(stateHome, { recursive: true })
 
   const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
-    XDG_CONFIG_HOME: layout.configHome,
-    XDG_DATA_HOME: layout.dataHome,
-    XDG_STATE_HOME: layout.stateHome
+    ...buildHostIdentityEnv(runtimeRoot, profile, hostEnvironment),
+    // Precise XDG roots match resolveOpencodeHost* (including Windows — OpenCode uses XDG layout).
+    XDG_CONFIG_HOME: join(profile.home, '.config'),
+    XDG_DATA_HOME: join(profile.home, '.local', 'share'),
+    XDG_STATE_HOME: stateHome
   }
+
+  const hasAuthEnv = Boolean(
+    hostEnvironment.OPENCODE_API_KEY?.trim() ||
+      hostEnvironment.OPENAI_API_KEY?.trim() ||
+      hostEnvironment.ANTHROPIC_API_KEY?.trim()
+  )
+  const authMaterialPresent = hostAuth.present || hasAuthEnv
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'opencode',
-    mode: 'runtime-copy',
-    authMaterialPresent: materialized.configCopied || hostAuth.present,
-    hostAuthPath: materialized.hostConfigDir,
-    runtimeAuthPath: materialized.runtimeConfigDir,
-    warnings: materialized.configCopied
-      ? [
-          'OpenCode config/auth snapshotted to runtime XDG directories; question denied + auto-replied if asked; MCP injected via OPENCODE_CONFIG_CONTENT.'
-        ]
-      : ['OpenCode config directory is empty (will rely on environment variable API key)']
+    mode: 'host-identity',
+    authMaterialPresent,
+    hostAuthPath: hostConfigDir,
+    runtimeAuthPath: stateHome,
+    warnings: [
+      authMaterialPresent
+        ? `OpenCode uses host profile identity (${hostConfigDir}); state under ${stateHome}; MCP injected via OPENCODE_CONFIG_CONTENT.`
+        : `Host OpenCode auth not found under ${hostConfigDir} / ${hostDataDir}; set OPENCODE_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY).`,
+      'OpenCode question denied + auto-replied if asked; outer sandbox is the filesystem boundary.'
+    ]
   }
 
-  const readRoots = uniqueRoots([...resolveOpencodeInstallDirs()])
+  // Fail-closed allowlist: always declare precise host roots even when absent.
+  const readRoots = uniqueRoots([hostConfigDir, hostDataDir, ...resolveOpencodeInstallDirs()])
+  const writeRoots = uniqueRoots([hostConfigDir, hostDataDir, stateHome])
   return {
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     runtimeRoot,
     envPatch,
     readRoots,
-    writeRoots: [],
-    cleanupPlan: () => materialized.cleanup(),
+    writeRoots,
+    cleanupPlan: () => undefined,
     diagnostics,
     filesystemProfile: {
       provider: 'opencode',
       hostReadRoots: readRoots,
-      hostWriteRoots: [],
+      hostWriteRoots: writeRoots,
       runtimeEnv: envPatch,
-      credentialSnapshots: [
-        { relativePath: '.config/opencode/auth.json', required: false },
-        { relativePath: '.local/share/opencode/auth.json', required: false }
-      ],
-      scrubPatterns: [
-        '.config/opencode/auth.json',
-        '.config/opencode/credentials.json',
-        '.local/share/opencode/auth.json',
-        '.local/share/opencode/credentials.json'
-      ]
+      credentialSnapshots: [],
+      scrubPatterns: []
     }
   }
 }

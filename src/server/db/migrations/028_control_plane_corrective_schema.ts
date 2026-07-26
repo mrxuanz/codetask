@@ -314,9 +314,9 @@ export const migration028ControlPlaneCorrectiveSchema: Migration = {
         SELECT
           key,
           value,
-          CASE WHEN key = 'control_schema_generation' AND value IN ('copied', 'v3_authoritative')
+          CASE WHEN key = 'control_schema_generation' AND value IN ('copied', 'cutover_blocked')
             THEN 26 ELSE source_migration END,
-          CASE WHEN key = 'control_schema_generation' AND value IN ('copied', 'v3_authoritative')
+          CASE WHEN key = 'control_schema_generation' AND value IN ('copied', 'cutover_blocked')
             THEN 26 ELSE source_migration END,
           source_migration,
           copy_report_hash,

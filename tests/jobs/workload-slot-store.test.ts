@@ -12,9 +12,9 @@ import { getDb } from '../../src/server/db'
 import {
   reconcileOrphanWorkloadSlotsOnStartup,
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady
+} from '../../src/server/legacy-shim'
 import {
   jobArtifacts,
   jobTasks,
@@ -36,11 +36,11 @@ import {
   markRunCancelling,
   refreshWorkloadLease,
   workloadPoolCapacity,
-  resetWorkloadRunControllersForTests
-} from '../../src/server/legacy-control-plane/workload-slot-store'
-import { updateJobRowFenced } from '../../src/server/legacy-control-plane/repository'
-import { hydrateTaskEvidenceSync } from '../../src/server/legacy-control-plane/evidence/store'
-import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
+  resetWorkloadRunControllersForTests,
+  updateJobRowFenced,
+  hydrateTaskEvidenceSync
+} from '../../src/server/legacy-shim'
+import type { TaskProgressDto } from '../../src/server/legacy-shim'
 import {
   registerPlannerMcpSession,
   unregisterPlannerMcpSession,
@@ -696,9 +696,9 @@ test('quarantined planning slot continues to block global admission', async () =
     })
     assert.ok(run)
 
-    const { stopRunLifecycle } = await import('../../src/server/legacy-control-plane/run-lifecycle')
+    const { stopRunLifecycle } = await import('../../src/server/legacy-shim')
     const { registerRunRuntime, resetRuntimeSupervisorForTests } =
-      await import('../../src/server/legacy-control-plane/runtime-supervisor')
+      await import('../../src/server/legacy-shim')
     resetRuntimeSupervisorForTests()
     registerRunRuntime(run.runId, {
       kind: 'cursor-acp',
@@ -738,9 +738,9 @@ test('advancePlanningQueue is a no-op while draining', async () => {
   await setupDb()
   try {
     const { beginDraining, endDraining } =
-      await import('../../src/server/legacy-control-plane/shutdown-state')
+      await import('../../src/server/legacy-shim')
     const { advancePlanningQueue } =
-      await import('../../src/server/legacy-control-plane/queue-coordinator')
+      await import('../../src/server/legacy-shim')
     const db = getDb()
     await seedJob(db, 'job-drain', 'planning')
     db.update(threadJobs)
@@ -764,7 +764,7 @@ test('periodic reconcile advances queues even when no stale slots exist', async 
   await setupDb()
   try {
     const { runPeriodicWorkloadReconcile } =
-      await import('../../src/server/legacy-control-plane/reconcile')
+      await import('../../src/server/legacy-shim')
     await runPeriodicWorkloadReconcile()
     await runPeriodicWorkloadReconcile()
   } finally {

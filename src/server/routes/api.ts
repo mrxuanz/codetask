@@ -13,6 +13,7 @@ import { createAttachmentRoutes } from './attachments'
 import { createFsRoutes } from './fs'
 import { createJobRoutes, createUserJobRoutes } from './jobs'
 import { createDraftListRoutes } from './drafts'
+import { createPlanRoutes } from './plans'
 import { createDesignSessionRoutes } from './design-sessions'
 import { createMcpRoutes } from './mcp'
 import { createProjectRoutes } from './projects'
@@ -21,8 +22,7 @@ import { createSystemRoutes } from './system'
 import { createEventsRoutes } from './events'
 import { createProjectThreadRoutes, createThreadRoutes } from './threads'
 import { createTurnRoutes } from './turns'
-import { isV3Authoritative } from '../application/cutover-state'
-import { mountV3Routes } from '../http/v3/mount'
+import { mountCoreHttpRoutes } from '../interfaces/http/hono-mount'
 import { isStorageMigrationActive } from '../storage/migration'
 
 export function createApiRoutes(ctx: AppContext): Hono {
@@ -70,12 +70,14 @@ export function createApiRoutes(ctx: AppContext): Hono {
   api.route('/threads', createDesignSessionRoutes(ctx))
   api.route('/jobs', createUserJobRoutes(ctx))
   api.route('/drafts', createDraftListRoutes(ctx))
+  api.route('/plans', createPlanRoutes(ctx))
 
-  // V3 Job API only when process generation is authoritative. Legacy roots must not
-  // initialize control-plane services (FIX-PLAN F0/F1).
-  if (isV3Authoritative(ctx.db)) {
-    api.route('/v3', mountV3Routes(ctx))
-  }
+  // Parallel new-core kernel mount (does not replace legacy job/draft routes).
+  // Phase C4: `/api/core` is the sole parallel new surface — do not mount `/api/v3`
+  // here. Isolation tests that need a dedicated control HTTP surface should mount core routes (and may use
+  // `setCutoverMarkerForTests('cutover_blocked')` for blocked/410 scenarios).
+  // Production bootstrap still fail-closes on the `cutover_blocked` schema marker.
+  api.route('/core', mountCoreHttpRoutes(ctx.coreApplication))
 
   api.onError((error, c) => {
     console.error('[api] unhandled error:', error)

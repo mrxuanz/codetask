@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { extname } from 'node:path'
 import type { CommandInvocation } from '../../../shared/providers/installation'
-import { spawnProviderInvocation } from '../spawn'
+import { spawnProtectedProviderInvocation } from '../../adapters/runtime/protected-spawn'
 
 export interface ClaudeSdkSpawnRequest {
   readonly command: string
@@ -43,13 +43,14 @@ export function spawnClaudeSdkInvocation(
   for (const [key, value] of Object.entries(request.env)) {
     if (typeof value === 'string') env[key] = value
   }
-  return spawnProviderInvocation(
+  return spawnProtectedProviderInvocation(
     buildClaudeSdkCommandInvocation(installationInvocation, request.command),
     request.args,
     {
       cwd: request.cwd ?? process.cwd(),
       env,
       signal: request.signal,
+      providerCode: 'claude',
       // The SDK custom-spawn interface consumes stdin/stdout but not stderr.
       // Inherit stderr so command-script failures cannot block on a full pipe.
       stdio: ['pipe', 'pipe', 'inherit']

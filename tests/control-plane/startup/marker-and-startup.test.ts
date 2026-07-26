@@ -91,10 +91,10 @@ describe('startup: strict marker parsing', () => {
     }
   })
 
-  it('blocks production bootstrap on v3_authoritative until cutover is release-ready', async () => {
+  it('blocks production bootstrap on cutover_blocked until cutover is release-ready', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'cp-marker-v3-block-'))
     await resetAppContextForTests()
-    setCutoverMarkerForTests('v3_authoritative')
+    setCutoverMarkerForTests('cutover_blocked')
     try {
       assert.throws(() => bootstrapRuntime({ dataDir }), (error: unknown) => {
         return error instanceof StartupError && error.code === 'control_plane.v3_not_release_ready'
@@ -172,7 +172,7 @@ describe('startup: strict marker parsing', () => {
     setCutoverMarkerForTests('copied')
     try {
       const ctx = bootstrapRuntime({ dataDir })
-      setCutoverMarkerForTests('v3_authoritative')
+      setCutoverMarkerForTests('cutover_blocked')
       ctx.applicationRuntime = createV3ApplicationRuntimeForTests(ctx)
       await ensureRuntimeReady(ctx)
       assert.equal(ctx.applicationRuntime.kind, 'v3')

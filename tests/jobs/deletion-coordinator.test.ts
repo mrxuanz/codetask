@@ -22,16 +22,14 @@ import {
   isThreadProjectDeletionBlocked,
   resumePendingDeletionRequestsOnStartup,
   resetDeletionCoordinatorForTests,
-  setDeletionPurgeHooksForTests
-} from '../../src/server/legacy-control-plane/deletion-coordinator'
-import {
+  setDeletionPurgeHooksForTests,
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import { resetWorkspaceLeaseStateForTests } from '../../src/server/legacy-control-plane/workspace-lease-store'
-import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-control-plane/workload-slot-store'
-import { resetRuntimeSupervisorForTests } from '../../src/server/legacy-control-plane/runtime-supervisor'
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
+  resetWorkspaceLeaseStateForTests,
+  resetWorkloadRunControllersForTests,
+  resetRuntimeSupervisorForTests
+} from '../../src/server/legacy-shim'
 import { jobRuntimeDir } from '../../src/server/runtime/cleanup'
 
 let dataDir = ''
@@ -381,7 +379,7 @@ test('incomplete deletion blocks thread turns and job lease admission', async ()
     assert.equal(await isThreadProjectDeletionBlocked(threadId), true)
 
     const { claimExecutionSlotForJobTx } =
-      await import('../../src/server/legacy-control-plane/workload-slot-store')
+      await import('../../src/server/legacy-shim')
     const claim = await claimExecutionSlotForJobTx('user', jobId)
     assert.equal(claim, null)
   } finally {

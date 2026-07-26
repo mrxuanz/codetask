@@ -15,28 +15,20 @@ import {
 } from '../../src/server/db/schema'
 import {
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import {
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
   claimWorkloadSlotTx,
   getActiveRun,
-  resetWorkloadRunControllersForTests
-} from '../../src/server/legacy-control-plane/workload-slot-store'
-import {
+  resetWorkloadRunControllersForTests,
   finishExecutionRunLifecycle,
   finishPlanningRunLifecycle,
-  stopRunLifecycle
-} from '../../src/server/legacy-control-plane/run-lifecycle'
-import {
+  stopRunLifecycle,
   acquireWorkspaceLease,
-  releaseWorkspaceLeaseForOwner
-} from '../../src/server/legacy-control-plane/workspace-lease-store'
-import {
+  releaseWorkspaceLeaseForOwner,
   hasRunRuntime,
   registerRunRuntime,
   resetRuntimeSupervisorForTests
-} from '../../src/server/legacy-control-plane/runtime-supervisor'
+} from '../../src/server/legacy-shim'
 import { eq } from 'drizzle-orm'
 
 let dataDir: string

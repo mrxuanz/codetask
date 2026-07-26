@@ -47,6 +47,7 @@ const ALLOWED_PATH_PREFIXES = [
   'src/server/application/controls-command-adapter.ts',
   'src/server/application/planner-adapter.ts',
   'src/server/http/legacy-cutover-guard.ts',
+  'src/server/legacy-shim/',
   'src/shared/job-recovery-state.ts'
 ]
 
@@ -66,7 +67,8 @@ function normalizePath(filePath) {
 }
 
 function isLegacyIsolatedPath(filePath) {
-  return normalizePath(filePath).includes('legacy-control-plane/')
+  const n = normalizePath(filePath)
+  return n.includes('src/server/control-plane/') || /(^|\/)server\/control-plane\//.test(n)
 }
 
 function isAllowedPath(filePath) {
@@ -242,7 +244,7 @@ for (const symbol of symbols) {
 const legacyImports = v3CompositionGraph.filter((filePath) => isLegacyIsolatedPath(filePath))
 if (legacyImports.length > 0) {
   hasErrors = true
-  console.error('\nForbidden legacy-control-plane import in V3 composition graph:')
+  console.error('\nForbidden control-plane implementation import in composition graph:')
   for (const filePath of legacyImports) {
     console.error(`  ${filePath}`)
   }

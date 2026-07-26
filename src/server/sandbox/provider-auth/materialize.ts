@@ -1,35 +1,27 @@
-import { spawnSync } from 'child_process'
+/**
+ * Credential materializers — diagnose / contract tests only.
+ *
+ * Production `prepareCodexAuth` / `prepareOpenCodeAuth` use host-identity +
+ * precise path allowlists and must not call these helpers.
+ */
 import {
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
-  unlinkSync,
   writeFileSync
 } from 'fs'
 import { chmodSync } from 'fs'
 import { dirname, join } from 'path'
 import {
-  cursorProjectSlug,
   resolveCodexHostAuthPath,
   resolveCodexHostConfigPath,
-  resolveCursorHostAuthPath,
-  resolveCursorHostConfigDir,
-  resolveCursorHostCursorHome,
   resolveHostProfilePaths,
   type HostProfilePaths,
   resolveOpencodeHostConfigDir,
   resolveOpencodeHostDataDir,
-  runtimeCodexHome,
-  runtimeCursorAuthPath,
-  runtimeCursorConfigDir,
-  runtimeCursorHome
+  runtimeCodexHome
 } from './paths'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../../host-environment'
 import {
   scrubCredentialSnapshotManifest,
   writeCredentialSnapshotManifest
@@ -186,212 +178,6 @@ export function materializeCodexAuth(
     hostAuthPath,
     cleanup: () => {
       scrubCredentialSnapshotManifest(runtimeRoot)
-    }
-  }
-}
-
-export interface MaterializeCursorResult {
-  authCopied: boolean
-  runtimeAuthPath: string
-  hostAuthPath: string
-  cleanup: () => void
-}
-
-/** Darwin agent CLI reads `$HOME/.cursor/auth.json` when AGENT_CLI_CREDENTIAL_STORE=file. */
-export function runtimeCursorCliAuthPath(runtimeRoot: string): string {
-  return join(runtimeCursorHome(runtimeRoot), 'auth.json')
-}
-
-function writeCursorRuntimeAuthPayload(
-  runtimeRoot: string,
-  payload: Record<string, unknown>
-): string[] {
-  const raw = `${JSON.stringify(payload)}\n`
-  const paths = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
-  const written: string[] = []
-  for (const path of paths) {
-    ensureParentDir(path)
-    writeFileSync(path, raw, { encoding: 'utf8', mode: 0o600 })
-    restrictFilePermissions(path)
-    written.push(path)
-  }
-  return written
-}
-
-function mirrorCursorAuthFiles(source: string, runtimeRoot: string): string[] {
-  const destinations = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
-  const written: string[] = []
-  for (const destination of destinations) {
-    if (destination === source) continue
-    copyAuthSnapshot(source, destination)
-    written.push(destination)
-  }
-  return written
-}
-
-function readDarwinCursorKeychainPassword(
-  service: string,
-  profile: HostProfilePaths,
-  hostEnvironment: HostEnvironmentSnapshot
-): string | null {
-  const result = spawnSync(
-    'security',
-    ['find-generic-password', '-s', service, '-a', 'cursor-user', '-w'],
-    {
-      encoding: 'utf8',
-      timeout: 15_000,
-      env: {
-        ...hostEnvironment,
-        HOME: profile.home
-      }
-    }
-  )
-  if (result.status !== 0) return null
-  const value = (result.stdout ?? '').trim()
-  return value.length > 0 ? value : null
-}
-
-function readDarwinCursorKeychainTokens(
-  profile: HostProfilePaths,
-  hostEnvironment: HostEnvironmentSnapshot
-): {
-  accessToken: string
-  refreshToken: string
-} | null {
-  if (process.platform !== 'darwin') return null
-  const accessToken = readDarwinCursorKeychainPassword(
-    'cursor-access-token',
-    profile,
-    hostEnvironment
-  )
-  const refreshToken = readDarwinCursorKeychainPassword(
-    'cursor-refresh-token',
-    profile,
-    hostEnvironment
-  )
-  if (!accessToken || !refreshToken) return null
-  return { accessToken, refreshToken }
-}
-
-/**
- * Ensure runtime has a file-store auth.json the Cursor CLI can read under HOME=runtimeRoot.
- * Prefer host auth.json, then macOS Keychain export (host HOME), then existing runtime copies.
- */
-export function ensureCursorRuntimeAuth(
-  runtimeRoot: string,
-  profile: HostProfilePaths = resolveHostProfilePaths(),
-  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
-): boolean {
-  const cliAuthPath = runtimeCursorCliAuthPath(runtimeRoot)
-  const legacyAuthPath = runtimeCursorAuthPath(runtimeRoot)
-
-  if (existsSync(cliAuthPath)) {
-    if (!existsSync(legacyAuthPath)) copyAuthSnapshot(cliAuthPath, legacyAuthPath)
-    return true
-  }
-
-  if (existsSync(legacyAuthPath)) {
-    copyAuthSnapshot(legacyAuthPath, cliAuthPath)
-    return true
-  }
-
-  const hostAuthPath = resolveCursorHostAuthPath(profile)
-  if (existsSync(hostAuthPath)) {
-    mirrorCursorAuthFiles(hostAuthPath, runtimeRoot)
-    return true
-  }
-
-  const tokens = readDarwinCursorKeychainTokens(profile, hostEnvironment)
-  if (tokens) {
-    writeCursorRuntimeAuthPayload(runtimeRoot, tokens)
-    return true
-  }
-
-  return false
-}
-
-export function materializeCursorAuth(
-  runtimeRoot: string,
-  workspaceRoot: string,
-  profile: HostProfilePaths = resolveHostProfilePaths(),
-  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
-): MaterializeCursorResult {
-  const hostAuthPath = resolveCursorHostAuthPath(profile)
-  const runtimeAuthPath = runtimeCursorAuthPath(runtimeRoot)
-  const hostCursorHome = resolveCursorHostCursorHome(profile)
-  const hostConfigDir = resolveCursorHostConfigDir(profile)
-
-  const cursorHome = runtimeCursorHome(runtimeRoot)
-  const cursorConfig = runtimeCursorConfigDir(runtimeRoot)
-  const projectDir = join(cursorHome, 'projects', cursorProjectSlug(workspaceRoot))
-
-  for (const stale of [cursorHome, cursorConfig, dirname(runtimeAuthPath)]) {
-    if (existsSync(stale)) {
-      try {
-        rmSync(stale, { recursive: true, force: true })
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  mkdirSync(cursorHome, { recursive: true })
-  mkdirSync(projectDir, { recursive: true })
-  mkdirSync(join(projectDir, 'agent-transcripts'), { recursive: true })
-  mkdirSync(join(projectDir, 'terminals'), { recursive: true })
-  writeFileSync(join(projectDir, 'worker.log'), '', { flag: 'a' })
-
-  if (process.platform === 'win32') {
-    mkdirSync(join(runtimeRoot, 'AppData', 'Roaming', 'Cursor'), { recursive: true })
-    mkdirSync(join(runtimeRoot, 'AppData', 'Local'), { recursive: true })
-  }
-
-  mkdirSync(cursorConfig, { recursive: true })
-  mkdirSync(join(cursorConfig, 'acp-sessions'), { recursive: true })
-  mkdirSync(dirname(runtimeAuthPath), { recursive: true })
-
-  const copiedPaths: string[] = []
-
-  const optionalCopies: Array<{ host: string; runtime: string }> = [
-    { host: join(hostCursorHome, 'cli-config.json'), runtime: join(cursorHome, 'cli-config.json') },
-    {
-      host: join(hostCursorHome, 'agent-cli-state.json'),
-      runtime: join(cursorHome, 'agent-cli-state.json')
-    },
-    {
-      host: join(hostConfigDir, 'cli-config.json'),
-      runtime: join(cursorConfig, 'cli-config.json')
-    },
-    { host: join(hostConfigDir, 'acp-config.json'), runtime: join(cursorConfig, 'acp-config.json') }
-  ]
-
-  for (const { host, runtime } of optionalCopies) {
-    if (!existsSync(host)) continue
-    copyAuthSnapshot(host, runtime)
-    copiedPaths.push(runtime)
-  }
-
-  const authCopied = ensureCursorRuntimeAuth(runtimeRoot, profile, hostEnvironment)
-  if (authCopied) {
-    for (const path of [runtimeCursorCliAuthPath(runtimeRoot), runtimeAuthPath]) {
-      if (existsSync(path)) copiedPaths.push(path)
-    }
-  }
-
-  return {
-    authCopied,
-    runtimeAuthPath: existsSync(runtimeCursorCliAuthPath(runtimeRoot))
-      ? runtimeCursorCliAuthPath(runtimeRoot)
-      : runtimeAuthPath,
-    hostAuthPath,
-    cleanup: () => {
-      for (const path of copiedPaths) {
-        try {
-          if (existsSync(path)) unlinkSync(path)
-        } catch {
-          // ignore
-        }
-      }
     }
   }
 }

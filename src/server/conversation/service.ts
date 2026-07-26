@@ -144,7 +144,7 @@ export async function prepareConversationTurn(input: {
   const workspacePath = resolved.workspacePath
 
   const { isThreadProjectDeletionBlocked } =
-    await import('../legacy-control-plane/deletion-coordinator')
+    await import('../legacy-shim')
   if (await isThreadProjectDeletionBlocked(threadId)) {
     throw AppError.conflict('Project or thread is being deleted', undefined, 'thread.deleting')
   }
@@ -174,7 +174,7 @@ export async function prepareConversationTurn(input: {
         throw AppError.internal('Conversation write admission requires a turn id', 'turn.unknown')
       }
       const { acquireWorkspaceLease } =
-        await import('../legacy-control-plane/workspace-lease-store')
+        await import('../legacy-shim')
       workspaceLeaseOwnerId = input.turnId
       const lease = acquireWorkspaceLease({
         workspacePath,
@@ -219,7 +219,7 @@ export async function prepareConversationTurn(input: {
   } catch (error) {
     if (workspaceLeaseId) {
       const { releaseWorkspaceLease } =
-        await import('../legacy-control-plane/workspace-lease-store')
+        await import('../legacy-shim')
       releaseWorkspaceLease({ leaseId: workspaceLeaseId })
     }
     releaseThread(threadId)
@@ -402,7 +402,7 @@ export async function* executePreparedTurn(
   const wizardPhase = prepared.wizardPhase
 
   const { enterWorkspaceLeaseContext } =
-    await import('../legacy-control-plane/workspace-lease-context')
+    await import('../legacy-shim')
   if (prepared.workspaceLeaseId && prepared.workspaceLeaseOwnerId) {
     enterWorkspaceLeaseContext({
       leaseId: prepared.workspaceLeaseId,
@@ -795,11 +795,11 @@ export async function* executePreparedTurn(
     }
     yield { event: 'error', data: { message: errMessage, error: turnError } }
   } finally {
-    const { releaseWorkspaceLease } = await import('../legacy-control-plane/workspace-lease-store')
+    const { releaseWorkspaceLease } = await import('../legacy-shim')
     if (prepared.workspaceLeaseId) {
       const released = releaseWorkspaceLease({ leaseId: prepared.workspaceLeaseId })
       if (released) {
-        const { advanceExecutionQueue } = await import('../legacy-control-plane/queue-coordinator')
+        const { advanceExecutionQueue } = await import('../legacy-shim')
         await advanceExecutionQueue(username).catch((error) => {
           console.warn('[conversation] failed to advance task queue after lease release', error)
         })

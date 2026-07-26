@@ -8,6 +8,8 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 
 export function sandboxTestsEnabled() {
+  // Test-harness composition edge only: product code reads AppConfig.sandbox.outerSandboxEnabled,
+  // not CODETASK_DISABLE_OUTER_SANDBOX. This env skip lets CI/dev opt out of native sandbox suites.
   if (process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
     return { enabled: false, reason: 'CODETASK_DISABLE_OUTER_SANDBOX=1' }
   }

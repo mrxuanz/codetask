@@ -8,6 +8,7 @@ import type { McpSecretProvider } from '../settings/mcp-secret-provider'
 import type { AppConfig } from '../config/app-config'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderRuntimeManager } from '../providers/lifecycle'
+import type { ApplicationHandle } from '../composition/types'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
@@ -29,6 +30,8 @@ export interface AppContext {
   security: SecurityContext
   bootId: string
   applicationRuntime: ApplicationRuntime | null
+  /** Always-on new-core kernel (sqlite under `<dataDir>/core/kernel.sqlite`). */
+  coreApplication: ApplicationHandle
   storage?: {
     bootstrapRoot: string
     source: string

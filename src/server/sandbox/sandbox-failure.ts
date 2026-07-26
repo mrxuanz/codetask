@@ -1,4 +1,4 @@
-import type { PlanProgressDto, TaskProgressDto } from '../legacy-control-plane/types'
+import type { PlanProgressDto, TaskProgressDto } from '../legacy-shim'
 import { ProviderAuthError } from './provider-auth'
 import { SandboxError } from './types'
 import { createTurnError, normalizeTurnError, type TurnErrorDto } from '../../shared/turn-errors.ts'

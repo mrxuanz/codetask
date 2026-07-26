@@ -92,7 +92,7 @@ export async function cleanupJobRuntimeTree(
     if (ctx.executionRuntime.isLoopActive(jobId)) {
       return 'deferred_active'
     }
-    const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
+    const { listActiveWorkloadSlots } = await import('../legacy-shim')
     if ((await listActiveWorkloadSlots()).some((slot) => slot.ownerId === jobId)) {
       return 'deferred_slot'
     }

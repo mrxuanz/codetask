@@ -95,14 +95,17 @@ function collectCompositionImportGraph(): string[] {
   return [...files]
 }
 
-describe('composition: authoritative V3 import closure', () => {
-  it('production V3 composition root must not import legacy-control-plane', () => {
+describe('composition: authoritative import closure', () => {
+  it('production composition root must not import server control-plane implementation', () => {
     const graph = collectCompositionImportGraph()
-    const offenders = graph.filter((filePath) => filePath.includes('legacy-control-plane/'))
+    const offenders = graph.filter((filePath) =>
+      filePath.includes('src/server/control-plane/') ||
+      filePath.includes('/server/control-plane/')
+    )
     assert.deepEqual(
       offenders,
       [],
-      `V3 composition graph must not depend on legacy-control-plane: ${offenders.join(', ')}`
+      `composition graph must not depend on server control-plane: ${offenders.join(', ')}`
     )
   })
 })

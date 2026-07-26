@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeMilestoneVerificationVerdict } from '../../src/server/legacy-control-plane/verification/types'
+import { normalizeMilestoneVerificationVerdict } from '../../src/server/legacy-shim'
 
 const baseVerdict = {
   status: 'needs-repair',

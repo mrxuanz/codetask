@@ -5,7 +5,7 @@ import {
   buildTaskMcpCapabilityToken,
   registerTaskMcpSession,
   unregisterTaskMcpSession
-} from '../../src/server/legacy-control-plane/mcp/task-session'
+} from '../../src/server/legacy-shim'
 
 test('task MCP capability is bound to the stable logical-task idempotency key', () => {
   const sessionId = 'task-mcp-test'

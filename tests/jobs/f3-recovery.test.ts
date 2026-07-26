@@ -9,13 +9,12 @@ import { getDb } from '../../src/server/db'
 import {
   reconcileOrphanRunningJobsForUser,
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-control-plane/workload-slot-store'
-import { findNextPendingJobId } from '../../src/server/legacy-control-plane/repository'
-import { beginDraining, endDraining } from '../../src/server/legacy-control-plane/shutdown-state'
-import {
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
+  resetWorkloadRunControllersForTests,
+  findNextPendingJobId,
+  beginDraining,
+  endDraining,
   authorizeUncertainTaskAttemptReplayForJob,
   beginTaskAttempt,
   commitCompletedTaskAttempt,
@@ -25,7 +24,7 @@ import {
   markAllRunningAttemptsInterrupted,
   markTaskAttemptProviderStarted,
   markRunningAttemptsInterruptedForJob
-} from '../../src/server/legacy-control-plane/task-attempts'
+} from '../../src/server/legacy-shim'
 import {
   jobTaskAttempts,
   jobTasks,
@@ -626,9 +625,9 @@ test('F3-A: uncertain fence stays blocked until explicit user authorize (no sile
   await setupDb()
   try {
     const { prepareInterruptedJobForUserContinue } =
-      await import('../../src/server/legacy-control-plane/queue-coordinator')
+      await import('../../src/server/legacy-shim')
     const { jobHasUncertainReplayFence } =
-      await import('../../src/server/legacy-control-plane/task-attempts')
+      await import('../../src/server/legacy-shim')
 
     await seedJob('job-auto', { status: 'running' })
     await getDb().insert(jobTasks).values({

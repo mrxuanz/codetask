@@ -188,7 +188,7 @@ export async function createThread(
   if (!project) {
     throw AppError.notFound('Project not found', 'project.not_found')
   }
-  const { isProjectDeletionBlocked } = await import('../legacy-control-plane/deletion-coordinator')
+  const { isProjectDeletionBlocked } = await import('../legacy-shim')
   if (isProjectDeletionBlocked(projectId)) {
     throw AppError.conflict('Project is being deleted', undefined, 'project.deleting')
   }
@@ -481,7 +481,7 @@ export async function pruneEmptyCreateTaskThreads(): Promise<{ removed: number }
 }
 
 export async function deleteThread(username: string, threadId: string): Promise<void> {
-  const { drainAndDeleteThread } = await import('../legacy-control-plane/deletion-coordinator')
+  const { drainAndDeleteThread } = await import('../legacy-shim')
   await drainAndDeleteThread(username, threadId)
 }
 

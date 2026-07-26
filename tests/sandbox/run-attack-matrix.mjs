@@ -11,6 +11,7 @@ import {
 } from './sandbox-test-utils.mjs'
 
 async function main() {
+  // Test-harness composition edge: product enablement is AppConfig, not this env flag.
   if (process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
     console.log('skip: CODETASK_DISABLE_OUTER_SANDBOX=1')
     return

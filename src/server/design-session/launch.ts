@@ -6,11 +6,11 @@ import {
   type JobReferenceManifest
 } from '../../shared/job-references'
 import type { JobSnapshot } from '../../shared/contracts/job-snapshot'
-import type { ThreadJobAbilityDto } from '../legacy-control-plane/types'
+import type { ThreadJobAbilityDto } from '../legacy-shim'
 import type { SavedJobPlan } from '../planner/plan-types'
 import type { ThreadJob } from '../db/schema'
 import { AppError } from '../error'
-import { ReferenceFileMissingError } from '../legacy-control-plane/reference-paths'
+import { ReferenceFileMissingError } from '../legacy-shim'
 import { referenceManifestStaleReason } from '../reference-corpus/corpus-sync'
 
 export function assertManifestResolvedPathsReadable(manifest: JobReferenceManifest): void {

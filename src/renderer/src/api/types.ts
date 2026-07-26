@@ -6,7 +6,7 @@ export interface BootstrapData {
   username?: string
   setupTokenRequired?: boolean
   storagePhase?: 'selection_required' | 'ready' | 'recovery_required'
-  controlPlaneGeneration?: 'preparing' | 'copied' | 'v3_authoritative' | null
+  controlPlaneGeneration?: 'preparing' | 'copied' | 'cutover_blocked' | null
 }
 
 export interface AuthData {

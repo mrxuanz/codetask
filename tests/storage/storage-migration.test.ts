@@ -14,7 +14,7 @@ import test from 'node:test'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
 import { getStorageMigration, startStorageMigration } from '../../src/server/storage/migration'
-import { endDraining } from '../../src/server/legacy-control-plane/shutdown-state'
+import { endDraining } from '../../src/server/legacy-shim'
 import {
   StorageLocatorRepository,
   bootstrapPaths,

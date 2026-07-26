@@ -4,7 +4,7 @@ import { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export function preflightSandbox(): void {
   if (!isOuterSandboxEnabled()) {
-    sandboxTurnDebug('preflightSandbox: skipped (CODETASK_DISABLE_OUTER_SANDBOX=1)')
+    sandboxTurnDebug('preflightSandbox: skipped (outer sandbox disabled via AppConfig (desktop only))')
     return
   }
   sandboxTurnDebug('preflightSandbox: checking sandbox health')

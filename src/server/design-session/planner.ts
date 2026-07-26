@@ -32,8 +32,8 @@ import { plannerSandboxDebug } from '../debug/planner-sandbox'
 import { planFailureFromSandboxError } from '../sandbox/sandbox-failure'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
 import { ensureDraftPlanningAbilities } from '../conversation/draft/normalize'
-import type { PlanProgressDto } from '../legacy-control-plane/types'
-import { emitJobEvent } from '../legacy-control-plane/service'
+import type { PlanProgressDto } from '../legacy-shim'
+import { emitJobEvent } from '../legacy-shim'
 import { AppError } from '../error'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import {
@@ -45,9 +45,9 @@ import {
 } from './service'
 import { advanceWizardPhase, buildDraftToPlanHandoff } from '../wizard/phase'
 import { WIZARD_PHASE_PLAN_EDIT } from '../wizard/types'
-import type { PlanningRunOutcome } from '../legacy-control-plane/run-lifecycle'
-import { getRunController } from '../legacy-control-plane/workload-slot-store'
-import { runWithExecutionRunContext } from '../legacy-control-plane/execution-run-context'
+import type { PlanningRunOutcome } from '../legacy-shim'
+import { getRunController } from '../legacy-shim'
+import { runWithExecutionRunContext } from '../legacy-shim'
 
 export async function commitDesignPlanReady(
   designSessionId: string,
@@ -253,7 +253,7 @@ async function runDesignPlanner(
     planRevisionBefore?: number
   }
 ): Promise<void> {
-  const { claimWorkloadSlotTx } = await import('../legacy-control-plane/workload-slot-store')
+  const { claimWorkloadSlotTx } = await import('../legacy-shim')
   const run = await claimWorkloadSlotTx({
     username,
     ownerKind: 'thread_job',
@@ -278,7 +278,7 @@ async function runDesignPlanner(
       emitJobEvent(designSessionId, { event: 'plan_progress', data: { planProgress } })
       emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: updated } })
     }
-    const { advanceWorkloadQueue } = await import('../legacy-control-plane/workload-slot-store')
+    const { advanceWorkloadQueue } = await import('../legacy-shim')
     await advanceWorkloadQueue(username).catch((error) => {
       console.warn(
         '[runDesignPlanner] advance queue after planning wait failed',
@@ -343,10 +343,10 @@ async function runDesignPlanner(
         }
       : undefined
 
-    const { registerRunRuntime } = await import('../legacy-control-plane/runtime-supervisor')
+    const { registerRunRuntime } = await import('../legacy-shim')
     const { buildCursorPlannerRuntimeHandle } =
-      await import('../legacy-control-plane/runtime-handle-cursor')
-    const { updateRunRuntimeRef } = await import('../legacy-control-plane/workload-slot-store')
+      await import('../legacy-shim')
+    const { updateRunRuntimeRef } = await import('../legacy-shim')
     registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
     await updateRunRuntimeRef(run.runId, { kind: 'sandbox-worker', scopeId: plannerScopeId })
 
@@ -619,14 +619,14 @@ async function runDesignPlanner(
     // durable slot remains the safety fence until provider close is confirmed.
     getAppContext().runtimeRegistry.endJobPlanning(designSessionId, run.runId)
     try {
-      const { finishPlanningRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
+      const { finishPlanningRunLifecycle } = await import('../legacy-shim')
       await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
     } finally {
       try {
         // Planner uses snapshot-read / runtimeRoot writes only, but clear any
         // legacy lease defensively if setup reached an older compatibility path.
         const { releaseWorkspaceLeaseForOwner } =
-          await import('../legacy-control-plane/workspace-lease-store')
+          await import('../legacy-shim')
         releaseWorkspaceLeaseForOwner('planner', designSessionId, run.runId)
       } catch (error) {
         console.warn(
@@ -799,7 +799,7 @@ export function scheduleDesignSessionPlanRegeneration(
 export async function retryDesignSessionPlanning(
   username: string,
   designSessionId: string
-): Promise<import('../legacy-control-plane/types').ThreadJobDto> {
+): Promise<import('../legacy-shim').ThreadJobDto> {
   const { getUserDesignSessionAsJob } = await import('./service')
   const session = await getUserDesignSessionAsJob(username, designSessionId)
   if (!session) throw AppError.notFound('Design session not found', 'design_session.not_found')

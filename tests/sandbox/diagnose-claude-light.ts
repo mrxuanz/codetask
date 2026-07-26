@@ -96,16 +96,15 @@ async function runStatic(runtimeRoot: string): Promise<{
       'CLAUDE_CODE_OAUTH_TOKEN'
     ].filter((key) => Boolean(env[key])),
     runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-copy' &&
-      env.HOME === runtimeRoot &&
+      prepared.diagnostics.mode === 'host-identity' &&
+      env.HOME !== runtimeRoot &&
       claudeDir.startsWith(runtimeRoot) &&
-      (prepared.writeRoots ?? []).length === 0 &&
-      hostReadRoots.length === 0
+      (prepared.writeRoots ?? []).every((root) => root.startsWith(runtimeRoot))
   }
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('Claude runtime-copy isolation check failed')
+  if (!report.runtimeIsolated) throw new Error('Claude host-identity sandbox wiring check failed')
   if (report.settingSourcesOuterSandbox.length !== 0) {
     throw new Error('outer sandbox must use empty settingSources')
   }

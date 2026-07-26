@@ -15,7 +15,7 @@ describe('composition: owner-safe SSE cursor (CR6)', () => {
   it('replays only owner-scoped outbox events via production runtime', async () => {
     await withCompositionContext(
       {
-        generation: 'v3_authoritative',
+        generation: 'cutover_blocked',
         seed(db) {
           seedControlJob(db, { jobId: 'job-1', username: 'u1', state: 'execution_queued' })
           seedControlJob(db, { jobId: 'job-2', username: 'u2', state: 'execution_queued' })
@@ -73,7 +73,7 @@ describe('composition: owner-safe SSE cursor (CR6)', () => {
   it('flushes outbox to event hub after committed command', async () => {
     await withCompositionContext(
       {
-        generation: 'v3_authoritative',
+        generation: 'cutover_blocked',
         seed(db) {
           seedControlJob(db, {
             jobId: 'job-1',

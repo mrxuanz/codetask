@@ -48,10 +48,11 @@ export function resolveClaudeSystemPrompt(systemPrompt?: string): ClaudeSystemPr
 }
 
 /**
- * Outer-sandbox turns isolate via runtime-copy auth and must not load host
- * CLAUDE.md / skills / hooks. Direct conversation turns (including read-only)
- * load user/project/local settings so host `settings.json` env auth and model
- * defaults stay available; MCP and skills are overridden in streamClaudeTurn.
+ * Outer-sandbox turns use host-identity + settings env-inject (no credential
+ * file copy) and must not load host CLAUDE.md / skills / hooks. Direct
+ * conversation turns (including read-only) load user/project/local settings so
+ * host `settings.json` env auth and model defaults stay available; MCP and
+ * skills are overridden in streamClaudeTurn.
  */
 export function resolveClaudeSettingSources(
   outerSandbox: boolean,

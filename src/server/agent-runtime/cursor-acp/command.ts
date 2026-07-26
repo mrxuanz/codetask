@@ -7,7 +7,8 @@ import {
 import { existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join, normalize } from 'node:path'
-import { spawnProviderCommandSync, spawnProviderInvocation } from '../../providers/spawn'
+import { spawnProviderCommandSync } from '../../providers/spawn'
+import { spawnProtectedProviderInvocation } from '../../adapters/runtime/protected-spawn'
 import { processHostEnvironmentSource } from '../../host-environment'
 
 type StringEnv = Record<string, string | undefined>
@@ -198,12 +199,18 @@ export function spawnCursorAgent(
   options: SpawnOptions & { env: Record<string, string> }
 ): ChildProcess {
   const prepared = prepareCursorAgentProcess(command, options.env)
-  const { cwd, env: _env, shell: _shell, ...rest } = options
-  return spawnProviderInvocation({ executable: prepared.executable, prefixArgs: [] }, args, {
-    ...rest,
-    cwd: typeof cwd === 'string' ? cwd : process.cwd(),
-    env: prepared.env
-  })
+  const { cwd, stdio, signal } = options
+  return spawnProtectedProviderInvocation(
+    { executable: prepared.executable, prefixArgs: [] },
+    args,
+    {
+      cwd: typeof cwd === 'string' ? cwd : process.cwd(),
+      env: prepared.env,
+      providerCode: 'cursor',
+      ...(stdio !== undefined ? { stdio } : {}),
+      ...(signal !== undefined ? { signal } : {})
+    }
+  )
 }
 
 /**
@@ -220,17 +227,19 @@ export function spawnCursorAgentInvocation(
   options: SpawnOptions & { env: Record<string, string> }
 ): ChildProcess {
   const env = withCursorAgentPath(options.env, launch.pathForEnv?.trim() || launch.executable)
-  const { cwd, env: _env, shell: _shell, ...rest } = options
-  return spawnProviderInvocation(
+  const { cwd, stdio, signal } = options
+  return spawnProtectedProviderInvocation(
     {
       executable: launch.executable,
       prefixArgs: launch.prefixArgs ?? []
     },
     args,
     {
-      ...rest,
       cwd: typeof cwd === 'string' ? cwd : process.cwd(),
-      env
+      env,
+      providerCode: 'cursor',
+      ...(stdio !== undefined ? { stdio } : {}),
+      ...(signal !== undefined ? { signal } : {})
     }
   )
 }

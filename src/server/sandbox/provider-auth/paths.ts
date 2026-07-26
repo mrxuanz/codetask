@@ -469,6 +469,18 @@ function addOpencodeCliRoots(dirs: Set<string>, cliPath: string): void {
 export function resolveOpencodeInstallDirs(): string[] {
   const dirs = new Set<string>()
 
+  // T314: prefer ProviderInstallation before PATH which/where spawn.
+  try {
+    const nodeRequire = createRequire(__filename)
+    const { resolveProviderExecutable } = nodeRequire(
+      '../../providers/executable.ts'
+    ) as typeof import('../../providers/executable')
+    const resolved = resolveProviderExecutable('opencode')
+    if (resolved?.executable) addOpencodeCliRoots(dirs, resolved.executable)
+  } catch {
+    // Fall through to package / PATH discovery.
+  }
+
   for (const pkg of ['opencode-ai', '@opencode-ai/sdk'] as const) {
     try {
       const req = createRequire(__filename)
@@ -481,6 +493,7 @@ export function resolveOpencodeInstallDirs(): string[] {
     }
   }
 
+  // Unprotected PATH probe — last resort only (see t314-spawn-inventory.md).
   try {
     if (process.platform === 'win32') {
       const output = execFileSync('where', ['opencode'], {

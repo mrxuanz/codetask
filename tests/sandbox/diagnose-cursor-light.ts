@@ -26,6 +26,7 @@ import {
   resolveCursorAgentExecutable,
   spawnCursorAgent
 } from '../../src/server/agent-runtime/cursor-acp/command'
+import { installLiveProtectedRuntimeStub } from '../../src/server/adapters/runtime/protected-spawn'
 import { createCursorPermissionHandler } from '../../src/server/agent-runtime/cursor-acp/permissions'
 import { autoAnswerCursorAskQuestion } from '../../src/server/agent-runtime/cursor-acp/extensions'
 
@@ -311,6 +312,7 @@ async function runCursorAcpTurn(input: {
   log('acp', 'spawn', { executable, cliArgs })
 
   const mcpServers = input.mcpUrl ? [buildHttpMcp(input.mcpUrl)] : []
+  installLiveProtectedRuntimeStub({ cwd: input.cwd, providerCode: 'cursor' })
   const child = spawnCursorAgent(command, cliArgs, {
     cwd: input.cwd,
     env: input.env,

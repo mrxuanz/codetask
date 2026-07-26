@@ -9,7 +9,7 @@ import { closeDatabaseForTests } from '../../../src/server/db'
 import {
   reconcileOrphanRunningJobsOnStartupOnce,
   resetJobReconcileForTests
-} from '../../../src/server/legacy-control-plane/reconcile'
+} from '../../../src/server/legacy-shim'
 
 describe('startup: reconcile Once retry semantics', () => {
   it('retries reconcile Once after first failure instead of skipping', async () => {

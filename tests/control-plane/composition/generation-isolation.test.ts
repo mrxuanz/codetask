@@ -33,7 +33,7 @@ async function bootV3ForTests(): Promise<{
   await resetAppContextForTests()
   setCutoverMarkerForTests('copied')
   const ctx = bootstrapRuntime({ dataDir })
-  setCutoverMarkerForTests('v3_authoritative')
+  setCutoverMarkerForTests('cutover_blocked')
   ctx.applicationRuntime = createV3ApplicationRuntimeForTests(ctx)
   await ensureRuntimeReady(ctx)
   const runtime = getControlPlaneRuntime(ctx)
@@ -70,7 +70,7 @@ describe('composition: generation isolation', () => {
   it('authoritative V3 test factory starts only V3 scheduler', async () => {
     const { runtime, dataDir } = await bootV3ForTests()
     try {
-      assert.equal(runtime.schemaGeneration, 'v3_authoritative')
+      assert.equal(runtime.schemaGeneration, 'cutover_blocked')
       assert.equal(runtime.started, true, 'authoritative must start V3 scheduler')
       assert.equal(runtime.scheduler.isRunning(), true)
     } finally {

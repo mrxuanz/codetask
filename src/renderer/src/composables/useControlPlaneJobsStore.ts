@@ -113,7 +113,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   let isAuthoritative = false
   const apiReady = (async () => {
     const generation = await fetchControlPlaneGeneration()
-    isAuthoritative = generation === 'v3_authoritative'
+    isAuthoritative = generation === 'cutover_blocked'
     jobsApi = await resolveJobsApi()
     return jobsApi
   })()

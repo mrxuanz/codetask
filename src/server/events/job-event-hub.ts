@@ -203,12 +203,20 @@ export async function getRealtimeJobSnapshot(
   jobId: string
 ): Promise<import('../../shared/contracts/jobs.ts').ThreadJobDto | null> {
   const ctx = getAppContext()
+
+  // Core-first: when the job lives in new-core, shape via legacy-api-mapper + SSE mapper.
+  const { tryCoreJobSseSnapshot } = await import('../composition/core-job-sse-bridge')
+  const coreSnapshot = await tryCoreJobSseSnapshot(jobId, ctx.coreApplication)
+  if (coreSnapshot) {
+    return coreSnapshot as import('../../shared/contracts/jobs.ts').ThreadJobDto
+  }
+
   const { isV3Authoritative } = await import('../application/cutover-state')
   if (isV3Authoritative(ctx.db)) {
     const { getControlPlaneRuntime } = await import('../application/control-plane-runtime')
     return getControlPlaneRuntime(ctx).queryService.getTaskJob(jobId, { username })
   }
-  const { getUserJob } = await import('../legacy-control-plane/service')
+  const { getUserJob } = await import('../legacy-shim')
   return getUserJob(username, jobId)
 }
 

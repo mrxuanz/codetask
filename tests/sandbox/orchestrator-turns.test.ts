@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
+import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap'
 import {
   forceTerminateJobSandboxTurns,
   hasActiveJobSandboxTurns,
@@ -95,14 +99,18 @@ test('supervisor client publishes completed only after worker cleanup exits succ
 })
 
 test('aborted sandbox turn unregisters active job turn in finally', async () => {
-  const previous = process.env.CODETASK_SANDBOX_SUPERVISOR
-  process.env.CODETASK_SANDBOX_SUPERVISOR = '0'
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-supervisor-off-'))
   resetActiveJobTurnsForTests()
   const jobId = 'job-abort-unregister'
   const controller = new AbortController()
   controller.abort()
 
   try {
+    bootstrapRuntime({
+      dataDir,
+      mode: 'desktop',
+      config: { sandbox: { supervisorEnabled: false } }
+    })
     await assert.rejects(async () => {
       for await (const _chunk of streamSandboxedConversationTurn({
         role: 'planner',
@@ -120,8 +128,8 @@ test('aborted sandbox turn unregisters active job turn in finally', async () => 
     assert.equal(hasActiveJobSandboxTurns(jobId), false)
   } finally {
     resetActiveJobTurnsForTests()
-    if (previous === undefined) delete process.env.CODETASK_SANDBOX_SUPERVISOR
-    else process.env.CODETASK_SANDBOX_SUPERVISOR = previous
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
   }
 })
 

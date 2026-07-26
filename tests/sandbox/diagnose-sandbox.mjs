@@ -291,6 +291,7 @@ function parseWorkerProbes(stdout) {
 }
 
 async function main() {
+  // Test-harness composition edge: product enablement is AppConfig, not this env flag.
   if (process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
     console.error('Refusing to run with CODETASK_DISABLE_OUTER_SANDBOX=1')
     process.exit(2)

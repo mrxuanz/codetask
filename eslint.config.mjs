@@ -66,7 +66,7 @@ export default defineConfig(
       'src/shared/contracts/control-plane/**/*.{ts,tsx}',
       'src/server/{domain,application}/**/*.{ts,tsx}',
       'src/server/infra/sqlite/control-plane/**/*.{ts,tsx}',
-      'src/server/http/v3/**/*.{ts,tsx}',
+      'src/server/control-plane/**/*.{ts,tsx}',
       'src/renderer/src/stores/**/*.{ts,tsx}',
       'tests/control-plane/**/*.{ts,tsx}'
     ],

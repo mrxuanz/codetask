@@ -5,9 +5,6 @@
  */
 import { randomUUID } from 'crypto'
 import { getControlPlaneServices, type ControlPlaneAppContext } from './control-plane-services'
-import { LEGACY_RESUME_RUNNING_DISABLED } from './legacy-resume-running-disabled'
-
-export { LEGACY_RESUME_RUNNING_DISABLED }
 
 export async function pauseJobViaCommand(
   ctx: ControlPlaneAppContext,

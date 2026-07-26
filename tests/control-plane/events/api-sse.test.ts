@@ -16,10 +16,10 @@ import {
 import {
   parseIfMatch,
   parseIdempotencyKey
-} from '@server/http/v3/headers'
+} from '@server/http/control-headers'
 import { CommandError } from '@server/domain/jobs/job-errors'
 
-describe('API V3 headers', () => {
+describe('Control-plane HTTP headers', () => {
   it('should require If-Match header', () => {
     assert.throws(
       () => parseIfMatch(undefined),

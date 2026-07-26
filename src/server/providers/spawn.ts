@@ -46,8 +46,15 @@ export function spawnProviderProcess(
 }
 
 /**
- * Protocol adapters use this gateway when their final argv is assembled lazily
- * (for example OpenCode's ephemeral port or Cursor ACP arguments).
+ * Internal cross-spawn used by RuntimeAdapter live openTurn only.
+ *
+ * Protected Claude / Cursor / OpenCode launches must call
+ * `spawnProtectedProviderInvocation` (adapters/runtime/protected-spawn.ts),
+ * which routes through RuntimeAdapter.openTurn. Do not add new external async
+ * launch call sites here — probes may keep using spawnProviderCommandSync /
+ * which / where / taskkill. See docs/refactor/gates/t314-spawn-inventory.md.
+ *
+ * @internal RuntimeAdapter wrap path — not a public protected gateway.
  */
 export function spawnProviderInvocation(
   invocation: CommandInvocation,

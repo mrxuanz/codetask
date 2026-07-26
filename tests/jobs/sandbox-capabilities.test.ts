@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
+import {
+  bootstrapRuntime,
+  resetAppContextForTests
+} from '../../src/server/bootstrap'
+import { createAppConfig } from '../../src/server/config/app-config'
 import {
   detectSandboxReadCapabilities,
   resetSandboxReadCapabilitiesCache,
@@ -11,10 +19,16 @@ import {
 } from '../../src/server/reference-corpus/read-grants'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 
+test('createAppConfig defaults singleFileAllowlist to false and accepts override', () => {
+  assert.equal(createAppConfig().sandbox.singleFileAllowlist, false)
+  assert.equal(
+    createAppConfig({ sandbox: { singleFileAllowlist: true } }).sandbox.singleFileAllowlist,
+    true
+  )
+})
+
 test('detectSandboxReadCapabilities defaults to directory-only projection', () => {
   resetSandboxReadCapabilitiesCache()
-  const prev = process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST
-  delete process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST
   try {
     const caps = detectSandboxReadCapabilities()
     assert.equal(caps.readRootMode, 'directory_only')
@@ -23,8 +37,25 @@ test('detectSandboxReadCapabilities defaults to directory-only projection', () =
     assert.equal(typeof caps.nativeSandboxAvailable, 'boolean')
   } finally {
     resetSandboxReadCapabilitiesCache()
-    if (prev === undefined) delete process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST
-    else process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST = prev
+  }
+})
+
+test('detectSandboxReadCapabilities reads AppConfig.sandbox.singleFileAllowlist', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-sandbox-caps-'))
+  resetSandboxReadCapabilitiesCache()
+  try {
+    bootstrapRuntime({
+      dataDir,
+      mode: 'desktop',
+      config: { sandbox: { singleFileAllowlist: true } }
+    })
+    resetSandboxReadCapabilitiesCache()
+    const caps = detectSandboxReadCapabilities()
+    assert.equal(caps.singleFileAllowlist, true)
+  } finally {
+    resetSandboxReadCapabilitiesCache()
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
   }
 })
 
