@@ -14,7 +14,6 @@ import {
   type SessionNotification,
   type Stream
 } from '@agentclientprotocol/sdk'
-import { resolveCursorAcpModelId } from '../../conversation/models'
 import type { CursorAcpMcpServer } from '../mcp'
 import { autoAnswerCursorAskQuestion, type CursorAskQuestionRequest } from './extensions'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
@@ -473,7 +472,7 @@ export async function applyCursorModel(
   session: Pick<CursorAcpSessionHandle, 'sessionId'>,
   model?: string
 ): Promise<void> {
-  const modelId = resolveCursorAcpModelId(model)
+  const modelId = model?.trim() || undefined
   if (!modelId) {
     debugCursor('model skipped (use cursor cli default)')
     return

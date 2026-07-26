@@ -2,18 +2,11 @@ import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import { Hono } from 'hono'
 import {
-  isSseStreamRoute,
   getRequestAbortSignal,
   REQUEST_TIMEOUT_MS,
   requestTimeout
 } from '../../src/server/middleware/http-limits'
 import { getCurrentRequestAbortSignal } from '../../src/server/context/request-abort'
-
-test('isSseStreamRoute recognizes known SSE stream paths', () => {
-  assert.equal(isSseStreamRoute('/api/events/stream'), true)
-  assert.equal(isSseStreamRoute('/api/events/jobs/stream'), true)
-  assert.equal(isSseStreamRoute('/api/threads/thread-1/messages'), false)
-})
 
 test('requestTimeout returns 408 when handler exceeds limit', async () => {
   mock.timers.enable({ apis: ['setTimeout'], now: Date.now() })
@@ -44,36 +37,24 @@ test('requestTimeout returns 408 when handler exceeds limit', async () => {
   }
 })
 
-test('requestTimeout skips long-lived SSE and conversation message routes', async () => {
+test('requestTimeout has no business-route bypasses', async () => {
   mock.timers.enable({ apis: ['setTimeout'], now: Date.now() })
 
   try {
     const app = new Hono()
-    app.use('*', requestTimeout())
+    app.use('*', requestTimeout(10))
     app.get('/api/events/stream', async (c) => {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, REQUEST_TIMEOUT_MS + 1_000)
-      })
-      return c.text('stream')
-    })
-    app.get('/api/threads/thread-1/messages', async (c) => {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, REQUEST_TIMEOUT_MS + 1_000)
-      })
-      return c.text('messages')
+      const signal = getRequestAbortSignal(c)
+      await new Promise<void>((resolve) =>
+        signal.addEventListener('abort', resolve, { once: true })
+      )
+      return c.text('late')
     })
 
-    const streamResponsePromise = app.fetch(new Request('http://localhost/api/events/stream'))
-    const messagesResponsePromise = app.fetch(
-      new Request('http://localhost/api/threads/thread-1/messages')
-    )
-    mock.timers.tick(REQUEST_TIMEOUT_MS + 1_000)
+    const responsePromise = app.fetch(new Request('http://localhost/api/events/stream'))
+    mock.timers.tick(10)
 
-    const streamResponse = await streamResponsePromise
-    const messagesResponse = await messagesResponsePromise
-
-    assert.equal(streamResponse.status, 200)
-    assert.equal(messagesResponse.status, 200)
+    assert.equal((await responsePromise).status, 408)
   } finally {
     mock.timers.reset()
   }

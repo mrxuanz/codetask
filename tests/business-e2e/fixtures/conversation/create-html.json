@@ -1,7 +1,0 @@
-{
-  "language": "zh-CN",
-  "expect": {
-    "htmlMarker": "BUSINESS_E2E_CHAT_HTML"
-  },
-  "note": "Message and filename are injected from conversation core (opencode.html / cursor.html / …)."
-}

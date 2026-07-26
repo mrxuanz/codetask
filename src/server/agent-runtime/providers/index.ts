@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../../conversation/cores'
+import type { SupportedCoreCode } from '../../../shared/providers/codes'
 import type { AgentTurnChunk, AgentTurnInput, AgentTurnOptions, AgentTurnProvider } from '../types'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import { getTestProviderRegistryOverride } from './test-overrides'

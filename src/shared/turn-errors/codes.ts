@@ -80,6 +80,8 @@ export type TurnErrorCode =
   | 'auth.password_missing_digit'
   | 'auth.password_missing_symbol'
   | 'auth.password_invalid_chars'
+  | 'auth.password_contains_username'
+  | 'auth.password_common'
   | 'thread.not_found'
   | 'thread.busy'
   | 'thread.deleting'
@@ -254,6 +256,8 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'auth.password_missing_digit': 'Password must include at least one digit',
   'auth.password_missing_symbol': 'Password must include at least one symbol',
   'auth.password_invalid_chars': 'Password may only contain printable ASCII characters',
+  'auth.password_contains_username': 'Password must not contain the username',
+  'auth.password_common': 'This password is too common',
   'thread.not_found': 'Thread not found',
   'thread.busy': 'Thread is busy; please wait for the current turn to finish',
   'thread.deleting': 'This conversation is being deleted',

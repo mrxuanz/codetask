@@ -10,7 +10,7 @@ import {
   writeFileSync
 } from 'fs'
 import { isAbsolute, join, relative, resolve, sep } from 'path'
-import type { SupportedCoreCode } from '../../conversation/cores'
+import type { SupportedCoreCode } from '../../../shared/providers/codes'
 
 export const CREDENTIAL_SNAPSHOT_MANIFEST = 'credential-snapshot-manifest.json'
 

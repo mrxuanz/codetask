@@ -19,7 +19,6 @@ import {
   mergeProvidersConfigOverrides,
   normalizeProviderCode
 } from '../../src/shared/providers/index.ts'
-import { createAppConfig } from '../../src/server/config/app-config.ts'
 import {
   DefaultProviderInstallationResolver,
   ProviderInstallationError
@@ -47,20 +46,18 @@ test('serializable descriptors cover each provider exactly once', () => {
 })
 
 test('typed provider config defaults to auto and supports explicit startup overrides', () => {
-  const config = createAppConfig({
-    providers: {
-      codex: {
-        executable: { mode: 'path', path: ' /opt/tools/codex ' },
-        model: ' gpt-test '
-      }
+  const config = createProvidersConfig({
+    codex: {
+      executable: { mode: 'path', path: ' /opt/tools/codex ' },
+      model: ' gpt-test '
     }
   })
-  assert.deepEqual(config.providers.codex.executable, {
+  assert.deepEqual(config.codex.executable, {
     mode: 'path',
     path: '/opt/tools/codex'
   })
-  assert.equal(config.providers.codex.model, 'gpt-test')
-  assert.deepEqual(config.providers.opencode.executable, { mode: 'auto' })
+  assert.equal(config.codex.model, 'gpt-test')
+  assert.deepEqual(config.opencode.executable, { mode: 'auto' })
 })
 
 test('typed provider config rejects empty paths and non-string models', () => {

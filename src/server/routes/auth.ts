@@ -1,30 +1,20 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
 import { ok } from '../response'
+import { getClientIp } from '../auth/client-ip'
 import {
-  getBootstrap,
-  loginAccount,
-  logoutAccount,
-  setupAccount,
-  type LoginOptions
-} from '../auth/service'
-import { validateSetupToken } from '../auth/setup-token'
-import { getClientIp, scopeKeyForLogin, hashIp, bucketKeyForIp } from '../auth/client-ip'
-import { generateCaptcha } from '../auth/captcha'
-import { rateLimit, CAPTCHA_GEN_RULE } from '../auth/memory-limiter'
-
-function bearerToken(authHeader: string | undefined): string | undefined {
-  if (!authHeader?.startsWith('Bearer ')) return undefined
-  const token = authHeader.slice(7).trim()
-  return token || undefined
-}
+  clearAuthSessionCookies,
+  readAuthSessionCookie,
+  setAuthSessionCookies
+} from '../interfaces/http/auth-session-cookie'
 
 export function createAuthRoutes(ctx: AppContext): Hono {
-  const auth = new Hono()
+  const routes = new Hono()
+  const auth = ctx.security.auth
 
-  auth.get('/bootstrap', async (c) => {
-    const token = bearerToken(c.req.header('Authorization'))
-    const data = await getBootstrap(token)
+  routes.get('/bootstrap', (c) => {
+    const data = auth.service.bootstrap(readAuthSessionCookie(c))
+    c.header('Cache-Control', 'no-store')
     return c.json(
       ok({
         ...data,
@@ -33,107 +23,96 @@ export function createAuthRoutes(ctx: AppContext): Hono {
     )
   })
 
-  auth.post('/setup', async (c) => {
-    const precheck = await getBootstrap()
-    if (ctx.security.mode === 'server') {
-      if (precheck.initialized) {
-        return c.json(
-          {
-            data: null,
-            status: 40901,
-            extra: {},
-            message: 'Account already initialized',
-            success: false
-          },
-          409
-        )
-      }
-
-      const body = await c.req.json<{ username?: string; password?: string; setupToken?: string }>()
-      const setupToken = body.setupToken?.trim()
-      if (!setupToken || !validateSetupToken(ctx.security.authSecret, setupToken)) {
-        return c.json(
-          {
-            data: null,
-            status: 40101,
-            extra: {},
-            message: 'Invalid or expired setup token',
-            success: false
-          },
-          401
-        )
-      }
-      const data = await setupAccount(body.username ?? '', body.password ?? '')
-      return c.json(ok(data))
-    }
-
-    const body = await c.req.json<{ username?: string; password?: string }>()
-    const data = await setupAccount(body.username ?? '', body.password ?? '')
-    return c.json(ok(data))
-  })
-
-  auth.post('/login', async (c) => {
+  routes.post('/setup', async (c) => {
     const body = await c.req.json<{
       username?: string
       password?: string
+      setupToken?: string
+    }>()
+    const session = await auth.service.setupAccount({
+      username: body.username ?? '',
+      password: body.password ?? '',
+      setupGrant: body.setupToken?.trim(),
+      requestScope: getClientIp(c)
+    })
+    setAuthSessionCookies(c, auth, session)
+    return c.json(
+      ok({
+        username: session.username,
+        expires_at: Math.floor(session.expiresAtMs / 1_000)
+      })
+    )
+  })
+
+  routes.post('/login', async (c) => {
+    const body = await c.req.json<{
+      username?: string
+      password?: string
+      challengeId?: string
+      challengeAnswer?: string
       captchaId?: string
       captchaAnswer?: string
     }>()
-    const clientIp = getClientIp(c)
-    const opts: LoginOptions = {
+    const session = await auth.service.login({
       username: body.username ?? '',
       password: body.password ?? '',
-      captchaId: body.captchaId,
-      captchaAnswer: body.captchaAnswer,
-      clientIp,
-      authSecret: ctx.security.authSecret
-    }
-    const data = await loginAccount(opts)
-    return c.json(ok(data))
+      requestScope: getClientIp(c),
+      challengeId: body.challengeId ?? body.captchaId,
+      challengeAnswer: body.challengeAnswer ?? body.captchaAnswer
+    })
+    setAuthSessionCookies(c, auth, session)
+    return c.json(
+      ok({
+        username: session.username,
+        expires_at: Math.floor(session.expiresAtMs / 1_000)
+      })
+    )
   })
 
-  auth.post('/logout', async (c) => {
-    const token = bearerToken(c.req.header('Authorization'))
-    await logoutAccount(token)
+  routes.post('/logout', (c) => {
+    auth.service.logout(readAuthSessionCookie(c))
+    clearAuthSessionCookies(c)
     return c.json(ok({ loggedOut: true }))
   })
 
-  auth.post('/captcha', async (c) => {
-    const clientIp = getClientIp(c)
-    const ipHash = hashIp(ctx.security.authSecret, clientIp)
-    const bucketKey = bucketKeyForIp(ipHash) + ':capgen'
-
-    const limit = rateLimit(bucketKey, CAPTCHA_GEN_RULE)
-    if (!limit.allowed) {
-      return c.json(
-        {
-          data: null,
-          status: 40101,
-          extra: {},
-          message: 'Too many captcha requests',
-          success: false
-        },
-        429
-      )
-    }
-
-    const result = await generateCaptcha(ctx.security.authSecret, scopeKeyForLogin(ipHash))
-
-    if ('error' in result) {
-      return c.json(
-        {
-          data: null,
-          status: 40101,
-          extra: {},
-          message: result.error,
-          success: false
-        },
-        429
-      )
-    }
-
-    return c.json(ok(result))
+  routes.post('/logout-all', (c) => {
+    const token = readAuthSessionCookie(c)
+    if (token) auth.service.logoutAll(token)
+    clearAuthSessionCookies(c)
+    return c.json(ok({ loggedOut: true }))
   })
 
-  return auth
+  routes.post('/change-password', async (c) => {
+    const token = readAuthSessionCookie(c) ?? ''
+    const body = await c.req.json<{
+      currentPassword?: string
+      newPassword?: string
+    }>()
+    const session = await auth.service.changePassword({
+      token,
+      currentPassword: body.currentPassword ?? '',
+      newPassword: body.newPassword ?? ''
+    })
+    setAuthSessionCookies(c, auth, session)
+    return c.json(
+      ok({
+        username: session.username,
+        expires_at: Math.floor(session.expiresAtMs / 1_000)
+      })
+    )
+  })
+
+  routes.post('/captcha', (c) => {
+    const challenge = auth.service.issueChallenge(getClientIp(c))
+    c.header('Cache-Control', 'no-store')
+    return c.json(
+      ok({
+        challengeId: challenge.challengeId,
+        image: challenge.publicPayload,
+        expires_at: Math.floor(challenge.expiresAtMs / 1_000)
+      })
+    )
+  })
+
+  return routes
 }

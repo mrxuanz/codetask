@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../../conversation/cores'
+import type { SupportedCoreCode } from '../../../shared/providers/codes'
 import { SandboxError } from '../types'
 
 export class ProviderAuthError extends SandboxError {

@@ -1,5 +1,7 @@
 import { fail, type ApiResponse } from './response'
 import { TURN_ERROR_DEFAULT_MESSAGES } from '../shared/turn-errors/codes.ts'
+import { AuthError } from './core/domain/auth'
+import { AuthSecurityCapacityError } from './core/application/ports'
 
 export const code = {
   OK: 0,
@@ -27,6 +29,29 @@ export function resolveHttpStatus(error: unknown): number {
   if (error instanceof AppError) {
     return error.httpStatus
   }
+  if (error instanceof AuthError) {
+    if (error.code === 'auth.rate_limited') return 429
+    if (
+      error.code === 'auth.already_initialized' ||
+      error.code === 'auth.setup_required' ||
+      error.code === 'auth.password_reused' ||
+      error.code === 'auth.concurrent_update'
+    ) {
+      return 409
+    }
+    if (
+      error.code === 'auth.invalid_credentials' ||
+      error.code === 'auth.setup_grant_invalid' ||
+      error.code === 'auth.challenge_required' ||
+      error.code === 'auth.challenge_invalid' ||
+      error.code === 'auth.session_invalid' ||
+      error.code === 'auth.current_password_invalid'
+    ) {
+      return 401
+    }
+    return 400
+  }
+  if (error instanceof AuthSecurityCapacityError) return 429
   return 500
 }
 
@@ -128,6 +153,21 @@ export class AppError extends Error {
 export function toErrorResponse(error: unknown): ApiResponse<Record<string, unknown> | null> {
   if (error instanceof AppError) {
     return error.toResponse()
+  }
+  if (error instanceof AuthError) {
+    const httpStatus = resolveHttpStatus(error)
+    const status =
+      httpStatus === 401
+        ? code.UNAUTHORIZED
+        : httpStatus === 409
+          ? code.CONFLICT
+          : httpStatus === 429
+            ? 42901
+            : code.BAD_REQUEST
+    return fail(status, error.code, { code: error.code, ...error.details })
+  }
+  if (error instanceof AuthSecurityCapacityError) {
+    return fail(42901, 'auth.rate_limited', { code: 'auth.rate_limited', retryAfterMs: 1_000 })
   }
 
   const message = error instanceof Error ? error.message : 'internal server error'

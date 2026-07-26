@@ -7,10 +7,10 @@ import {
 } from '../../shared/turn-errors.ts'
 import { isTurnError, createTurnError } from '../../shared/turn-errors.ts'
 import type { AgentTurnChunk } from './types'
-import { DEFAULT_APP_CONFIG } from '../config/app-config'
+import { DEFAULT_TURN_RUNTIME_CONFIG } from './turn-runtime-config'
 
-const DEFAULT_MAX_RETRIES = DEFAULT_APP_CONFIG.turn.maxRetries
-const ABSOLUTE_MAX_RETRIES = DEFAULT_APP_CONFIG.turn.absoluteMaxRetries
+const DEFAULT_MAX_RETRIES = DEFAULT_TURN_RUNTIME_CONFIG.maxRetries
+const ABSOLUTE_MAX_RETRIES = DEFAULT_TURN_RUNTIME_CONFIG.absoluteMaxRetries
 
 function turnErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message

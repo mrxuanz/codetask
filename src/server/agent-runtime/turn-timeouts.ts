@@ -1,9 +1,9 @@
 import type { ConversationRole } from './roles'
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from '../sandbox/session-state'
-import { DEFAULT_APP_CONFIG } from '../config/app-config'
+import { DEFAULT_TURN_RUNTIME_CONFIG } from './turn-runtime-config'
 
 /** Shared stalled threshold for every role (conversation / planner / task / verifiers). */
-export const TASK_TURN_STALLED_MS = DEFAULT_APP_CONFIG.turn.stalledMs
+export const TASK_TURN_STALLED_MS = DEFAULT_TURN_RUNTIME_CONFIG.stalledMs
 
 /**
  * All roles share the task-worker timeout policy.
@@ -27,7 +27,7 @@ export function stalledAfterMsForRole(
  */
 export function noFirstSignalMsForRole(
   _role: ConversationRole,
-  noFirstSignalMs = DEFAULT_APP_CONFIG.turn.noFirstSignalMs
+  noFirstSignalMs = DEFAULT_TURN_RUNTIME_CONFIG.noFirstSignalMs
 ): number | null {
   return noFirstSignalMs
 }

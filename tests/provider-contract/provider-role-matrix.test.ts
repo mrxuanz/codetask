@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { SUPPORTED_CORE_CODES } from '../../src/server/conversation/cores'
+import { SUPPORTED_CORE_CODES } from '../../src/shared/providers/codes'
 import {
   resolveProviderOuterSandbox,
   resolveProviderRunPolicy

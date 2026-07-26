@@ -8,7 +8,6 @@
     "src/standalone/**/*",
     "src/sandbox/**/*",
     "src/shared/**/*",
-    "scripts/control-plane/**/*",
     "native/codeteam-sandbox/index.d.ts"
   ],
   "compilerOptions": {

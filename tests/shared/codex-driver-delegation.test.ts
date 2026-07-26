@@ -154,16 +154,15 @@ test('central preflight switch no longer handles Codex; driver owns preflight', 
   assert.doesNotMatch(codexPreflight, /resolveProviderExecutable/)
 })
 
-test('buildCodexTurnPlan lives in Codex driver module; runner does not import policy', () => {
+test('buildCodexTurnPlan lives in Codex driver module without a legacy runner', () => {
   const turnPlan = readFileSync(join(root, 'src/server/providers/codex/turn-plan.ts'), 'utf8')
   const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/codex-sdk.ts'), 'utf8')
-  const runner = readFileSync(join(root, 'src/server/agent-runtime/runner.ts'), 'utf8')
   const driverSource = readFileSync(join(root, 'src/server/providers/codex/driver.ts'), 'utf8')
 
   assert.match(turnPlan, /export function buildCodexTurnPlan/)
   assert.match(sdk, /from '\.\.\/\.\.\/providers\/codex\/turn-plan'/)
   assert.doesNotMatch(sdk, /from '\.\/codex-policy'/)
-  assert.doesNotMatch(runner, /codex-policy|buildCodexTurnPlan/)
+  assert.equal(existsSync(join(root, 'src/server/agent-runtime/runner.ts')), false)
   assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/codex-policy.ts')), false)
   assert.match(driverSource, /export \{\s*buildCodexTurnPlan/s)
 })

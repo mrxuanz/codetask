@@ -2,7 +2,7 @@ import type { ConversationRole } from './roles'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import type { TurnActivityKind } from './turn-scope'
 import { stalledAfterMsForRole } from './turn-timeouts'
-import { DEFAULT_APP_CONFIG, type TurnConfig } from '../config/app-config'
+import { DEFAULT_TURN_RUNTIME_CONFIG, type TurnRuntimeConfig } from './turn-runtime-config'
 
 const LONG_RUNNING_COMMAND_RE =
   /\b(npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|yarn\s+test|bun\s+test|pytest|cargo\s+test|go\s+test|jest|vitest|playwright\s+test|mvn\s+test|gradle\s+test|make\s+test|ctest)\b/i
@@ -18,7 +18,7 @@ interface StalledListener {
 }
 
 export type ProgressGuardConfig = Pick<
-  TurnConfig,
+  TurnRuntimeConfig,
   'progressWindowMs' | 'stalledMs' | 'longRunningToolCapMs'
 >
 
@@ -27,7 +27,7 @@ export type ProgressGuardConfig = Pick<
  * suppress stall — even if `_openToolCount > 0` (the C.2 hole).
  */
 export function longRunningToolCapMs(
-  configuredMs = DEFAULT_APP_CONFIG.turn.longRunningToolCapMs
+  configuredMs = DEFAULT_TURN_RUNTIME_CONFIG.longRunningToolCapMs
 ): number {
   return configuredMs
 }
@@ -54,9 +54,9 @@ export class ProgressGuard {
   constructor(role: ConversationRole, config: Partial<ProgressGuardConfig> = {}) {
     this._role = role
     this._config = {
-      progressWindowMs: DEFAULT_APP_CONFIG.turn.progressWindowMs,
-      stalledMs: DEFAULT_APP_CONFIG.turn.stalledMs,
-      longRunningToolCapMs: DEFAULT_APP_CONFIG.turn.longRunningToolCapMs,
+      progressWindowMs: DEFAULT_TURN_RUNTIME_CONFIG.progressWindowMs,
+      stalledMs: DEFAULT_TURN_RUNTIME_CONFIG.stalledMs,
+      longRunningToolCapMs: DEFAULT_TURN_RUNTIME_CONFIG.longRunningToolCapMs,
       ...config
     }
   }

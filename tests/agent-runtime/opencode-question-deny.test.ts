@@ -40,7 +40,7 @@ describe('OpenCode question policy', () => {
     for (const name of ['bash', 'edit', 'write', 'patch', 'task', 'skill']) {
       assert.equal(tools[name], false, name)
     }
-    assert.equal(permission['codeteam-manager_propose_task_draft'], 'allow')
+    assert.equal(permission['codeteam-manager_propose_task_draft'], undefined)
   })
 
   it('auto-replies with the first (recommended) option label', () => {

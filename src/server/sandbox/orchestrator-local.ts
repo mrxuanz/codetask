@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../conversation/cores'
+import type { SupportedCoreCode } from '../../shared/providers/codes'
 import type { ConversationRole } from '../agent-runtime/roles'
 import type { AgentTurnInput, AgentTurnChunk } from '../agent-runtime/types'
 import { formatSdkTurnError } from '../agent-runtime/errors'

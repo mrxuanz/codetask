@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../conversation/cores'
+import type { SupportedCoreCode } from '../../shared/providers/codes'
 import type { ConversationRole } from './roles'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'

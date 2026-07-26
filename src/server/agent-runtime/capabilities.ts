@@ -1,11 +1,8 @@
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { createTurnError } from '../../shared/turn-errors.ts'
-import type { SupportedCoreCode } from '../conversation/cores'
+import type { SupportedCoreCode } from '../../shared/providers/codes'
 import type { ConversationRole } from './roles'
-import {
-  getProviderDescriptor,
-  type ProviderCapabilityProfile
-} from '../../shared/providers'
+import { getProviderDescriptor, type ProviderCapabilityProfile } from '../../shared/providers'
 
 export type AgentCapabilityProfile = ProviderCapabilityProfile
 
@@ -61,9 +58,7 @@ export function assertCapabilityProfileMatchesRole(
 ): void {
   const valid =
     role === 'conversation'
-      ? profile === 'chat-write' ||
-        profile === 'chat-read' ||
-        profile === 'create-task-read'
+      ? profile === 'chat-write' || profile === 'chat-read' || profile === 'create-task-read'
       : role === 'planner'
         ? profile === 'planner-read'
         : role === 'task-worker'

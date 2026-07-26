@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
-import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../server/db'
+import { openKernelDatabase } from '../server/adapters/sqlite'
+import { dataPaths } from '../server/data-paths'
 import {
   StorageLocatorRepository,
   createStorageLocator,
@@ -29,11 +30,10 @@ export function initializeStorageRoot(input: {
   try {
     mkdirSync(staging, { recursive: false, mode: 0o700 })
     const marker = writeDataRootMarker(staging, id)
-    for (const dir of ['blobs/attachments', 'runtimes', 'migration']) {
+    for (const dir of ['db', 'sandbox-home', 'sandbox-runtime']) {
       mkdirSync(join(staging, dir), { recursive: true })
     }
-    const db = createIsolatedTestDatabase(staging)
-    closeIsolatedTestDatabase(db)
+    openKernelDatabase({ filename: dataPaths(staging).authDbFile }).close()
 
     if (existsSync(target)) {
       renameSync(target, emptyBackup)

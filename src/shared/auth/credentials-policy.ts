@@ -2,7 +2,7 @@ import type { TurnErrorCode } from '../turn-errors/codes'
 
 export const USERNAME_MIN_LENGTH = 4
 export const USERNAME_MAX_LENGTH = 32
-export const PASSWORD_MIN_LENGTH = 8
+export const PASSWORD_MIN_LENGTH = 12
 export const PASSWORD_MAX_LENGTH = 128
 
 const USERNAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]+$/
@@ -10,7 +10,13 @@ const PASSWORD_LOWERCASE_PATTERN = /[a-z]/
 const PASSWORD_UPPERCASE_PATTERN = /[A-Z]/
 const PASSWORD_DIGIT_PATTERN = /[0-9]/
 const PASSWORD_SYMBOL_PATTERN = /[^A-Za-z0-9]/
-const PASSWORD_ALLOWED_PATTERN = /^[\x21-\x7E]+$/
+const PASSWORD_ALLOWED_PATTERN = /^[\x20-\x7E]+$/
+const COMMON_PASSWORDS = new Set([
+  'admin123!@#',
+  'password123!',
+  'qwerty123456!',
+  'welcome123!'
+])
 
 const RESERVED_USERNAMES = new Set([
   'admin',
@@ -43,6 +49,8 @@ export type CredentialPolicyCode = Extract<
   | 'auth.password_missing_digit'
   | 'auth.password_missing_symbol'
   | 'auth.password_invalid_chars'
+  | 'auth.password_contains_username'
+  | 'auth.password_common'
 >
 
 export interface CredentialPolicyViolation {
@@ -70,7 +78,10 @@ export function validateSetupUsername(username: string): CredentialPolicyViolati
   return null
 }
 
-export function validateSetupPassword(password: string): CredentialPolicyViolation | null {
+export function validateSetupPassword(
+  password: string,
+  username?: string
+): CredentialPolicyViolation | null {
   if (password.length < PASSWORD_MIN_LENGTH) {
     return {
       code: 'auth.password_too_short',
@@ -105,6 +116,20 @@ export function validateSetupPassword(password: string): CredentialPolicyViolati
     return { code: 'auth.password_missing_symbol' }
   }
 
+  const normalizedPassword = password.toLowerCase()
+  const normalizedUsername = username?.trim().toLowerCase()
+  if (
+    normalizedUsername &&
+    normalizedUsername.length >= USERNAME_MIN_LENGTH &&
+    normalizedPassword.includes(normalizedUsername)
+  ) {
+    return { code: 'auth.password_contains_username' }
+  }
+
+  if (COMMON_PASSWORDS.has(normalizedPassword)) {
+    return { code: 'auth.password_common' }
+  }
+
   return null
 }
 
@@ -112,5 +137,5 @@ export function validateSetupCredentials(
   username: string,
   password: string
 ): CredentialPolicyViolation | null {
-  return validateSetupUsername(username) ?? validateSetupPassword(password)
+  return validateSetupUsername(username) ?? validateSetupPassword(password, username)
 }

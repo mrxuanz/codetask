@@ -10,11 +10,8 @@ import { fail } from './response'
 import { createApiRoutes } from './routes/api'
 
 export {
-  bootstrapRuntime,
-  ensureRuntimeReady,
-  getAppContext,
-  resetAppContextForTests,
-  shutdownRuntime,
+  createRuntime,
+  type ApplicationRuntime,
   type AppContext,
   type BootstrapOptions
 } from './bootstrap'

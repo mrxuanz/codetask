@@ -23,5 +23,5 @@ export interface SandboxHealthReport {
 }
 
 export function fetchSandboxHealth(): Promise<{ data: SandboxHealthReport }> {
-  return api<SandboxHealthReport>('/api/system/sandbox-health')
+  return api<SandboxHealthReport>('/api/sandbox/health')
 }

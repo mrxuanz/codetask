@@ -1,35 +1,49 @@
-const TOKEN_KEY = 'task_token'
-const EXPIRES_KEY = 'task_token_expires'
-const DEFAULT_TTL_SEC = 12 * 60 * 60
+const LEGACY_TOKEN_KEYS = ['task_token', 'task_token_expires'] as const
+const CSRF_COOKIE_NAME = 'codetask_csrf'
+const CSRF_HEADER_NAME = 'x-codetask-csrf'
+const SETUP_GRANT_HEADER_NAME = 'x-codetask-setup-grant'
+let setupGrant = ''
 
-export function setToken(token: string, expiresAtSec?: number): void {
-  const expires = expiresAtSec ?? Math.floor(Date.now() / 1000) + DEFAULT_TTL_SEC
-  localStorage.setItem(TOKEN_KEY, token)
-  localStorage.setItem(EXPIRES_KEY, String(expires))
-}
-
-export function getToken(): string | null {
-  const token = localStorage.getItem(TOKEN_KEY)
-  const expiresRaw = localStorage.getItem(EXPIRES_KEY)
-  if (!token || !expiresRaw) return null
-
-  const expiresAt = Number(expiresRaw)
-  if (Number.isNaN(expiresAt) || Math.floor(Date.now() / 1000) >= expiresAt) {
-    clearToken()
-    return null
+function readCookie(name: string): string | null {
+  const prefix = `${name}=`
+  for (const part of document.cookie.split(';')) {
+    const value = part.trim()
+    if (!value.startsWith(prefix)) continue
+    try {
+      return decodeURIComponent(value.slice(prefix.length))
+    } catch {
+      return null
+    }
   }
-  return token
+  return null
 }
 
+/**
+ * Authentication sessions live exclusively in an HttpOnly cookie. This cleanup
+ * only removes credentials left by pre-remediation releases.
+ */
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(EXPIRES_KEY)
+  for (const key of LEGACY_TOKEN_KEYS) {
+    localStorage.removeItem(key)
+  }
 }
 
+/** Keep a first-run grant in memory only; never persist it in browser storage. */
+export function setSetupGrant(value: string): void {
+  setupGrant = value.trim()
+}
+
+export function clearSetupGrant(): void {
+  setupGrant = ''
+}
+
+/** Headers required by the current authentication/setup phase. */
 export function authHeaders(): HeadersInit {
-  const token = getToken()
-  if (!token) return {}
-  return { Authorization: `Bearer ${token}` }
+  const headers: Record<string, string> = {}
+  const csrfToken = readCookie(CSRF_COOKIE_NAME)
+  if (csrfToken) headers[CSRF_HEADER_NAME] = csrfToken
+  if (setupGrant) headers[SETUP_GRANT_HEADER_NAME] = setupGrant
+  return headers
 }
 
 export function assetUrlWithAuth(assetUrl: string): string {

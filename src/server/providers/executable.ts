@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import type { ProviderInstallationSource } from '../../shared/providers/installation'
 import type { SupportedCoreCode } from '../../shared/providers/codes'
 import { DEFAULT_PROVIDERS_CONFIG, type ProviderSettings } from '../../shared/providers/settings'
@@ -8,8 +7,6 @@ import {
   type ProviderInstallationResolver
 } from './installation'
 import { processHostEnvironmentSource } from '../host-environment'
-
-const nodeRequire = createRequire(import.meta.url)
 
 export type ExecutableSource = ProviderInstallationSource
 
@@ -44,9 +41,7 @@ function isOptions(
 }
 
 function defaultProviderSettings(provider: SupportedCoreCode): ProviderSettings {
-  // Deferred import avoids executable → bootstrap → composition → drivers cycles.
-  const { getAppConfig } = nodeRequire('../bootstrap.ts') as typeof import('../bootstrap')
-  return getAppConfig().providers[provider] ?? DEFAULT_PROVIDERS_CONFIG[provider]
+  return DEFAULT_PROVIDERS_CONFIG[provider]
 }
 
 export function resolveProviderExecutable(

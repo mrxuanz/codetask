@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../../conversation/cores'
+import type { SupportedCoreCode } from '../../../shared/providers/codes'
 import type { AgentTurnProvider } from '../types'
 import { getProviderRegistry } from '../../providers/access'
 import { createTestOverrideDriver } from '../../providers/delegating-driver'

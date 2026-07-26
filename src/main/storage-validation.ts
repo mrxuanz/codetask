@@ -272,7 +272,8 @@ export function validateExistingStorageRoot(input: {
   })
   if (!validation.ok) return validation
 
-  const dbFile = dataPaths(validation.canonicalPath).dbFile
+  const paths = dataPaths(validation.canonicalPath)
+  const dbFile = existsSync(paths.authDbFile) ? paths.authDbFile : paths.legacyDbFile
   if (!existsSync(dbFile) || !statSync(dbFile).isFile()) {
     return { ...validation, ok: false, issue: 'storage_database_missing' }
   }
