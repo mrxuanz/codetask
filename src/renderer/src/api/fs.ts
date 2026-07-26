@@ -21,3 +21,13 @@ export function browseFilesystem(partialPath: string): Promise<ApiResponse<Brows
 export function fetchBrowseParent(path: string): Promise<ApiResponse<{ parentPath: string }>> {
   return api<{ parentPath: string }>(`/api/fs/parent?path=${encodeURIComponent(path)}`)
 }
+
+export function createFilesystemFolder(
+  parentPath: string,
+  name: string
+): Promise<ApiResponse<{ path: string }>> {
+  return api<{ path: string }>('/api/fs/mkdir', {
+    method: 'POST',
+    body: JSON.stringify({ parentPath, name })
+  })
+}

@@ -6,7 +6,6 @@ export const CLAUDE_DESCRIPTOR = Object.freeze({
   label: 'Claude Code',
   description: 'Anthropic Claude Code CLI',
   defaultCommands: ['claude', 'claude-code'],
-  authEnvironmentKeys: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
   childEnvironmentKeys: [
     'CLAUDE_CONFIG_DIR',
     'ANTHROPIC_BASE_URL',

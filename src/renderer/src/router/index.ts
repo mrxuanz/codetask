@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import BootstrapGate from '@renderer/components/BootstrapGate.vue'
 import BootstrapRedirect from '@renderer/pages/BootstrapRedirect.vue'
-import HomePage from '@renderer/pages/HomePage.vue'
+import ConversationPage from '@renderer/pages/ConversationPage.vue'
+import SettingsPage from '@renderer/pages/SettingsPage.vue'
+import DraftsPage from '@renderer/pages/DraftsPage.vue'
 import LoginPage from '@renderer/pages/LoginPage.vue'
 import SetupPage from '@renderer/pages/SetupPage.vue'
 
@@ -15,7 +17,9 @@ const router = createRouter({
       children: [
         { path: 'setup', component: SetupPage },
         { path: 'login', component: LoginPage },
-        { path: 'home', component: HomePage }
+        { path: 'home', component: ConversationPage },
+        { path: 'drafts', component: DraftsPage },
+        { path: 'settings', component: SettingsPage }
       ]
     }
   ]

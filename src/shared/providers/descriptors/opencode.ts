@@ -6,7 +6,6 @@ export const OPENCODE_DESCRIPTOR = Object.freeze({
   label: 'OpenCode',
   description: 'OpenCode CLI',
   defaultCommands: ['opencode'],
-  authEnvironmentKeys: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENCODE_API_KEY'],
   childEnvironmentKeys: [
     'XDG_CONFIG_HOME',
     'XDG_DATA_HOME',

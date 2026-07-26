@@ -15,6 +15,28 @@ export const CODETASK_TRANSIENT_ENV_KEYS = [
 ] as const
 
 /**
+ * Credentials and Provider configuration that CodeTask deliberately refuses to
+ * inherit from the host process. Authentication must come from each CLI's
+ * host-login store; product settings travel as typed values.
+ */
+export const PROVIDER_HOST_ENV_DENYLIST = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'OPENAI_API_KEY',
+  'CODEX_API_KEY',
+  'CURSOR_API_KEY',
+  'CURSOR_AUTH_TOKEN',
+  'OPENCODE_API_KEY'
+] as const
+
+/**
  * Inputs for the single subprocess-environment compile boundary.
  * Host identity arrives as a snapshot; overlays are explicit declarations.
  */
@@ -35,7 +57,7 @@ export interface EnvironmentCompiler {
 }
 
 /**
- * Strip CodeTask transient keys only. Host provider auth keys are preserved.
+ * Strip CodeTask transient control keys before compiling a child environment.
  */
 export function stripCodeTaskTransientEnv(
   env: Readonly<Record<string, string>>
@@ -43,6 +65,17 @@ export function stripCodeTaskTransientEnv(
   const out = { ...env }
   for (const key of CODETASK_TRANSIENT_ENV_KEYS) {
     delete out[key]
+  }
+  return out
+}
+
+export function stripProviderHostConfiguration(
+  env: Readonly<Record<string, string>>
+): Record<string, string> {
+  const out = { ...env }
+  const denied = new Set(PROVIDER_HOST_ENV_DENYLIST.map((key) => key.toLowerCase()))
+  for (const key of Object.keys(out)) {
+    if (denied.has(key.toLowerCase())) delete out[key]
   }
   return out
 }
@@ -67,7 +100,7 @@ export function applyProviderOverlay(
 
 export class DefaultEnvironmentCompiler implements EnvironmentCompiler {
   compile(input: EnvironmentCompileInput): Record<string, string> {
-    let env = stripCodeTaskTransientEnv(input.hostEnvironment)
+    let env = stripProviderHostConfiguration(stripCodeTaskTransientEnv(input.hostEnvironment))
     env = applyProviderOverlay(input.provider, env, input.providerOverlay)
 
     if (input.taskOverlay) {
@@ -77,9 +110,9 @@ export class DefaultEnvironmentCompiler implements EnvironmentCompiler {
       env = { ...env, ...input.sandboxOverlay }
     }
 
-    // Host-auth product decision: do not invent isolated CLI homes here.
-    // Existing host CODEX_HOME / CLAUDE_CONFIG_DIR are preserved if present.
-    return env
+    // Host-login product decision: credentials are discovered through CLI-owned
+    // files / OS credential stores, never inherited as environment variables.
+    return stripProviderHostConfiguration(env)
   }
 }
 

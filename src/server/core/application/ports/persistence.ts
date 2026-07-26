@@ -57,6 +57,243 @@ export interface AuthCleanupResult {
   readonly throttles: number
 }
 
+export interface ConversationSettingsRecord {
+  readonly userId: string
+  readonly provider: 'cursorcli'
+  readonly model: string | null
+  readonly revision: number
+  readonly updatedAtMs: number
+}
+
+export interface ConversationWorkspaceRecord {
+  readonly id: string
+  readonly userId: string
+  readonly title: string
+  readonly rootPath: string
+  readonly canonicalKey: string
+  readonly createdAtMs: number
+  readonly updatedAtMs: number
+}
+
+export interface ConversationThreadRecord {
+  readonly id: string
+  readonly workspaceId: string
+  readonly title: string
+  readonly provider: 'cursorcli'
+  readonly model: string | null
+  readonly runtimeSessionId: string | null
+  readonly createdAtMs: number
+  readonly updatedAtMs: number
+  readonly lastMessageAtMs: number | null
+}
+
+export interface ConversationMessageRecord {
+  readonly id: string
+  readonly threadId: string
+  readonly role: 'user' | 'assistant'
+  readonly content: string
+  readonly sequence: number
+  readonly createdAtMs: number
+}
+
+export interface ConversationTurnRecord {
+  readonly id: string
+  readonly threadId: string
+  readonly userMessageId: string
+  readonly state: 'running' | 'completed' | 'failed' | 'cancelled'
+  readonly provider: 'cursorcli'
+  readonly model: string | null
+  readonly errorCode: string | null
+  readonly errorMessage: string | null
+  readonly startedAtMs: number
+  readonly finishedAtMs: number | null
+}
+
+export interface DraftSettingsRecord {
+  readonly userId: string
+  readonly provider: 'cursorcli'
+  readonly model: string | null
+  readonly plannerPrompt: string | null
+  readonly skillsManual: string | null
+  readonly revision: number
+  readonly updatedAtMs: number
+}
+
+export type DraftStatus = 'editing' | 'generating' | 'tree_ready' | 'submitted'
+
+export interface DraftRecord {
+  readonly id: string
+  readonly userId: string
+  readonly workspaceId: string
+  readonly sourceThreadId: string | null
+  readonly title: string
+  readonly objective: string
+  readonly requirements: string
+  readonly constraints: string
+  readonly acceptanceCriteria: string
+  readonly status: DraftStatus
+  readonly revision: number
+  readonly activeTreeId: string | null
+  readonly submittedHandoffId: string | null
+  readonly createdAtMs: number
+  readonly updatedAtMs: number
+  readonly submittedAtMs: number | null
+}
+
+export interface DraftAttachmentRecord {
+  readonly id: string
+  readonly draftId: string
+  readonly displayName: string
+  readonly mediaType: string
+  readonly sizeBytes: number
+  readonly sha256: string
+  readonly storageRelativePath: string
+  readonly createdAtMs: number
+}
+
+export interface DraftGenerationRunRecord {
+  readonly id: string
+  readonly draftId: string
+  readonly state: 'running' | 'completed' | 'failed' | 'cancelled'
+  readonly sourceDraftRevision: number
+  readonly settingsRevision: number
+  readonly provider: 'cursorcli'
+  readonly model: string | null
+  readonly errorCode: string | null
+  readonly errorMessage: string | null
+  readonly startedAtMs: number
+  readonly finishedAtMs: number | null
+}
+
+export interface DraftExecutionTreeRecord {
+  readonly id: string
+  readonly draftId: string
+  readonly generationRunId: string
+  readonly treeRevision: number
+  readonly sourceDraftRevision: number
+  readonly schemaVersion: 1
+  readonly treeJson: string
+  readonly plannerPromptSnapshot: string
+  readonly skillsManualSnapshot: string
+  readonly model: string | null
+  readonly createdAtMs: number
+}
+
+export interface JobIntakeHandoffRecord {
+  readonly id: string
+  readonly sourceDraftId: string
+  readonly sourceUserId: string
+  readonly sourceWorkspaceId: string
+  readonly sourceTreeId: string
+  readonly sourceDraftRevision: number
+  readonly sourceTreeRevision: number
+  readonly state: 'pending' | 'accepted' | 'rejected'
+  readonly draftSnapshotJson: string
+  readonly executionTreeJson: string
+  readonly createdAtMs: number
+  readonly acceptedAtMs: number | null
+  readonly rejectedAtMs: number | null
+  readonly rejectionCode: string | null
+}
+
+export interface JobIntakeAttachmentRecord {
+  readonly id: string
+  readonly handoffId: string
+  readonly sourceAttachmentId: string
+  readonly displayName: string
+  readonly mediaType: string
+  readonly sizeBytes: number
+  readonly sha256: string
+  readonly storageRelativePath: string
+  readonly createdAtMs: number
+}
+
+export interface ConversationRepository {
+  getSettings(userId: string): ConversationSettingsRecord | null
+  putSettings(record: ConversationSettingsRecord): void
+  listWorkspaces(userId: string): ConversationWorkspaceRecord[]
+  getWorkspace(userId: string, workspaceId: string): ConversationWorkspaceRecord | null
+  getWorkspaceByCanonicalKey(
+    userId: string,
+    canonicalKey: string
+  ): ConversationWorkspaceRecord | null
+  insertWorkspace(record: ConversationWorkspaceRecord): void
+  deleteWorkspace(userId: string, workspaceId: string): boolean
+  listThreads(userId: string, workspaceId: string): ConversationThreadRecord[]
+  getThread(userId: string, threadId: string): ConversationThreadRecord | null
+  insertThread(record: ConversationThreadRecord): void
+  updateThreadTitle(userId: string, threadId: string, title: string, updatedAtMs: number): boolean
+  deleteThread(userId: string, threadId: string): boolean
+  listMessages(userId: string, threadId: string): ConversationMessageRecord[]
+  nextMessageSequence(threadId: string): number
+  insertMessage(record: ConversationMessageRecord): void
+  getRunningTurn(threadId: string): ConversationTurnRecord | null
+  insertTurn(record: ConversationTurnRecord): void
+  completeTurn(input: {
+    readonly turnId: string
+    readonly threadId: string
+    readonly assistantMessage: ConversationMessageRecord
+    readonly runtimeSessionId: string | null
+    readonly finishedAtMs: number
+  }): boolean
+  failTurn(input: {
+    readonly turnId: string
+    readonly state: 'failed' | 'cancelled'
+    readonly errorCode: string
+    readonly errorMessage: string
+    readonly finishedAtMs: number
+  }): boolean
+}
+
+export interface DraftRepository {
+  getSettings(userId: string): DraftSettingsRecord | null
+  putSettings(record: DraftSettingsRecord): void
+  listDrafts(userId: string, workspaceId?: string): DraftRecord[]
+  getDraft(userId: string, draftId: string): DraftRecord | null
+  insertDraft(record: DraftRecord): void
+  updateDraftContent(record: DraftRecord, expectedRevision: number): boolean
+  updateDraftState(input: {
+    readonly userId: string
+    readonly draftId: string
+    readonly expectedRevision: number
+    readonly expectedStatus?: DraftStatus | undefined
+    readonly status: DraftStatus
+    readonly activeTreeId: string | null
+    readonly submittedHandoffId?: string | null | undefined
+    readonly submittedAtMs?: number | null | undefined
+    readonly updatedAtMs: number
+  }): boolean
+  deleteDraft(userId: string, draftId: string): boolean
+  listAttachments(userId: string, draftId: string): DraftAttachmentRecord[]
+  getAttachment(userId: string, draftId: string, attachmentId: string): DraftAttachmentRecord | null
+  insertAttachment(record: DraftAttachmentRecord): void
+  deleteAttachment(draftId: string, attachmentId: string): boolean
+  getRunningGeneration(draftId: string): DraftGenerationRunRecord | null
+  insertGeneration(record: DraftGenerationRunRecord): void
+  finishGeneration(input: {
+    readonly runId: string
+    readonly state: 'completed' | 'failed' | 'cancelled'
+    readonly errorCode: string | null
+    readonly errorMessage: string | null
+    readonly finishedAtMs: number
+  }): boolean
+  nextTreeRevision(draftId: string): number
+  insertExecutionTree(record: DraftExecutionTreeRecord): void
+  getExecutionTree(userId: string, draftId: string, treeId: string): DraftExecutionTreeRecord | null
+  getActiveExecutionTree(userId: string, draftId: string): DraftExecutionTreeRecord | null
+}
+
+/**
+ * Durable boundary owned by the future Job module.
+ * Draft planning can only append immutable pending handoffs; it cannot execute them.
+ */
+export interface JobIntakeRepository {
+  getBySourceDraftId(sourceDraftId: string): JobIntakeHandoffRecord | null
+  insertHandoff(record: JobIntakeHandoffRecord): void
+  insertAttachment(record: JobIntakeAttachmentRecord): void
+  listAttachments(handoffId: string): JobIntakeAttachmentRecord[]
+}
+
 export interface AuthRepository {
   getUser(): AuthUserRecord | null
   getUserByNormalizedUsername(normalizedUsername: string): AuthUserRecord | null
@@ -92,6 +329,9 @@ export interface AuthRepository {
 
 export interface KernelTransaction {
   readonly auth: AuthRepository
+  readonly conversation: ConversationRepository
+  readonly draft: DraftRepository
+  readonly jobIntake: JobIntakeRepository
 }
 
 export interface UnitOfWork {

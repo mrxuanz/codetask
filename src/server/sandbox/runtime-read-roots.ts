@@ -3,6 +3,7 @@ import { dirname, join, normalize } from 'path'
 import { existsSync, realpathSync } from 'fs'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
+import { stripProviderHostConfiguration } from '../providers/environment'
 
 function safeRealpath(path: string): string {
   try {
@@ -65,7 +66,10 @@ export function resolveRuntimeReadRoots(
     const npmRoot = execFileSync(process.execPath, ['-p', 'require.resolve.paths("module")'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...hostEnvironment, ELECTRON_RUN_AS_NODE: '1' }
+      env: {
+        ...stripProviderHostConfiguration(hostEnvironment),
+        ELECTRON_RUN_AS_NODE: '1'
+      }
     }).trim()
     if (npmRoot) addRoot(roots, npmRoot)
   } catch {

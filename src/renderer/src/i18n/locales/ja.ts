@@ -626,5 +626,128 @@ export default {
       }
     }
   },
+  conversation: {
+    nav: { chat: '会話', drafts: 'ドラフト', settings: '設定' },
+    title: '会話',
+    workspaces: 'ワークスペース',
+    addFolder: 'フォルダを追加',
+    chooseFolder: '作業フォルダを選択',
+    addSelectedFolder: '選択したフォルダを追加',
+    createAndAddFolder: '作成して追加',
+    newThread: '新しい会話',
+    noWorkspace: 'ワークスペースはまだありません',
+    emptyTitle: 'ローカルフォルダから開始',
+    emptyDescription: 'Cursor は選択したフォルダ内のファイルを読み書きします。',
+    startHint: 'メッセージを送信して会話を開始します。',
+    waiting: 'Cursor が応答中…',
+    thinking: 'Cursor が思考中…',
+    promptPlaceholder: 'Cursor に依頼する内容を入力…',
+    chooseWorkspaceFirst: '先に作業フォルダを選択してください',
+    send: '送信',
+    stop: '停止',
+    cancelled: '応答を停止しました',
+    folderDialogTitle: '作業フォルダを選択',
+    folderDialogDescription: '既存フォルダを選択するか、子フォルダを新規作成できます。',
+    confirmRemoveWorkspace:
+      '「{name}」を CodeTask から削除しますか？ローカルファイルは削除されません。',
+    confirmDeleteThread: '会話「{name}」を削除しますか？元に戻せません。',
+    errors: {
+      loadWorkspaces: 'ワークスペースの読み込みに失敗しました',
+      loadThreads: '会話の読み込みに失敗しました',
+      loadMessages: 'メッセージの読み込みに失敗しました',
+      createThread: '会話の作成に失敗しました',
+      addWorkspace: 'ワークスペースの追加に失敗しました',
+      removeWorkspace: 'ワークスペースの削除に失敗しました',
+      deleteThread: '会話の削除に失敗しました',
+      send: 'メッセージの送信に失敗しました'
+    },
+    settings: {
+      title: '設定',
+      description: '会話はホストの Cursor アカウントのみを使用し、API Key は受け付けません。',
+      cursorTitle: 'Cursor ホスト認証',
+      cursorDescription: 'このマシンの Cursor Agent CLI ログインを再利用します。',
+      authenticated: 'ログイン済み',
+      notAuthenticated: '未ログイン',
+      loginHint: 'ホストのターミナルでブラウザログインを完了し、状態を更新してください：',
+      noKeyHint: 'Key 入力欄はなく、環境変数から資格情報を読み取りません。',
+      modelLabel: 'デフォルトモデル（任意）',
+      modelPlaceholder: '空欄の場合は Cursor のデフォルトを使用',
+      modelHint: 'モデル名は型付き設定として保存し、環境変数では渡しません。',
+      save: '会話設定を保存',
+      saving: '保存中…',
+      saved: '保存しました',
+      refreshStatus: 'ログイン状態を更新'
+    }
+  },
+  drafts: {
+    title: 'ドラフトと実行ツリー',
+    new: '新規',
+    empty: 'ドラフトはまだありません。',
+    noWorkspace: '先に会話でワークスペースを追加してください',
+    goChat: '会話へ戻る',
+    createTitle: 'ドラフトを作成',
+    workspace: 'ワークスペース',
+    boundaryHint: 'このモジュールはツリー生成のみを行い、確認後に Job Intake へ渡します。',
+    fields: {
+      title: 'タイトル',
+      objective: '目的',
+      requirements: '詳細要件',
+      constraints: '制約と対象外',
+      acceptance: '受け入れ基準'
+    },
+    status: {
+      editing: '編集中',
+      generating: '生成中',
+      tree_ready: '確認待ち',
+      submitted: '引き渡し済み'
+    },
+    save: 'ドラフトを保存',
+    saving: '保存中…',
+    saved: '保存しました',
+    generate: '実行ツリーを生成',
+    regenerate: '実行ツリーを再生成',
+    generated: '実行ツリーを生成しました',
+    generating: 'Cursor が実行ツリーを生成・検証しています…',
+    progress: '{count} 文字を受信しました。有効な最終ツリーのみ保存されます。',
+    thinking: '思考を表示',
+    stop: '生成を停止',
+    cancelled: '生成を停止しました',
+    delete: 'ドラフトを削除',
+    deletePrompt: 'ドラフトと添付ファイルを削除しますか？元に戻せません。',
+    deleteSubmittedPrompt:
+      'ドラフト元データを削除しますか？Job Intake のスナップショットと添付コピーは残ります。',
+    treeTitle: '実行ツリー',
+    treeImmutableHint: 'サーバー検証済みのバージョン付きスナップショット',
+    confirm: '確認して引き渡す',
+    confirming: '引き渡し中…',
+    confirmPrompt: 'このツリーを確認し、不変の Job Intake スナップショットを作成しますか？',
+    submitted: 'ツリーと添付コピーを Job Intake へ渡しました。',
+    attachments: {
+      title: 'ドラフト添付',
+      hint: '確認時に検証し、Job Intake 専用ストレージへコピーします。',
+      add: '添付を追加',
+      uploading: 'アップロード中…',
+      empty: '添付はありません',
+      remove: '削除'
+    },
+    handoff: {
+      title: 'Job Intake が受領済み',
+      pending: '状態は pending です。Job 実行モジュールは未実装のため実行されません。',
+      attachments: '{count} 件の独立した添付コピーを保存'
+    },
+    settings: {
+      title: 'ドラフトプランナー',
+      description: '実行ツリー生成用のプロンプトと Skills 操作手順を編集します。',
+      model: '計画モデル（任意）',
+      prompt: 'プランナープロンプト',
+      skills: 'Skills 操作手順',
+      skillsHint: '既定手順には分割、依存、添付、パス、引き渡しの制約が含まれます。',
+      resetDefault: '既定に戻す',
+      usingDefault: '組み込みの既定値を使用中です。',
+      usingCustom: 'カスタム版として保存されます。',
+      protocolHint: 'JSON、ID、依存、相対パス、添付 ID、所要時間はサーバーが強制検証します。',
+      save: 'ドラフト計画設定を保存'
+    }
+  },
   turnErrors: turnErrorsJa
 } as const

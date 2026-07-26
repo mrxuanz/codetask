@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import {
+  buildProviderChildEnv,
+  buildSandboxPreparedProviderEnv
+} from '../../src/server/agent-runtime/env.ts'
+import { processHostEnvironmentSource } from '../../src/server/host-environment.ts'
+import { buildSandboxEnv } from '../../src/server/sandbox/env.ts'
 
 /**
  * Provider subsystem process.env allowlist (PRU-12-01).
@@ -109,5 +116,51 @@ test('deprecated PRU-12-07 policy re-export files are deleted', () => {
     'src/server/agent-runtime/providers/cursor-policy.ts'
   ]) {
     assert.equal(existsSync(join(process.cwd(), relative)), false, relative)
+  }
+})
+
+test('all Provider child boundaries remove host and overlay credential variables', () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-no-env-credentials-'))
+  const previous = processHostEnvironmentSource.snapshot()
+  processHostEnvironmentSource.install(
+    Object.freeze({
+      ...previous,
+      OPENAI_API_KEY: 'host-secret',
+      CURSOR_API_KEY: 'host-cursor-secret',
+      ANTHROPIC_AUTH_TOKEN: 'host-anthropic-secret'
+    })
+  )
+  try {
+    const direct = buildProviderChildEnv(runtimeRoot, { preserveHostIdentity: true })
+    const prepared = buildSandboxPreparedProviderEnv()
+    const sandbox = buildSandboxEnv({
+      runtimeRoot,
+      providerEnv: {
+        CODEX_API_KEY: 'overlay-secret',
+        CURSOR_AUTH_TOKEN: 'overlay-cursor-secret'
+      }
+    })
+    for (const env of [direct, prepared, sandbox]) {
+      assert.equal(env.OPENAI_API_KEY, undefined)
+      assert.equal(env.CODEX_API_KEY, undefined)
+      assert.equal(env.CURSOR_API_KEY, undefined)
+      assert.equal(env.CURSOR_AUTH_TOKEN, undefined)
+      assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined)
+    }
+  } finally {
+    processHostEnvironmentSource.install(previous)
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('Provider descriptors have no credential-environment contract', () => {
+  for (const relative of [
+    'src/shared/providers/descriptor.ts',
+    'src/shared/providers/descriptors/codex.ts',
+    'src/shared/providers/descriptors/claude.ts',
+    'src/shared/providers/descriptors/opencode.ts',
+    'src/shared/providers/descriptors/cursor.ts'
+  ]) {
+    assert.doesNotMatch(readFileSync(join(process.cwd(), relative), 'utf8'), /authEnvironmentKeys/)
   }
 })

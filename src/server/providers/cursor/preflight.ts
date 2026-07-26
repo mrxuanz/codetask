@@ -39,7 +39,7 @@ function isLoggedInFromText(text: string): boolean {
 
 /**
  * Cursor auth preflight owned by the Cursor driver module.
- * Host-identity semantics: env key / host snapshot / `agent status` probe.
+ * Host-identity semantics: CLI-owned host login / `agent status` probe.
  * Probe-only: never logs in, never writes host credential files.
  */
 export function runCursorAuthPreflight(

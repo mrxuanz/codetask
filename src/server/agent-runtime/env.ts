@@ -3,6 +3,7 @@ import { join } from 'path'
 import { resolveCursorWorkspaceProjectSlug } from './cursor-acp/cursor-workspace'
 import { augmentPathWithHostNode } from '../sandbox/toolchain-path'
 import { processHostEnvironmentSource } from '../host-environment'
+import { stripProviderHostConfiguration } from '../providers/environment'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -30,21 +31,6 @@ const HOST_PROFILE_ENV_KEYS = new Set([
   'XDG_DATA_HOME',
   'XDG_STATE_HOME'
 ])
-
-const PROVIDER_AUTH_ENV_KEYS = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_MODEL',
-  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  'ANTHROPIC_SMALL_FAST_MODEL',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'CODEX_API_KEY',
-  'CURSOR_API_KEY'
-] as const
 
 export const WINDOWS_CRASH_REPORTER_ENV: Record<string, string> = {
   ELECTRON_DISABLE_CRASH_REPORTER: '1',
@@ -208,20 +194,8 @@ function applyIsolatedWindowsProfile(runtimeRoot: string, env: Record<string, st
   applyWindowsCrashReporterEnv(env)
 }
 
-function copyHostAuthEnv(
-  env: Record<string, string>,
-  hostEnvironment = processHostEnvironmentSource.snapshot()
-): void {
-  for (const key of PROVIDER_AUTH_ENV_KEYS) {
-    const value = hostEnvironment[key]
-    if (typeof value === 'string' && value.trim()) {
-      env[key] = value
-    }
-  }
-}
-
 export function buildSandboxPreparedProviderEnv(): Record<string, string> {
-  const env: Record<string, string> = { ...processHostEnvironmentSource.snapshot() }
+  const env = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
   env.PATH = augmentPathWithHostNode(env.PATH)
 
   for (const name of BLOCKED_ENV) {
@@ -241,7 +215,7 @@ export function buildProviderChildEnv(
 ): Record<string, string> {
   const preserveHost = options?.preserveHostIdentity ?? true
   ensureIsolatedProviderDirs(runtimeRoot)
-  const hostEnvironment = processHostEnvironmentSource.snapshot()
+  const hostEnvironment = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
 
   const hostHome =
     hostEnvironment.HOME ?? hostEnvironment.USERPROFILE ?? hostEnvironment.HOMEPATH ?? runtimeRoot
@@ -276,8 +250,6 @@ export function buildProviderChildEnv(
     env[key] = value
   }
 
-  copyHostAuthEnv(env, hostEnvironment)
-
   for (const name of BLOCKED_ENV) {
     delete env[name]
   }
@@ -290,7 +262,5 @@ export function buildProviderChildEnv(
 }
 
 export function buildSandboxAuthPassthrough(): Record<string, string> {
-  const env: Record<string, string> = {}
-  copyHostAuthEnv(env)
-  return env
+  return {}
 }

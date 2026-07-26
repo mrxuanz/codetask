@@ -3,6 +3,7 @@ import {
   applyProviderOverlay,
   CODETASK_TRANSIENT_ENV_KEYS,
   defaultEnvironmentCompiler,
+  PROVIDER_HOST_ENV_DENYLIST,
   stripCodeTaskTransientEnv
 } from './environment'
 import { PROVIDER_OWNED_ENV_KEYS } from './owned-env'
@@ -71,9 +72,11 @@ function summarizeEnvVars(
     ...Object.keys(overlays.taskOverlay ?? {}),
     ...Object.keys(overlays.sandboxOverlay ?? {})
   ])
+  const denied = new Set(PROVIDER_HOST_ENV_DENYLIST.map((key) => key.toLowerCase()))
 
   const summaries: LaunchEnvVarSummary[] = []
   for (const name of [...names].sort()) {
+    if (denied.has(name.toLowerCase())) continue
     let source: EnvVarSource = 'host'
     if (overlays.sandboxOverlay && name in overlays.sandboxOverlay) source = 'sandbox'
     else if (overlays.taskOverlay && name in overlays.taskOverlay) source = 'task'

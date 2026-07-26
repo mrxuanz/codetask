@@ -9,6 +9,7 @@ import { createRequire } from 'node:module'
 import { delimiter, dirname, join, normalize } from 'node:path'
 import { spawnProviderCommandSync, spawnProviderInvocation } from '../../providers/spawn'
 import { processHostEnvironmentSource } from '../../host-environment'
+import { stripProviderHostConfiguration } from '../../providers/environment'
 
 type StringEnv = Record<string, string | undefined>
 
@@ -42,9 +43,14 @@ function envValue(env: StringEnv, key: string): string | undefined {
 function withProcessEnv(
   env: StringEnv = processHostEnvironmentSource.snapshot()
 ): NodeJS.ProcessEnv {
-  const merged: NodeJS.ProcessEnv = { ...processHostEnvironmentSource.snapshot() }
+  const merged: NodeJS.ProcessEnv = stripProviderHostConfiguration(
+    processHostEnvironmentSource.snapshot()
+  )
   for (const [key, value] of Object.entries(env)) {
-    if (typeof value === 'string') merged[key] = value
+    if (typeof value === 'string') {
+      const filtered = stripProviderHostConfiguration({ [key]: value })
+      if (filtered[key] !== undefined) merged[key] = value
+    }
   }
   return merged
 }

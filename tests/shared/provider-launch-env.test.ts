@@ -51,6 +51,23 @@ test('applyProviderOverlay rejects non-owned keys', () => {
     OPENAI_API_KEY: 'overlay',
     NOT_OWNED_KEY: 'should-not-appear'
   })
-  assert.equal(out.OPENAI_API_KEY, 'overlay')
+  assert.equal(out.OPENAI_API_KEY, 'host')
   assert.equal('NOT_OWNED_KEY' in out, false)
+})
+
+test('buildLaunchEnv strips host and overlay credential variables', () => {
+  const env = buildLaunchEnv({
+    provider: 'codex',
+    hostEnv: {
+      PATH: '/usr/bin',
+      OPENAI_API_KEY: 'host-secret',
+      CODEX_API_KEY: 'host-secret-2'
+    },
+    providerOverlay: {
+      OPENAI_API_KEY: 'overlay-secret'
+    }
+  })
+  assert.equal(env.PATH, '/usr/bin')
+  assert.equal(env.OPENAI_API_KEY, undefined)
+  assert.equal(env.CODEX_API_KEY, undefined)
 })

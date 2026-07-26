@@ -8,7 +8,6 @@ export interface ProviderDescriptor {
   readonly label: string
   readonly description: string
   readonly defaultCommands: readonly string[]
-  readonly authEnvironmentKeys: readonly string[]
   readonly childEnvironmentKeys: readonly string[]
   readonly mcpRootKey: 'mcp_servers' | 'mcpServers' | 'mcp'
   readonly capabilities: ProviderCapabilities

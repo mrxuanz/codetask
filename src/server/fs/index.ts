@@ -206,3 +206,27 @@ export function parentBrowsePath(path: string): string {
   }
   return resolveExistingDirectory(trimTrailingSeparators(parent))
 }
+
+export function createChildDirectory(parentPath: string, nameInput: string): string {
+  const name = nameInput.trim()
+  if (!name || name === '.' || name === '..' || name.length > 255 || /[\\/\0]/.test(name)) {
+    throw AppError.badRequest('Invalid folder name', 'folderPicker.folderNameInvalid')
+  }
+  const parent = resolveExistingDirectory(expandTilde(parentPath))
+  const target = join(parent, name)
+  try {
+    mkdirSync(target, { recursive: false })
+  } catch (cause) {
+    throw AppError.badRequest(
+      `Unable to create directory: ${cause instanceof Error ? cause.message : String(cause)}`,
+      'project.path_inaccessible',
+      { path: displayPathString(target) }
+    )
+  }
+  return resolveExistingDirectory(target)
+}
+
+export function workspaceCanonicalKey(rootPath: string): string {
+  const canonical = normalizeWorkspacePath(rootPath, false)
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical
+}

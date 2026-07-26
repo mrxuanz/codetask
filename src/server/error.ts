@@ -2,6 +2,8 @@ import { fail, type ApiResponse } from './response'
 import { TURN_ERROR_DEFAULT_MESSAGES } from '../shared/turn-errors/codes.ts'
 import { AuthError } from './core/domain/auth'
 import { AuthSecurityCapacityError } from './core/application/ports'
+import { ConversationError } from './core/domain/conversation'
+import { DraftError } from './core/domain/draft'
 
 export const code = {
   OK: 0,
@@ -52,6 +54,56 @@ export function resolveHttpStatus(error: unknown): number {
     return 400
   }
   if (error instanceof AuthSecurityCapacityError) return 429
+  if (error instanceof ConversationError) {
+    if (
+      error.code === 'conversation.workspace_not_found' ||
+      error.code === 'conversation.thread_not_found' ||
+      error.code === 'conversation.turn_not_found'
+    ) {
+      return 404
+    }
+    if (
+      error.code === 'conversation.workspace_exists' ||
+      error.code === 'conversation.turn_in_progress'
+    ) {
+      return 409
+    }
+    if (
+      error.code === 'conversation.provider_unavailable' ||
+      error.code === 'conversation.provider_not_authenticated'
+    ) {
+      return 503
+    }
+    return 400
+  }
+  if (error instanceof DraftError) {
+    if (
+      error.code === 'draft.not_found' ||
+      error.code === 'draft.attachment_not_found' ||
+      error.code === 'draft.generation_not_found' ||
+      error.code === 'draft.workspace_not_found'
+    ) {
+      return 404
+    }
+    if (
+      error.code === 'draft.locked' ||
+      error.code === 'draft.generation_in_progress' ||
+      error.code === 'draft.revision_conflict' ||
+      error.code === 'draft.settings_conflict' ||
+      error.code === 'draft.confirm_conflict' ||
+      error.code === 'draft.tree_not_ready' ||
+      error.code === 'draft.tree_stale'
+    ) {
+      return 409
+    }
+    if (
+      error.code === 'draft.provider_unavailable' ||
+      error.code === 'draft.provider_not_authenticated'
+    ) {
+      return 503
+    }
+    return 400
+  }
   return 500
 }
 
@@ -168,6 +220,30 @@ export function toErrorResponse(error: unknown): ApiResponse<Record<string, unkn
   }
   if (error instanceof AuthSecurityCapacityError) {
     return fail(42901, 'auth.rate_limited', { code: 'auth.rate_limited', retryAfterMs: 1_000 })
+  }
+  if (error instanceof ConversationError) {
+    const httpStatus = resolveHttpStatus(error)
+    const status =
+      httpStatus === 404
+        ? code.NOT_FOUND
+        : httpStatus === 409
+          ? code.CONFLICT
+          : httpStatus === 503
+            ? 50301
+            : code.BAD_REQUEST
+    return fail(status, error.code, { code: error.code, ...error.details })
+  }
+  if (error instanceof DraftError) {
+    const httpStatus = resolveHttpStatus(error)
+    const status =
+      httpStatus === 404
+        ? code.NOT_FOUND
+        : httpStatus === 409
+          ? code.CONFLICT
+          : httpStatus === 503
+            ? 50301
+            : code.BAD_REQUEST
+    return fail(status, error.code, { code: error.code, ...error.details })
   }
 
   const message = error instanceof Error ? error.message : 'internal server error'
