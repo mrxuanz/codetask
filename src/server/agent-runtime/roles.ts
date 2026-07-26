@@ -2,11 +2,13 @@ export type ConversationRole =
   | 'conversation'
   | 'planner'
   | 'task-worker'
+  | 'work-verifier'
   | 'milestone-verifier'
   | 'slice-verifier'
 
 export const OUTER_SANDBOX_ROLES: ConversationRole[] = [
   'task-worker',
+  'work-verifier',
   'milestone-verifier',
   'slice-verifier'
 ]
@@ -28,6 +30,8 @@ export function resolveRoleMcpToolNames(role: ConversationRole): readonly string
       return PLANNER_ROLE_MCP_TOOLS
     case 'task-worker':
       return ['report_task_result']
+    case 'work-verifier':
+      return ['complete_work_verification']
     case 'slice-verifier':
       return ['complete_slice_verification']
     case 'milestone-verifier':

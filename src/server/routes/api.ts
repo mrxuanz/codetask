@@ -11,6 +11,7 @@ import { createAuthRoutes } from './auth'
 import { getSandboxHealth } from '../sandbox/health'
 import { createConversationRoutes } from './conversation'
 import { createDraftRoutes } from './drafts'
+import { createJobRoutes } from './jobs'
 
 export function createApiRoutes(ctx: AppContext): Hono {
   const api = new Hono()
@@ -27,6 +28,7 @@ export function createApiRoutes(ctx: AppContext): Hono {
   api.route('/', createAuthRoutes(ctx))
   api.route('/', createConversationRoutes(ctx))
   api.route('/', createDraftRoutes(ctx))
+  api.route('/', createJobRoutes(ctx))
   api.get('/sandbox/health', (c) => c.json(ok(getSandboxHealth(ctx.dataDir))))
 
   api.onError((error, c) => {

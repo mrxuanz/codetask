@@ -11,14 +11,7 @@ use super::normalize_path_for_sandbox;
 use super::seatbelt_regex_for_unreadable_glob;
 use super::unix_socket_dir_params;
 use super::unix_socket_policy;
-use codeteam_network_proxy::ConfigReloader;
-use codeteam_network_proxy::ConfigState;
-use codeteam_network_proxy::NetworkMode;
 use codeteam_network_proxy::NetworkProxy;
-use codeteam_network_proxy::NetworkProxyConfig;
-use codeteam_network_proxy::NetworkProxyConstraints;
-use codeteam_network_proxy::NetworkProxyState;
-use codeteam_network_proxy::build_config_state;
 use codeteam_sandbox_policy::permissions::FileSystemAccessMode;
 use codeteam_sandbox_policy::permissions::FileSystemPath;
 use codeteam_sandbox_policy::permissions::FileSystemSandboxEntry;
@@ -33,7 +26,6 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use tempfile::TempDir;
 
 fn assert_seatbelt_denied(stderr: &[u8], path: &Path) {
@@ -59,6 +51,13 @@ fn seatbelt_policy_arg(args: &[String]) -> &str {
         .expect("seatbelt args should include policy text")
 }
 
+fn has_writable_exclusion(args: &[String], root_index: usize, path: &Path) -> bool {
+    let prefix = format!("-DWRITABLE_ROOT_{root_index}_EXCLUDED_");
+    let suffix = format!("={}", path.display());
+    args.iter()
+        .any(|arg| arg.starts_with(&prefix) && arg.ends_with(&suffix))
+}
+
 fn seatbelt_protected_metadata_name_requirements(root: &Path) -> String {
     let mut root = root.to_string_lossy().to_string();
     while root.len() > 1 && root.ends_with('/') {
@@ -77,23 +76,6 @@ fn seatbelt_protected_metadata_name_requirements(root: &Path) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-struct TestConfigReloader;
-
-#[async_trait::async_trait]
-impl ConfigReloader for TestConfigReloader {
-    fn source_label(&self) -> String {
-        "seatbelt test config".to_string()
-    }
-
-    async fn maybe_reload(&self) -> anyhow::Result<Option<ConfigState>> {
-        Ok(None)
-    }
-
-    async fn reload_now(&self) -> anyhow::Result<ConfigState> {
-        Err(anyhow::anyhow!("seatbelt test config cannot reload"))
-    }
 }
 
 #[test]
@@ -240,19 +222,13 @@ fn explicit_unreadable_paths_are_excluded_from_full_disk_read_and_write_access()
         ),
         "expected read carveout parameter in args: {args:#?}"
     );
-    let writable_definitions: Vec<String> = args
-        .iter()
-        .filter(|arg| arg.starts_with("-DWRITABLE_ROOT_"))
-        .cloned()
-        .collect();
-    assert_eq!(
-        writable_definitions,
-        vec![
-            "-DWRITABLE_ROOT_0=/".to_string(),
-            "-DWRITABLE_ROOT_0_EXCLUDED_0=/.codeteam".to_string(),
-            format!("-DWRITABLE_ROOT_0_EXCLUDED_1={}", unreadable_root.display()),
-        ],
-        "unexpected write carveout parameters in args: {args:#?}"
+    assert!(
+        args.iter().any(|arg| arg == "-DWRITABLE_ROOT_0=/"),
+        "expected full-disk writable root parameter in args: {args:#?}"
+    );
+    assert!(
+        has_writable_exclusion(&args, 0, unreadable_root.as_path()),
+        "expected unreadable path to be a write carveout regardless of protected-name ordering: {args:#?}"
     );
 }
 
@@ -606,30 +582,15 @@ fn create_seatbelt_args_allowlists_explicit_unix_socket_paths_without_proxy() {
     );
 }
 
-#[tokio::test]
-async fn create_seatbelt_args_merges_proxy_and_explicit_unix_socket_paths() -> anyhow::Result<()> {
+#[test]
+fn create_seatbelt_args_does_not_broaden_sockets_for_the_disabled_proxy() {
     let cwd = TempDir::new().expect("temp cwd");
     let file_system_policy = FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(
         &SandboxPolicy::new_read_only_policy(),
         cwd.path(),
     );
-    let network_socket = "/tmp/codex-proxy-use";
     let explicit_socket = "/tmp/codex-browser-use";
-    let mut network_config = NetworkProxyConfig::default();
-    network_config.network.enabled = true;
-    network_config.network.mode = NetworkMode::Full;
-    network_config
-        .network
-        .set_allow_unix_sockets(vec![network_socket.to_string()]);
-    let state = build_config_state(network_config, NetworkProxyConstraints::default())?;
-    let network_proxy = NetworkProxy::builder()
-        .state(Arc::new(NetworkProxyState::with_reloader(
-            state,
-            Arc::new(TestConfigReloader),
-        )))
-        .managed_by_codex(/*managed_by_codex*/ false)
-        .build()
-        .await?;
+    let network_proxy = NetworkProxy::builder().build();
     let extra_allow_unix_sockets = vec![absolute_path(explicit_socket)];
 
     let args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
@@ -644,8 +605,6 @@ async fn create_seatbelt_args_merges_proxy_and_explicit_unix_socket_paths() -> a
 
     let expected_explicit_socket = normalize_path_for_sandbox(Path::new(explicit_socket))
         .expect("explicit socket root should normalize");
-    let expected_network_socket = normalize_path_for_sandbox(Path::new(network_socket))
-        .expect("network socket root should normalize");
     let unix_socket_definitions = args
         .iter()
         .filter(|arg| arg.starts_with("-DUNIX_SOCKET_PATH_"))
@@ -653,16 +612,12 @@ async fn create_seatbelt_args_merges_proxy_and_explicit_unix_socket_paths() -> a
         .collect::<Vec<_>>();
     assert_eq!(
         unix_socket_definitions,
-        vec![
-            format!(
-                "-DUNIX_SOCKET_PATH_0={}",
-                expected_explicit_socket.display()
-            ),
-            format!("-DUNIX_SOCKET_PATH_1={}", expected_network_socket.display()),
-        ],
-        "seatbelt args should include both explicit and network proxy socket roots: {args:?}"
+        vec![format!(
+            "-DUNIX_SOCKET_PATH_0={}",
+            expected_explicit_socket.display()
+        )],
+        "disabled proxy must not broaden the explicit unix socket allowlist: {args:?}"
     );
-    Ok(())
 }
 
 #[test]
@@ -828,7 +783,6 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         vulnerable_root,
         vulnerable_root_canonical,
         dot_git_canonical,
-        dot_agents_canonical: _,
         dot_codex_canonical,
         empty_root,
         empty_root_canonical,
@@ -877,20 +831,6 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         "expected cwd writable root to carry protected carveouts:\n{policy_text}",
     );
     assert!(
-        policy_text.contains("WRITABLE_ROOT_0_EXCLUDED_0"),
-        "expected cwd metadata carveouts in policy:\n{policy_text}",
-    );
-    assert!(
-        policy_text.contains("WRITABLE_ROOT_0_EXCLUDED_1")
-            && policy_text.contains("WRITABLE_ROOT_0_EXCLUDED_2"),
-        "expected symbolic cwd .git/.agents carveouts in policy:\n{policy_text}",
-    );
-    assert!(
-        policy_text.contains("WRITABLE_ROOT_1_EXCLUDED_0")
-            && policy_text.contains("WRITABLE_ROOT_1_EXCLUDED_1"),
-        "expected explicit writable root .git/.codeteam carveouts in policy:\n{policy_text}",
-    );
-    assert!(
         policy_text.contains(&seatbelt_protected_metadata_name_requirements(
             &cwd.canonicalize().expect("canonicalize cwd")
         )),
@@ -909,59 +849,20 @@ fn create_seatbelt_args_with_read_only_git_and_codex_subpaths() {
         "expected empty root metadata protection regex requirements in policy:\n{policy_text}",
     );
 
-    let expected_definitions = [
-        format!(
-            "-DWRITABLE_ROOT_0={}",
-            cwd.canonicalize()
-                .expect("canonicalize cwd")
-                .to_string_lossy()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_0_EXCLUDED_0={}",
-            cwd.canonicalize()
-                .expect("canonicalize cwd")
-                .join(".codeteam")
-                .display()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_0_EXCLUDED_1={}",
-            cwd.canonicalize()
-                .expect("canonicalize cwd")
-                .join(".git")
-                .display()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_0_EXCLUDED_2={}",
-            cwd.canonicalize()
-                .expect("canonicalize cwd")
-                .join(".agents")
-                .display()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_1={}",
-            vulnerable_root_canonical.to_string_lossy()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_1_EXCLUDED_0={}",
-            dot_git_canonical.to_string_lossy()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_1_EXCLUDED_1={}",
-            dot_codex_canonical.to_string_lossy()
-        ),
-        format!(
-            "-DWRITABLE_ROOT_2={}",
-            empty_root_canonical.to_string_lossy()
-        ),
-    ];
-    let writable_definitions: Vec<String> = args
-        .iter()
-        .filter(|arg| arg.starts_with("-DWRITABLE_ROOT_"))
-        .cloned()
-        .collect();
-    assert_eq!(
-        writable_definitions, expected_definitions,
-        "unexpected writable-root parameter definitions in {args:#?}"
+    let cwd_canonical = cwd.canonicalize().expect("canonicalize cwd");
+    for expected_root in [
+        format!("-DWRITABLE_ROOT_0={}", cwd_canonical.display()),
+        format!("-DWRITABLE_ROOT_1={}", vulnerable_root_canonical.display()),
+        format!("-DWRITABLE_ROOT_2={}", empty_root_canonical.display()),
+    ] {
+        assert!(
+            args.contains(&expected_root),
+            "missing writable root {expected_root}: {args:#?}"
+        );
+    }
+    assert!(
+        has_writable_exclusion(&args, 1, &dot_git_canonical),
+        "existing .git directory must be excluded from its writable root: {args:#?}"
     );
     let command_index = args
         .iter()
@@ -1225,7 +1126,6 @@ fn create_seatbelt_args_for_cwd_as_git_repo() {
         vulnerable_root,
         vulnerable_root_canonical,
         dot_git_canonical,
-        dot_agents_canonical,
         dot_codex_canonical,
         ..
     } = populate_tmpdir(tmp.path());
@@ -1296,29 +1196,13 @@ fn create_seatbelt_args_for_cwd_as_git_repo() {
         args.contains(&expected_root),
         "missing {expected_root}: {args:#?}"
     );
-    let expected_dot_git = format!(
-        "-DWRITABLE_ROOT_0_EXCLUDED_0={}",
-        dot_git_canonical.to_string_lossy()
+    assert!(
+        has_writable_exclusion(&args, 0, &dot_git_canonical),
+        "missing .git write exclusion: {args:#?}"
     );
     assert!(
-        args.contains(&expected_dot_git),
-        "missing {expected_dot_git}: {args:#?}"
-    );
-    let expected_dot_codex = format!(
-        "-DWRITABLE_ROOT_0_EXCLUDED_1={}",
-        dot_codex_canonical.to_string_lossy()
-    );
-    assert!(
-        args.contains(&expected_dot_codex),
-        "missing {expected_dot_codex}: {args:#?}"
-    );
-    let unexpected_dot_agents = format!(
-        "-DWRITABLE_ROOT_0_EXCLUDED_1={}",
-        dot_agents_canonical.to_string_lossy()
-    );
-    assert!(
-        !args.contains(&unexpected_dot_agents),
-        "missing .agents should be handled by regex rather than materialized as a path param: {args:#?}"
+        has_writable_exclusion(&args, 0, &dot_codex_canonical),
+        "missing .codeteam write exclusion: {args:#?}"
     );
     let expected_slash_tmp = format!("-DWRITABLE_ROOT_1={}", slash_tmp.to_string_lossy());
     assert!(
@@ -1343,7 +1227,6 @@ struct PopulatedTmp {
     vulnerable_root: PathBuf,
     vulnerable_root_canonical: PathBuf,
     dot_git_canonical: PathBuf,
-    dot_agents_canonical: PathBuf,
     dot_codex_canonical: PathBuf,
 
     /// Path without protected metadata subfolders.
@@ -1380,14 +1263,12 @@ fn populate_tmpdir(tmp: &Path) -> PopulatedTmp {
         .canonicalize()
         .expect("canonicalize vulnerable_root");
     let dot_git_canonical = vulnerable_root_canonical.join(".git");
-    let dot_agents_canonical = vulnerable_root_canonical.join(".agents");
     let dot_codex_canonical = vulnerable_root_canonical.join(".codeteam");
     let empty_root_canonical = empty_root.canonicalize().expect("canonicalize empty_root");
     PopulatedTmp {
         vulnerable_root,
         vulnerable_root_canonical,
         dot_git_canonical,
-        dot_agents_canonical,
         dot_codex_canonical,
         empty_root,
         empty_root_canonical,

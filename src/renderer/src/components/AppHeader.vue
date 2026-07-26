@@ -31,6 +31,13 @@ const { t } = useI18n()
           {{ t('conversation.nav.drafts') }}
         </RouterLink>
         <RouterLink
+          to="/jobs"
+          class="rounded-md px-3 py-2"
+          :class="route.path === '/jobs' ? 'bg-muted font-medium' : 'text-muted-foreground'"
+        >
+          {{ t('conversation.nav.jobs') }}
+        </RouterLink>
+        <RouterLink
           to="/settings"
           class="rounded-md px-3 py-2"
           :class="route.path === '/settings' ? 'bg-muted font-medium' : 'text-muted-foreground'"

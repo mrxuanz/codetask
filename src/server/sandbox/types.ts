@@ -2,75 +2,39 @@ import type { ConversationRole } from '../agent-runtime/roles'
 
 export type AgentRole = ConversationRole
 
-export interface FileRule {
-  path: string
-  access: 'read' | 'write' | 'none'
-}
-
+/**
+ * Canonical application sandbox policy.
+ *
+ * Native protocol discriminators are added only by the wire adapter. Business
+ * and scheduling code cannot select a V1/V2/V3 policy API.
+ */
 export interface SandboxPolicy {
-  version: 1
-  role: AgentRole
-  cwd: string
-  runtimeRoot: string
-  filesystem: {
-    default: 'none' | 'read'
-    rules: FileRule[]
-    protectedNames: string[]
+  readonly role: AgentRole
+  readonly cwd: string
+  readonly runtimeRoot: string
+  readonly filesystem: {
+    readonly defaultAccess: 'none'
+    readonly allowedReadRoots: string[]
+    readonly allowedWriteRoots: string[]
+    readonly protectedNames: string[]
+    readonly allowSystemRuntime: boolean
   }
-  network: {
-    ip: 'full' | 'none'
-    inbound: boolean
-    allowLoopback: boolean
-    unixSockets: string[]
+  readonly network: {
+    readonly mode: 'none' | 'restricted' | 'full'
+    readonly allowLoopback: boolean
+    readonly allowUnixSockets: string[]
   }
-  process: {
-    isolateFromHost: true
-    allowOwnDescendantSignals: true
-    denyPtrace: true
+  readonly process: {
+    readonly isolateFromHost: boolean
+    readonly denyPtrace: boolean
+    readonly allowOwnDescendantSignals: boolean
   }
-}
-
-export interface SandboxPolicyV2 {
-  version: 2
-  role: AgentRole
-  cwd: string
-  runtimeRoot: string
-  filesystem: {
-    defaultAccess: 'none'
-    allowedReadRoots: string[]
-    allowedWriteRoots: string[]
-    protectedNames: string[]
-    allowSystemRuntime: boolean
-  }
-  network: {
-    mode: 'none' | 'restricted' | 'full'
-    allowLoopback: boolean
-    allowUnixSockets: string[]
-  }
-  process: {
-    isolateFromHost: boolean
-    denyPtrace: boolean
-    allowOwnDescendantSignals: boolean
-  }
-}
-
-export type AnySandboxPolicy = SandboxPolicy | SandboxPolicyV2
-
-export function isSandboxPolicyV2(policy: AnySandboxPolicy): policy is SandboxPolicyV2 {
-  return policy.version === 2
 }
 
 export type SandboxBackend = 'linux-bwrap-seccomp' | 'macos-seatbelt' | 'windows-elevated'
 
-export interface SandboxRunRequest {
-  protocolVersion: 1 | 2
-  policy: AnySandboxPolicy
-  command: string
-  args: string[]
-  env: Record<string, string>
-}
-
 export interface SandboxEvidence {
+  /** Native attestation protocol; not an application policy selector. */
   protocolVersion: 1 | 2
   active: boolean
   backend: SandboxBackend

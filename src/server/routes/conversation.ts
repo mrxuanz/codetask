@@ -41,7 +41,14 @@ export function createConversationRoutes(ctx: AppContext): Hono {
   })
 
   routes.get('/conversation/workspaces', (c) => {
-    return c.json(ok(service.listWorkspaces(userIdFrom(c))))
+    return c.json(
+      ok(
+        service.listWorkspaces(userIdFrom(c)).map((workspace) => ({
+          ...workspace,
+          workspaceAccess: ctx.conversation.workspaceAccess(workspace.id)
+        }))
+      )
+    )
   })
 
   routes.post('/conversation/workspaces', async (c) => {
@@ -56,7 +63,10 @@ export function createConversationRoutes(ctx: AppContext): Hono {
   })
 
   routes.delete('/conversation/workspaces/:workspaceId', (c) => {
-    service.deleteWorkspace(userIdFrom(c), c.req.param('workspaceId'))
+    const userId = userIdFrom(c)
+    const workspaceId = c.req.param('workspaceId')
+    ctx.job.service.assertWorkspaceRemovalAllowed(userId, workspaceId)
+    service.deleteWorkspace(userId, workspaceId)
     return c.json(ok({ deleted: true }))
   })
 

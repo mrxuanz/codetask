@@ -1,7 +1,10 @@
 import type { SupportedCoreCode } from '../../shared/providers/codes'
 import type { ConversationRole } from './roles'
 import type { TurnErrorDto } from '../../shared/turn-errors.ts'
-import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type {
+  WorkspaceAccessMode,
+  WorkspaceWriteLease
+} from '../../shared/workspace-access.ts'
 import type { AgentCapabilityProfile } from './capabilities'
 import type { ProviderInstallation } from '../../shared/providers/installation'
 import type { ProviderRuntimeScope } from '../../shared/providers/capabilities'
@@ -74,13 +77,7 @@ export interface AgentTurnRunnerInput {
   readRoots?: string[] | undefined
   workspaceAccess?: WorkspaceAccessMode | undefined
   /** Explicit lease identity used to fail closed before enabling main-workspace writes. */
-  workspaceLease?:
-    | {
-        leaseId: string
-        ownerKind: 'conversation' | 'planner' | 'thread_job'
-        ownerId: string
-      }
-    | undefined
+  workspaceLease?: WorkspaceWriteLease | undefined
 
   jobId?: string | undefined
   providerRuntimeScopeId?: string | undefined

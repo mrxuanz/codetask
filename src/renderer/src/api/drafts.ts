@@ -5,6 +5,7 @@ import {
 } from '@renderer/auth/sessionRedirect'
 import { api, ApiError } from './client'
 import type { ApiResponse } from './types'
+import type { JobSnapshot } from './jobs'
 
 export type DraftStatus = 'editing' | 'generating' | 'tree_ready' | 'submitted'
 export interface DraftRecord {
@@ -87,7 +88,7 @@ export interface JobIntakeHandoff {
   state: 'pending' | 'accepted' | 'rejected'
   attachmentCount: number
   createdAtMs: number
-  jobModuleImplemented: false
+  jobModuleImplemented: true
 }
 export interface DraftDetails {
   draft: DraftRecord
@@ -190,11 +191,14 @@ export function confirmDraftExecutionTree(
   draftId: string,
   expectedRevision: number,
   treeId: string
-): Promise<ApiResponse<JobIntakeHandoff>> {
-  return api<JobIntakeHandoff>(`/api/drafts/${encodeURIComponent(draftId)}/confirm`, {
+): Promise<ApiResponse<{ handoff: JobIntakeHandoff; job: JobSnapshot }>> {
+  return api<{ handoff: JobIntakeHandoff; job: JobSnapshot }>(
+    `/api/drafts/${encodeURIComponent(draftId)}/confirm`,
+    {
     method: 'POST',
     body: JSON.stringify({ expectedRevision, treeId })
-  })
+    }
+  )
 }
 
 export async function streamDraftGeneration(

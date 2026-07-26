@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppHeader from '@renderer/components/AppHeader.vue'
 import AccountSecurityCard from '@renderer/components/settings/AccountSecurityCard.vue'
+import JobRoleSettingsEditor from '@renderer/components/settings/JobRoleSettingsEditor.vue'
 import SandboxHealthCard from '@renderer/components/settings/SandboxHealthCard.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Card from '@renderer/components/ui/Card.vue'
@@ -25,6 +26,13 @@ import { fetchSandboxHealth, type SandboxHealthReport } from '@renderer/api/syst
 import { useBootstrap } from '@renderer/composables/useBootstrap'
 import { translateApiError } from '@renderer/i18n/translateApiError'
 import { fetchDraftSettings, updateDraftSettings, type DraftSettings } from '@renderer/api/drafts'
+import {
+  fetchJobProviders,
+  fetchJobSettings,
+  updateJobSettings,
+  type JobProviderDescriptor,
+  type JobSettings
+} from '@renderer/api/jobs'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -46,6 +54,11 @@ const plannerUseDefault = ref(true)
 const skillsUseDefault = ref(true)
 const draftSaving = ref(false)
 const draftSaved = ref(false)
+const jobSettings = ref<JobSettings | null>(null)
+const jobDefaults = ref<JobSettings | null>(null)
+const jobProviders = ref<JobProviderDescriptor[]>([])
+const jobSaving = ref(false)
+const jobSaved = ref(false)
 
 function reportError(cause: unknown): void {
   const message = cause instanceof Error ? cause.message : String(cause)
@@ -57,11 +70,20 @@ async function load(): Promise<void> {
   sandboxLoading.value = true
   error.value = null
   try {
-    const [settingsResult, providerResult, sandboxResult, draftResult] = await Promise.all([
+    const [
+      settingsResult,
+      providerResult,
+      sandboxResult,
+      draftResult,
+      jobResult,
+      jobProviderResult
+    ] = await Promise.all([
       fetchConversationSettings(),
       fetchConversationProviderStatus(),
       fetchSandboxHealth(),
-      fetchDraftSettings()
+      fetchDraftSettings(),
+      fetchJobSettings(),
+      fetchJobProviders()
     ])
     model.value = settingsResult.data.model ?? ''
     provider.value = providerResult.data
@@ -72,11 +94,32 @@ async function load(): Promise<void> {
     skillsManual.value = draftResult.data.skillsManual.value
     plannerUseDefault.value = draftResult.data.plannerPrompt.useDefault
     skillsUseDefault.value = draftResult.data.skillsManual.useDefault
+    jobSettings.value = structuredClone(jobResult.data.settings)
+    jobDefaults.value = jobResult.data.defaults
+    jobProviders.value = jobProviderResult.data
   } catch (cause) {
     reportError(cause)
   } finally {
     loading.value = false
     sandboxLoading.value = false
+  }
+}
+
+async function saveJobExecution(): Promise<void> {
+  const current = jobSettings.value
+  if (!current) return
+  jobSaving.value = true
+  jobSaved.value = false
+  error.value = null
+  try {
+    const result = await updateJobSettings(current, current.revision)
+    jobSettings.value = structuredClone(result.data.settings)
+    jobDefaults.value = result.data.defaults
+    jobSaved.value = true
+  } catch (cause) {
+    reportError(cause)
+  } finally {
+    jobSaving.value = false
   }
 }
 
@@ -236,6 +279,83 @@ onMounted(() => {
                 </Button>
               </div>
             </template>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ t('jobs.settings.title') }}</CardTitle>
+            <CardDescription>{{ t('jobs.settings.description') }}</CardDescription>
+          </CardHeader>
+          <CardContent v-if="jobSettings && jobDefaults" class="space-y-6">
+            <div class="space-y-2">
+              <Label for="job-concurrency">{{ t('jobs.settings.concurrency') }}</Label>
+              <select
+                id="job-concurrency"
+                v-model.number="jobSettings.maxConcurrentJobs"
+                class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option :value="1">1</option>
+                <option :value="2">2</option>
+              </select>
+              <p class="text-xs text-muted-foreground">
+                {{ t('jobs.settings.concurrencyHint') }}
+              </p>
+            </div>
+
+            <JobRoleSettingsEditor
+              :title="t('jobs.settings.workTitle')"
+              :description="t('jobs.settings.workDescription')"
+              :role="jobSettings.work"
+              :defaults="jobDefaults.work"
+              :providers="jobProviders"
+              :validation="false"
+              @update="jobSettings.work = $event"
+            />
+            <JobRoleSettingsEditor
+              :title="t('jobs.settings.workValidationTitle')"
+              :description="t('jobs.settings.workValidationDescription')"
+              :role="jobSettings.workValidation"
+              :defaults="jobDefaults.workValidation"
+              :providers="jobProviders"
+              validation
+              @update="jobSettings.workValidation = { ...jobSettings.workValidation, ...$event }"
+            />
+            <JobRoleSettingsEditor
+              :title="t('jobs.settings.sliceValidationTitle')"
+              :description="t('jobs.settings.sliceValidationDescription')"
+              :role="jobSettings.sliceValidation"
+              :defaults="jobDefaults.sliceValidation"
+              :providers="jobProviders"
+              validation
+              @update="jobSettings.sliceValidation = { ...jobSettings.sliceValidation, ...$event }"
+            />
+            <JobRoleSettingsEditor
+              :title="t('jobs.settings.milestoneValidationTitle')"
+              :description="t('jobs.settings.milestoneValidationDescription')"
+              :role="jobSettings.milestoneValidation"
+              :defaults="jobDefaults.milestoneValidation"
+              :providers="jobProviders"
+              validation
+              @update="
+                jobSettings.milestoneValidation = {
+                  ...jobSettings.milestoneValidation,
+                  ...$event
+                }
+              "
+            />
+
+            <div class="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              {{ t('jobs.settings.protocolHint') }}
+            </div>
+            <div class="flex items-center gap-3">
+              <Button :disabled="jobSaving" @click="saveJobExecution">
+                {{ jobSaving ? t('conversation.settings.saving') : t('common.save') }}
+              </Button>
+              <span v-if="jobSaved" class="text-sm text-emerald-700">
+                {{ t('conversation.settings.saved') }}
+              </span>
+            </div>
           </CardContent>
         </Card>
 

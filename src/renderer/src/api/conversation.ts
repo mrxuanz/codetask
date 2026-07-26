@@ -31,6 +31,7 @@ export interface ConversationWorkspace {
   title: string
   rootPath: string
   canonicalKey: string
+  workspaceAccess: 'read-only' | 'write'
   createdAtMs: number
   updatedAtMs: number
 }
@@ -57,7 +58,7 @@ export interface ConversationMessage {
 }
 
 export type ConversationStreamEvent =
-  | { type: 'started'; turnId: string }
+  | { type: 'started'; turnId: string; workspaceAccess: 'read-only' | 'write' }
   | { type: 'delta'; content: string }
   | { type: 'thinking'; content: string }
   | {

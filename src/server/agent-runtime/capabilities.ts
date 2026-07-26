@@ -28,6 +28,7 @@ export function resolveAgentCapabilityProfile(input: {
   switch (input.role) {
     case 'task-worker':
       return 'task-sandbox'
+    case 'work-verifier':
     case 'slice-verifier':
     case 'milestone-verifier':
       return 'verifier-sandbox'

@@ -324,11 +324,163 @@ const migration003DraftPlanning: KernelMigration = {
   }
 }
 
-export const KERNEL_SCHEMA_VERSION = 3
+const migration004JobExecution: KernelMigration = {
+  version: 4,
+  name: 'job-execution',
+  checksum: 'job-execution-kernel-004-2026-07-27',
+  apply(database): void {
+    database.exec(`
+      CREATE TABLE job_settings (
+        user_id TEXT PRIMARY KEY REFERENCES auth_users(id) ON DELETE CASCADE,
+        max_concurrent_jobs INTEGER NOT NULL DEFAULT 2
+          CHECK (max_concurrent_jobs BETWEEN 1 AND 2),
+        work_provider TEXT NOT NULL DEFAULT 'codex'
+          CHECK (work_provider IN ('codex', 'claude-code', 'opencode', 'cursorcli')),
+        work_model TEXT,
+        work_prompt TEXT,
+        work_skills_manual TEXT,
+        work_validation_enabled INTEGER NOT NULL DEFAULT 1 CHECK (work_validation_enabled IN (0, 1)),
+        work_validation_provider TEXT NOT NULL DEFAULT 'claude-code'
+          CHECK (work_validation_provider IN ('codex', 'claude-code', 'opencode', 'cursorcli')),
+        work_validation_model TEXT,
+        work_validation_prompt TEXT,
+        work_validation_skills_manual TEXT,
+        slice_validation_enabled INTEGER NOT NULL DEFAULT 1 CHECK (slice_validation_enabled IN (0, 1)),
+        slice_validation_provider TEXT NOT NULL DEFAULT 'opencode'
+          CHECK (slice_validation_provider IN ('codex', 'claude-code', 'opencode', 'cursorcli')),
+        slice_validation_model TEXT,
+        slice_validation_prompt TEXT,
+        slice_validation_skills_manual TEXT,
+        milestone_validation_enabled INTEGER NOT NULL DEFAULT 1
+          CHECK (milestone_validation_enabled IN (0, 1)),
+        milestone_validation_provider TEXT NOT NULL DEFAULT 'cursorcli'
+          CHECK (milestone_validation_provider IN ('codex', 'claude-code', 'opencode', 'cursorcli')),
+        milestone_validation_model TEXT,
+        milestone_validation_prompt TEXT,
+        milestone_validation_skills_manual TEXT,
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0)
+      );
+
+      CREATE TABLE jobs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+        source_handoff_id TEXT NOT NULL UNIQUE,
+        workspace_id TEXT NOT NULL REFERENCES conversation_workspaces(id) ON DELETE RESTRICT,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+          state IN ('queued', 'running', 'pause_requested', 'paused', 'succeeded', 'failed', 'deleted')
+        ),
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        queue_order INTEGER NOT NULL CHECK (queue_order >= 1),
+        active_item_id TEXT,
+        source_snapshot_json TEXT NOT NULL,
+        execution_tree_json TEXT NOT NULL,
+        last_error_code TEXT,
+        last_error_message TEXT,
+        created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+        started_at_ms INTEGER,
+        finished_at_ms INTEGER,
+        deleted_at_ms INTEGER,
+        CHECK (
+          (state = 'deleted' AND deleted_at_ms IS NOT NULL)
+          OR (state <> 'deleted' AND deleted_at_ms IS NULL)
+        )
+      );
+
+      CREATE INDEX idx_jobs_user_state_queue
+        ON jobs(user_id, state, queue_order, created_at_ms, id);
+      CREATE INDEX idx_jobs_workspace_state
+        ON jobs(workspace_id, state, updated_at_ms DESC);
+
+      CREATE TABLE job_work_items (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL CHECK (sequence >= 1),
+        kind TEXT NOT NULL CHECK (
+          kind IN ('work', 'work_validation', 'slice_validation', 'milestone_validation')
+        ),
+        tree_task_id TEXT,
+        scope_id TEXT NOT NULL,
+        parent_item_id TEXT REFERENCES job_work_items(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        objective TEXT NOT NULL,
+        files_json TEXT NOT NULL,
+        acceptance_criteria_json TEXT NOT NULL,
+        attachment_ids_json TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+          state IN ('queued', 'running', 'succeeded', 'failed', 'skipped')
+        ),
+        attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+        repair_generation INTEGER NOT NULL DEFAULT 0 CHECK (repair_generation >= 0),
+        provider_code TEXT NOT NULL
+          CHECK (provider_code IN ('codex', 'claude-code', 'opencode', 'cursorcli')),
+        model TEXT,
+        prompt_snapshot TEXT NOT NULL,
+        skills_manual_snapshot TEXT NOT NULL,
+        result_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        started_at_ms INTEGER,
+        finished_at_ms INTEGER,
+        created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+        UNIQUE(job_id, sequence)
+      );
+
+      CREATE INDEX idx_job_work_items_job_sequence
+        ON job_work_items(job_id, sequence, id);
+      CREATE INDEX idx_job_work_items_job_state_sequence
+        ON job_work_items(job_id, state, sequence, id);
+
+      CREATE TABLE job_attachments (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        source_attachment_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+        sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+        storage_relative_path TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+        UNIQUE(job_id, source_attachment_id),
+        UNIQUE(job_id, storage_relative_path)
+      );
+
+      CREATE INDEX idx_job_attachments_job
+        ON job_attachments(job_id, created_at_ms, id);
+
+      CREATE TABLE job_workspace_leases (
+        workspace_id TEXT PRIMARY KEY REFERENCES conversation_workspaces(id) ON DELETE CASCADE,
+        job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+        lease_id TEXT NOT NULL UNIQUE,
+        acquired_at_ms INTEGER NOT NULL CHECK (acquired_at_ms >= 0),
+        heartbeat_at_ms INTEGER NOT NULL CHECK (heartbeat_at_ms >= acquired_at_ms)
+      );
+
+      CREATE TABLE job_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+        job_id TEXT REFERENCES jobs(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0)
+      );
+
+      CREATE INDEX idx_job_events_user_cursor ON job_events(user_id, id);
+      CREATE INDEX idx_job_events_job_cursor ON job_events(job_id, id);
+    `)
+  }
+}
+
+export const KERNEL_SCHEMA_VERSION = 4
 const KERNEL_MIGRATIONS: readonly KernelMigration[] = [
   migration001Authentication,
   migration002Conversation,
-  migration003DraftPlanning
+  migration003DraftPlanning,
+  migration004JobExecution
 ]
 
 function ensureMigrationTable(database: Database.Database): void {

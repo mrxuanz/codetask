@@ -4,6 +4,7 @@ import BootstrapRedirect from '@renderer/pages/BootstrapRedirect.vue'
 import ConversationPage from '@renderer/pages/ConversationPage.vue'
 import SettingsPage from '@renderer/pages/SettingsPage.vue'
 import DraftsPage from '@renderer/pages/DraftsPage.vue'
+import JobsPage from '@renderer/pages/JobsPage.vue'
 import LoginPage from '@renderer/pages/LoginPage.vue'
 import SetupPage from '@renderer/pages/SetupPage.vue'
 
@@ -19,6 +20,7 @@ const router = createRouter({
         { path: 'login', component: LoginPage },
         { path: 'home', component: ConversationPage },
         { path: 'drafts', component: DraftsPage },
+        { path: 'jobs', component: JobsPage },
         { path: 'settings', component: SettingsPage }
       ]
     }

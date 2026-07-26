@@ -31,7 +31,11 @@ export interface ConversationProviderStatus {
 }
 
 export type ConversationStreamEvent =
-  | { readonly type: 'started'; readonly turnId: string }
+  | {
+      readonly type: 'started'
+      readonly turnId: string
+      readonly workspaceAccess: 'read-only' | 'write'
+    }
   | { readonly type: 'delta'; readonly content: string }
   | { readonly type: 'thinking'; readonly content: string }
   | {
@@ -44,6 +48,7 @@ export type ConversationStreamEvent =
 export interface ConversationModule {
   readonly service: ConversationService
   providerStatus(): Promise<ConversationProviderStatus>
+  workspaceAccess(workspaceId: string): 'read-only' | 'write'
   streamTurn(input: {
     readonly userId: string
     readonly threadId: string
@@ -73,6 +78,7 @@ export function createConversationModule(input: {
   readonly cursorDriver?: ProviderDriver | undefined
   readonly runtimeManager?: ProviderRuntimeManager | undefined
   readonly clock?: Clock | undefined
+  readonly workspaceIsWriteLocked?: ((workspaceId: string) => boolean) | undefined
 }): ConversationModule {
   const service = new ConversationService({
     unitOfWork: new SqliteUnitOfWork(input.database),
@@ -92,6 +98,9 @@ export function createConversationModule(input: {
 
   return Object.freeze({
     service,
+    workspaceAccess(workspaceId: string): 'read-only' | 'write' {
+      return input.workspaceIsWriteLocked?.(workspaceId) === true ? 'read-only' : 'write'
+    },
     async providerStatus(): Promise<ConversationProviderStatus> {
       const installation = await discoverCursor()
       if (!installation) {
@@ -148,7 +157,12 @@ export function createConversationModule(input: {
       readonly signal?: AbortSignal | undefined
     }): AsyncGenerator<ConversationStreamEvent> {
       const started = service.beginTurn(turnInput.userId, turnInput.threadId, turnInput.prompt)
-      yield { type: 'started', turnId: started.turn.id }
+      const workspaceLocked = input.workspaceIsWriteLocked?.(started.workspace.id) === true
+      yield {
+        type: 'started',
+        turnId: started.turn.id,
+        workspaceAccess: workspaceLocked ? 'read-only' : 'write'
+      }
 
       const turnRuntimeRoot = join(input.runtimeRoot, started.thread.id)
       mkdirSync(turnRuntimeRoot, { recursive: true })
@@ -183,9 +197,12 @@ export function createConversationModule(input: {
             cwd: started.workspace.rootPath,
             runtimeRoot: turnRuntimeRoot,
             prompt: started.prompt,
+            systemPrompt: workspaceLocked
+              ? 'A Job currently owns this workspace. This conversation is strictly read-only: inspect and explain, but do not edit files, execute mutating commands, or start implementation.'
+              : undefined,
             runtimeSessionId: started.thread.runtimeSessionId,
             model: started.turn.model ?? undefined,
-            capabilityProfile: 'chat-write',
+            capabilityProfile: workspaceLocked ? 'chat-read' : 'chat-write',
             installation,
             providerSettings: driver.settings,
             providerRuntimeScopeId: buildConversationProviderRuntimeScopeId(

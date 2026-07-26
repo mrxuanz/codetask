@@ -11,6 +11,7 @@ export function dataPaths(dataDir: string): {
   sandboxRuntime: string
   conversationRuntime: string
   draftRuntime: string
+  jobRuntime: string
   draftAssets: string
   jobIntakeAssets: string
 } {
@@ -21,6 +22,7 @@ export function dataPaths(dataDir: string): {
     sandboxRuntime: join(dataDir, 'sandbox-runtime'),
     conversationRuntime: join(dataDir, 'sandbox-runtime', 'conversations'),
     draftRuntime: join(dataDir, 'sandbox-runtime', 'drafts'),
+    jobRuntime: join(dataDir, 'sandbox-runtime', 'jobs'),
     draftAssets: join(dataDir, 'draft-assets'),
     jobIntakeAssets: join(dataDir, 'job-intake-assets')
   }

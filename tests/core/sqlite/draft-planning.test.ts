@@ -152,7 +152,7 @@ describe('draft planning and Job intake boundary', () => {
       })
       assert.equal(handoff.state, 'pending')
       assert.equal(handoff.attachmentCount, 1)
-      assert.equal(handoff.jobModuleImplemented, false)
+      assert.equal(handoff.jobModuleImplemented, true)
       const repeated = await f.drafts.confirmExecutionTree('user-1', draft.id, {
         expectedRevision: draft.revision,
         treeId: treeRecord.id

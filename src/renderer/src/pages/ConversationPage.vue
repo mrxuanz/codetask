@@ -219,6 +219,9 @@ async function send(): Promise<void> {
       thread.id,
       content,
       (event) => {
+        if (event.type === 'started' && selectedWorkspace.value) {
+          selectedWorkspace.value.workspaceAccess = event.workspaceAccess
+        }
         if (event.type === 'delta') assistantMessage.content += event.content
         if (event.type === 'thinking') thinking.value += event.content
         if (event.type === 'completed') {
@@ -350,6 +353,12 @@ onMounted(() => {
         <div class="min-h-0 flex-1 overflow-y-auto">
           <div class="mx-auto w-full max-w-4xl space-y-5 p-4 sm:p-6">
             <ErrorAlert v-if="error" :message="error" />
+            <p
+              v-if="selectedWorkspace?.workspaceAccess === 'read-only'"
+              class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+            >
+              {{ t('conversation.jobReadOnly') }}
+            </p>
             <div v-if="messagesLoading" class="flex justify-center py-10"><Spinner /></div>
             <div
               v-else-if="!selectedWorkspace"

@@ -5,13 +5,15 @@ import { SqliteAuthRepository } from './repositories/auth-repository'
 import { SqliteConversationRepository } from './repositories/conversation-repository'
 import { SqliteDraftRepository } from './repositories/draft-repository'
 import { SqliteJobIntakeRepository } from './repositories/job-intake-repository'
+import { SqliteJobRepository } from './repositories/job-repository'
 
 function createTransaction(database: Database.Database): KernelTransaction {
   return {
     auth: new SqliteAuthRepository(database),
     conversation: new SqliteConversationRepository(database),
     draft: new SqliteDraftRepository(database),
-    jobIntake: new SqliteJobIntakeRepository(database)
+    jobIntake: new SqliteJobIntakeRepository(database),
+    job: new SqliteJobRepository(database)
   }
 }
 

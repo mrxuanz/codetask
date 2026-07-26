@@ -39,6 +39,15 @@ export type {
   JobIntakeAttachmentRecord,
   JobIntakeHandoffRecord,
   JobIntakeRepository,
+  JobAttachmentRecord,
+  JobEventRecord,
+  JobItemKindRecord,
+  JobRecord,
+  JobRepository,
+  JobSettingsRecord,
+  JobStateRecord,
+  JobWorkItemRecord,
+  JobWorkspaceLeaseRecord,
   KernelTransaction,
   UnitOfWork
 } from './persistence'
