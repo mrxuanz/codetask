@@ -95,6 +95,8 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'auth.password_missing_digit': 'パスワードには数字を1文字以上含めてください',
   'auth.password_missing_symbol': 'パスワードには記号を1文字以上含めてください',
   'auth.password_invalid_chars': 'パスワードには印字可能な ASCII 文字のみ使用できます',
+  'auth.password_contains_username': 'パスワードにユーザー名を含めることはできません',
+  'auth.password_common': 'このパスワードは一般的すぎます。より強力なパスワードを使用してください',
   'thread.not_found': 'スレッドが見つかりません',
   'thread.busy': 'スレッドが実行中です。現在のターンが終了するまでお待ちください。',
   'thread.deleting': 'この会話は削除処理中です',

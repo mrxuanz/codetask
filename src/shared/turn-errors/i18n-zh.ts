@@ -85,6 +85,8 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'auth.password_missing_digit': '密码须包含至少一个数字',
   'auth.password_missing_symbol': '密码须包含至少一个符号',
   'auth.password_invalid_chars': '密码只能包含可打印的 ASCII 字符',
+  'auth.password_contains_username': '密码不能包含用户名',
+  'auth.password_common': '该密码过于常见，请更换一个更强的密码',
   'thread.not_found': '对话不存在',
   'thread.busy': '当前对话正在运行，请等待回复完成',
   'thread.deleting': '该对话正在删除中',

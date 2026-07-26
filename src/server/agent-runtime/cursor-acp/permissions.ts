@@ -1,12 +1,7 @@
 import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
-import { allCreateTaskMcpToolNames } from '../../wizard/tools'
 import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
 
-const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
-  'codeteam-manager',
-  ...allCreateTaskMcpToolNames(),
-  ...PLANNER_ROLE_MCP_TOOLS
-])
+const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>(['codeteam-manager', ...PLANNER_ROLE_MCP_TOOLS])
 
 export type CursorPermissionRequestParams = {
   options: Array<{ optionId: string }>

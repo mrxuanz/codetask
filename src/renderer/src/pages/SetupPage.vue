@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { setup } from '@renderer/api/auth'
 import { api } from '@renderer/api/client'
-import { setToken } from '@renderer/auth/token'
 import CredentialsForm from '@renderer/components/auth/CredentialsForm.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
@@ -63,12 +62,15 @@ watch(storagePath, () => {
 
 onMounted(async () => {
   if (!needsStorage.value) return
+  storagePath.value = bootstrapData.value?.storageDefaultCandidate ?? ''
+  storageIssue.value = bootstrapData.value?.storageIssue
+    ? translateApiError(bootstrapData.value.storageIssue, t)
+    : null
+  if (needSetupToken.value) return
   try {
     const response = await fetchStorageBootstrap()
     storagePath.value = response.data.defaultCandidate
-    storageIssue.value = response.data.issue
-      ? translateApiError(response.data.issue, t)
-      : null
+    storageIssue.value = response.data.issue ? translateApiError(response.data.issue, t) : null
   } catch (error) {
     storageIssue.value = storageErrorMessage(error)
   }
@@ -128,8 +130,7 @@ async function ensureStorageReady(): Promise<void> {
   storageIssue.value = null
   const response = await validateStorageTarget(storagePath.value)
   const action =
-    response.data.action ??
-    (storagePhase.value === 'recovery_required' ? 'recover' : 'initialize')
+    response.data.action ?? (storagePhase.value === 'recovery_required' ? 'recover' : 'initialize')
   if (action === 'recover') {
     await recoverStorageTarget(response.data.canonicalPath, response.data.nonce)
   } else {
@@ -163,8 +164,7 @@ async function onSubmit(payload: {
     }
   }
 
-  const res = await setup(payload.username, payload.password, payload.setupToken)
-  setToken(res.data.token, res.data.expires_at)
+  await setup(payload.username, payload.password, payload.setupToken)
   await refresh()
   await router.replace('/home')
 }

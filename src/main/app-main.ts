@@ -4,7 +4,6 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { parseCliArgs } from './cli'
 import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
-import { SafeLoggerImpl } from '../server/application/safe-logger'
 import { resolveDataDirSelection } from './data-dir'
 import { discoverRunningService } from './service-discovery'
 import { createElectronServerPlatform } from './electron-server-platform'
@@ -12,15 +11,6 @@ import { createShutdownSignalHandler } from './shutdown-signal'
 import { initializeProcessHostEnvironment } from '../server/host-environment'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
-
-let logDir: string | undefined
-try {
-  logDir = join(app.getPath('userData'), 'logs')
-} catch {
-  logDir = undefined
-}
-const earlyLogger = new SafeLoggerImpl(logDir ? { logDir } : undefined)
-earlyLogger.info('SafeLogger installed on main process')
 
 const cli = parseCliArgs()
 if (cli.mode === 'server') {

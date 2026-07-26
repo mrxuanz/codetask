@@ -90,7 +90,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
     }
   })
   assert.deepEqual(systemMcp, {
-    outcome: { outcome: 'selected', optionId: 'allow-once' }
+    outcome: { outcome: 'selected', optionId: 'deny-once' }
   })
 
   // Real Cursor ACP title: server and tool are hyphen-joined, then repeated after ":".

@@ -9,8 +9,7 @@ test('shouldClearSessionOnApiError keeps session on login guard responses', () =
   )
   assert.equal(
     shouldClearSessionOnApiError(401, 40101, 'Account temporarily locked', {
-      lockedUntil: 123,
-      retryAfterSec: 60
+      retryAfterMs: 60_000
     }),
     false
   )

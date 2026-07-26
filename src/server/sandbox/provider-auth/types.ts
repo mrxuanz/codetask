@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../../conversation/cores'
+import type { SupportedCoreCode } from '../../../shared/providers/codes'
 import type { ProviderAuthMode } from '../../../shared/providers/capabilities'
 
 export type { ProviderAuthMode }

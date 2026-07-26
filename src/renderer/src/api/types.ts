@@ -6,11 +6,11 @@ export interface BootstrapData {
   username?: string
   setupTokenRequired?: boolean
   storagePhase?: 'selection_required' | 'ready' | 'recovery_required'
-  controlPlaneGeneration?: 'preparing' | 'copied' | 'v3_authoritative' | null
+  storageDefaultCandidate?: string
+  storageIssue?: string
 }
 
 export interface AuthData {
-  token: string
   username: string
   expires_at: number
 }
@@ -18,12 +18,12 @@ export interface AuthData {
 export interface CaptchaChallenge {
   challengeId: string
   image: string
+  expires_at: number
 }
 
 export interface LoginErrorData {
   captchaRequired?: boolean
-  lockedUntil?: number
-  retryAfterSec?: number
+  retryAfterMs?: number
 }
 
 export interface LoginPayload {

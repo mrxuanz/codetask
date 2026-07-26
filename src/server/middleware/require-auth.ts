@@ -1,6 +1,11 @@
 import type { MiddlewareHandler } from 'hono'
-import { findSessionUsername } from '../auth/service'
-import { resolveSessionTokenFromRequest } from '../auth/session'
+import type { SecureAuthModule } from '../composition/auth'
+import { setRequestAuthPrincipal } from '../auth/session'
+import {
+  clearAuthSessionCookies,
+  hasValidCsrfToken,
+  readAuthSessionCookie
+} from '../interfaces/http/auth-session-cookie'
 
 interface AllowlistEntry {
   method: string
@@ -14,8 +19,6 @@ const PUBLIC_ALLOWLIST: AllowlistEntry[] = [
   { method: 'POST', path: '/setup' },
   { method: 'POST', path: '/captcha' }
 ]
-
-export const ATTACHMENT_GET_PATH = /^\/threads\/[^/]+\/attachments\/[^/]+$/
 
 const API_PREFIX = '/api'
 
@@ -31,21 +34,6 @@ export function normalizedApiPath(path: string): string {
 export function isPublicApiRoute(method: string, path: string): boolean {
   const p = normalizedApiPath(path)
   return PUBLIC_ALLOWLIST.some((entry) => entry.method === method && entry.path === p)
-}
-
-export function isMcpApiRoute(path: string): boolean {
-  const p = normalizedApiPath(path)
-  return p === '/mcp' || p.startsWith('/mcp/')
-}
-
-export function isAttachmentAssetTokenGet(
-  method: string,
-  path: string,
-  assetToken?: string | null
-): boolean {
-  if (method !== 'GET') return false
-  if (!assetToken?.trim()) return false
-  return ATTACHMENT_GET_PATH.test(normalizedApiPath(path))
 }
 
 function unauthorizedResponse(message: string): Response {
@@ -64,30 +52,42 @@ function unauthorizedResponse(message: string): Response {
   )
 }
 
-export function requireAuth(): MiddlewareHandler {
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+export function requireAuth(auth: SecureAuthModule): MiddlewareHandler {
   return async (c, next) => {
-    if (isPublicApiRoute(c.req.method, c.req.path) || isMcpApiRoute(c.req.path)) {
+    if (isPublicApiRoute(c.req.method, c.req.path)) {
       return next()
     }
 
-    if (isAttachmentAssetTokenGet(c.req.method, c.req.path, c.req.query('asset_token') || c.req.header('x-asset-token'))) {
-      return next()
-    }
-
-    const authHeader = c.req.header('Authorization')
-    const token = resolveSessionTokenFromRequest({
-      ...(authHeader !== undefined ? { authHeader } : {})
-    })
-
+    const token = readAuthSessionCookie(c)
     if (!token) {
       return unauthorizedResponse('Authentication required')
     }
 
-    const username = await findSessionUsername(token)
-    if (!username) {
+    const principal = auth.service.tryAuthenticate(token)
+    if (!principal) {
+      clearAuthSessionCookies(c)
       return unauthorizedResponse('Invalid or expired session')
     }
 
+    if (WRITE_METHODS.has(c.req.method) && !hasValidCsrfToken(c, auth)) {
+      return new Response(
+        JSON.stringify({
+          data: null,
+          status: 40301,
+          extra: {},
+          message: 'auth.csrf_invalid',
+          success: false
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    setRequestAuthPrincipal(c, principal)
     return next()
   }
 }

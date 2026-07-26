@@ -9,10 +9,7 @@ import {
 import { snapshotHostEnv, stripCodeTaskTransientEnv } from '../providers/launch-env'
 import { augmentPathWithHostNode } from './toolchain-path'
 import type { ProviderAuthMode } from './provider-auth/types'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../host-environment'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',

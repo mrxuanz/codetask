@@ -1,10 +1,8 @@
-import type { SupportedCoreCode } from '../conversation/cores'
+import type { SupportedCoreCode } from '../../shared/providers/codes'
 import { getProviderDescriptor } from '../../shared/providers/descriptors'
-import {
-  CODETEAM_MANAGER_MCP_SERVER,
-  MCP_HTTP_ACCEPT_HEADER_VALUE
-} from '../conversation/draft/types'
-import { allCreateTaskMcpToolNames } from '../wizard/tools'
+
+export const CODETEAM_MANAGER_MCP_SERVER = 'codeteam-manager'
+export const MCP_HTTP_ACCEPT_HEADER_VALUE = 'application/json, text/event-stream'
 
 export function buildHttpMcpServerConfig(url: string): {
   type: 'http'
@@ -23,7 +21,7 @@ export function buildHttpMcpServerConfig(url: string): {
 function buildCodexMcpToolApprovals(
   toolNames?: readonly string[]
 ): Record<string, { approval_mode: 'approve' }> {
-  const names = toolNames ?? allCreateTaskMcpToolNames()
+  const names = toolNames ?? []
   return Object.fromEntries(names.map((name) => [name, { approval_mode: 'approve' as const }]))
 }
 

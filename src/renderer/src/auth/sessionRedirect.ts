@@ -18,11 +18,7 @@ export function isUnauthorizedApiError(status: number, message: string): boolean
 function isLoginGuardError(data: unknown): boolean {
   if (!data || typeof data !== 'object') return false
   const record = data as Record<string, unknown>
-  return (
-    record.captchaRequired === true ||
-    typeof record.lockedUntil === 'number' ||
-    typeof record.retryAfterSec === 'number'
-  )
+  return record.captchaRequired === true || typeof record.retryAfterMs === 'number'
 }
 
 export function shouldClearSessionOnApiError(

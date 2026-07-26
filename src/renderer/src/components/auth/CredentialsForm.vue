@@ -16,6 +16,7 @@ import { fetchCaptcha } from '@renderer/api/auth'
 import type { CaptchaChallenge } from '@renderer/api/types'
 import { validateSetupCredentials } from '@shared/auth/credentials-policy'
 import { turnErrorI18nKey } from '@shared/turn-errors'
+import { clearSetupGrant, setSetupGrant } from '@renderer/auth/token'
 
 const { t } = useI18n()
 
@@ -47,21 +48,23 @@ const captchaChallenge = ref<CaptchaChallenge | null>(null)
 const captchaAnswer = ref('')
 const captchaLoading = ref(false)
 
+watch(setupToken, (value) => {
+  setSetupGrant(value)
+})
+
 watch(
   () => props.showSetupToken,
   (val) => {
     if (!val) {
       setupToken.value = ''
+      clearSetupGrant()
     }
   }
 )
 
-function trimSetupInputs(): void {
+function normalizeSetupInputs(): void {
   if (!props.enforceCredentialsPolicy) return
-
   username.value = username.value.trim()
-  password.value = password.value.trim()
-  confirmPassword.value = confirmPassword.value.trim()
   setupToken.value = setupToken.value.trim()
 }
 
@@ -71,16 +74,14 @@ function trimUsername(): void {
 
 function handleFieldBlur(): void {
   if (props.enforceCredentialsPolicy) {
-    trimSetupInputs()
+    normalizeSetupInputs()
     return
   }
   trimUsername()
 }
 
 function onPasswordBlur(): void {
-  if (props.enforceCredentialsPolicy) {
-    trimSetupInputs()
-  }
+  // Passwords are byte-for-byte credentials; never silently normalize them.
 }
 
 async function loadCaptcha(): Promise<void> {
@@ -99,7 +100,7 @@ async function handleSubmit(): Promise<void> {
   submitting.value = true
   error.value = null
 
-  trimSetupInputs()
+  normalizeSetupInputs()
 
   if (props.enforceCredentialsPolicy) {
     const violation = validateSetupCredentials(username.value, password.value)
@@ -127,17 +128,15 @@ async function handleSubmit(): Promise<void> {
   } catch (err: unknown) {
     const apiErr = err as {
       message?: string
-      data?: { captchaRequired?: boolean; lockedUntil?: number; retryAfterSec?: number }
+      data?: { captchaRequired?: boolean; retryAfterMs?: number }
     }
     if (apiErr.data?.captchaRequired) {
       captchaAnswer.value = ''
       await loadCaptcha()
       props.onCaptchaRequired?.()
-      if (apiErr.data.lockedUntil) {
-        const until = new Date(apiErr.data.lockedUntil * 1000).toLocaleTimeString()
-        error.value = `${t('login.accountLocked')} ${until}`
-      } else if (apiErr.data.retryAfterSec) {
-        error.value = `${t('errors.invalidCredentials')} (${apiErr.data.retryAfterSec}s)`
+      if (apiErr.data.retryAfterMs && apiErr.data.retryAfterMs > 0) {
+        const retryAfterSec = Math.max(1, Math.ceil(apiErr.data.retryAfterMs / 1_000))
+        error.value = `${t('errors.invalidCredentials')} (${retryAfterSec}s)`
       } else {
         error.value = t('login.captchaRequired')
       }
@@ -155,7 +154,9 @@ async function handleSubmit(): Promise<void> {
   <Card class="w-full min-w-0 overflow-hidden">
     <CardHeader class="space-y-2 px-4 pt-5 sm:px-6 sm:pt-6">
       <CardTitle class="text-lg sm:text-xl">{{ title }}</CardTitle>
-      <CardDescription class="text-sm leading-relaxed break-words">{{ description }}</CardDescription>
+      <CardDescription class="text-sm leading-relaxed break-words">{{
+        description
+      }}</CardDescription>
       <p
         v-if="enforceCredentialsPolicy"
         class="text-xs leading-relaxed text-muted-foreground break-words sm:text-sm"
@@ -165,7 +166,6 @@ async function handleSubmit(): Promise<void> {
     </CardHeader>
     <CardContent class="px-4 pb-5 sm:px-6 sm:pb-6">
       <form class="flex min-w-0 flex-col gap-3 sm:gap-4" @submit.prevent="handleSubmit">
-        <slot name="before" :disabled="submitting || captchaLoading" />
         <div v-if="showSetupToken" class="flex min-w-0 flex-col gap-2">
           <Label for="setupToken">{{ t('setup.setupTokenLabel') }}</Label>
           <Input
@@ -177,6 +177,7 @@ async function handleSubmit(): Promise<void> {
             @blur="handleFieldBlur"
           />
         </div>
+        <slot name="before" :disabled="submitting || captchaLoading" />
         <div class="flex min-w-0 flex-col gap-2">
           <Label for="username">{{ t('common.username') }}</Label>
           <Input
@@ -207,7 +208,7 @@ async function handleSubmit(): Promise<void> {
             :placeholder="t('setup.confirmPasswordPlaceholder')"
             autocomplete="new-password"
             required
-            @blur="trimSetupInputs"
+            @blur="normalizeSetupInputs"
           />
         </div>
         <div v-if="captchaChallenge" class="flex min-w-0 flex-col gap-2">
@@ -222,7 +223,7 @@ async function handleSubmit(): Promise<void> {
             v-model="captchaAnswer"
             :placeholder="t('common.captchaPlaceholder')"
             autocomplete="off"
-            maxlength="5"
+            maxlength="6"
             required
           />
         </div>

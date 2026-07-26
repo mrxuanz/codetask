@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -10,7 +10,15 @@ import {
   readDataRootMarker,
   writeDataRootMarker
 } from '../../src/main/storage-locator'
-import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
+import { openKernelDatabase } from '../../src/server/adapters/sqlite'
+import { dataPaths } from '../../src/server/data-paths'
+
+const SETUP_TOKEN = 'valid-setup-token'
+
+function createAuthDatabase(dataDir: string): void {
+  mkdirSync(join(dataDir, 'db'), { recursive: true })
+  openKernelDatabase({ filename: dataPaths(dataDir).authDbFile }).close()
+}
 
 test('setup shell mounts only storage/bootstrap APIs and initializes after validation', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-setup-shell-'))
@@ -26,11 +34,14 @@ test('setup shell mounts only storage/bootstrap APIs and initializes after valid
       bootstrap
     },
     isDev: false,
-    setupTokenRequired: true
+    setupTokenRequired: true,
+    verifySetupToken: (token) => token === SETUP_TOKEN
   })
 
   assert.equal(existsSync(candidate), false)
-  const jobs = await app.request('/api/jobs')
+  const jobs = await app.request('/api/jobs', {
+    headers: { 'x-codetask-setup-grant': SETUP_TOKEN }
+  })
   assert.equal(jobs.status, 404)
 
   const bootstrapResponse = await app.request('/api/bootstrap')
@@ -41,16 +52,29 @@ test('setup shell mounts only storage/bootstrap APIs and initializes after valid
   assert.equal(bootstrapBody.data.setupTokenRequired, true)
   assert.equal(bootstrapBody.data.storagePhase, 'selection_required')
 
-  const browseResponse = await app.request('/api/fs/browse', {
+  const unauthorizedBrowse = await app.request('/api/fs/browse', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ partialPath: root })
+  })
+  assert.equal(unauthorizedBrowse.status, 401)
+
+  const browseResponse = await app.request('/api/fs/browse', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-codetask-setup-grant': SETUP_TOKEN
+    },
     body: JSON.stringify({ partialPath: root })
   })
   assert.equal(browseResponse.status, 200)
 
   const validationResponse = await app.request('/api/system/storage/validate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-codetask-setup-grant': SETUP_TOKEN
+    },
     body: JSON.stringify({ path: candidate })
   })
   assert.equal(validationResponse.status, 200)
@@ -61,7 +85,10 @@ test('setup shell mounts only storage/bootstrap APIs and initializes after valid
 
   const initializeResponse = await app.request('/api/system/storage/initialize', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-codetask-setup-grant': SETUP_TOKEN
+    },
     body: JSON.stringify({
       path: validation.data.canonicalPath,
       validationNonce: validation.data.nonce
@@ -73,7 +100,7 @@ test('setup shell mounts only storage/bootstrap APIs and initializes after valid
   }
   assert.equal(initialized.data.phase, 'ready')
   assert.ok(readDataRootMarker(candidate))
-  assert.equal(existsSync(join(candidate, 'db', 'app.db')), true)
+  assert.equal(existsSync(dataPaths(candidate).authDbFile), true)
   assert.equal(existsSync(bootstrap.locatorFile), true)
 })
 
@@ -151,8 +178,7 @@ test('recovery rewrites only the locator after marker and SQLite integrity valid
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const existingData = join(root, 'existing-data')
   const marker = writeDataRootMarker(existingData, 'recovered-installation')
-  const db = createIsolatedTestDatabase(existingData)
-  closeIsolatedTestDatabase(db)
+  createAuthDatabase(existingData)
   const bootstrap = bootstrapPaths(join(root, 'bootstrap-root'))
   const app = createSetupShell({
     storage: {
@@ -194,7 +220,7 @@ test('recovery rewrites only the locator after marker and SQLite integrity valid
     assert.equal(locator.locator.installationId, marker.installationId)
     assert.equal(locator.locator.source, 'recovered')
   }
-  assert.equal(existsSync(join(existingData, 'db', 'app.db')), true)
+  assert.equal(existsSync(dataPaths(existingData).authDbFile), true)
 })
 
 test('first-run selection adopts an already initialized CodeTask data directory', async (t) => {
@@ -202,8 +228,7 @@ test('first-run selection adopts an already initialized CodeTask data directory'
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const existingData = join(root, 'existing-data')
   const marker = writeDataRootMarker(existingData, 'existing-installation')
-  const db = createIsolatedTestDatabase(existingData)
-  closeIsolatedTestDatabase(db)
+  createAuthDatabase(existingData)
   const bootstrap = bootstrapPaths(join(root, 'shared-bootstrap'))
   const app = createSetupShell({
     storage: {

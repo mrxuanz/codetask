@@ -1,37 +1,19 @@
-import type { AppDatabase } from '../db'
-import type { JobEventBus } from './event-bus'
-import type { JobExecutionRuntimeRegistry } from './job-execution-runtime'
-import type { RuntimeRegistry } from './runtime-registry'
-import type { SettingsStore } from './settings-store'
-import type { ApplicationRuntime } from '../application/application-runtime'
-import type { McpSecretProvider } from '../settings/mcp-secret-provider'
-import type { AppConfig } from '../config/app-config'
-import type { ProviderRegistry } from '../providers/registry'
-import type { ProviderRuntimeManager } from '../providers/lifecycle'
+import type { KernelSqliteDatabase } from '../adapters/sqlite'
+import type { SecureAuthModule } from '../composition/auth'
 
 export interface SecurityContext {
-  mode: 'desktop' | 'server'
-  authSecret: string
-  mcpSecrets: McpSecretProvider
-  setupToken?: string
+  readonly mode: 'desktop' | 'server'
+  readonly authSecret: string
+  readonly auth: SecureAuthModule
 }
 
 export interface AppContext {
-  config: AppConfig
-  dataDir: string
-  db: AppDatabase
-  settings: SettingsStore
-  eventBus: JobEventBus
-  runtimeRegistry: RuntimeRegistry
-  executionRuntime: JobExecutionRuntimeRegistry
-  providerRegistry: ProviderRegistry
-  providerRuntimeManager: ProviderRuntimeManager
-  security: SecurityContext
-  bootId: string
-  applicationRuntime: ApplicationRuntime | null
-  storage?: {
-    bootstrapRoot: string
-    source: string
-    managed: boolean
+  readonly dataDir: string
+  readonly kernelDb: KernelSqliteDatabase
+  readonly security: SecurityContext
+  readonly storage?: {
+    readonly bootstrapRoot: string
+    readonly source: string
+    readonly managed: boolean
   }
 }

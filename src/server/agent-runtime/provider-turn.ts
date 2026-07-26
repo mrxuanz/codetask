@@ -1,13 +1,9 @@
-import { createTurnError, TURN_CANCELLED } from '../../shared/turn-errors.ts'
+import { TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
-import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
-import { refreshWorkloadLease } from '../legacy-control-plane/workload-slot-store'
-import { refreshWorkspaceLease } from '../legacy-control-plane/workspace-lease-store'
-import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
 import { ProgressGuard } from './progress-guard'
 import { TurnScope } from './turn-scope'
-import { getAppConfig } from '../bootstrap'
+import { DEFAULT_TURN_RUNTIME_CONFIG } from './turn-runtime-config'
 
 export interface ProviderTurnContext {
   processExit?: Promise<never>
@@ -30,27 +26,14 @@ export function forwardAbortSignal(
 export function createProviderTurnScope(
   role: ConversationRole,
   options: AgentTurnOptions | undefined,
-  ctx: ProviderTurnContext
+  context: ProviderTurnContext
 ): TurnScope {
-  const turnConfig = getAppConfig().turn
-  const executionContext = getExecutionRunContext()
-  const workspaceContext = getWorkspaceLeaseContext()
   const turnScope = new TurnScope({
     role,
     externalSignal: options?.signal,
-    processExit: ctx.processExit,
-    noFirstSignalMs: turnConfig.noFirstSignalMs,
-    progressGuard: new ProgressGuard(role, turnConfig),
-    onKeepAlive: async () => {
-      if (executionContext?.runId) {
-        await refreshWorkloadLease(executionContext.runId)
-      }
-      if (workspaceContext) {
-        if (!refreshWorkspaceLease(workspaceContext.leaseId)) {
-          throw createTurnError('workspace.lease_lost')
-        }
-      }
-    }
+    processExit: context.processExit,
+    noFirstSignalMs: DEFAULT_TURN_RUNTIME_CONFIG.noFirstSignalMs,
+    progressGuard: new ProgressGuard(role, DEFAULT_TURN_RUNTIME_CONFIG)
   })
   turnScope.arm()
   return turnScope

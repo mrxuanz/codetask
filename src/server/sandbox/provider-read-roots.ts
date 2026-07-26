@@ -1,6 +1,6 @@
 import { dirname, normalize, parse } from 'path'
 import { existsSync, realpathSync, statSync } from 'fs'
-import type { SupportedCoreCode } from '../conversation/cores'
+import type { SupportedCoreCode } from '../../shared/providers/codes'
 import { getProviderRegistry } from '../providers/access'
 import { providerInstallationResolver } from '../providers/installation'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'

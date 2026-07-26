@@ -15,6 +15,7 @@ export default {
     preview: 'Preview',
     delete: 'Delete',
     loading: 'Loading',
+    logout: 'Sign out',
     captchaLabel: 'Verification code',
     captchaPlaceholder: 'Enter code',
     captchaLoadFailed: 'Failed to load verification code',
@@ -39,13 +40,13 @@ export default {
     setupTokenLabel: 'Setup token (from server console)',
     setupTokenPlaceholder: 'Enter the setup token printed in the server console',
     credentialsHint:
-      'Username: 4-32 chars, starts with a letter, letters/numbers/_/- only; reserved names like admin/root are blocked. Password: 8+ chars with upper, lower, digit, and symbol.',
+      'Username: 4-32 chars, starts with a letter, letters/numbers/_/- only; reserved names like admin/root are blocked. Password: 12+ chars with upper, lower, digit, and symbol.',
     confirmPassword: 'Confirm password',
     confirmPasswordPlaceholder: 'Enter password again',
     passwordMismatch: 'Passwords do not match',
     storageTitle: 'Choose data storage',
     storageDescription:
-      'Choose where CodeTask stores its database, attachments, and isolated Provider runtimes. The default folder is created automatically if missing.',
+      'Choose where CodeTask stores its authentication database and sandbox runtime data. The default folder is created automatically if missing.',
     storagePathLabel: 'Data directory',
     storagePathRequired: 'Enter a data directory',
     storageBrowse: 'Browse',
@@ -567,11 +568,31 @@ export default {
       saveSuccess: 'Settings saved',
       sections: {
         language: 'Language',
+        security: 'Account Security',
         storage: 'Data Storage',
         sandbox: 'Sandbox',
         controlPlane: 'Control Plane',
         mcp: 'MCP',
         prompts: 'Prompts'
+      },
+      security: {
+        title: 'Account Security',
+        description: 'Change the sign-in password or revoke every session for this account.',
+        currentPassword: 'Current password',
+        newPassword: 'New password',
+        confirmPassword: 'Confirm new password',
+        passwordHint:
+          'Use at least 12 characters with uppercase, lowercase, a number, and a symbol.',
+        passwordMismatch: 'The new passwords do not match',
+        passwordChanged: 'Password changed. Other sign-in sessions have been revoked.',
+        passwordReused: 'The new password must differ from the current password',
+        changePassword: 'Change password',
+        changingPassword: 'Changing…',
+        sessionsTitle: 'Sign-in sessions',
+        sessionsDescription:
+          'Revoke every session, including this browser, and return to the sign-in page.',
+        signOutEverywhere: 'Sign out everywhere',
+        signingOut: 'Signing out…'
       },
       sandbox: {
         title: 'Sandbox',

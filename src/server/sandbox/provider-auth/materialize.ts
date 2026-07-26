@@ -26,10 +26,7 @@ import {
   runtimeCursorConfigDir,
   runtimeCursorHome
 } from './paths'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../../host-environment'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
 import {
   scrubCredentialSnapshotManifest,
   writeCredentialSnapshotManifest

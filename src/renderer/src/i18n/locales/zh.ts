@@ -15,6 +15,7 @@ export default {
     preview: '预览',
     delete: '删除',
     loading: '加载中',
+    logout: '退出登录',
     captchaLabel: '验证码',
     captchaPlaceholder: '输入验证码',
     captchaLoadFailed: '验证码加载失败',
@@ -39,13 +40,13 @@ export default {
     setupTokenLabel: '初始化令牌（来自服务端控制台）',
     setupTokenPlaceholder: '输入服务端控制台打印的初始化令牌',
     credentialsHint:
-      '用户名 4-32 位，字母开头，仅含字母/数字/下划线/连字符；不可使用 admin、root 等保留名。密码至少 8 位，须含大小写字母、数字和符号。',
+      '用户名 4-32 位，字母开头，仅含字母/数字/下划线/连字符；不可使用 admin、root 等保留名。密码至少 12 位，须含大小写字母、数字和符号。',
     confirmPassword: '确认密码',
     confirmPasswordPlaceholder: '请再次输入密码',
     passwordMismatch: '两次输入的密码不一致',
     storageTitle: '选择数据存储目录',
     storageDescription:
-      '选择 CodeTask 存放数据库、附件和隔离 Provider 运行时的位置。默认目录不存在时会自动创建。',
+      '选择 CodeTask 存放认证数据库和沙箱运行数据的位置。默认目录不存在时会自动创建。',
     storagePathLabel: '数据目录',
     storagePathRequired: '请填写数据目录',
     storageBrowse: '浏览',
@@ -548,11 +549,29 @@ export default {
       saveSuccess: '设置已保存',
       sections: {
         language: '语言',
+        security: '账户安全',
         storage: '数据存储',
         sandbox: '沙箱',
         controlPlane: '控制平面',
         mcp: 'MCP',
         prompts: '提示词'
+      },
+      security: {
+        title: '账户安全',
+        description: '修改登录密码或撤销此账户的全部登录会话。',
+        currentPassword: '当前密码',
+        newPassword: '新密码',
+        confirmPassword: '确认新密码',
+        passwordHint: '至少 12 个字符，并同时包含大写字母、小写字母、数字和符号。',
+        passwordMismatch: '两次输入的新密码不一致',
+        passwordChanged: '密码已更新，其他登录会话已撤销。',
+        passwordReused: '新密码不能与当前密码相同',
+        changePassword: '修改密码',
+        changingPassword: '正在修改…',
+        sessionsTitle: '登录会话',
+        sessionsDescription: '撤销包括当前浏览器在内的全部会话，并返回登录页。',
+        signOutEverywhere: '退出所有设备',
+        signingOut: '正在退出…'
       },
       sandbox: {
         title: '沙箱',

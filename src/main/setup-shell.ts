@@ -22,6 +22,7 @@ export interface SetupShellOptions {
   forbiddenRoots?: readonly string[]
   /** Server mode requires a console setup token; desktop does not. */
   setupTokenRequired?: boolean
+  verifySetupToken?: (token: string) => boolean
   /** Boot the full runtime in-process after storage is ready (no process restart). */
   activateStorage?: (dataDir: string) => void | Promise<void>
 }
@@ -32,6 +33,35 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   const recoveryNonces = new StorageValidationNonceRepository()
   const repository = new StorageLocatorRepository(options.storage.bootstrap)
 
+  app.use('/api/*', async (c, next) => {
+    const publicPath = c.req.path === '/api/health' || c.req.path === '/api/bootstrap'
+    const method = c.req.method.toUpperCase()
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const fetchSite = c.req.header('Sec-Fetch-Site')?.toLowerCase()
+      if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+        return c.json(fail(40301, 'Cross-origin setup requests not allowed', {}), 403)
+      }
+      const origin = c.req.header('Origin')
+      if (origin) {
+        try {
+          if (new URL(origin).origin !== new URL(c.req.url).origin) {
+            return c.json(fail(40301, 'Cross-origin setup requests not allowed', {}), 403)
+          }
+        } catch {
+          return c.json(fail(40301, 'Invalid setup request origin', {}), 403)
+        }
+      }
+    }
+
+    if (!publicPath && options.setupTokenRequired) {
+      const token = c.req.header('x-codetask-setup-grant')?.trim() ?? ''
+      if (!token || !options.verifySetupToken?.(token)) {
+        return c.json(fail(40101, 'auth.setup_grant_invalid', {}), 401)
+      }
+    }
+    return next()
+  })
+
   app.get('/api/health', (c) => c.json(ok({ status: 'ok', phase: 'storage_setup' })))
   app.get('/api/bootstrap', (c) =>
     c.json(
@@ -39,7 +69,9 @@ export function createSetupShell(options: SetupShellOptions): Hono {
         initialized: false,
         authenticated: false,
         setupTokenRequired: options.setupTokenRequired === true,
-        storagePhase: options.storage.phase
+        storagePhase: options.storage.phase,
+        storageDefaultCandidate: options.storage.dataDir,
+        storageIssue: options.storage.issue
       })
     )
   )
@@ -55,7 +87,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     )
   })
 
-  // Same browse surface as create-project; unauthenticated during storage setup only.
+  // The storage picker is setup-only and requires the server setup grant in server mode.
   app.post('/api/fs/browse', async (c) => {
     try {
       const body = await c.req.json<{ partialPath?: string }>()

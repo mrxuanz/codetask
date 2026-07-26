@@ -11,9 +11,7 @@ import test from 'node:test'
 
 const SCAN_ROOTS = [join(process.cwd(), 'src/server')]
 
-const ALLOWED_PROCESS_ENV_FILES = new Set([
-  join(process.cwd(), 'src/server/host-environment.ts')
-])
+const ALLOWED_PROCESS_ENV_FILES = new Set([join(process.cwd(), 'src/server/host-environment.ts')])
 
 function collectFiles(entry: string): string[] {
   if (!existsSync(entry)) return []

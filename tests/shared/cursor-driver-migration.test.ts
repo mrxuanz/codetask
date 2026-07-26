@@ -206,7 +206,6 @@ test('buildCursorTurnPlan lives in Cursor driver module; outer layers do not rea
     join(root, 'src/server/agent-runtime/cursor-acp/stream-session-turn.ts'),
     'utf8'
   )
-  const runner = readFileSync(join(root, 'src/server/agent-runtime/runner.ts'), 'utf8')
   const providerPolicy = readFileSync(
     join(root, 'src/server/agent-runtime/provider-policy.ts'),
     'utf8'
@@ -216,7 +215,7 @@ test('buildCursorTurnPlan lives in Cursor driver module; outer layers do not rea
   assert.doesNotMatch(turnPlan, /CODETASK_CURSOR_API_ENDPOINT/)
   assert.doesNotMatch(turnPlan, /CODETASK_CURSOR_APPROVE_MCPS/)
   assert.match(stream, /from '\.\.\/\.\.\/providers\/cursor\/turn-plan'/)
-  assert.doesNotMatch(runner, /CODETASK_CURSOR_API_ENDPOINT|CODETASK_CURSOR_APPROVE_MCPS/)
+  assert.equal(existsSync(join(root, 'src/server/agent-runtime/runner.ts')), false)
   assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/cursor-policy.ts')), false)
   assert.doesNotMatch(providerPolicy, /buildCursorAcpCliArgs/)
   assert.doesNotMatch(providerPolicy, /CODETASK_CURSOR/)

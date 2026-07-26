@@ -87,7 +87,10 @@ const { t } = useI18n()
 
     <div
       :class="
-        cn('space-y-2 overflow-y-auto px-3 py-3 sm:px-4', fillHeight ? 'min-h-0 flex-1' : 'max-h-72')
+        cn(
+          'space-y-2 overflow-y-auto px-3 py-3 sm:px-4',
+          fillHeight ? 'min-h-0 flex-1' : 'max-h-72'
+        )
       "
     >
       <ErrorAlert v-if="error" :message="error" />
@@ -133,7 +136,9 @@ const { t } = useI18n()
       v-if="hideFooter !== true"
       class="shrink-0 space-y-3 border-t border-border px-3 py-3 sm:px-4"
     >
-      <div class="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+      <div
+        class="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3"
+      >
         <span class="min-w-0 break-all text-xs text-muted-foreground md:truncate">
           {{ t('folderPicker.currentDirectory', { path: currentPath || '—' }) }}
         </span>

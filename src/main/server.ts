@@ -1,14 +1,12 @@
 import { serve, type ServerType } from '@hono/node-server'
 import type { ExecutionContext, Hono } from 'hono'
-import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
-import { readSchemaGeneration } from '../server/application/cutover-state'
-import { initConversationMcpBackend } from '../server/conversation/mcp/url'
+import { createApp, createRuntime, type ApplicationRuntime } from '../server'
 import { mkdirSync } from 'fs'
 import { ensureResolvedDataRoot, type DataDirResolution } from './storage-locator'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
-import { generateSetupToken } from '../server/auth/setup-token'
+import { createSetupGrantService } from '../server/composition/auth'
 import { clearPublishedRunningService, publishRunningService } from './service-discovery'
 import type { AppSecretProvider } from '../server/auth/secret'
 
@@ -43,6 +41,7 @@ export interface AppServerPlatform {
 }
 
 let activeServer: ServerType | null = null
+let activeRuntime: ApplicationRuntime | null = null
 let shutdownPromise: Promise<void> | null = null
 let setupTokenAnnounced = false
 
@@ -55,12 +54,12 @@ function formatUrl(host: string, port: number): string {
 function announceSetupToken(authSecret: string): void {
   if (setupTokenAnnounced) return
   setupTokenAnnounced = true
-  const { token } = generateSetupToken(authSecret)
+  const { grant } = createSetupGrantService(authSecret).issue(Date.now())
   console.log('')
   console.log('========================================')
   console.log('  Account not initialized.')
   console.log('  Setup token (valid 15 min):')
-  console.log(`  ${token}`)
+  console.log(`  ${grant}`)
   console.log('========================================')
   console.log('')
 }
@@ -103,9 +102,8 @@ async function createReadyApp(
   storage: DataDirResolution,
   platform: AppServerPlatform,
   http: { rendererDevUrl?: string; staticDir?: string }
-): Promise<{ app: Hono; dataDir: string; usesLegacyComposition: boolean }> {
+): Promise<{ app: Hono; dataDir: string; runtime: ApplicationRuntime }> {
   const dataDir = ensureResolvedDataRoot(storage)
-  process.env.CODETASK_DATA_DIR = dataDir
 
   const authSecret = await platform.loadAuthSecret({
     mode: cli.mode,
@@ -113,52 +111,38 @@ async function createReadyApp(
   })
   console.log(`[security] auth secret provider: ${authSecret.provider.describeStorage().kind}`)
 
-  const ctx = bootstrapRuntime({
+  const runtime = createRuntime({
     dataDir,
     mode: cli.mode,
     authSecret: authSecret.value,
-    mcpSecretPath: storage.bootstrap.mcpSecretFile,
     storage: {
       bootstrapRoot: storage.bootstrap.root,
       source: storage.source,
       managed: storage.managed
     }
   })
-  process.env.CODETASK_MODE = cli.mode
 
-  const schemaRead = readSchemaGeneration(ctx.db)
-  const usesLegacyComposition = schemaRead !== 'v3_authoritative'
+  try {
+    await runtime.ensureReady()
+    const ctx = runtime.context
 
-  await ensureRuntimeReady(ctx)
-
-  if (cli.mode === 'server') {
-    const { getBootstrap } = await import('../server/auth/service')
-    const state = await getBootstrap()
-    if (!state.initialized) {
-      announceSetupToken(ctx.security.authSecret)
+    if (cli.mode === 'server') {
+      const state = ctx.security.auth.service.bootstrap()
+      if (!state.initialized) {
+        announceSetupToken(ctx.security.authSecret)
+      }
     }
+
+    const app = createApp(ctx, {
+      isDev: platform.isDev,
+      rendererDevUrl: http.rendererDevUrl,
+      staticDir: http.staticDir
+    })
+    return { app, dataDir, runtime }
+  } catch (error) {
+    await runtime.shutdown()
+    throw error
   }
-
-  const app = createApp(ctx, {
-    isDev: platform.isDev,
-    rendererDevUrl: http.rendererDevUrl,
-    staticDir: http.staticDir
-  })
-  return { app, dataDir, usesLegacyComposition }
-}
-
-function scheduleLegacyQueueResume(usesLegacyComposition: boolean): void {
-  if (!usesLegacyComposition) return
-
-  // Resume persisted work only after the HTTP listener is live. setImmediate also lets startup
-  // finish reporting readiness before recovered jobs can consume executor capacity.
-  setImmediate(() => {
-    void import('../server/legacy-control-plane/job-queue')
-      .then((module) => module.resumeJobQueuesAfterServerReady())
-      .catch((error) => {
-        console.error('[jobs] failed to resume queues after HTTP startup', error)
-      })
-  })
 }
 
 export function getShutdownPromise(): Promise<void> | null {
@@ -200,11 +184,14 @@ export async function startAppServer(
     }
 
     const setupTokenRequired = cli.mode === 'server'
+    let verifySetupToken: ((token: string) => boolean) | undefined
     if (setupTokenRequired) {
       const earlySecret = await platform.loadAuthSecret({
         mode: cli.mode,
         bootstrapSecretPath: storage.bootstrap.authSecretFile
       })
+      const grants = createSetupGrantService(earlySecret.value)
+      verifySetupToken = (token) => grants.verify(token, Date.now())
       announceSetupToken(earlySecret.value)
     }
 
@@ -217,6 +204,7 @@ export async function startAppServer(
       staticDir: http.staticDir,
       forbiddenRoots: [platform.appRoot, process.cwd()],
       setupTokenRequired,
+      verifySetupToken,
       activateStorage: async () => {
         if (promoteInflight) {
           await promoteInflight
@@ -227,14 +215,9 @@ export async function startAppServer(
           if (resolved.phase !== 'ready') {
             throw new Error(resolved.issue ?? 'Storage locator is not ready after initialization')
           }
-          const { app, dataDir, usesLegacyComposition } = await createReadyApp(
-            cli,
-            resolved,
-            platform,
-            http
-          )
+          const { app, dataDir, runtime } = await createReadyApp(cli, resolved, platform, http)
           activeApp = app
-          initConversationMcpBackend(boundPort)
+          activeRuntime = runtime
           if (cli.mode === 'server' && publishedInfo) {
             publishRunningService(resolved.bootstrap, { ...publishedInfo, mode: 'server' }, dataDir)
           }
@@ -242,7 +225,6 @@ export async function startAppServer(
             `[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`
           )
           console.log(`[storage] data root: ${dataDir} (source=${resolved.source})`)
-          scheduleLegacyQueueResume(usesLegacyComposition)
         })()
         try {
           await promoteInflight
@@ -299,8 +281,9 @@ export async function startAppServer(
     return info
   }
 
-  const { app, dataDir, usesLegacyComposition } = await createReadyApp(cli, storage, platform, http)
+  const { app, dataDir, runtime } = await createReadyApp(cli, storage, platform, http)
   activeApp = app
+  activeRuntime = runtime
 
   const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
     cli.host,
@@ -320,14 +303,19 @@ export async function startAppServer(
       )
       boundPort = port
       bindChanged = cli.port !== port
-      initConversationMcpBackend(port)
       break
     } catch (error) {
-      if (!isAddressInUse(error)) throw error
+      if (!isAddressInUse(error)) {
+        activeRuntime = null
+        await runtime.shutdown()
+        throw error
+      }
     }
   }
 
   if (!activeServer) {
+    activeRuntime = null
+    await runtime.shutdown()
     throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
   }
 
@@ -355,8 +343,6 @@ export async function startAppServer(
     console.log(`[server] External access: http://<your-ip>:${boundPort}`)
   }
 
-  scheduleLegacyQueueResume(usesLegacyComposition)
-
   return info
 }
 
@@ -368,23 +354,9 @@ export async function stopAppServer(): Promise<void> {
   clearPublishedRunningService()
 
   try {
-    const { stopRetentionJanitor } = await import('../server/retention/lifecycle')
-    stopRetentionJanitor()
-    const { stopArtifactExpiryScheduler } = await import('../server/retention/expiry-scheduler')
-    stopArtifactExpiryScheduler()
-  } catch (error) {
-    console.warn('[server] failed to stop retention janitor', error)
-  }
-
-  try {
-    const { stopAuthJanitor } = await import('../server/auth/janitor')
-    stopAuthJanitor()
-  } catch (error) {
-    console.warn('[server] failed to stop auth janitor', error)
-  }
-
-  try {
-    await shutdownRuntime('app_shutdown')
+    const runtime = activeRuntime
+    activeRuntime = null
+    await runtime?.shutdown()
   } catch (error) {
     console.warn('[server] failed to shutdown application runtime', error)
   }
@@ -392,11 +364,4 @@ export async function stopAppServer(): Promise<void> {
   await import('../server/sandbox/supervisor-manager').then((module) =>
     module.shutdownSandboxSupervisor()
   )
-
-  try {
-    const { closeDatabaseForTests } = await import('../server/db')
-    closeDatabaseForTests()
-  } catch (error) {
-    console.warn('[server] failed to close database', error)
-  }
 }

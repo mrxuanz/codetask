@@ -167,18 +167,17 @@ test('central preflight switch no longer handles Claude; driver owns preflight',
   assert.doesNotMatch(claudePreflight, /resolveProviderExecutable/)
 })
 
-test('buildClaudeTurnOptions lives in Claude driver module; runner does not import Claude policy', () => {
+test('buildClaudeTurnOptions lives in Claude driver module without a legacy runner', () => {
   const turnOptions = readFileSync(
     join(root, 'src/server/providers/claude/turn-options.ts'),
     'utf8'
   )
   const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/claude-sdk.ts'), 'utf8')
-  const runner = readFileSync(join(root, 'src/server/agent-runtime/runner.ts'), 'utf8')
 
   assert.match(turnOptions, /export function buildClaudeTurnOptions/)
   assert.match(sdk, /from '\.\.\/\.\.\/providers\/claude\/turn-options'/)
   assert.doesNotMatch(sdk, /from '\.\/claude-policy'/)
-  assert.doesNotMatch(runner, /claude-policy|buildClaudeTurnOptions/)
+  assert.equal(existsSync(join(root, 'src/server/agent-runtime/runner.ts')), false)
   assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/claude-policy.ts')), false)
 })
 

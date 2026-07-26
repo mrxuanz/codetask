@@ -13,6 +13,7 @@ export default {
     preview: 'プレビュー',
     delete: '削除',
     loading: '読み込み中',
+    logout: 'ログアウト',
     captchaLabel: '認証コード',
     captchaPlaceholder: 'コードを入力',
     captchaLoadFailed: '認証コードの読み込みに失敗しました',
@@ -37,13 +38,13 @@ export default {
     setupTokenLabel: 'セットアップトークン（サーバーコンソールから）',
     setupTokenPlaceholder: 'サーバーコンソールに表示されたセットアップトークンを入力',
     credentialsHint:
-      'ユーザー名は 4〜32 文字、英字で始まり、英数字・アンダースコア・ハイフンのみ。admin/root などの予約名は不可。パスワードは 8 文字以上で、大文字・小文字・数字・記号を含めてください。',
+      'ユーザー名は 4〜32 文字、英字で始まり、英数字・アンダースコア・ハイフンのみ。admin/root などの予約名は不可。パスワードは 12 文字以上で、大文字・小文字・数字・記号を含めてください。',
     confirmPassword: 'パスワード確認',
     confirmPasswordPlaceholder: 'もう一度パスワードを入力',
     passwordMismatch: 'パスワードが一致しません',
     storageTitle: 'データ保存先を選択',
     storageDescription:
-      'CodeTask のデータベース、添付ファイル、分離された Provider ランタイムの保存先を選択します。デフォルトフォルダが無い場合は自動作成します。',
+      'CodeTask の認証データベースとサンドボックス実行データの保存先を選択します。デフォルトフォルダが無い場合は自動作成します。',
     storagePathLabel: 'データディレクトリ',
     storagePathRequired: 'データディレクトリを入力してください',
     storageBrowse: '参照',
@@ -512,11 +513,30 @@ export default {
       saveSuccess: '設定を保存しました',
       sections: {
         language: '言語',
+        security: 'アカウントセキュリティ',
         storage: 'データストレージ',
         sandbox: 'サンドボックス',
         controlPlane: 'Control Plane',
         mcp: 'MCP',
         prompts: 'Prompts'
+      },
+      security: {
+        title: 'アカウントセキュリティ',
+        description: 'ログインパスワードの変更、またはすべてのセッションの無効化を行います。',
+        currentPassword: '現在のパスワード',
+        newPassword: '新しいパスワード',
+        confirmPassword: '新しいパスワード（確認）',
+        passwordHint: '12文字以上で、大文字・小文字・数字・記号を含めてください。',
+        passwordMismatch: '新しいパスワードが一致しません',
+        passwordChanged: 'パスワードを変更し、他のログインセッションを無効化しました。',
+        passwordReused: '現在とは異なる新しいパスワードを使用してください',
+        changePassword: 'パスワードを変更',
+        changingPassword: '変更中…',
+        sessionsTitle: 'ログインセッション',
+        sessionsDescription:
+          'このブラウザを含むすべてのセッションを無効化し、ログイン画面に戻ります。',
+        signOutEverywhere: 'すべての端末からログアウト',
+        signingOut: 'ログアウト中…'
       },
       sandbox: {
         title: 'サンドボックス',
