@@ -10,7 +10,6 @@ import {
   resolveHostProfilePaths,
   resolveOpencodeInstallDirs,
   runtimeCodexHome,
-  snapshotClaudeHostSettings,
   snapshotCodexHostAuth,
   snapshotCursorHostAuth,
   snapshotOpencodeHostAuth
@@ -18,17 +17,6 @@ import {
 import { materializeCodexAuth, materializeOpencodeAuth, opencodeRuntimeLayout } from './materialize'
 import type { ProviderAuthDiagnostics, ProviderAuthPrepared } from './types'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
-
-const RUNTIME_AUTH_ENV_KEYS = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'CODEX_API_KEY',
-  'CURSOR_API_KEY',
-  'CURSOR_AUTH_TOKEN',
-  'OPENCODE_API_KEY'
-] as const
 
 function uniqueRoots(roots: string[]): string[] {
   const seen = new Set<string>()
@@ -80,18 +68,6 @@ function copySelectedHostEnv(
   }
 }
 
-function copyRuntimeAuthEnv(
-  env: Record<string, string>,
-  hostEnvironment: HostEnvironmentSnapshot
-): void {
-  for (const key of RUNTIME_AUTH_ENV_KEYS) {
-    const value = hostEnvironment[key]
-    if (typeof value === 'string' && value.trim()) {
-      env[key] = value.trim()
-    }
-  }
-}
-
 function buildRuntimeBaseEnv(
   runtimeRoot: string,
   hostEnvironment: HostEnvironmentSnapshot
@@ -123,7 +99,6 @@ function buildRuntimeBaseEnv(
     env.XDG_STATE_HOME = join(runtimeRoot, 'state')
   }
 
-  copyRuntimeAuthEnv(env, hostEnvironment)
   return env
 }
 
@@ -158,7 +133,6 @@ function buildHostIdentityEnv(
     env.XDG_DATA_HOME = join(profile.home, '.local', 'share')
   }
 
-  copyRuntimeAuthEnv(env, hostEnvironment)
   return env
 }
 
@@ -183,7 +157,7 @@ function authPreparationContext(input: ProviderAuthPreparationOptions): {
 export function prepareCodexAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
   const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
-  const hostAuth = snapshotCodexHostAuth(profile, hostEnvironment)
+  const hostAuth = snapshotCodexHostAuth(profile)
   const hostAuthPath = resolveCodexHostAuthPath(profile)
   const materialized = materializeCodexAuth(runtimeRoot, profile)
   const codexHome = runtimeCodexHome(runtimeRoot)
@@ -206,8 +180,8 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
         ]
       : [
           materialized.configCopied
-            ? `Codex config snapshotted, but no auth material was found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
-            : `Host Codex auth file not found: ${hostAuthPath} (set OPENAI_API_KEY / CODEX_API_KEY)`
+            ? `Codex config snapshotted, but no host login was found: ${hostAuthPath} (run codex login)`
+            : `Host Codex login file not found: ${hostAuthPath} (run codex login)`
         ]
   }
 
@@ -237,7 +211,7 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
 export function prepareCursorAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
   const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
-  const hostAuth = snapshotCursorHostAuth(profile, hostEnvironment)
+  const hostAuth = snapshotCursorHostAuth(profile)
   const cursorHome = resolveCursorHostCursorHome(profile)
   // Keep project metadata under runtime (P5), but use host identity so macOS Keychain /
   // seatbelt ACP can authenticate. runtime-copy HOME breaks Keychain and still fails ACP
@@ -257,7 +231,7 @@ export function prepareCursorAuth(input: ProviderAuthPreparationOptions): Provid
     warnings: [
       hostAuth.present || hostAuth.sources.length > 0
         ? 'Cursor uses the host profile identity (including macOS Keychain); outer sandbox allows read/write to ~/.cursor and related directories.'
-        : `Host Cursor auth.json not found (macOS may use Keychain login only); set CURSOR_API_KEY.`,
+        : 'Cursor host login was not detected from files (macOS may use Keychain); run `agent login`.',
       'ACP uses --force --sandbox disabled --approve-mcps --trust; temp files written to runtime.'
     ]
   }
@@ -299,33 +273,22 @@ export function prepareCursorAuth(input: ProviderAuthPreparationOptions): Provid
 export function prepareClaudeAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
   const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
-  const hostSettings = snapshotClaudeHostSettings(profile)
   const claudeDir = join(runtimeRoot, '.claude')
   mkdirSync(claudeDir, { recursive: true })
 
   const envPatch = {
     ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
-    CLAUDE_CONFIG_DIR: claudeDir,
-    ...hostSettings.env
+    CLAUDE_CONFIG_DIR: claudeDir
   }
-
-  const hasAuthEnv = Object.keys(envPatch).some(
-    (key) =>
-      key === 'ANTHROPIC_API_KEY' ||
-      key === 'ANTHROPIC_AUTH_TOKEN' ||
-      key === 'CLAUDE_CODE_OAUTH_TOKEN'
-  )
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'claude-code',
     mode: 'runtime-copy',
-    authMaterialPresent: hasAuthEnv,
-    hostAuthPath: hostSettings.settingsPath,
+    authMaterialPresent: false,
+    hostAuthPath: join(profile.home, '.claude'),
     runtimeAuthPath: claudeDir,
     warnings: [
-      hasAuthEnv
-        ? `Claude host settings injected as auth env only; session state written to ${claudeDir}.`
-        : `No injectable Claude auth env found (${hostSettings.settingsPath}); ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN required.`,
+      'Claude environment-token authentication is disabled; this Provider remains unavailable until a file/OS-store host-login bridge is implemented.',
       'Claude inner bypassPermissions + sandbox disabled; settingSources=[]; outer sandbox is the only boundary.'
     ]
   }
@@ -374,7 +337,7 @@ export function prepareOpenCodeAuth(input: ProviderAuthPreparationOptions): Prov
       ? [
           'OpenCode config/auth snapshotted to runtime XDG directories; question denied + auto-replied if asked; MCP injected via OPENCODE_CONFIG_CONTENT.'
         ]
-      : ['OpenCode config directory is empty (will rely on environment variable API key)']
+      : ['OpenCode host login files were not found; environment-token authentication is disabled.']
   }
 
   const readRoots = uniqueRoots([...resolveOpencodeInstallDirs()])

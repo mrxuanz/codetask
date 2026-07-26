@@ -1,1 +1,4 @@
 export { SqliteAuthRepository } from './auth-repository'
+export { SqliteConversationRepository } from './conversation-repository'
+export { SqliteDraftRepository } from './draft-repository'
+export { SqliteJobIntakeRepository } from './job-intake-repository'

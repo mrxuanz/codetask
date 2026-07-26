@@ -27,6 +27,7 @@ import {
   runtimeCursorHome
 } from './paths'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
+import { stripProviderHostConfiguration } from '../../providers/environment'
 import {
   scrubCredentialSnapshotManifest,
   writeCredentialSnapshotManifest
@@ -238,7 +239,7 @@ function readDarwinCursorKeychainPassword(
       encoding: 'utf8',
       timeout: 15_000,
       env: {
-        ...hostEnvironment,
+        ...stripProviderHostConfiguration(hostEnvironment),
         HOME: profile.home
       }
     }

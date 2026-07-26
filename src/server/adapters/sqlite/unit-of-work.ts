@@ -2,9 +2,17 @@ import type Database from 'better-sqlite3'
 import type { KernelTransaction, UnitOfWork } from '../../core/application/ports'
 import { KernelSqliteDatabase } from './database'
 import { SqliteAuthRepository } from './repositories/auth-repository'
+import { SqliteConversationRepository } from './repositories/conversation-repository'
+import { SqliteDraftRepository } from './repositories/draft-repository'
+import { SqliteJobIntakeRepository } from './repositories/job-intake-repository'
 
 function createTransaction(database: Database.Database): KernelTransaction {
-  return { auth: new SqliteAuthRepository(database) }
+  return {
+    auth: new SqliteAuthRepository(database),
+    conversation: new SqliteConversationRepository(database),
+    draft: new SqliteDraftRepository(database),
+    jobIntake: new SqliteJobIntakeRepository(database)
+  }
 }
 
 export class SqliteUnitOfWork implements UnitOfWork {

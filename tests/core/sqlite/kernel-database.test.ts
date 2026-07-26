@@ -15,6 +15,18 @@ const EXPECTED_TABLES = [
   'auth_sessions',
   'auth_throttles',
   'auth_users',
+  'conversation_messages',
+  'conversation_settings',
+  'conversation_threads',
+  'conversation_turns',
+  'conversation_workspaces',
+  'draft_attachments',
+  'draft_execution_trees',
+  'draft_generation_runs',
+  'draft_settings',
+  'drafts',
+  'job_intake_attachments',
+  'job_intake_handoffs',
   'kernel_schema_migrations'
 ]
 

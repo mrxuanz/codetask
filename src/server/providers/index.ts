@@ -34,15 +34,11 @@ export {
   processHostEnvironmentSource,
   initializeProcessHostEnvironment,
   resolveHostEnvironment,
-  processHostAuthSource,
-  ProcessHostAuthSource,
   ProcessHostEnvironmentSource
 } from '../host-environment'
 export type {
   HostEnvironmentSnapshot,
   HostEnvironmentSource,
   HostEnvironmentCommandRunner,
-  ResolveHostEnvironmentOptions,
-  HostAuthSource,
-  HostAuthKeyPresence
+  ResolveHostEnvironmentOptions
 } from '../host-environment'

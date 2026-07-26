@@ -188,7 +188,7 @@ test('credential snapshots are manifested and startup scrub removes only recorde
   }
 })
 
-test('prepareClaude isolates CLAUDE_CONFIG_DIR and does not expose host ~/.claude read roots', () => {
+test('prepareClaude rejects environment-token auth and isolates CLAUDE_CONFIG_DIR', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-claude-env-'))
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-claude-host-'))
   const hostClaude = join(hostRoot, '.claude')
@@ -212,7 +212,9 @@ test('prepareClaude isolates CLAUDE_CONFIG_DIR and does not expose host ~/.claud
     })
     assert.equal(prepared.envPatch.CLAUDE_CONFIG_DIR, join(runtimeRoot, '.claude'))
     assert.equal(prepared.envPatch.HOME, runtimeRoot)
-    assert.equal(prepared.envPatch.ANTHROPIC_API_KEY, 'sk-test')
+    assert.equal(prepared.envPatch.ANTHROPIC_API_KEY, undefined)
+    assert.equal(prepared.diagnostics.authMaterialPresent, false)
+    assert.match(prepared.diagnostics.warnings.join('\n'), /environment-token.*disabled/i)
     assert.notEqual(prepared.envPatch.PATH, '/should-not-inject')
 
     const hostConfigDir = resolveClaudeHostConfigDir(

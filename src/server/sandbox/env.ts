@@ -7,6 +7,7 @@ import {
   ensureIsolatedProviderDirs
 } from '../agent-runtime/env'
 import { snapshotHostEnv, stripCodeTaskTransientEnv } from '../providers/launch-env'
+import { stripProviderHostConfiguration } from '../providers/environment'
 import { augmentPathWithHostNode } from './toolchain-path'
 import type { ProviderAuthMode } from './provider-auth/types'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
@@ -80,7 +81,9 @@ export function buildSandboxEnv(input: {
   ensureIsolatedProviderDirs(input.runtimeRoot)
 
   const host = snapshotHostEnv()
-  const providerEnv = stripCodeTaskTransientEnv({ ...(input.providerEnv ?? {}) })
+  const providerEnv = stripProviderHostConfiguration(
+    stripCodeTaskTransientEnv({ ...(input.providerEnv ?? {}) })
+  )
   const env: Record<string, string> = {
     PATH: host.PATH ?? '',
     LANG: host.LANG ?? 'C.UTF-8',

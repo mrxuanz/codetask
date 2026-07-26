@@ -58,7 +58,7 @@ test('buildLaunchSpec redactedSummary never contains secret overlay values', () 
   })
 })
 
-test('LaunchSummary envVars include present flags', () => {
+test('LaunchSummary omits credential variable names entirely', () => {
   withFakeCodexBin((bin, cwd) => {
     const spec = buildLaunchSpec('codex', {
       cwd,
@@ -69,11 +69,13 @@ test('LaunchSummary envVars include present flags', () => {
       },
       providerOverlay: { OPENAI_API_KEY: 'set', CODEX_API_KEY: '' }
     })
-    const openAi = spec.redactedSummary.envVars.find((v) => v.name === 'OPENAI_API_KEY')
-    const codexKey = spec.redactedSummary.envVars.find((v) => v.name === 'CODEX_API_KEY')
-    assert.ok(openAi)
-    assert.equal(openAi.present, true)
-    assert.ok(codexKey)
-    assert.equal(codexKey.present, false)
+    assert.equal(spec.env.OPENAI_API_KEY, undefined)
+    assert.equal(spec.env.CODEX_API_KEY, undefined)
+    assert.equal(
+      spec.redactedSummary.envVars.some(
+        (entry) => entry.name === 'OPENAI_API_KEY' || entry.name === 'CODEX_API_KEY'
+      ),
+      false
+    )
   })
 })

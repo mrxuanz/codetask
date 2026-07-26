@@ -4,11 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { createProviderRegistry } from '../../src/server/providers/composition.ts'
-import {
-  ProcessHostAuthSource,
-  processHostAuthSource,
-  processHostEnvironmentSource
-} from '../../src/server/host-environment.ts'
+import { processHostEnvironmentSource } from '../../src/server/host-environment.ts'
 import { toProviderAuthLogDto } from '../../src/server/sandbox/provider-auth/types.ts'
 import { spawnProviderCommandSync } from '../../src/server/providers/spawn.ts'
 import { resolveProviderRunPolicy } from '../../src/server/agent-runtime/provider-policy.ts'
@@ -37,33 +33,6 @@ test('ProviderAuthMode is only runtime-copy | host-identity (PRU-05-01)', () => 
     'utf8'
   )
   assert.doesNotMatch(policySource, /host-identity-dev-only|env-token/)
-})
-
-test('HostAuthSource returns presence only and never secret values (PRU-05-03)', () => {
-  const secret = 'host-auth-source-secret-value-pru-05-03'
-  const source = new ProcessHostAuthSource({
-    snapshot: () =>
-      Object.freeze({
-        OPENAI_API_KEY: secret,
-        EMPTY_KEY: '',
-        MISSING_IGNORED: undefined as unknown as string
-      })
-  })
-  const result = source.inspectEnvironmentKeys(['OPENAI_API_KEY', 'EMPTY_KEY', 'ABSENT_KEY'])
-  assert.deepEqual(result, [
-    { key: 'OPENAI_API_KEY', present: true },
-    { key: 'EMPTY_KEY', present: false },
-    { key: 'ABSENT_KEY', present: false }
-  ])
-  const json = JSON.stringify(result)
-  assert.ok(!json.includes(secret))
-  assert.equal('value' in result[0], false)
-
-  // Default process-backed source is constructible and returns boolean presence.
-  const live = processHostAuthSource.inspectEnvironmentKeys(['PATH'])
-  assert.equal(live.length, 1)
-  assert.equal(live[0]?.key, 'PATH')
-  assert.equal(typeof live[0]?.present, 'boolean')
 })
 
 test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)', () => {

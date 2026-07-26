@@ -9,8 +9,11 @@ import {
   type KernelSqliteDatabase
 } from './adapters/sqlite'
 import { createSecureAuthModule } from './composition/auth'
+import { createConversationModule } from './composition/conversation'
+import { createDraftModule } from './composition/draft'
 import type { AppContext } from './context'
 import { dataPaths } from './data-paths'
+import { processHostEnvironmentSource } from './host-environment'
 
 export type { AppContext } from './context'
 
@@ -68,10 +71,24 @@ export function createRuntime(options: BootstrapOptions): ApplicationRuntime {
       authSecret,
       mode
     })
+    const conversation = createConversationModule({
+      database: kernelDb,
+      runtimeRoot: dataPaths(options.dataDir).conversationRuntime,
+      hostEnvironment: processHostEnvironmentSource.snapshot()
+    })
+    const draft = createDraftModule({
+      database: kernelDb,
+      runtimeRoot: dataPaths(options.dataDir).draftRuntime,
+      draftAssetsRoot: dataPaths(options.dataDir).draftAssets,
+      jobIntakeAssetsRoot: dataPaths(options.dataDir).jobIntakeAssets,
+      hostEnvironment: processHostEnvironmentSource.snapshot()
+    })
     const context: AppContext = {
       dataDir: options.dataDir,
       kernelDb,
       security: { mode, authSecret, auth },
+      conversation,
+      draft,
       ...(options.storage ? { storage: options.storage } : {})
     }
     auth.service.cleanup()
@@ -91,9 +108,13 @@ export function createRuntime(options: BootstrapOptions): ApplicationRuntime {
         if (closed) return
         closed = true
         try {
-          auth.dispose()
+          await Promise.all([conversation.shutdown(), draft.shutdown()])
         } finally {
-          kernelDb.close()
+          try {
+            auth.dispose()
+          } finally {
+            kernelDb.close()
+          }
         }
       }
     })

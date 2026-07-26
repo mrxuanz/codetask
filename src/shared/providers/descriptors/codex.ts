@@ -6,7 +6,6 @@ export const CODEX_DESCRIPTOR = Object.freeze({
   label: 'Codex',
   description: 'OpenAI Codex CLI',
   defaultCommands: ['codex'],
-  authEnvironmentKeys: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
   childEnvironmentKeys: ['CODEX_HOME'],
   mcpRootKey: 'mcp_servers',
   capabilities: {

@@ -78,10 +78,7 @@ export interface CodexHostAuthSnapshot {
   sources: string[]
 }
 
-export function snapshotCodexHostAuth(
-  profile = resolveHostProfilePaths(),
-  env: HostEnvironment = processHostEnvironmentSource.snapshot()
-): CodexHostAuthSnapshot {
+export function snapshotCodexHostAuth(profile = resolveHostProfilePaths()): CodexHostAuthSnapshot {
   const codexHome = resolveCodexHostHome(profile)
   const sources: string[] = []
 
@@ -90,10 +87,8 @@ export function snapshotCodexHostAuth(
     if (existsSync(path)) sources.push(path)
   }
 
-  const hasEnvKey = Boolean(env.OPENAI_API_KEY?.trim() || env.CODEX_API_KEY?.trim())
-
   return {
-    present: sources.some((path) => path.endsWith('auth.json')) || hasEnvKey,
+    present: sources.some((path) => path.endsWith('auth.json')),
     codexHome,
     sources
   }
@@ -108,8 +103,7 @@ export interface CursorHostAuthSnapshot {
 }
 
 export function snapshotCursorHostAuth(
-  profile = resolveHostProfilePaths(),
-  env: HostEnvironment = processHostEnvironmentSource.snapshot()
+  profile = resolveHostProfilePaths()
 ): CursorHostAuthSnapshot {
   const authCandidates = resolveCursorHostAuthPathCandidates(profile)
   const authPath =
@@ -132,10 +126,8 @@ export function snapshotCursorHostAuth(
     if (existsSync(path)) sources.push(path)
   }
 
-  const hasEnvKey = Boolean(env.CURSOR_API_KEY?.trim())
-
   return {
-    present: authCandidates.some((candidate) => existsSync(candidate)) || hasEnvKey,
+    present: authCandidates.some((candidate) => existsSync(candidate)),
     authPath,
     cursorHome,
     configDir,
@@ -153,77 +145,17 @@ export function resolveClaudeProjectConfigDir(workspaceRoot: string): string {
 
 const CLAUDE_SETTINGS_FILENAMES = ['settings.json', 'settings.local.json'] as const
 
-const CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES = [
-  'CODETASK_',
-  'ELECTRON_',
-  'CHROME_',
-  'CRASHPAD_'
-] as const
-
-const CLAUDE_SETTINGS_BLOCKED_ENV_KEYS = new Set([
-  'PATH',
-  'HOME',
-  'USERPROFILE',
-  'HOMEDRIVE',
-  'HOMEPATH',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'TMPDIR',
-  'TEMP',
-  'TMP',
-  'XDG_CONFIG_HOME',
-  'XDG_CACHE_HOME',
-  'XDG_DATA_HOME',
-  'XDG_STATE_HOME',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'NODE_EXTRA_CA_CERTS',
-  'CURL_CA_BUNDLE',
-  'REQUESTS_CA_BUNDLE',
-  'CLAUDE_CONFIG_DIR'
-])
-
-function isAllowedClaudeSettingsEnvKey(key: string): boolean {
-  const upper = key.toUpperCase()
-  if (CLAUDE_SETTINGS_BLOCKED_ENV_KEYS.has(upper)) return false
-  if (CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))) return false
-  return upper.startsWith('ANTHROPIC_') || upper === 'CLAUDE_CODE_OAUTH_TOKEN'
-}
-
-function readClaudeSettingsEnv(settingsPath: string): Record<string, string> {
-  if (!existsSync(settingsPath)) return {}
-  try {
-    const parsed = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
-      env?: Record<string, unknown>
-    }
-    const env = parsed.env
-    if (!env || typeof env !== 'object') return {}
-    const out: Record<string, string> = {}
-    for (const [key, value] of Object.entries(env)) {
-      if (typeof value !== 'string' || !value.trim()) continue
-      if (!isAllowedClaudeSettingsEnvKey(key)) continue
-      out[key] = value.trim()
-    }
-    return out
-  } catch {
-    return {}
-  }
-}
-
 function snapshotClaudeSettingsInDir(configDir: string): {
   configDir: string
   sources: string[]
-  env: Record<string, string>
 } {
   const sources: string[] = []
-  const env: Record<string, string> = {}
   for (const name of CLAUDE_SETTINGS_FILENAMES) {
     const path = join(configDir, name)
     if (!existsSync(path)) continue
     sources.push(path)
-    Object.assign(env, readClaudeSettingsEnv(path))
   }
-  return { configDir, sources, env }
+  return { configDir, sources }
 }
 
 export interface ClaudeHostSettingsSnapshot {
@@ -231,7 +163,6 @@ export interface ClaudeHostSettingsSnapshot {
   configDir: string
   settingsPath: string
   sources: string[]
-  env: Record<string, string>
 }
 
 export function snapshotClaudeHostSettings(
@@ -243,15 +174,13 @@ export function snapshotClaudeHostSettings(
     present: snapshot.sources.length > 0,
     configDir,
     settingsPath: join(configDir, 'settings.json'),
-    sources: snapshot.sources,
-    env: snapshot.env
+    sources: snapshot.sources
   }
 }
 
 export function snapshotClaudeProjectSettings(workspaceRoot: string): {
   configDir: string
   sources: string[]
-  env: Record<string, string>
 } {
   return snapshotClaudeSettingsInDir(resolveClaudeProjectConfigDir(workspaceRoot))
 }

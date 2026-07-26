@@ -9,11 +9,19 @@ export function dataPaths(dataDir: string): {
   legacyDbFile: string
   sandboxHome: string
   sandboxRuntime: string
+  conversationRuntime: string
+  draftRuntime: string
+  draftAssets: string
+  jobIntakeAssets: string
 } {
   return {
     authDbFile: join(dataDir, 'db', 'auth.db'),
     legacyDbFile: join(dataDir, 'db', 'app.db'),
     sandboxHome: join(dataDir, 'sandbox-home'),
-    sandboxRuntime: join(dataDir, 'sandbox-runtime')
+    sandboxRuntime: join(dataDir, 'sandbox-runtime'),
+    conversationRuntime: join(dataDir, 'sandbox-runtime', 'conversations'),
+    draftRuntime: join(dataDir, 'sandbox-runtime', 'drafts'),
+    draftAssets: join(dataDir, 'draft-assets'),
+    jobIntakeAssets: join(dataDir, 'job-intake-assets')
   }
 }

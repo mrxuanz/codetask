@@ -683,5 +683,131 @@ export default {
       }
     }
   },
+  conversation: {
+    nav: { chat: 'Chat', drafts: 'Drafts', settings: 'Settings' },
+    title: 'Conversation',
+    workspaces: 'Workspaces',
+    addFolder: 'Add folder',
+    chooseFolder: 'Choose a workspace folder',
+    addSelectedFolder: 'Add selected folder',
+    createAndAddFolder: 'Create and add',
+    newThread: 'New conversation',
+    noWorkspace: 'No workspace yet',
+    emptyTitle: 'Start with a local folder',
+    emptyDescription: 'Cursor will read and edit files inside the folder you choose.',
+    startHint: 'Send a message to start this conversation.',
+    waiting: 'Cursor is replying…',
+    thinking: 'Cursor is thinking…',
+    promptPlaceholder: 'Describe what you want Cursor to do…',
+    chooseWorkspaceFirst: 'Choose a workspace folder first',
+    send: 'Send',
+    stop: 'Stop',
+    cancelled: 'The response was stopped',
+    folderDialogTitle: 'Choose a workspace folder',
+    folderDialogDescription: 'Select an existing folder or create a child folder here.',
+    confirmRemoveWorkspace: 'Remove “{name}” from CodeTask? Local files will not be deleted.',
+    confirmDeleteThread: 'Delete conversation “{name}”? This cannot be undone.',
+    errors: {
+      loadWorkspaces: 'Failed to load workspaces',
+      loadThreads: 'Failed to load conversations',
+      loadMessages: 'Failed to load messages',
+      createThread: 'Failed to create conversation',
+      addWorkspace: 'Failed to add workspace',
+      removeWorkspace: 'Failed to remove workspace',
+      deleteThread: 'Failed to delete conversation',
+      send: 'Failed to send message'
+    },
+    settings: {
+      title: 'Settings',
+      description: 'Conversations use the Cursor account on this host; API keys are not accepted.',
+      cursorTitle: 'Cursor host authentication',
+      cursorDescription: 'CodeTask reuses the Cursor Agent CLI login on this machine.',
+      authenticated: 'Authenticated',
+      notAuthenticated: 'Not authenticated',
+      loginHint: 'Complete browser login in a host terminal, then refresh status:',
+      noKeyHint: 'There is no key form and credentials are never read from environment variables.',
+      modelLabel: 'Default model (optional)',
+      modelPlaceholder: 'Leave blank to use the Cursor default',
+      modelHint: 'The model name is stored as typed conversation data, not environment config.',
+      save: 'Save conversation settings',
+      saving: 'Saving…',
+      saved: 'Saved',
+      refreshStatus: 'Refresh login status'
+    }
+  },
+  drafts: {
+    title: 'Drafts and execution trees',
+    new: 'New',
+    empty: 'No drafts yet.',
+    noWorkspace: 'Add a workspace folder from Chat first',
+    goChat: 'Return to Chat',
+    createTitle: 'Create draft',
+    workspace: 'Workspace',
+    boundaryHint: 'This module only generates trees; confirmation hands off to Job Intake.',
+    fields: {
+      title: 'Title',
+      objective: 'Objective',
+      requirements: 'Detailed requirements',
+      constraints: 'Constraints and non-goals',
+      acceptance: 'Acceptance criteria'
+    },
+    status: {
+      editing: 'Editing',
+      generating: 'Generating',
+      tree_ready: 'Ready to confirm',
+      submitted: 'Handed off'
+    },
+    save: 'Save draft',
+    saving: 'Saving…',
+    saved: 'Draft saved',
+    generate: 'Generate execution tree',
+    regenerate: 'Regenerate execution tree',
+    generated: 'Execution tree generated',
+    generating: 'Cursor is generating and validating the execution tree…',
+    progress: '{count} characters received. Only a valid final tree is saved.',
+    thinking: 'Show reasoning',
+    stop: 'Stop generation',
+    cancelled: 'Generation stopped',
+    delete: 'Delete draft',
+    deletePrompt: 'Delete this draft and its draft-owned attachments? This cannot be undone.',
+    deleteSubmittedPrompt:
+      'Delete draft source data? The submitted Job Intake snapshot and attachment copies remain.',
+    treeTitle: 'Execution tree',
+    treeImmutableHint: 'Versioned snapshot validated by the server',
+    confirm: 'Confirm and hand off',
+    confirming: 'Handing off…',
+    confirmPrompt:
+      'Confirm this tree and create an immutable Job Intake snapshot? The draft will be locked.',
+    submitted: 'Tree and attachment copies handed off to Job Intake.',
+    attachments: {
+      title: 'Draft attachments',
+      hint: 'The planner reads these; confirmation validates and copies them into Job Intake storage.',
+      add: 'Add attachment',
+      uploading: 'Uploading…',
+      empty: 'No attachments',
+      remove: 'Remove'
+    },
+    handoff: {
+      title: 'Received by Job Intake',
+      pending:
+        'The handoff is pending. The Job execution module is not implemented, so execution will not start.',
+      attachments: '{count} independent attachment copies saved'
+    },
+    settings: {
+      title: 'Draft planner',
+      description: 'Edit the prompt and Skills operating manual used to generate execution trees.',
+      model: 'Planning model (optional)',
+      prompt: 'Planner prompt',
+      skills: 'Skills operating manual',
+      skillsHint:
+        'The default manual captures prior constraints around task sizing, dependencies, attachments, paths, and publication.',
+      resetDefault: 'Reset to default',
+      usingDefault: 'Using the built-in default.',
+      usingCustom: 'This content will be saved as a custom version.',
+      protocolHint:
+        'JSON shape, IDs, dependencies, relative paths, attachment IDs, and task duration remain server-enforced and cannot be disabled by custom text.',
+      save: 'Save draft planning settings'
+    }
+  },
   turnErrors: turnErrorsEn
 } as const

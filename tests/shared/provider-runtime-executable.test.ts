@@ -218,7 +218,7 @@ test('Codex config alone is not misclassified as authentication material', () =>
       hostEnvironment: Object.freeze({ HOME: home, PATH: process.env.PATH ?? '' })
     })
     assert.equal(prepared.diagnostics.authMaterialPresent, false)
-    assert.match(prepared.diagnostics.warnings.join('\n'), /config snapshotted.*no auth material/i)
+    assert.match(prepared.diagnostics.warnings.join('\n'), /config snapshotted.*no host login/i)
     prepared.cleanupPlan()
   } finally {
     rmSync(home, { recursive: true, force: true })
