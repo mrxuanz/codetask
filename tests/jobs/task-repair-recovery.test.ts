@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classifyTaskOutcome } from '../../src/server/legacy-control-plane/task-blocker/classify'
 import {
+  classifyTaskOutcome,
   MAX_TASK_REPAIR_GENERATIONS,
-  resolveTaskRecoveryAction
-} from '../../src/server/legacy-control-plane/task-blocker/recovery'
-import { injectTaskImplementationRepairTask } from '../../src/server/legacy-control-plane/repair-tasks'
+  resolveTaskRecoveryAction,
+  injectTaskImplementationRepairTask
+} from '../../src/server/legacy-shim'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
-import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
-import { resolveVerifierInfraRecovery } from '../../src/server/legacy-control-plane/verification-recovery'
+import { resolveVerifierInfraRecovery } from '../../src/server/legacy-shim'
+import type { TaskProgressDto } from '../../src/server/legacy-shim'
 
 const implementationPacket = {
   status: 'failed' as const,

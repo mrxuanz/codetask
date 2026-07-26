@@ -21,8 +21,9 @@ export function resolveProviderRunPolicy(input: {
     innerAccess: 'full-access',
     approvals: 'auto',
     stateRoot: input.runtimeRoot,
-    // Outer sandbox → runtime-copy; direct host turns → host-identity (shared enum).
-    authMode: input.outerSandbox ? 'runtime-copy' : 'host-identity'
+    // All production prepareAuth paths are host-identity / precise path allowlist.
+    // `runtime-copy` remains in the shared enum for legacy fixtures / diagnose only.
+    authMode: 'host-identity'
   }
 }
 

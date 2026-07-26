@@ -4,7 +4,7 @@ import {
   acquireWorkspaceLease,
   releaseWorkspaceLeaseForOwner,
   resetWorkspaceLeaseStateForTests
-} from '../../src/server/legacy-control-plane/workspace-lease-store'
+} from '../../src/server/legacy-shim'
 import {
   THREAD_KIND_CHAT,
   THREAD_KIND_CREATE_TASK,

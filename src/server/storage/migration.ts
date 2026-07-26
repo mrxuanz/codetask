@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'pat
 import Database from 'better-sqlite3'
 import type { AppContext } from '../context'
 import { dataPaths } from '../data-paths'
-import { beginDraining, endDraining } from '../legacy-control-plane/shutdown-state'
+import { beginDraining, endDraining } from '../legacy-shim'
 import { startRetentionJanitor, stopRetentionJanitor } from '../retention/lifecycle'
 import { startAuthJanitor, stopAuthJanitor } from '../auth/janitor'
 import { scrubCredentialSnapshotsInTree } from '../sandbox/provider-auth/snapshot-manifest'

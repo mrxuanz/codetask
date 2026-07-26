@@ -13,7 +13,7 @@ import {
   updateDraftAbilityCores,
   updateDraftReferenceDescription,
   uploadDraftReferences
-} from '../legacy-control-plane/service'
+} from '../legacy-shim'
 import {
   confirmDraftAndStartPlanning,
   confirmDraftSection,
@@ -25,7 +25,7 @@ import {
   unlockRequirementsContractForEdit,
   updateDraftContent,
   updateJobPlan
-} from '../legacy-control-plane/draft-plan'
+} from '../legacy-shim'
 import {
   cancelJob,
   deleteJob,
@@ -34,10 +34,23 @@ import {
   resumePausedJob,
   continueJob,
   attachControlPlaneJobFields
-} from '../legacy-control-plane/controls'
+} from '../legacy-shim'
 import { AppError } from '../error'
 import { ok } from '../response'
 import { createLegacyCutoverGuard } from '../http/legacy-cutover-guard'
+import { tryCoreJobControl, tryCoreJobDelete } from '../composition/core-job-control-bridge'
+import {
+  enrichUserJobsFromCore,
+  tryMapCoreJobToLegacy
+} from '../composition/core-job-list-bridge'
+import {
+  tryCoreDraftConfirm,
+  tryCoreDraftConfirmFinal,
+  tryCoreDraftPatch,
+  tryCoreDraftSectionConfirm,
+  tryCoreDraftUnlock
+} from '../composition/core-draft-bridge'
+import { tryCorePlanConfirm } from '../composition/core-plan-bridge'
 import { bodySizeLimit } from '../middleware/body-limiter'
 import {
   MAX_MULTIPART_BODY_BYTES,
@@ -61,6 +74,32 @@ function parseDraftSection(raw: string): DraftSectionKey {
     return raw as DraftSectionKey
   }
   throw AppError.badRequest('Invalid draft section', 'draft.invalid_section', { section: raw })
+}
+
+async function readJsonBodyRecord(c: {
+  req: {
+    header: (name: string) => string | undefined
+    json: <T = unknown>() => Promise<T>
+  }
+}): Promise<Record<string, unknown>> {
+  try {
+    const contentType = c.req.header('content-type') ?? ''
+    if (!contentType.includes('application/json')) return {}
+    const body = await c.req.json<unknown>()
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      return body as Record<string, unknown>
+    }
+  } catch {
+    /* no/invalid body */
+  }
+  return {}
+}
+
+function draftIdFromBody(body: Record<string, unknown>): string | undefined {
+  if (typeof body.draftId === 'string' && body.draftId.trim()) {
+    return body.draftId.trim()
+  }
+  return undefined
 }
 
 function parseOptionalString(value: unknown): string | undefined {
@@ -123,9 +162,10 @@ function parsePlanNodeRef(raw: string): string {
   return trimmed
 }
 
-export function createJobRoutes(_ctx: AppContext): Hono {
+export function createJobRoutes(ctx: AppContext): Hono {
   const routes = new Hono()
   const legacyWriteGuard = createLegacyCutoverGuard()
+  const coreApp = ctx.coreApplication
 
   routes.get('/:threadId/drafts', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
@@ -142,19 +182,25 @@ export function createJobRoutes(_ctx: AppContext): Hono {
   routes.get('/:threadId/jobs/latest', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const job = await getLatestThreadJob(username, c.req.param('threadId'))
+    if (!job) return c.json(ok({ job: null }))
+    const coreMapped = await tryMapCoreJobToLegacy(job.id, coreApp)
+    if (coreMapped) return c.json(ok({ job: { ...job, ...coreMapped } }))
     return c.json(ok({ job }))
   })
 
   routes.get('/:threadId/jobs/:jobId', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await getThreadJob(username, c.req.param('threadId'), c.req.param('jobId'))
+    const jobId = c.req.param('jobId')
+    const core = await tryCoreJobControl(c, 'get', jobId, coreApp)
+    if (core) return core
+    const job = await getThreadJob(username, c.req.param('threadId'), jobId)
     if (!job) throw AppError.notFound('Job not found', 'job.not_found')
     return c.json(ok({ job }))
   })
 
   routes.get('/:threadId/jobs/:jobId/tasks/:taskId/evidence', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const { getTaskEvidenceDetailForUser } = await import('../legacy-control-plane/service')
+    const { getTaskEvidenceDetailForUser } = await import('../legacy-shim')
     const detail = await getTaskEvidenceDetailForUser({
       username,
       threadId: c.req.param('threadId'),
@@ -167,10 +213,21 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:threadId/jobs', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{ draftMessageId?: string }>()
+    const body = await c.req.json<{ draftMessageId?: string; draftId?: string }>()
     if (!body.draftMessageId?.trim()) {
       throw AppError.badRequest('draftMessageId is required', 'job.draft_message_id_required')
     }
+    const bodyDraftId =
+      typeof body.draftId === 'string' && body.draftId.trim()
+        ? body.draftId.trim()
+        : body.draftMessageId.trim()
+    const core = await tryCoreDraftConfirmFinal(
+      c,
+      bodyDraftId,
+      coreApp,
+      body as Record<string, unknown>
+    )
+    if (core) return core
     const result = await confirmDraftAndStartPlanning(
       username,
       c.req.param('threadId'),
@@ -181,7 +238,24 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:threadId/jobs/:jobId/confirm-plan', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const job = await confirmExecutionPlan(username, c.req.param('threadId'), c.req.param('jobId'))
+    const jobId = c.req.param('jobId')
+    let bodyPlanId: string | undefined
+    try {
+      const contentType = c.req.header('content-type') ?? ''
+      if (contentType.includes('application/json')) {
+        const body = await c.req.json<{ planId?: string }>()
+        if (typeof body?.planId === 'string' && body.planId.trim()) {
+          bodyPlanId = body.planId.trim()
+        }
+      }
+    } catch {
+      /* no/invalid body — try jobId then legacy */
+    }
+    const core =
+      (bodyPlanId ? await tryCorePlanConfirm(c, bodyPlanId, coreApp) : null) ??
+      (await tryCorePlanConfirm(c, jobId, coreApp))
+    if (core) return core
+    const job = await confirmExecutionPlan(username, c.req.param('threadId'), jobId)
     return c.json(ok({ job }))
   })
 
@@ -229,6 +303,22 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:threadId/messages/:messageId/draft/confirm', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    let bodyDraftId: string | undefined
+    try {
+      const contentType = c.req.header('content-type') ?? ''
+      if (contentType.includes('application/json')) {
+        const body = await c.req.json<{ draftId?: string }>()
+        if (typeof body?.draftId === 'string' && body.draftId.trim()) {
+          bodyDraftId = body.draftId.trim()
+        }
+      }
+    } catch {
+      /* no/invalid body — fall through to legacy */
+    }
+    if (bodyDraftId) {
+      const core = await tryCoreDraftConfirm(c, bodyDraftId, coreApp)
+      if (core) return core
+    }
     const result = await confirmDraftMessage(
       username,
       c.req.param('threadId'),
@@ -239,6 +329,10 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:threadId/messages/:messageId/draft/confirm-final', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const body = await readJsonBodyRecord(c)
+    const bodyDraftId = draftIdFromBody(body) ?? c.req.param('messageId')
+    const core = await tryCoreDraftConfirmFinal(c, bodyDraftId, coreApp, body)
+    if (core) return core
     const result = await confirmDraftAndStartPlanning(
       username,
       c.req.param('threadId'),
@@ -249,6 +343,12 @@ export function createJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:threadId/messages/:messageId/draft/unlock', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const body = await readJsonBodyRecord(c)
+    const bodyDraftId = draftIdFromBody(body)
+    if (bodyDraftId) {
+      const core = await tryCoreDraftUnlock(c, bodyDraftId, coreApp, body)
+      if (core) return core
+    }
     const result = await unlockDraftForEdit(
       username,
       c.req.param('threadId'),
@@ -274,6 +374,18 @@ export function createJobRoutes(_ctx: AppContext): Hono {
   routes.patch('/:threadId/messages/:messageId/draft', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
     const body: unknown = await c.req.json()
+    const bodyRecord =
+      body && typeof body === 'object' && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {}
+    const bodyDraftId =
+      typeof bodyRecord.draftId === 'string' && bodyRecord.draftId.trim()
+        ? bodyRecord.draftId.trim()
+        : undefined
+    if (bodyDraftId) {
+      const core = await tryCoreDraftPatch(c, bodyDraftId, coreApp, bodyRecord)
+      if (core) return core
+    }
     const result = await updateDraftContent(
       username,
       c.req.param('threadId'),
@@ -289,6 +401,18 @@ export function createJobRoutes(_ctx: AppContext): Hono {
     async (c) => {
       const username = await requireUsername(c.req.header('Authorization'))
       const section = parseDraftSection(c.req.param('section'))
+      const body = await readJsonBodyRecord(c)
+      const bodyDraftId = draftIdFromBody(body)
+      if (bodyDraftId) {
+        const core = await tryCoreDraftSectionConfirm(
+          c,
+          bodyDraftId,
+          section,
+          coreApp,
+          body
+        )
+        if (core) return core
+      }
       const result = await confirmDraftSection(
         username,
         c.req.param('threadId'),
@@ -429,13 +553,14 @@ export function createJobRoutes(_ctx: AppContext): Hono {
   return routes
 }
 
-export function createUserJobRoutes(_ctx: AppContext): Hono {
+export function createUserJobRoutes(ctx: AppContext): Hono {
   const routes = new Hono()
   const legacyWriteGuard = createLegacyCutoverGuard()
+  const coreApp = ctx.coreApplication
 
   routes.post('/queue/resume', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const { resumeJobQueueForUser } = await import('../legacy-control-plane/job-queue')
+    const { resumeJobQueueForUser } = await import('../legacy-shim')
     await resumeJobQueueForUser(username)
     return c.json(ok({ resumed: true }))
   })
@@ -447,11 +572,14 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
     const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 50))
     const q = c.req.query('q')?.trim()
     const result = await listUserJobs(username, { status, page, limit, q: q || undefined })
-    return c.json(ok(result))
+    const jobs = await enrichUserJobsFromCore(result.jobs, coreApp)
+    return c.json(ok({ ...result, jobs }))
   })
 
   routes.get('/:jobId', async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const core = await tryCoreJobControl(c, 'get', c.req.param('jobId'), coreApp)
+    if (core) return core
     const job = await getUserJob(username, c.req.param('jobId'))
     if (!job) throw AppError.notFound('Job not found', 'job.not_found')
     return c.json(ok({ job }))
@@ -459,6 +587,8 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:jobId/pause', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const core = await tryCoreJobControl(c, 'pause', c.req.param('jobId'), coreApp)
+    if (core) return core
     const job = attachControlPlaneJobFields(
       username,
       await pauseJob(username, c.req.param('jobId'))
@@ -468,6 +598,9 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:jobId/resume', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    // New-core uses continue for resume-from-paused.
+    const core = await tryCoreJobControl(c, 'continue', c.req.param('jobId'), coreApp)
+    if (core) return core
     const job = attachControlPlaneJobFields(
       username,
       await resumePausedJob(username, c.req.param('jobId'))
@@ -477,6 +610,8 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:jobId/continue', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const core = await tryCoreJobControl(c, 'continue', c.req.param('jobId'), coreApp)
+    if (core) return core
     const job = attachControlPlaneJobFields(
       username,
       await continueJob(username, c.req.param('jobId'))
@@ -486,6 +621,8 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:jobId/cancel', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const core = await tryCoreJobControl(c, 'cancel', c.req.param('jobId'), coreApp)
+    if (core) return core
     const job = attachControlPlaneJobFields(
       username,
       await cancelJob(username, c.req.param('jobId'))
@@ -495,6 +632,9 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:jobId/restart', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    // New-core maps restart → retry (new execution generation).
+    const core = await tryCoreJobControl(c, 'retry', c.req.param('jobId'), coreApp)
+    if (core) return core
     const job = attachControlPlaneJobFields(
       username,
       await restartJob(username, c.req.param('jobId'))
@@ -504,13 +644,15 @@ export function createUserJobRoutes(_ctx: AppContext): Hono {
 
   routes.post('/:jobId/retry-planning', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
-    const { retryJobPlanning } = await import('../legacy-control-plane/service')
+    const { retryJobPlanning } = await import('../legacy-shim')
     const job = await retryJobPlanning(username, c.req.param('jobId'))
     return c.json(ok({ job }))
   })
 
   routes.delete('/:jobId', legacyWriteGuard, async (c) => {
     const username = await requireUsername(c.req.header('Authorization'))
+    const core = await tryCoreJobDelete(c, c.req.param('jobId'), coreApp)
+    if (core) return core
     await deleteJob(username, c.req.param('jobId'))
     return c.json(ok({ deleted: true }))
   })

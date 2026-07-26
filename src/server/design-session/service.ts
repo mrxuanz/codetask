@@ -16,12 +16,12 @@ import {
   threads,
   type ThreadJob
 } from '../db/schema'
-import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
+import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-shim'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { defaultTaskProgress } from '../planner/save-plan'
-import { mapJob } from '../legacy-control-plane/repository'
+import { mapJob } from '../legacy-shim'
 import { AppError } from '../error'
-import { ReferenceFileMissingError } from '../legacy-control-plane/reference-paths'
+import { ReferenceFileMissingError } from '../legacy-shim'
 import {
   assertConfirmRevisionMatches,
   buildJobSnapshot,
@@ -29,10 +29,10 @@ import {
   parseSessionManifest,
   validateLaunchPreconditions
 } from './launch'
-import { advanceWorkloadQueue } from '../legacy-control-plane/workload-slot-store'
-import { emitJobEvent } from '../legacy-control-plane/service'
+import { advanceWorkloadQueue } from '../legacy-shim'
+import { emitJobEvent } from '../legacy-shim'
 import { putDesignPlanRevisionInTx } from '../retention/design-plan-artifacts'
-import { stageJobReferenceAssets } from '../legacy-control-plane/job-reference-assets'
+import { stageJobReferenceAssets } from '../legacy-shim'
 import { THREAD_KIND_TASK_SNAPSHOT } from '../threads/types'
 import { stripAssetUrlAuthTokensInValue } from '../auth/sign-asset-url'
 
@@ -333,11 +333,11 @@ export async function launchJobFromDesignSession(
   designSessionId: string,
   options?: { skipQueueAdvance?: boolean }
 ): Promise<ThreadJobDto> {
-  const { ensureStartupWorkloadReady } = await import('../legacy-control-plane/workload-slot')
+  const { ensureStartupWorkloadReady } = await import('../legacy-shim')
   await ensureStartupWorkloadReady()
 
   // FIX-PLAN F3-C (§8.4): reject new execution-tree confirms while draining for shutdown.
-  const { isDraining } = await import('../legacy-control-plane/shutdown-state')
+  const { isDraining } = await import('../legacy-shim')
   if (isDraining()) {
     throw AppError.conflict(
       'Runtime is shutting down; cannot confirm execution tree',

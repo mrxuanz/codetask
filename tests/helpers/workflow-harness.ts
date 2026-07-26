@@ -25,12 +25,12 @@ import {
 import { eq, or } from 'drizzle-orm'
 import { getDb } from '../../src/server/db'
 import { threadJobs } from '../../src/server/db/schema'
-import { clearExecutionLease } from '../../src/server/legacy-control-plane/repository'
-import { abortActiveTurn } from '../../src/server/legacy-control-plane/controls'
 import {
+  clearExecutionLease,
+  abortActiveTurn,
   reconcileOrphanRunningJobsOnStartup,
   resetJobReconcileForTests
-} from '../../src/server/legacy-control-plane/reconcile'
+} from '../../src/server/legacy-shim'
 import { saveControlPlanePolicies } from '../../src/server/settings/control-plane'
 import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
@@ -268,13 +268,13 @@ export class WorkflowHarness {
     }
     try {
       const { releaseAllActiveWorkspaceLeases } =
-        await import('../../src/server/legacy-control-plane/workspace-lease-store')
+        await import('../../src/server/legacy-shim')
       releaseAllActiveWorkspaceLeases()
     } catch {
       /* best-effort */
     }
     try {
-      const { endDraining } = await import('../../src/server/legacy-control-plane/shutdown-state')
+      const { endDraining } = await import('../../src/server/legacy-shim')
       endDraining()
     } catch {
       /* best-effort */

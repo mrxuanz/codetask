@@ -16,7 +16,7 @@ const CONTROL_PLANE_DIRS = [
   'src/server/domain',
   'src/server/application',
   'src/server/infra/sqlite/control-plane',
-  'src/server/http/v3',
+  'src/server/control-plane',
   'src/renderer/src/stores',
   'tests/control-plane'
 ]

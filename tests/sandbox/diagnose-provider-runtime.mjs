@@ -200,9 +200,8 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
       root.toLowerCase().startsWith(host.toLowerCase())
     ),
     runtimeIsolated:
-      prepared.envPatch.HOME === runtimeRoot &&
-      prepared.diagnostics.mode === 'runtime-copy' &&
-      hostWrites.length === 0
+      prepared.diagnostics.mode === 'host-identity' &&
+      prepared.envPatch.HOME !== runtimeRoot
   }
 }
 

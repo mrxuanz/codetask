@@ -9,9 +9,12 @@ import { createLegacyApplicationRuntime } from '../../../src/server/application/
 import { readSchemaGeneration } from '../../../src/server/application/cutover-state'
 import { getDb } from '../../../src/server/db'
 import { threadJobs } from '../../../src/server/db/schema'
-import { resetJobReconcileForTests } from '../../../src/server/legacy-control-plane/reconcile'
-import { beginDraining, endDraining } from '../../../src/server/legacy-control-plane/shutdown-state'
-import { resetStartupWorkloadGateForTests } from '../../../src/server/legacy-control-plane/workload-slot'
+import {
+  resetJobReconcileForTests,
+  beginDraining,
+  endDraining,
+  resetStartupWorkloadGateForTests
+} from '../../../src/server/legacy-shim'
 import { seedJobGraph } from '../../helpers/seed-job-graph'
 
 test('startup recovery does not wait on its own workload gate for an orphan running job', async () => {

@@ -37,7 +37,7 @@ import { Scheduler, type SchedulerCapabilities } from './scheduler'
 import { ShutdownCoordinator, type ShutdownReason } from './shutdown-coordinator'
 import { StartupCoordinator } from './startup-coordinator'
 import { StartupReconciler } from './startup-reconciler-impl'
-import type { SseEnvelope } from '../http/v3/sse-envelope'
+import type { SseEnvelope } from './sse-envelope'
 import type { RuntimeController } from './ports/runtime-controller'
 import { threads } from '../db/schema'
 import { jobTopic } from '../../shared/contracts/job-event-hub'
@@ -495,7 +495,7 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
     { nowMs: () => Date.now() },
     logger,
     (jobId, runId, kind) => {
-      if (runtime.schemaGeneration === 'v3_authoritative') {
+      if (runtime.schemaGeneration === 'cutover_blocked') {
         void startV3ExecutorRuntime(runtime, jobId, runId, kind)
       }
     }
@@ -556,7 +556,7 @@ function createControlPlaneRuntime(ctx: AppContext): ControlPlaneRuntime | null 
       {
         name: 'control-plane-reconcile',
         execute: async () => {
-          if (runtime.schemaGeneration === 'v3_authoritative') {
+          if (runtime.schemaGeneration === 'cutover_blocked') {
             await new StartupReconciler(
               jobRepository,
               controlPlane,
@@ -641,7 +641,7 @@ export async function startControlPlaneScheduler(ctx: AppContext): Promise<void>
   const runtime = ensureControlPlaneRuntime(ctx)
   if (runtime === null) return
   await bootstrapControlPlaneRuntime(ctx)
-  if (runtime.schemaGeneration !== 'v3_authoritative') {
+  if (runtime.schemaGeneration !== 'cutover_blocked') {
     runtime.logger.info('control-plane scheduler remains idle before authoritative cutover', {
       schemaGeneration: runtime.schemaGeneration
     })

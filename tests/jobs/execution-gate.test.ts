@@ -5,13 +5,11 @@ import {
   applyTaskProgressToGate,
   buildGateStates,
   findNextReadyTask,
-  reopenSliceVerificationForMissingVerdict
-} from '../../src/server/legacy-control-plane/execution-gate'
-import {
+  reopenSliceVerificationForMissingVerdict,
   injectSliceRepairTasks,
   injectTaskDependencyPrepTask,
   injectTaskImplementationRepairTask
-} from '../../src/server/legacy-control-plane/repair-tasks'
+} from '../../src/server/legacy-shim'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
 
 function createPlan(taskCount: number): SavedJobPlan {

@@ -9,7 +9,7 @@ import {
   loadDesignReferenceManifest
 } from '../design-session/service'
 import { scheduleDesignSessionPlanRegeneration } from '../design-session/planner'
-import { emitJobEvent, getThreadJob, updateJobRow } from '../legacy-control-plane/service'
+import { emitJobEvent, getThreadJob, updateJobRow } from '../legacy-shim'
 import type { PlannerRegisteredPlan } from '../planner/plan-types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import {
@@ -21,7 +21,7 @@ import {
 } from '../planner/mcp/normalize'
 import { validatePlanAbilityCodes } from '../planner/plan-ability-validation'
 import { flattenRegisteredPlan } from '../planner/save-plan'
-import type { ThreadJobDto } from '../legacy-control-plane/types'
+import type { ThreadJobDto } from '../legacy-shim'
 import {
   assertThreadWizardPhase,
   assertActivePlan,

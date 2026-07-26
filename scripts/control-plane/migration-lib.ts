@@ -119,7 +119,7 @@ const KNOWN_LEGACY_STATUSES = new Set([
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
-const SCHEMA_GENERATIONS = new Set(['preparing', 'copied', 'v3_authoritative'])
+const SCHEMA_GENERATIONS = new Set(['preparing', 'copied', 'cutover_blocked'])
 
 export const MIGRATION_COPY_SCOPE_TABLES = [
   'control_runtime_instances',

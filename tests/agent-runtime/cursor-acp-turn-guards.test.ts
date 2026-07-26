@@ -8,7 +8,7 @@ import { isRetryableTurnError } from '../../src/server/agent-runtime/retry'
 import {
   resolveEvidenceMissRecovery,
   resolveTaskInfraRecovery
-} from '../../src/server/legacy-control-plane/task-blocker/recovery'
+} from '../../src/server/legacy-shim'
 import { createTurnError } from '../../src/shared/turn-errors'
 
 test('isEmptyAcpReply treats blank as empty', () => {

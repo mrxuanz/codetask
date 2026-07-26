@@ -4,10 +4,10 @@
  * Manages the migration state transitions:
  * - preparing: Legacy runtime still active
  * - copied: Data copied but not yet authoritative
- * - v3_authoritative: V3 is now the source of truth
+ * - cutover_blocked: V3 is now the source of truth
  */
 
-export type SchemaGeneration = 'preparing' | 'copied' | 'v3_authoritative'
+export type SchemaGeneration = 'preparing' | 'copied' | 'cutover_blocked'
 
 export interface CutoverMarker {
   readonly key: 'control_schema_generation'
@@ -26,7 +26,7 @@ export function canUpgradeTo(marker: CutoverMarker, target: SchemaGeneration): b
   switch (target) {
     case 'copied':
       return marker.value === 'preparing'
-    case 'v3_authoritative':
+    case 'cutover_blocked':
       return marker.value === 'copied'
     default:
       return false
@@ -58,7 +58,7 @@ export function upgradeMarker(
 }
 
 export function isAuthoritative(marker: CutoverMarker): boolean {
-  return marker.value === 'v3_authoritative'
+  return marker.value === 'cutover_blocked'
 }
 
 export function createInitialMarker(): CutoverMarker {

@@ -43,7 +43,7 @@ describe('composition: runtime close order (D05)', () => {
   it('keeps slot held until provider handle.closed resolves', async () => {
     await withCompositionContext(
       {
-        generation: 'v3_authoritative',
+        generation: 'cutover_blocked',
         seed(db) {
           seedControlJob(db, {
             jobId: 'job-1',

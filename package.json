@@ -22,6 +22,7 @@
     "check:control-plane-types": "node scripts/check-control-plane-types.mjs",
     "check:legacy-write-guard": "node scripts/control-plane/legacy-write-guard.mjs",
     "check:no-double-assertions": "node scripts/check-no-double-assertions.mjs",
+    "check:import-boundary": "node scripts/check-import-boundary.mjs",
     "write:release-gate": "node --import tsx scripts/control-plane/write-release-gate.ts",
     "start": "electron-vite preview",
     "start:server": "node out/main/standalone.js",
@@ -35,6 +36,7 @@
     "business:e2e": "node --import tsx tests/business-e2e/supervisor/main.ts",
     "business:e2e:list": "npm run business:e2e -- --list",
     "business:e2e:smoke": "npm run business:e2e -- --profile fixed-opencode --suite smoke",
+    "business:e2e:authfree": "npm run business:e2e -- --profile fixed-opencode --part bootstrap && npm run business:e2e -- --profile fixed-opencode --case foundation",
     "business:e2e:conversation": "npm run business:e2e -- --profile fixed-opencode --part conversation",
     "business:e2e:chat-html": "npm run business:e2e -- --profile fixed-opencode --case chat-create-html",
     "business:e2e:draft-job": "npm run business:e2e -- --profile fixed-opencode --part draft-job",
@@ -78,7 +80,8 @@
     "test:live": "npm run test:providers:light",
     "test:ci": "npm run typecheck && npm run test:fast",
     "release:test-gate": "npm run typecheck && npm run typecheck:control-plane:ci && npm run test:ci-scripts && npm run check:control-plane-types && npm run check:legacy-write-guard && npm run check:no-double-assertions && npm run lint:ci && npm run test:fast && npm run test:control-plane",
-    "test:sandbox:all": "npm run test:sandbox:tdd && npm run test:sandbox && npm run test:sandbox:v2 && npm run test:sandbox:attachments"
+    "test:sandbox:all": "npm run test:sandbox:tdd && npm run test:sandbox && npm run test:sandbox:v2 && npm run test:sandbox:attachments",
+    "soak:core:stub": "node scripts/cutover/soak-core-stub.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",

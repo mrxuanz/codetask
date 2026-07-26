@@ -8,16 +8,14 @@ import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/boot
 import { getDb } from '../../src/server/db'
 import {
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import {
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
   claimExecutionSlotForJobTx,
   releaseWorkloadSlot,
-  resetWorkloadRunControllersForTests
-} from '../../src/server/legacy-control-plane/workload-slot-store'
-import { findNextPendingJobId } from '../../src/server/legacy-control-plane/repository'
-import { listPendingJobIds } from '../../src/server/legacy-control-plane/execution-queue-meta'
+  resetWorkloadRunControllersForTests,
+  findNextPendingJobId,
+  listPendingJobIds
+} from '../../src/server/legacy-shim'
 import {
   projects,
   threadJobs,

@@ -64,7 +64,7 @@ test('orchestrator-turns pins completed-after-reap supervisor contract', () => {
 
 // H6-08 / H7-11 — dependency-human pauses, does not infra-retry
 test('dependency-human recovery pauses instead of scheduling infra-retry', () => {
-  const source = readSource('src/server/legacy-control-plane/task-blocker/recovery.ts')
+  const source = readSource('src/server/control-plane/task-blocker/recovery.ts')
   const humanBlock = source.slice(source.indexOf("classification.kind === 'dependency-human'"))
   assert.match(humanBlock, /action: 'pause-human'/)
   assert.doesNotMatch(humanBlock.slice(0, 400), /infra-retry/)

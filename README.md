@@ -107,6 +107,18 @@ Data is pushed via **SSE** job snapshots; embedded **Hono** HTTP server serves t
 - **[OpenAI Codex](https://github.com/openai/codex)** — Sandbox isolation and OS helper patterns; native layer vendors `native/vendor/codex-rs`
 - **[t3code](https://github.com/pingdotgg/t3code)** — Desktop UX reference: project / chat / task layering, multi-provider integration, streaming state
 
+## Kernel refactor (in progress)
+
+A parallel **business kernel** (`src/server/core`, `adapters`, `interfaces`,
+`composition`) is under construction beside the live control plane. Production
+still uses the legacy runtime; cutover and legacy purge are **not** complete.
+
+Working docs, gates, and the import-graph delete gate:
+
+- [docs/refactor/README.md](docs/refactor/README.md)
+
+Do not treat Wave checklists as a claim that production has switched.
+
 ## Open Source Notice
 
 This repository includes vendored and adapted sandbox-related code derived from the OpenAI Codex project, primarily under `native/vendor/codex-rs` and the corresponding `native/codeteam-*` crates.

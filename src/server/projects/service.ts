@@ -4,7 +4,7 @@ import { AppError } from '../error'
 import { getDb } from '../db'
 import { conversationTurns, projects, threadJobs, type Project } from '../db/schema'
 import { controlJobs } from '../infra/sqlite/control-plane/schema'
-import { findWorkspaceLeaseConflictSnapshot } from '../legacy-control-plane/workspace-lease-store'
+import { findWorkspaceLeaseConflictSnapshot } from '../legacy-shim'
 import { cleanDisplayPath, inferTitleFromPath, normalizeWorkspacePath } from '../fs'
 
 function nowSec(): number {
@@ -207,6 +207,6 @@ export async function touchProject(username: string, projectId: string): Promise
 }
 
 export async function deleteProject(username: string, projectId: string): Promise<void> {
-  const { drainAndDeleteProject } = await import('../legacy-control-plane/deletion-coordinator')
+  const { drainAndDeleteProject } = await import('../legacy-shim')
   await drainAndDeleteProject(username, projectId)
 }

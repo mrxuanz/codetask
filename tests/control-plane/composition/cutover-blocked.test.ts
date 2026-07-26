@@ -138,7 +138,7 @@ describe('composition: cutover release gate (CR8)', () => {
             )
             .get() as { value: string }
         ).value,
-        'v3_authoritative'
+        'cutover_blocked'
       )
       readDb.close()
     } finally {

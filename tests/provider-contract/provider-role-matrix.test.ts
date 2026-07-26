@@ -19,14 +19,14 @@ const ROLES: ConversationRole[] = [
   'milestone-verifier'
 ]
 
-test('resolveProviderRunPolicy uses runtime-copy inside outer sandbox', () => {
+test('resolveProviderRunPolicy uses host-identity for outer and direct turns', () => {
   const policy = resolveProviderRunPolicy({
     outerSandbox: true,
     runtimeRoot: '/tmp/runtime'
   })
   assert.equal(policy.innerAccess, 'full-access')
   assert.equal(policy.approvals, 'auto')
-  assert.equal(policy.authMode, 'runtime-copy')
+  assert.equal(policy.authMode, 'host-identity')
   assert.equal(policy.stateRoot, '/tmp/runtime')
 })
 

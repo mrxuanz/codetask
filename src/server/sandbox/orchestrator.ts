@@ -1,4 +1,5 @@
 import type { AgentTurnChunk } from '../agent-runtime/types'
+import { getAppConfig } from '../bootstrap'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import { processHostEnvironmentSource } from '../host-environment'
 
@@ -50,9 +51,11 @@ function abortJobTurns(jobId: string, reason: string): void {
 }
 
 export function shouldUseSandboxSupervisor(): boolean {
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') return false
+  if (!getAppConfig().sandbox.supervisorEnabled) return false
 
+  // Process identity marker set when spawning the supervisor worker child —
+  // not a user feature flag. Prevents the worker from re-entering supervisor IPC.
+  const hostEnv = processHostEnvironmentSource.snapshot()
   if (hostEnv.CODETASK_SANDBOX_SUPERVISOR_WORKER === '1') return false
 
   return true

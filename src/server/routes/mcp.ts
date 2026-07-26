@@ -5,12 +5,12 @@ import { handleConversationMcpJsonRpc, type McpDispatchResult } from '../convers
 import { authorizeConversationMcpRequest } from '../conversation/mcp/session'
 import { handlePlannerMcpJsonRpc } from '../planner/mcp/handler'
 import { authorizePlannerMcpRequest } from '../planner/mcp/session'
-import { handleTaskMcpJsonRpc } from '../legacy-control-plane/mcp/task-handler'
-import { authorizeTaskMcpRequest } from '../legacy-control-plane/mcp/task-session'
-import { handleSliceVerifierMcpJsonRpc } from '../legacy-control-plane/mcp/slice-handler'
-import { authorizeSliceVerifierMcpRequest } from '../legacy-control-plane/mcp/slice-session'
-import { handleMilestoneVerifierMcpJsonRpc } from '../legacy-control-plane/mcp/milestone-handler'
-import { authorizeMilestoneVerifierMcpRequest } from '../legacy-control-plane/mcp/milestone-session'
+import { handleTaskMcpJsonRpc } from '../legacy-shim'
+import { authorizeTaskMcpRequest } from '../legacy-shim'
+import { handleSliceVerifierMcpJsonRpc } from '../legacy-shim'
+import { authorizeSliceVerifierMcpRequest } from '../legacy-shim'
+import { handleMilestoneVerifierMcpJsonRpc } from '../legacy-shim'
+import { authorizeMilestoneVerifierMcpRequest } from '../legacy-shim'
 import { requireLocalhost } from '../middleware/local-only'
 import {
   closeAllStreamableMcpTransportsForUrlSession,

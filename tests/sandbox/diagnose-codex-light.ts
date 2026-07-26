@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
-import { runtimeCodexHome } from '../../src/server/sandbox/provider-auth/paths'
+import { resolveCodexHostHome, resolveHostProfilePaths } from '../../src/server/sandbox/provider-auth/paths'
 import { buildOuterSandboxCodexConfigOverrides } from '../../src/server/agent-runtime/mcp'
 import { buildCodexTurnPlan } from '../../src/server/providers/codex/turn-plan'
 import type { ConversationRole } from '../../src/server/agent-runtime/roles'
@@ -362,8 +362,9 @@ async function runStaticForRole(
   )
 
   const prepared = outerSandbox ? prepareProviderAuthForTest('codex', runtimeRoot) : null
+  const hostCodexHome = resolveCodexHostHome(resolveHostProfilePaths())
   const codexHome = outerSandbox
-    ? (prepared!.envPatch.CODEX_HOME ?? runtimeCodexHome(runtimeRoot))
+    ? (prepared!.envPatch.CODEX_HOME ?? hostCodexHome)
     : join(process.env.CODEX_HOME ?? join(process.env.HOME ?? runtimeRoot, '.codex'))
 
   const systemMcp = plan.sdkConfig?.mcp_servers
@@ -398,17 +399,17 @@ async function runStaticForRole(
       noProxyEntries.has(entry)
     ),
     runtimeIsolated: outerSandbox
-      ? prepared!.diagnostics.mode === 'runtime-copy' &&
-        prepared!.envPatch.HOME === runtimeRoot &&
-        prepared!.envPatch.CODEX_HOME === runtimeCodexHome(runtimeRoot) &&
-        (prepared!.writeRoots ?? []).length === 0
+      ? prepared!.diagnostics.mode === 'host-identity' &&
+        prepared!.envPatch.HOME !== runtimeRoot &&
+        prepared!.envPatch.CODEX_HOME === hostCodexHome &&
+        (prepared!.writeRoots ?? []).includes(hostCodexHome)
       : plan.threadOptions.sandboxMode === 'workspace-write' && !plan.outerSandbox
   }
 
   log('static', role, report)
 
   if (outerSandbox && !report.runtimeIsolated) {
-    throw new Error(`[${role}] runtime-copy isolation check failed`)
+    throw new Error(`[${role}] host-identity sandbox wiring check failed`)
   }
   if (!outerSandbox && plan.outerSandbox) {
     throw new Error(`[${role}] conversation must not use outer sandbox`)
@@ -474,7 +475,8 @@ async function main(): Promise<void> {
     const shouldLive =
       !skipLive && (caseFilter === 'all' || caseFilter === 'hello' || caseFilter === 'mcp')
     const env = buildMergedEnv(prepared.envPatch)
-    const codexHome = env.CODEX_HOME ?? runtimeCodexHome(runtimeRoot)
+    const hostCodexHome = resolveCodexHostHome(resolveHostProfilePaths())
+    const codexHome = env.CODEX_HOME ?? hostCodexHome
 
     if (shouldLive) {
       if (!codexAuthPresent(codexHome)) {

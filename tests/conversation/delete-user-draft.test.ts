@@ -14,14 +14,15 @@ import {
   threads
 } from '../../src/server/db/schema'
 import { attachmentDir, messageArtifactDir } from '../../src/server/data-paths'
-import { deleteUserDraft, listUserDrafts } from '../../src/server/legacy-control-plane/draft-plan'
 import {
+  deleteUserDraft,
+  listUserDrafts,
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-control-plane/workload-slot-store'
-import { resetWorkspaceLeaseStateForTests } from '../../src/server/legacy-control-plane/workspace-lease-store'
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
+  resetWorkloadRunControllersForTests,
+  resetWorkspaceLeaseStateForTests
+} from '../../src/server/legacy-shim'
 import { THREAD_KIND_CREATE_TASK, THREAD_KIND_TASK_SNAPSHOT } from '../../src/server/threads/types'
 
 let dataDir = ''

@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getProviderDriverForTest, prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import {
-  materializeOpencodeAuth,
-  opencodeRuntimeLayout
-} from '../../src/server/sandbox/provider-auth/materialize'
+  resolveHostProfilePaths,
+  resolveOpencodeHostConfigDir,
+  resolveOpencodeHostDataDir
+} from '../../src/server/sandbox/provider-auth/paths'
 import { spawnProviderInvocation } from '../../src/server/providers/spawn'
 
 const SERVER_TIMEOUT_MS = 30_000
@@ -59,12 +60,8 @@ function listRuntimeFiles(runtimeRoot: string): string[] {
 async function runStatic(runtimeRoot: string): Promise<{
   mode: string
   writeRoots: string[]
-  layout: unknown
-  materialized: {
-    configCopied: boolean
-    runtimeConfigDir: string
-    runtimeDataDir: string
-  }
+  hostConfigDir: string
+  hostDataDir: string
   env: {
     HOME: string | undefined
     XDG_CONFIG_HOME: string | undefined
@@ -74,20 +71,18 @@ async function runStatic(runtimeRoot: string): Promise<{
   }
   runtimeIsolated: boolean
 }> {
-  const layout = opencodeRuntimeLayout(runtimeRoot)
-  const materialized = materializeOpencodeAuth(runtimeRoot)
+  const profile = resolveHostProfilePaths()
+  const hostConfigDir = resolveOpencodeHostConfigDir(profile)
+  const hostDataDir = resolveOpencodeHostDataDir(profile)
   const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
   const env = buildMergedEnv(prepared.envPatch)
+  const stateHome = join(runtimeRoot, '.local', 'state')
 
   const report = {
     mode: prepared.diagnostics.mode,
     writeRoots: prepared.writeRoots ?? [],
-    layout,
-    materialized: {
-      configCopied: materialized.configCopied,
-      runtimeConfigDir: materialized.runtimeConfigDir,
-      runtimeDataDir: materialized.runtimeDataDir
-    },
+    hostConfigDir,
+    hostDataDir,
     env: {
       HOME: env.HOME,
       XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
@@ -96,19 +91,18 @@ async function runStatic(runtimeRoot: string): Promise<{
       executableMode: executablePath ? 'path' : 'auto'
     },
     runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-copy' &&
-      env.HOME === runtimeRoot &&
-      env.XDG_CONFIG_HOME === layout.configHome &&
-      env.XDG_DATA_HOME === layout.dataHome &&
-      env.XDG_STATE_HOME === layout.stateHome &&
-      materialized.runtimeConfigDir === layout.configDir &&
-      materialized.runtimeDataDir === layout.dataDir &&
-      (prepared.writeRoots ?? []).length === 0
+      prepared.diagnostics.mode === 'host-identity' &&
+      env.HOME !== runtimeRoot &&
+      env.XDG_CONFIG_HOME === join(profile.home, '.config') &&
+      env.XDG_DATA_HOME === join(profile.home, '.local', 'share') &&
+      env.XDG_STATE_HOME === stateHome &&
+      (prepared.readRoots ?? []).includes(hostConfigDir) &&
+      (prepared.writeRoots ?? []).includes(stateHome)
   }
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('OpenCode runtime-copy isolation check failed')
+  if (!report.runtimeIsolated) throw new Error('OpenCode host-identity sandbox wiring check failed')
 
   return report
 }

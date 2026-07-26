@@ -11,7 +11,7 @@ describe('composition: production runtime query (D01)', () => {
   it('listTaskJobs returns control-plane jobs without legacy snapshots', async () => {
     await withCompositionContext(
       {
-        generation: 'v3_authoritative',
+        generation: 'cutover_blocked',
         seed(db) {
           seedControlJob(db, { jobId: 'job-1', username: 'u1', state: 'execution_queued' })
         }

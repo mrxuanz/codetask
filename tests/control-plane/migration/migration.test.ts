@@ -164,14 +164,14 @@ describe('Cutover marker', () => {
   it('should allow preparing -> copied -> authoritative after validation', () => {
     const preparing = createInitialMarker()
     assert.equal(canUpgradeTo(preparing, 'copied'), true)
-    assert.equal(canUpgradeTo(preparing, 'v3_authoritative'), false)
+    assert.equal(canUpgradeTo(preparing, 'cutover_blocked'), false)
 
     const copied = upgradeMarker(preparing, 'copied', { hasConflicts: false })
     assert.equal(copied.ok, true)
     if (copied.ok) {
       assert.equal(copied.marker.value, 'copied')
-      assert.equal(canUpgradeTo(copied.marker, 'v3_authoritative'), true)
-      const authoritative = upgradeMarker(copied.marker, 'v3_authoritative', {
+      assert.equal(canUpgradeTo(copied.marker, 'cutover_blocked'), true)
+      const authoritative = upgradeMarker(copied.marker, 'cutover_blocked', {
         hasConflicts: false
       })
       assert.equal(authoritative.ok, true)
@@ -189,7 +189,7 @@ describe('Cutover marker', () => {
     const copied = upgradeMarker(preparing, 'copied', { hasConflicts: false })
     assert.equal(copied.ok, true)
     if (copied.ok) {
-      const blockedAuthoritative = upgradeMarker(copied.marker, 'v3_authoritative', {
+      const blockedAuthoritative = upgradeMarker(copied.marker, 'cutover_blocked', {
         hasConflicts: true
       })
       assert.equal(blockedAuthoritative.ok, false)
@@ -217,9 +217,9 @@ describe('Cutover marker', () => {
     }
   })
 
-  it('should prevent duplicate cutover to v3_authoritative', () => {
+  it('should prevent duplicate cutover to cutover_blocked', () => {
     const preparing = createInitialMarker()
-    const direct = upgradeMarker(preparing, 'v3_authoritative', { hasConflicts: false })
+    const direct = upgradeMarker(preparing, 'cutover_blocked', { hasConflicts: false })
     assert.equal(direct.ok, false)
   })
 })
@@ -231,7 +231,7 @@ describe('Legacy API', () => {
     assert.equal(copied.ok, true)
     if (!copied.ok) return
 
-    const authoritative = upgradeMarker(copied.marker, 'v3_authoritative', { hasConflicts: false })
+    const authoritative = upgradeMarker(copied.marker, 'cutover_blocked', { hasConflicts: false })
     assert.equal(authoritative.ok, true)
     if (!authoritative.ok) return
 

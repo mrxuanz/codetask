@@ -127,7 +127,7 @@ async function createReadyApp(
   process.env.CODETASK_MODE = cli.mode
 
   const schemaRead = readSchemaGeneration(ctx.db)
-  const usesLegacyComposition = schemaRead !== 'v3_authoritative'
+  const usesLegacyComposition = schemaRead !== 'cutover_blocked'
 
   await ensureRuntimeReady(ctx)
 
@@ -153,7 +153,7 @@ function scheduleLegacyQueueResume(usesLegacyComposition: boolean): void {
   // Resume persisted work only after the HTTP listener is live. setImmediate also lets startup
   // finish reporting readiness before recovered jobs can consume executor capacity.
   setImmediate(() => {
-    void import('../server/legacy-control-plane/job-queue')
+    void import('../server/legacy-shim')
       .then((module) => module.resumeJobQueuesAfterServerReady())
       .catch((error) => {
         console.error('[jobs] failed to resume queues after HTTP startup', error)

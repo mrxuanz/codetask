@@ -3,7 +3,7 @@ import { reconcileOnStartupOnce } from '../conversation/service'
 import { pruneOrphanRuntimeTrees } from '../runtime/cleanup'
 import { runRetentionJanitorPass } from '../retention/lifecycle'
 import { runAuthJanitorPass } from '../auth/janitor'
-import { bindStartupWorkloadGate } from '../legacy-control-plane/workload-slot'
+import { bindStartupWorkloadGate } from '../legacy-shim'
 import { StartupCoordinator } from './startup-coordinator'
 import { SafeLoggerImpl } from './safe-logger'
 import type { SchemaGenerationRead } from './cutover-state'
@@ -37,7 +37,7 @@ export function createLegacyApplicationRuntime(
         name: 'interrupt-orphan-task-attempts',
         execute: async () => {
           const { markAllRunningAttemptsInterrupted } =
-            await import('../legacy-control-plane/task-attempts')
+            await import('../legacy-shim')
           const changed = markAllRunningAttemptsInterrupted()
           if (changed > 0) {
             logger.info('interrupted orphan task attempts on startup', { count: changed })
@@ -48,7 +48,7 @@ export function createLegacyApplicationRuntime(
         name: 'reclaim-workspace-leases',
         execute: async () => {
           const { reclaimStaleWorkspaceLeasesOnStartup } =
-            await import('../legacy-control-plane/workspace-lease-store')
+            await import('../legacy-shim')
           const changed = reclaimStaleWorkspaceLeasesOnStartup()
           if (changed > 0) {
             logger.info('reclaimed stale workspace leases on startup', { count: changed })
@@ -59,7 +59,7 @@ export function createLegacyApplicationRuntime(
         name: 'resume-deletion-requests',
         execute: async () => {
           const { resumePendingDeletionRequestsOnStartup } =
-            await import('../legacy-control-plane/deletion-coordinator')
+            await import('../legacy-shim')
           await resumePendingDeletionRequestsOnStartup()
         }
       },
@@ -67,7 +67,7 @@ export function createLegacyApplicationRuntime(
         name: 'reconcile-workload-slots',
         execute: async () => {
           const { reconcileOrphanWorkloadSlotsOnStartupOnce } =
-            await import('../legacy-control-plane/reconcile')
+            await import('../legacy-shim')
           await reconcileOrphanWorkloadSlotsOnStartupOnce()
         }
       },
@@ -75,7 +75,7 @@ export function createLegacyApplicationRuntime(
         name: 'reconcile-orphan-jobs',
         execute: async () => {
           const { reconcileOrphanRunningJobsOnStartupOnce } =
-            await import('../legacy-control-plane/reconcile')
+            await import('../legacy-shim')
           // Startup owns the workload gate. Advancing the queue from inside this stage would wait
           // on that same gate and deadlock, so defer it until startup and executor init complete.
           await reconcileOrphanRunningJobsOnStartupOnce({ deferQueueAdvance: true })
@@ -85,7 +85,7 @@ export function createLegacyApplicationRuntime(
         name: 'reconcile-planning-sessions',
         execute: async () => {
           const { reconcileOrphanPlanningSessionsOnStartupOnce } =
-            await import('../legacy-control-plane/reconcile')
+            await import('../legacy-shim')
           await reconcileOrphanPlanningSessionsOnStartupOnce()
         }
       },
@@ -192,19 +192,19 @@ async function startLegacyApplicationRuntimeOnce(runtime: LegacyApplicationRunti
   try {
     await runtime.startup.ensureReady()
 
-    const { startWorkloadReconciler } = await import('../legacy-control-plane/reconcile')
+    const { startWorkloadReconciler } = await import('../legacy-shim')
     startWorkloadReconciler()
     rollback.push(async () => {
-      const { stopWorkloadReconciler } = await import('../legacy-control-plane/reconcile')
+      const { stopWorkloadReconciler } = await import('../legacy-shim')
       stopWorkloadReconciler()
     })
 
-    const executorModule = await import('../legacy-control-plane/executor')
+    const executorModule = await import('../legacy-shim')
     await executorModule.initJobExecutor(runtime.ctx)
 
     // Startup reconcile repaired durable state without entering the gated queue. Once every stage
     // is complete and the executor is initialized, resume an interrupted running job (or FIFO work).
-    const { advanceAllQueues } = await import('../legacy-control-plane/queue-coordinator')
+    const { advanceAllQueues } = await import('../legacy-shim')
     await advanceAllQueues()
     const { advanceTurnQueue } = await import('../conversation/turn-queue')
     await advanceTurnQueue()
@@ -256,11 +256,11 @@ async function runShutdown(
   logger.info('legacy shutdown started', { reason })
 
   // 1. Enter draining: reject new claims / promotions.
-  const { beginDraining } = await import('../legacy-control-plane/shutdown-state')
+  const { beginDraining } = await import('../legacy-shim')
   beginDraining()
 
   // 2. Stop queue/reconciler timers.
-  const { stopWorkloadReconciler } = await import('../legacy-control-plane/reconcile')
+  const { stopWorkloadReconciler } = await import('../legacy-shim')
   stopWorkloadReconciler()
 
   // 3. Drain in-flight execution runs at a safe checkpoint.
@@ -307,10 +307,10 @@ async function closeCursorAcpRuntimes(logger: SafeLoggerImpl): Promise<void> {
 
 async function drainActiveExecutionRuns(logger: SafeLoggerImpl): Promise<void> {
   try {
-    const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
-    const { stopRunLifecycle } = await import('../legacy-control-plane/run-lifecycle')
+    const { listActiveWorkloadSlots } = await import('../legacy-shim')
+    const { stopRunLifecycle } = await import('../legacy-shim')
     const { markRunningAttemptsInterruptedForJob } =
-      await import('../legacy-control-plane/task-attempts')
+      await import('../legacy-shim')
 
     const slots = await listActiveWorkloadSlots({})
     const executionSlots = slots.filter((slot) => slot.kind === 'execution')
@@ -350,7 +350,7 @@ export async function resetLegacyApplicationRuntimeForTests(
   runtime: LegacyApplicationRuntime
 ): Promise<void> {
   await shutdownLegacyApplicationRuntime(runtime, 'app_shutdown').catch(() => {})
-  const { endDraining } = await import('../legacy-control-plane/shutdown-state')
+  const { endDraining } = await import('../legacy-shim')
   endDraining()
   runtime.startPromise = null
   runtime.shutdownPromise = null

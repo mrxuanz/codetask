@@ -129,7 +129,7 @@ export interface CompositionContextOptions {
 }
 
 /**
- * Boots an isolated composition context. Production bootstrap refuses v3_authoritative;
+ * Boots an isolated composition context. Production bootstrap refuses cutover_blocked;
  * authoritative fixtures use the test-only V3 factory after a Legacy-safe bootstrap.
  */
 export async function withCompositionContext(
@@ -142,11 +142,11 @@ export async function withCompositionContext(
     dataDir = mkdtempSync(join(tmpdir(), 'cp-composition-'))
     await resetAppContextForTests()
     const bootGeneration =
-      options.generation === 'v3_authoritative' ? 'copied' : options.generation
+      options.generation === 'cutover_blocked' ? 'copied' : options.generation
     setCutoverMarkerForTests(bootGeneration)
     ctx = bootstrapRuntime({ dataDir })
-    if (options.generation === 'v3_authoritative') {
-      setCutoverMarkerForTests('v3_authoritative')
+    if (options.generation === 'cutover_blocked') {
+      setCutoverMarkerForTests('cutover_blocked')
       ctx.applicationRuntime = createV3ApplicationRuntimeForTests(ctx)
     }
     const db = getSqliteClient(ctx)

@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classifyTaskOutcome } from '../../src/server/legacy-control-plane/task-blocker/classify'
+import { classifyTaskOutcome } from '../../src/server/legacy-shim'
 import { isInfraTurnError } from '../../src/shared/turn-errors/policy.ts'
 import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'
 import {
   MAX_TASK_INFRA_RETRIES,
   applyTaskInfraRetryItem,
   resolveTaskInfraRecovery,
-  resolveTaskRecoveryAction
-} from '../../src/server/legacy-control-plane/task-blocker/recovery'
-import { injectTaskDependencyPrepTask } from '../../src/server/legacy-control-plane/repair-tasks'
+  resolveTaskRecoveryAction,
+  injectTaskDependencyPrepTask
+} from '../../src/server/legacy-shim'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
-import type { TaskProgressDto } from '../../src/server/legacy-control-plane/types'
+import type { TaskProgressDto } from '../../src/server/legacy-shim'
 
 const infraPacket = {
   status: 'blocked' as const,

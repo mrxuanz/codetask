@@ -23,7 +23,7 @@ export interface LegacyApplicationRuntime {
 export interface V3ApplicationRuntime {
   readonly kind: 'v3'
   readonly ctx: AppContext
-  readonly schemaRead: 'v3_authoritative'
+  readonly schemaRead: 'cutover_blocked'
   readonly controlPlane: ControlPlaneRuntime
   started: boolean
   startPromise: Promise<void> | null
@@ -35,12 +35,12 @@ export type ApplicationRuntime = V3ApplicationRuntime | LegacyApplicationRuntime
 export function createV3ApplicationRuntime(ctx: AppContext): V3ApplicationRuntime {
   const controlPlane = createControlPlaneRuntime(ctx)
   if (controlPlane === null) {
-    throw new Error('Control-plane schema is unavailable for v3_authoritative')
+    throw new Error('Control-plane schema is unavailable for cutover_blocked')
   }
   return {
     kind: 'v3',
     ctx,
-    schemaRead: 'v3_authoritative',
+    schemaRead: 'cutover_blocked',
     controlPlane,
     started: false,
     startPromise: null,
@@ -49,7 +49,7 @@ export function createV3ApplicationRuntime(ctx: AppContext): V3ApplicationRuntim
 }
 
 /**
- * Test-only V3 root. Production bootstrap refuses v3_authoritative until F6 cutover.
+ * Test-only V3 root. Production bootstrap refuses cutover_blocked until F6 cutover.
  * Do not call from production Composition Root paths.
  */
 export function createV3ApplicationRuntimeForTests(ctx: AppContext): V3ApplicationRuntime {

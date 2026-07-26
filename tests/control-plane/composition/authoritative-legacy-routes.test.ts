@@ -3,13 +3,12 @@ import { describe, it, afterEach } from 'node:test'
 import { Hono } from 'hono'
 import { createUserJobRoutes, createJobRoutes } from '../../../src/server/routes/jobs'
 import { createDesignSessionRoutes } from '../../../src/server/routes/design-sessions'
+import { createApplication } from '../../../src/server/composition/create-application'
 import type { AppContext } from '../../../src/server/context'
-import {
-  resetSchemaGeneration,
-  setSchemaGeneration
-} from '../../../src/server/application/cutover-schema-generation'
+import { setCutoverMarkerForTests } from '../../../src/server/application/cutover-state'
 
-const noopCtx = {} as AppContext
+const coreApplication = createApplication({ mode: 'memory' })
+const noopCtx = { coreApplication } as AppContext
 
 const USER_JOB_WRITE_ROUTES = [
   { method: 'POST', path: '/jobs/queue/resume' },
@@ -80,25 +79,25 @@ async function assertAllBlocked(
 
 describe('composition: authoritative legacy job routes (D07)', () => {
   afterEach(() => {
-    resetSchemaGeneration()
+    setCutoverMarkerForTests(null)
   })
 
   it('blocks /jobs legacy writers with 410 when authoritative', async () => {
-    setSchemaGeneration('v3_authoritative')
+    setCutoverMarkerForTests('cutover_blocked')
     const app = new Hono()
     app.route('/jobs', createUserJobRoutes(noopCtx))
     await assertAllBlocked(app, USER_JOB_WRITE_ROUTES)
   })
 
   it('blocks thread-scoped legacy job writers with 410 when authoritative', async () => {
-    setSchemaGeneration('v3_authoritative')
+    setCutoverMarkerForTests('cutover_blocked')
     const app = new Hono()
     app.route('/threads', createJobRoutes(noopCtx))
     await assertAllBlocked(app, THREAD_JOB_WRITE_ROUTES)
   })
 
   it('blocks design-session legacy writers with 410 when authoritative', async () => {
-    setSchemaGeneration('v3_authoritative')
+    setCutoverMarkerForTests('cutover_blocked')
     const app = new Hono()
     app.route('/threads', createDesignSessionRoutes(noopCtx))
     await assertAllBlocked(app, DESIGN_SESSION_WRITE_ROUTES)

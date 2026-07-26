@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JobExecutionRuntimeRegistry } from '../../src/server/context/job-execution-runtime'
-import { isRestartInterruptedPause } from '../../src/server/legacy-control-plane/execution-recovery'
-import { isExecutionInfraNotReadyError } from '../../src/server/legacy-control-plane/execution-infra-errors'
+import { isRestartInterruptedPause, isExecutionInfraNotReadyError } from '../../src/server/legacy-shim'
 import { RuntimeRegistry } from '../../src/server/context/runtime-registry'
 
 test('JobExecutionRuntimeRegistry blocks a second active loop for the same user', () => {
@@ -114,7 +113,7 @@ test('isRestartInterruptedPause does not auto-resume pause-human dependency', ()
 
 test('resolveStaleExecutionJobAction keeps pause-human as noop', async () => {
   const { resolveStaleExecutionJobAction } =
-    await import('../../src/server/legacy-control-plane/execution-recovery')
+    await import('../../src/server/legacy-shim')
   const humanPaused = {
     status: 'paused',
     lastError: null,
@@ -143,7 +142,7 @@ test('resolveStaleExecutionJobAction keeps pause-human as noop', async () => {
 
 test('resolveStaleExecutionJobAction keeps legacy restart-looking paused as noop', async () => {
   const { resolveStaleExecutionJobAction } =
-    await import('../../src/server/legacy-control-plane/execution-recovery')
+    await import('../../src/server/legacy-shim')
   const interrupted = {
     status: 'paused',
     lastError: null,

@@ -8,8 +8,8 @@ import {
   resetInterruptedRunningTasks,
   resetInterruptedVerificationInProgress,
   syncTaskProgressForJobFailure
-} from '../../src/server/legacy-control-plane/execution-recovery.ts'
-import type { GateMilestoneState, GateSliceState } from '../../src/server/legacy-control-plane/execution-gate.ts'
+} from '../../src/server/legacy-shim'
+import type { GateMilestoneState, GateSliceState } from '../../src/server/legacy-shim'
 
 describe('isRecoverableWorkflowBlock', () => {
   it('recognizes deadlock workflow block by TurnError code', () => {

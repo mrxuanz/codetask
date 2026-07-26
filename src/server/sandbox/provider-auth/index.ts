@@ -9,10 +9,7 @@ export { ProviderAuthError } from './errors'
 export {
   filterCodexConfigToml,
   materializeCodexAuth,
-  materializeCursorAuth,
   materializeOpencodeAuth,
-  ensureCursorRuntimeAuth,
-  runtimeCursorCliAuthPath,
   opencodeRuntimeLayout
 } from './materialize'
 export {

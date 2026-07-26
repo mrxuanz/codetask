@@ -5,7 +5,6 @@ import { decideStartupReconcile } from '../../../src/server/application/startup-
 import { ShutdownCoordinator } from '../../../src/server/application/shutdown-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
 import type { JobAggregate } from '@shared/contracts/control-plane'
-import { LEGACY_RESUME_RUNNING_DISABLED } from '../../../src/server/application/legacy-resume-running-disabled'
 
 function buildJob(overrides: Partial<JobAggregate> = {}): JobAggregate {
   return {
@@ -125,6 +124,8 @@ describe('StartupCoordinator', () => {
   })
 })
 
+// Auto-resume of interrupted running jobs is the default (no kill-switch flag).
+// Reconcile outcomes for execution_running are covered by the cases below.
 describe('decideStartupReconcile', () => {
   describe('pause intent', () => {
     it('should settle to paused', () => {
@@ -238,11 +239,5 @@ describe('SafeLogger', () => {
         logger.error('error')
       })
     })
-  })
-})
-
-describe('legacy resume running', () => {
-  it('should enable auto resume for interrupted running jobs (FIX-PLAN F3-A)', () => {
-    assert.equal(LEGACY_RESUME_RUNNING_DISABLED, false)
   })
 })

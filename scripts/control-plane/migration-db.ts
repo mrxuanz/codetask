@@ -774,7 +774,7 @@ export function cutoverDatabase(
       assertInvariantSweepEmpty(db)
       assertCutoverReleaseGate(db, options.expectedAppCommit ?? resolveAppCommit())
       db.prepare(
-        `UPDATE control_schema_meta SET value = 'v3_authoritative', copy_report_hash = ?, backup_id = ?, validation_summary_json = ?, updated_at_ms = ? WHERE key = 'control_schema_generation'`
+        `UPDATE control_schema_meta SET value = 'cutover_blocked', copy_report_hash = ?, backup_id = ?, validation_summary_json = ?, updated_at_ms = ? WHERE key = 'control_schema_generation'`
       ).run(report.reportHash, backupId, JSON.stringify(report.invariantSummary), Date.now())
     })()
   } finally {

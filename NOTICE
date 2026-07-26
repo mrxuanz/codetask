@@ -3,6 +3,10 @@ Third-Party Notice
 
 This repository includes third-party code derived from the OpenAI Codex project.
 
+The OS sandbox is Codex-derived Rust (`codex-rs` → `native/codeteam-*`), packaged
+as a Node-API `.node` and loaded only through the Runtime Adapter — not an
+original from-scratch sandbox, and not resolved from PATH.
+
 Included upstream source
 - Project: OpenAI Codex
 - Repository: https://github.com/openai/codex
@@ -22,6 +26,8 @@ Local modifications include
 - renaming crates from `codex-*` to `codeteam-*`
 - adapting sandbox integration to this application's runtime and policy model
 - packaging and launcher changes for the desktop app
+
+Further notes: `docs/refactor/native-derivation.md`, `docs/refactor/native-inventory.md`
 
 For the upstream license and notice text, see:
 - `native/vendor/codex-rs/LICENSE`

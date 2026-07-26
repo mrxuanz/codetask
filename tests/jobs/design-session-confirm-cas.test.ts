@@ -23,17 +23,20 @@ import {
 import { AppError } from '../../src/server/error'
 import {
   resetJobReconcileForTests,
-  stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { ensureStartupWorkloadReady } from '../../src/server/legacy-control-plane/workload-slot'
-import { resetWorkloadRunControllersForTests } from '../../src/server/legacy-control-plane/workload-slot-store'
+  stopWorkloadReconcilerForTests,
+  ensureStartupWorkloadReady,
+  resetWorkloadRunControllersForTests
+} from '../../src/server/legacy-shim'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 import { parseJobReferenceManifest } from '../../src/shared/job-references'
 import type { SavedJobPlan } from '../../src/shared/contracts/plan'
 import { attachmentDir, threadAttachmentsDir } from '../../src/server/data-paths'
-import { deleteUserDraft, listUserDrafts } from '../../src/server/legacy-control-plane/draft-plan'
-import { drainAndDeleteJob } from '../../src/server/legacy-control-plane/deletion-coordinator'
-import { resolveAssignedReferenceLocalPaths } from '../../src/server/legacy-control-plane/reference-manifest'
+import {
+  deleteUserDraft,
+  listUserDrafts,
+  drainAndDeleteJob,
+  resolveAssignedReferenceLocalPaths
+} from '../../src/server/legacy-shim'
 
 const USER = 'user'
 const THREAD_ID = 'thread-1'

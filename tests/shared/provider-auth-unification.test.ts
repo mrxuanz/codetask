@@ -26,7 +26,7 @@ test('ProviderRegistry driver is the only complete production runtime entry (PRU
 test('ProviderAuthMode is only runtime-copy | host-identity (PRU-05-01)', () => {
   assert.equal(
     resolveProviderRunPolicy({ outerSandbox: true, runtimeRoot: '/r' }).authMode,
-    'runtime-copy'
+    'host-identity'
   )
   assert.equal(
     resolveProviderRunPolicy({ outerSandbox: false, runtimeRoot: '/r' }).authMode,
@@ -37,6 +37,7 @@ test('ProviderAuthMode is only runtime-copy | host-identity (PRU-05-01)', () => 
     'utf8'
   )
   assert.doesNotMatch(policySource, /host-identity-dev-only|env-token/)
+  assert.match(policySource, /authMode:\s*'host-identity'/)
 })
 
 test('HostAuthSource returns presence only and never secret values (PRU-05-03)', () => {
@@ -70,11 +71,11 @@ test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)'
   const forged = 'sk-forged-token-must-not-appear-in-logs'
   const dto = toProviderAuthLogDto({
     provider: 'codex',
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     authMaterialPresent: true,
     hostAuthPath: `/Users/secret-home/.codex/auth.json`,
-    runtimeAuthPath: `/tmp/runtime/.codex/auth.json`,
-    warnings: [`token=${forged}`, 'Codex auth snapshotted']
+    runtimeAuthPath: `/Users/secret-home/.codex/auth.json`,
+    warnings: [`token=${forged}`, 'Codex host-identity auth']
   })
   const json = JSON.stringify(dto)
   assert.ok(!json.includes(forged))
@@ -82,7 +83,7 @@ test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)'
   assert.ok(!json.includes('auth.json'))
   assert.deepEqual(dto, {
     provider: 'codex',
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     authMaterialPresent: true,
     warningCount: 2
   })
@@ -118,7 +119,8 @@ test('provider auth preflight is read-only: no credential writes or parent env m
     process.env[markerKey] = 'should-not-leak-into-credential-files'
 
     const beforeFiles = new Set<string>()
-    // Capture whether auth.json exists under runtime after prepare (materialize may create snapshots).
+    // Capture whether auth.json exists under runtime after prepare (host-identity
+    // must not materialize credential snapshots into runtimeRoot).
     // Preflight itself must not create additional credential files.
     const authJson = join(runtimeRoot, '.codex', 'auth.json')
     try {

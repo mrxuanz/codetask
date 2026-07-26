@@ -6,7 +6,6 @@ import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } 
 import { getOrCreateAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
 import { SafeLoggerImpl } from './application/safe-logger'
-import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
 import { StartupError } from './application/startup-error'
 import { readSchemaGeneration } from './application/cutover-state'
 import {
@@ -40,6 +39,9 @@ import {
 } from '../shared/providers/settings'
 import { createProviderRegistry } from './providers/composition'
 import { ProviderRuntimeManager } from './providers/lifecycle'
+import { createApplicationForDataDir } from './composition/create-application'
+import { uninstallProtectedRuntime } from './adapters/runtime/protected-spawn'
+import type { ApplicationHandle } from './composition/types'
 
 export type { AppContext } from './context'
 
@@ -99,14 +101,13 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     return appContext
   }
 
-  void LEGACY_RESUME_RUNNING_DISABLED
-
   const db = createDatabase(options.dataDir)
+  let coreApplication: ApplicationHandle | null = null
   try {
     const schemaRead = readSchemaGeneration(db)
 
     // FIX-PLAN F1 / R6: fail closed before publishing global context or starting janitors.
-    if (schemaRead === 'v3_authoritative') {
+    if (schemaRead === 'cutover_blocked') {
       throw new StartupError('control_plane.v3_not_release_ready')
     }
 
@@ -140,6 +141,8 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       )
     })
 
+    coreApplication = createApplicationForDataDir(options.dataDir)
+
     const nextContext: AppContext = {
       config,
       dataDir: options.dataDir,
@@ -157,6 +160,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       providerRuntimeManager: new ProviderRuntimeManager(),
       bootId,
       applicationRuntime: null,
+      coreApplication,
       ...(options.storage ? { storage: options.storage } : {})
     }
     appContext = nextContext
@@ -191,6 +195,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
     return appContext
   } catch (error) {
+    coreApplication?.close()
     closeDatabaseForTests()
     throw error
   }
@@ -215,6 +220,13 @@ export async function shutdownRuntime(
       error: error instanceof Error ? error.message : String(error)
     })
   })
+  try {
+    ctx.coreApplication.close()
+  } catch (error: unknown) {
+    bootstrapLogger.warn('core application shutdown failed', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
 }
 
 export async function resetAppContextForTests(): Promise<void> {
@@ -236,8 +248,14 @@ export async function resetAppContextForTests(): Promise<void> {
   if (appContext) {
     await Promise.allSettled([runRetentionJanitorPass(), runAuthJanitorPass()])
     appContext.settings.close()
+    try {
+      appContext.coreApplication.close()
+    } catch {
+      // ignore close errors during test reset
+    }
   }
 
   appContext = null
   closeDatabaseForTests()
+  uninstallProtectedRuntime()
 }

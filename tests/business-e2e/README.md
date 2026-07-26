@@ -23,6 +23,9 @@ npm run build:server
 npm run business:e2e:list
 npm run business:e2e:list -- --lang en
 
+# Auth-free cutover gate: bootstrap (10) + FakeDriver foundation (1)
+npm run business:e2e:authfree
+
 npm run business:e2e:conversation
 npm run business:e2e:chat-html
 npm run business:e2e:draft-job

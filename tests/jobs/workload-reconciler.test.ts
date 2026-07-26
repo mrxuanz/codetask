@@ -2,12 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   workloadLeaseTtlSec,
-  resetWorkloadRunControllersForTests
-} from '../../src/server/legacy-control-plane/workload-slot-store'
-import {
+  resetWorkloadRunControllersForTests,
   startWorkloadReconciler,
   stopWorkloadReconcilerForTests
-} from '../../src/server/legacy-control-plane/reconcile'
+} from '../../src/server/legacy-shim'
 
 describe('workload reconciler', () => {
   it('defaults lease ttl to 90 minutes', () => {

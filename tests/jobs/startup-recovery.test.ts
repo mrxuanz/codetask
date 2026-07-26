@@ -3,9 +3,9 @@ import test from 'node:test'
 import {
   resolveStaleExecutionJobAction,
   readPausingAttempt,
-  withPausingAttempt
-} from '../../src/server/legacy-control-plane/execution-recovery'
-import { pausingAttemptKey } from '../../src/server/legacy-control-plane/recovery-limits'
+  withPausingAttempt,
+  pausingAttemptKey
+} from '../../src/server/legacy-shim'
 
 test('resolveStaleExecutionJobAction keeps user paused jobs untouched', () => {
   assert.equal(resolveStaleExecutionJobAction({ status: 'paused' }), 'noop')

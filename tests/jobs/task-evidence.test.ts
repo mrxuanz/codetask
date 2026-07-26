@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { normalizeTaskEvidencePacket } from '../../src/server/legacy-control-plane/evidence/normalize'
 import {
+  normalizeTaskEvidencePacket,
   normalizeChangedFilePath,
-  resolveReadablePathWithinWorkspace
-} from '../../src/server/legacy-control-plane/evidence/paths'
-import { preflightSliceTaskEvidence } from '../../src/server/legacy-control-plane/evidence/preflight'
-import { computeSliceEvidenceBundleHash } from '../../src/server/legacy-control-plane/evidence/hash'
-import {
+  resolveReadablePathWithinWorkspace,
+  preflightSliceTaskEvidence,
+  computeSliceEvidenceBundleHash,
   guardVerificationAttempt,
   withVerificationAttempt
-} from '../../src/server/legacy-control-plane/verification-attempts'
+} from '../../src/server/legacy-shim'
 import type { SavedJobPlan } from '../../src/server/planner/plan-types'
-import type { TaskProgressItemDto } from '../../src/server/legacy-control-plane/types'
+import type { TaskProgressItemDto } from '../../src/server/legacy-shim'
 import { mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

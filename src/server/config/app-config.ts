@@ -31,10 +31,20 @@ export interface ExecutionConfig {
   readonly runLifecycle: RunLifecycleConfig
 }
 
+export interface SandboxConfig {
+  /** Desktop escape hatch; server mode always forces outer sandbox on. Default true. */
+  readonly outerSandboxEnabled: boolean
+  /** Prefer supervisor process path when available. Default true. Set false for direct native path. */
+  readonly supervisorEnabled: boolean
+  /** Allow exact single-file read grants in reference projection. Default false (directory-only). */
+  readonly singleFileAllowlist: boolean
+}
+
 export interface AppConfig {
   readonly http: HttpConfig
   readonly turn: TurnConfig
   readonly execution: ExecutionConfig
+  readonly sandbox: SandboxConfig
   readonly providers: ProvidersConfig
 }
 
@@ -44,6 +54,7 @@ export interface AppConfigOverrides {
   execution?: Partial<Omit<ExecutionConfig, 'runLifecycle'>> & {
     runLifecycle?: Partial<RunLifecycleConfig>
   }
+  sandbox?: Partial<SandboxConfig>
   providers?: ProvidersConfigOverrides
 }
 
@@ -73,6 +84,11 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
       killGraceMs: 5_000
     }
   },
+  sandbox: {
+    outerSandboxEnabled: true,
+    supervisorEnabled: true,
+    singleFileAllowlist: false
+  },
   providers: createProvidersConfig()
 }
 
@@ -93,6 +109,10 @@ export function createAppConfig(overrides: AppConfigOverrides = {}): AppConfig {
         ...DEFAULT_APP_CONFIG.execution.runLifecycle,
         ...overrides.execution?.runLifecycle
       }
+    },
+    sandbox: {
+      ...DEFAULT_APP_CONFIG.sandbox,
+      ...overrides.sandbox
     },
     providers: createProvidersConfig(overrides.providers)
   }

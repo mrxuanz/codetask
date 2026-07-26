@@ -14,7 +14,7 @@ describe('composition: planning claim without planner provider (D03)', () => {
   it('does not leave planning_running zombie state or held slots', async () => {
     await withCompositionContext(
       {
-        generation: 'v3_authoritative',
+        generation: 'cutover_blocked',
         seed(db) {
           seedControlJob(db, {
             jobId: 'job-plan-1',

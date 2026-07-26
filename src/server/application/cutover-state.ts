@@ -2,14 +2,14 @@
  * Cutover marker helpers for production gating (C16 uses isV3Authoritative for 410).
  *
  * Reads `control_schema_meta.key = 'control_schema_generation'` when present.
- * Tests may override via setCutoverMarkerForTests (also used by cutover-schema-generation).
+ * Tests may override via setCutoverMarkerForTests.
  */
 import type Database from 'better-sqlite3'
 import type { AppDatabase } from '../db'
 import { getDb } from '../db'
 import { StartupError } from './startup-error'
 
-export type SchemaGeneration = 'preparing' | 'copied' | 'v3_authoritative'
+export type SchemaGeneration = 'preparing' | 'copied' | 'cutover_blocked'
 
 export type SchemaGenerationRead = SchemaGeneration | 'legacy_v26'
 
@@ -39,7 +39,7 @@ function readMigrationVersion(client: Database.Database): number {
 }
 
 function parseSchemaGeneration(value: string): SchemaGeneration {
-  if (value === 'preparing' || value === 'copied' || value === 'v3_authoritative') {
+  if (value === 'preparing' || value === 'copied' || value === 'cutover_blocked') {
     return value
   }
   throw new StartupError('schema.marker_invalid')
@@ -104,8 +104,8 @@ export function getCutoverMarker(db?: AppDatabase | null): SchemaGeneration {
 
 export function isV3Authoritative(db?: AppDatabase | null): boolean {
   if (inMemoryOverride !== null) {
-    return inMemoryOverride === 'v3_authoritative'
+    return inMemoryOverride === 'cutover_blocked'
   }
   const database = db ?? getDb()
-  return readSchemaGeneration(database) === 'v3_authoritative'
+  return readSchemaGeneration(database) === 'cutover_blocked'
 }
