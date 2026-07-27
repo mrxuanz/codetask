@@ -6,11 +6,20 @@ import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 export function resolveInvocation(platform, execPath, requestedCommand, requestedArgs) {
-  if (platform === 'win32' && requestedCommand === 'npm') {
+  if (
+    platform === 'win32' &&
+    (requestedCommand === 'npm' || requestedCommand === 'npx')
+  ) {
     return {
       command: execPath,
       args: [
-        win32.join(win32.dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+        win32.join(
+          win32.dirname(execPath),
+          'node_modules',
+          'npm',
+          'bin',
+          `${requestedCommand}-cli.js`
+        ),
         ...requestedArgs
       ],
       npmCli: true

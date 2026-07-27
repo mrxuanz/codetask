@@ -19,9 +19,14 @@ export function sandboxErrorFromErrorChunk(
 ): SandboxError {
   const code = chunk.error?.code ?? chunk.code
   if (typeof code === 'string' && code.length > 0) {
-    return new SandboxError(chunk.message, code)
+    return new SandboxError(chunk.message, code, undefined, chunk.error?.detail)
   }
-  return new SandboxError(chunk.message, 'sandbox.sdk.error')
+  return new SandboxError(
+    chunk.message,
+    'sandbox.sdk.error',
+    undefined,
+    chunk.error?.detail
+  )
 }
 
 export function readStderrPreview(

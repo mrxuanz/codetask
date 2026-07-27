@@ -173,7 +173,6 @@ export async function* streamJobCursorSandboxTurn(
     runtimeRoot: input.runtimeRoot,
     prompt: input.prompt,
     runtimeSessionId: input.runtimeSessionId,
-    model: input.model,
     systemPrompt: input.systemPrompt,
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,

@@ -23,9 +23,6 @@ pub fn preflight() -> anyhow::Result<()> {
 
 pub fn resolve_linux_helper() -> anyhow::Result<PathBuf> {
     let candidates = [
-        std::env::var("CODETASK_LINUX_SANDBOX_HELPER")
-            .ok()
-            .map(PathBuf::from),
         std::env::current_exe()
             .ok()
             .and_then(|exe| exe.parent().map(|p| p.join("codeteam-linux-sandbox"))),
@@ -51,9 +48,6 @@ pub fn resolve_linux_helper() -> anyhow::Result<PathBuf> {
 }
 
 fn which_bwrap() -> anyhow::Result<String> {
-    if let Ok(path) = std::env::var("BWRAP_PATH") {
-        return Ok(path);
-    }
     let output = Command::new("which").arg("bwrap").output()?;
     if !output.status.success() {
         anyhow::bail!("bubblewrap (bwrap) is required on Linux");
@@ -85,6 +79,7 @@ pub fn spawn(
     command: &str,
     args: &[String],
     env: &HashMap<String, String>,
+    artifact_path: &Path,
 ) -> anyhow::Result<std::process::Child> {
     preflight()?;
 
@@ -100,6 +95,8 @@ pub fn spawn(
     let mut cmd = Command::new(&helper);
     cmd.arg("--sandbox-policy-cwd")
         .arg(policy.cwd())
+        .arg("--attestation-file")
+        .arg(artifact_path)
         .arg("--permission-profile")
         .arg(profile_json);
     for arg in sandbox_tool_ro_binds(&helper, &bwrap) {
@@ -114,7 +111,6 @@ pub fn spawn(
     for (key, value) in env {
         cmd.env(key, value);
     }
-    cmd.env("CODETASK_OUTER_SANDBOX", "1");
     Ok(cmd.spawn()?)
 }
 

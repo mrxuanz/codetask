@@ -475,12 +475,82 @@ const migration004JobExecution: KernelMigration = {
   }
 }
 
-export const KERNEL_SCHEMA_VERSION = 4
+const migration005ProviderThreads: KernelMigration = {
+  version: 5,
+  name: 'provider-threads',
+  checksum: 'provider-threads-kernel-005-2026-07-27',
+  apply(database): void {
+    database.exec(`
+      ALTER TABLE conversation_settings
+        ADD COLUMN preferred_provider_code TEXT NOT NULL DEFAULT 'codex'
+        CHECK (preferred_provider_code IN ('codex', 'claude-code', 'opencode', 'cursorcli'));
+
+      ALTER TABLE conversation_threads
+        ADD COLUMN selected_provider_code TEXT NOT NULL DEFAULT 'cursorcli'
+        CHECK (selected_provider_code IN ('codex', 'claude-code', 'opencode', 'cursorcli'));
+
+      ALTER TABLE conversation_turns
+        ADD COLUMN selected_provider_code TEXT NOT NULL DEFAULT 'cursorcli'
+        CHECK (selected_provider_code IN ('codex', 'claude-code', 'opencode', 'cursorcli'));
+    `)
+  }
+}
+
+const migration006PlannerThreads: KernelMigration = {
+  version: 6,
+  name: 'planner-threads',
+  checksum: 'planner-threads-kernel-006-2026-07-27',
+  apply(database): void {
+    database.exec(`
+      ALTER TABLE conversation_threads
+        ADD COLUMN thread_kind TEXT NOT NULL DEFAULT 'chat'
+        CHECK (thread_kind IN ('chat', 'planner'));
+
+      ALTER TABLE draft_generation_runs
+        ADD COLUMN selected_provider_code TEXT NOT NULL DEFAULT 'cursorcli'
+        CHECK (selected_provider_code IN ('codex', 'claude-code', 'opencode', 'cursorcli'));
+
+      ALTER TABLE draft_execution_trees
+        ADD COLUMN selected_provider_code TEXT NOT NULL DEFAULT 'cursorcli'
+        CHECK (selected_provider_code IN ('codex', 'claude-code', 'opencode', 'cursorcli'));
+
+      ALTER TABLE drafts
+        ADD COLUMN planner_phase TEXT NOT NULL DEFAULT 'gathering'
+        CHECK (planner_phase IN ('gathering', 'ready'));
+
+      UPDATE drafts SET planner_phase = 'ready';
+
+      ALTER TABLE draft_settings ADD COLUMN discussion_prompt TEXT;
+      ALTER TABLE draft_settings ADD COLUMN discussion_skills_manual TEXT;
+
+      UPDATE job_settings SET
+        work_model = NULL,
+        work_validation_model = NULL,
+        slice_validation_model = NULL,
+        milestone_validation_model = NULL;
+
+      UPDATE job_work_items SET model = NULL;
+
+      CREATE INDEX idx_conversation_threads_workspace_kind_activity
+        ON conversation_threads(
+          workspace_id,
+          thread_kind,
+          last_message_at_ms DESC,
+          created_at_ms DESC,
+          id
+        );
+    `)
+  }
+}
+
+export const KERNEL_SCHEMA_VERSION = 6
 const KERNEL_MIGRATIONS: readonly KernelMigration[] = [
   migration001Authentication,
   migration002Conversation,
   migration003DraftPlanning,
-  migration004JobExecution
+  migration004JobExecution,
+  migration005ProviderThreads,
+  migration006PlannerThreads
 ]
 
 function ensureMigrationTable(database: Database.Database): void {

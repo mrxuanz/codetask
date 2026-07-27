@@ -80,31 +80,27 @@ passed and failed require repairTasks=[]. repair requires 1–3 repairTasks. Ser
 
 export function defaultJobSettings(nowMs = 0): JobSettings {
   return {
-    maxConcurrentJobs: 2,
+    maxConcurrentJobs: 1,
     work: {
       provider: 'codex',
-      model: null,
       prompt: DEFAULT_WORK_PROMPT,
       skillsManual: DEFAULT_WORK_SKILLS_MANUAL
     },
     workValidation: {
       enabled: true,
       provider: 'claude-code',
-      model: null,
       prompt: DEFAULT_WORK_VALIDATION_PROMPT,
       skillsManual: DEFAULT_WORK_VALIDATION_SKILLS_MANUAL
     },
     sliceValidation: {
       enabled: true,
       provider: 'opencode',
-      model: null,
       prompt: DEFAULT_SLICE_VALIDATION_PROMPT,
       skillsManual: DEFAULT_SLICE_VALIDATION_SKILLS_MANUAL
     },
     milestoneValidation: {
       enabled: true,
       provider: 'cursorcli',
-      model: null,
       prompt: DEFAULT_MILESTONE_VALIDATION_PROMPT,
       skillsManual: DEFAULT_MILESTONE_VALIDATION_SKILLS_MANUAL
     },

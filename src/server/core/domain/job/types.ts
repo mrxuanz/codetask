@@ -1,4 +1,5 @@
 import type { SupportedCoreCode } from '../../../../shared/providers/codes'
+import type { ExecutionTree } from '../draft'
 
 export const JOB_STATES = [
   'queued',
@@ -24,7 +25,6 @@ export type JobItemState = 'queued' | 'running' | 'succeeded' | 'failed' | 'skip
 
 export interface JobRoleSettings {
   readonly provider: SupportedCoreCode
-  readonly model: string | null
   readonly prompt: string
   readonly skillsManual: string
 }
@@ -65,6 +65,26 @@ export interface JobSnapshot {
   readonly workspaceId: string
   readonly title: string
   readonly summary: string
+  readonly workspace: {
+    readonly id: string
+    readonly title: string
+    readonly rootPath: string
+  }
+  readonly sourceDraft: {
+    readonly title: string
+    readonly objective: string
+    readonly requirements: string
+    readonly constraints: string
+    readonly acceptanceCriteria: string
+  }
+  readonly executionTree: ExecutionTree
+  readonly attachments: readonly {
+    readonly id: string
+    readonly sourceAttachmentId: string
+    readonly displayName: string
+    readonly mediaType: string
+    readonly sizeBytes: number
+  }[]
   readonly state: JobState
   readonly revision: number
   readonly queuePosition: number | null
@@ -95,7 +115,8 @@ export interface JobItemSnapshot {
   readonly attempt: number
   readonly repairGeneration: number
   readonly provider: SupportedCoreCode
-  readonly model: string | null
   readonly result: WorkResult | VerificationResult | null
   readonly error: { readonly code: string; readonly message: string } | null
+  readonly startedAtMs: number | null
+  readonly finishedAtMs: number | null
 }

@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { ApiResponse } from './types'
+import type { ExecutionTree } from './drafts'
 
 export type JobProviderCode = 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
 export type JobState =
@@ -15,7 +16,6 @@ export type JobItemState = 'queued' | 'running' | 'succeeded' | 'failed' | 'skip
 
 export interface JobRoleSettings {
   provider: JobProviderCode
-  model: string | null
   prompt: string
   skillsManual: string
 }
@@ -59,7 +59,6 @@ export interface JobItemSnapshot {
   attempt: number
   repairGeneration: number
   provider: JobProviderCode
-  model: string | null
   result: {
     status: 'completed' | 'passed' | 'repair' | 'failed'
     summary: string
@@ -67,6 +66,8 @@ export interface JobItemSnapshot {
     evidence: string[]
   } | null
   error: { code: string; message: string } | null
+  startedAtMs: number | null
+  finishedAtMs: number | null
 }
 
 export interface JobSnapshot {
@@ -74,6 +75,22 @@ export interface JobSnapshot {
   workspaceId: string
   title: string
   summary: string
+  workspace: { id: string; title: string; rootPath: string }
+  sourceDraft: {
+    title: string
+    objective: string
+    requirements: string
+    constraints: string
+    acceptanceCriteria: string
+  }
+  executionTree: ExecutionTree
+  attachments: Array<{
+    id: string
+    sourceAttachmentId: string
+    displayName: string
+    mediaType: string
+    sizeBytes: number
+  }>
   state: JobState
   revision: number
   queuePosition: number | null

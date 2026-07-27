@@ -17,7 +17,6 @@ export interface AgentTurnInput {
   runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null | undefined
-  model?: string | undefined
   systemPrompt?: string | undefined
   mcpUrl?: string | undefined
   mcpToolNames?: readonly string[] | undefined
@@ -65,12 +64,10 @@ export interface AgentTurnRunnerInput {
   runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null | undefined
-  model?: string | undefined
   systemPrompt?: string | undefined
   mcpUrl?: string | undefined
   mcpToolNames?: readonly string[] | undefined
   userMcpServers?: Record<string, unknown> | undefined
-  mcpToken?: string | undefined
   signal?: AbortSignal | undefined
   capabilityProfile: AgentCapabilityProfile
 

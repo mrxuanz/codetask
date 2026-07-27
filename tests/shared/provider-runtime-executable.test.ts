@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -178,24 +185,34 @@ test('SDK-bundled automatic providers do not inherit external executable affinit
   assert.deepEqual(affinity.readRoots, [])
 })
 
-test('Claude and Codex preflight trust the isolated auth snapshot, not a host shim', () => {
-  const failingHostShim = process.execPath
+test('Claude probes the selected host CLI login while Codex trusts its isolated auth snapshot', () => {
+  const hostShim = process.execPath
+  const loggedInClaudeInstallation = {
+    ...installation('claude-code', hostShim),
+    invocation: {
+      executable: hostShim,
+      prefixArgs: ['-e', 'process.stdout.write(JSON.stringify({loggedIn:true}))', '--']
+    }
+  }
   const claudeInstallation = {
-    ...installation('claude-code', failingHostShim),
-    invocation: { executable: failingHostShim, prefixArgs: ['-e', 'process.exit(91)'] }
+    ...installation('claude-code', hostShim),
+    invocation: {
+      executable: hostShim,
+      prefixArgs: ['-e', 'process.stdout.write(JSON.stringify({loggedIn:false}))', '--']
+    }
   }
   const codexInstallation = {
-    ...installation('codex', failingHostShim),
-    invocation: { executable: failingHostShim, prefixArgs: ['-e', 'process.exit(92)'] }
+    ...installation('codex', hostShim),
+    invocation: { executable: hostShim, prefixArgs: ['-e', 'process.exit(92)'] }
   }
 
   assert.doesNotThrow(() =>
-    runClaudeAuthPreflight(preparedAuth('claude-code', true), claudeInstallation)
+    runClaudeAuthPreflight(preparedAuth('claude-code', false), loggedInClaudeInstallation)
   )
   assert.doesNotThrow(() => runCodexAuthPreflight(preparedAuth('codex', true), codexInstallation))
 
   assert.throws(
-    () => runClaudeAuthPreflight(preparedAuth('claude-code', false), claudeInstallation),
+    () => runClaudeAuthPreflight(preparedAuth('claude-code', true), claudeInstallation),
     (error) =>
       error instanceof ProviderAuthError && error.code === 'provider.claude.not_authenticated'
   )
@@ -204,6 +221,14 @@ test('Claude and Codex preflight trust the isolated auth snapshot, not a host sh
     (error) =>
       error instanceof ProviderAuthError && error.code === 'provider.codex.not_authenticated'
   )
+})
+
+test('Claude preflight disables filesystem settings before probing native host login', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/server/providers/claude/preflight.ts'),
+    'utf8'
+  )
+  assert.match(source, /\['--setting-sources', '', 'auth', 'status', '--json'\]/)
 })
 
 test('Codex config alone is not misclassified as authentication material', () => {
@@ -218,7 +243,10 @@ test('Codex config alone is not misclassified as authentication material', () =>
       hostEnvironment: Object.freeze({ HOME: home, PATH: process.env.PATH ?? '' })
     })
     assert.equal(prepared.diagnostics.authMaterialPresent, false)
-    assert.match(prepared.diagnostics.warnings.join('\n'), /config snapshotted.*no host login/i)
+    assert.match(
+      prepared.diagnostics.warnings.join('\n'),
+      /config was generated.*no host login/i
+    )
     prepared.cleanupPlan()
   } finally {
     rmSync(home, { recursive: true, force: true })

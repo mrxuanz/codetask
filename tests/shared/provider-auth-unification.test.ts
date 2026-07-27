@@ -8,6 +8,7 @@ import { processHostEnvironmentSource } from '../../src/server/host-environment.
 import { toProviderAuthLogDto } from '../../src/server/sandbox/provider-auth/types.ts'
 import { spawnProviderCommandSync } from '../../src/server/providers/spawn.ts'
 import { resolveProviderRunPolicy } from '../../src/server/agent-runtime/provider-policy.ts'
+import { prepareClaudeAuth } from '../../src/server/sandbox/provider-auth/bridge.ts'
 
 test('ProviderRegistry driver is the only complete production runtime entry (PRU-04-03)', () => {
   for (const provider of createProviderRegistry().list()) {
@@ -33,6 +34,23 @@ test('ProviderAuthMode is only runtime-copy | host-identity (PRU-05-01)', () => 
     'utf8'
   )
   assert.doesNotMatch(policySource, /host-identity-dev-only|env-token/)
+})
+
+test('Claude host identity keeps the host CLI credential namespace unchanged', () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'claude-host-identity-'))
+  try {
+    const prepared = prepareClaudeAuth({
+      runtimeRoot,
+      workspaceRoot: runtimeRoot,
+      hostEnvironment: processHostEnvironmentSource.snapshot()
+    })
+
+    assert.equal(prepared.mode, 'host-identity')
+    assert.equal(prepared.envPatch.CLAUDE_CONFIG_DIR, undefined)
+    assert.equal(prepared.envPatch.HOME, processHostEnvironmentSource.snapshot().HOME)
+  } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
 })
 
 test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)', () => {
@@ -125,16 +143,15 @@ test('provider auth preflight is read-only: no credential writes or parent env m
     assert.equal(afterContent, [...beforeFiles][0])
     assert.ok(!afterContent.includes('should-not-leak-into-credential-files'))
 
-    // Preflight modules must not call writeFile. External-CLI providers may
-    // probe their selected executable; SDK-bundled providers validate the
-    // authoritative runtime auth snapshot without probing a different host CLI.
+    // Preflight modules must not call writeFile. Host-identity providers probe
+    // their exact selected CLI; Codex validates its runtime auth snapshot.
     for (const name of ['codex', 'claude', 'cursor', 'opencode'] as const) {
       const source = readFileSync(
         join(process.cwd(), `src/server/providers/${name}/preflight.ts`),
         'utf8'
       )
       assert.doesNotMatch(source, /writeFile(Sync)?\(/)
-      if (name === 'cursor' || name === 'opencode') {
+      if (name === 'claude' || name === 'cursor' || name === 'opencode') {
         assert.match(source, /spawnProviderCommandSync/)
       } else {
         assert.doesNotMatch(source, /spawnProviderCommandSync/)

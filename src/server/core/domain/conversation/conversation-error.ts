@@ -6,7 +6,7 @@ export type ConversationErrorCode =
   | 'conversation.turn_not_found'
   | 'conversation.title_invalid'
   | 'conversation.prompt_invalid'
-  | 'conversation.model_invalid'
+  | 'conversation.provider_invalid'
   | 'conversation.provider_unavailable'
   | 'conversation.provider_not_authenticated'
 

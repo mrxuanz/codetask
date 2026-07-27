@@ -9,7 +9,6 @@ import { classifyCursorAcpError } from './errors'
 import { abortReason, createProviderTurnScope } from '../provider-turn'
 import { createAsyncQueue } from './async-queue'
 import {
-  applyCursorModel,
   bootstrapCursorAcp,
   cancelCursorAcpSession,
   CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS,
@@ -36,7 +35,6 @@ export interface CursorPromptInput {
   cwd: string
   prompt: string
   systemPrompt?: string | undefined
-  model?: string | undefined
   mcpServers: CursorAcpMcpServer[]
   runtimeSessionId?: string | null | undefined
   signal?: AbortSignal | undefined
@@ -458,8 +456,6 @@ export class CursorAcpSessionRuntime {
     const userPrompt = input.systemPrompt
       ? `${input.systemPrompt}\n\n---\n\n${input.prompt}`
       : input.prompt
-
-    await applyCursorModel(ctx, session, input.model)
 
     let reply = ''
     let thinking = ''

@@ -28,11 +28,9 @@ async function runSmokeTest(server: ServerInfo): Promise<void> {
 async function main(): Promise<void> {
   await initializeProcessHostEnvironment()
   const cli = parseServerCliArgs()
-  const platform = createNodeServerPlatform()
+  const platform = createNodeServerPlatform(cli)
   if (!platform.isDev && !platform.staticDir) {
-    throw new Error(
-      'Renderer assets not found. Set CODETASK_STATIC_DIR or run the standalone entry from a complete build.'
-    )
+    throw new Error('Renderer assets not found. Use --static-dir or run a complete server build.')
   }
 
   const server = await startAppServer(cli, platform)

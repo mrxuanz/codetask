@@ -101,7 +101,11 @@ app.whenReady().then(async () => {
   try {
     await initializeProcessHostEnvironment()
     if (cli.mode === 'desktop') {
-      const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
+      const storage = resolveDataDirSelection({
+        explicitDataDir: cli.dataDir,
+        mode: cli.mode,
+        ...(cli.bootstrapRoot ? { bootstrapRoot: cli.bootstrapRoot } : {})
+      })
       serverInfo = await discoverRunningService(
         storage.bootstrap,
         storage.phase === 'ready' ? storage.dataDir : undefined
@@ -110,7 +114,13 @@ app.whenReady().then(async () => {
         console.log(`[desktop] using running service at ${serverInfo.url}`)
       }
     }
-    serverInfo ??= await startAppServer(cli, createElectronServerPlatform())
+    serverInfo ??= await startAppServer(
+      cli,
+      createElectronServerPlatform(cli, {
+        // electron-vite owns this build-time bridge; it is not App/Provider configuration.
+        rendererDevUrl: process.env.ELECTRON_RENDERER_URL
+      })
+    )
     ipcMain.handle('get-server-info', () => serverInfo)
     ipcMain.handle('select-data-directory', async () => {
       const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

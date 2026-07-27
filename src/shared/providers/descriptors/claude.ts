@@ -6,18 +6,10 @@ export const CLAUDE_DESCRIPTOR = Object.freeze({
   label: 'Claude Code',
   description: 'Anthropic Claude Code CLI',
   defaultCommands: ['claude', 'claude-code'],
-  childEnvironmentKeys: [
-    'CLAUDE_CONFIG_DIR',
-    'ANTHROPIC_BASE_URL',
-    'ANTHROPIC_MODEL',
-    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-    'ANTHROPIC_DEFAULT_SONNET_MODEL',
-    'ANTHROPIC_DEFAULT_OPUS_MODEL',
-    'ANTHROPIC_SMALL_FAST_MODEL'
-  ],
+  childEnvironmentKeys: [],
   mcpRootKey: 'mcpServers',
   capabilities: {
-    authMode: 'runtime-copy',
+    authMode: 'host-identity',
     protocol: 'sdk',
     supportedProfiles: [
       'chat-write',

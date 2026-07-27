@@ -95,8 +95,6 @@ test('supervisor client publishes completed only after worker cleanup exits succ
 })
 
 test('aborted sandbox turn unregisters active job turn in finally', async () => {
-  const previous = process.env.CODETASK_SANDBOX_SUPERVISOR
-  process.env.CODETASK_SANDBOX_SUPERVISOR = '0'
   resetActiveJobTurnsForTests()
   const jobId = 'job-abort-unregister'
   const controller = new AbortController()
@@ -120,8 +118,6 @@ test('aborted sandbox turn unregisters active job turn in finally', async () => 
     assert.equal(hasActiveJobSandboxTurns(jobId), false)
   } finally {
     resetActiveJobTurnsForTests()
-    if (previous === undefined) delete process.env.CODETASK_SANDBOX_SUPERVISOR
-    else process.env.CODETASK_SANDBOX_SUPERVISOR = previous
   }
 })
 

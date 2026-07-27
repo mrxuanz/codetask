@@ -43,7 +43,7 @@ function inputValue(event: Event): string {
       </label>
     </div>
 
-    <div class="grid gap-4 sm:grid-cols-2">
+    <div>
       <div class="space-y-2">
         <Label>{{ t('jobs.settings.provider') }}</Label>
         <select
@@ -61,14 +61,6 @@ function inputValue(event: Event): string {
             {{ provider.label }} · {{ provider.protocol }}
           </option>
         </select>
-      </div>
-      <div class="space-y-2">
-        <Label>{{ t('jobs.settings.model') }}</Label>
-        <input
-          :value="role.model ?? ''"
-          class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-          @input="patch({ model: inputValue($event).trim() || null })"
-        />
       </div>
     </div>
 

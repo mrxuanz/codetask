@@ -230,7 +230,15 @@ export function snapshotOpencodeHostAuth(
     if (existsSync(path)) sources.push(path)
   }
 
-  return { present: sources.length > 0, configDir, dataDir, sources }
+  return {
+    present: sources.some((path) => {
+      const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
+      return name === 'auth.json' || name === 'credentials.json'
+    }),
+    configDir,
+    dataDir,
+    sources
+  }
 }
 
 export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths()): string[] {
@@ -240,6 +248,7 @@ export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths(
     dirs.push(join(profile.localAppData, 'Programs', 'cursor-agent'))
   } else if (process.platform === 'darwin') {
     dirs.push(join(profile.appData, 'Cursor'))
+    dirs.push(join(profile.home, '.local', 'share', 'cursor-agent'))
     dirs.push(join(profile.home, '.cursor-agent'))
   } else {
     dirs.push(join(profile.appData, 'Cursor'))
@@ -247,6 +256,54 @@ export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths(
     dirs.push(join(profile.home, '.cursor-agent'))
   }
 
+  return dirs
+}
+
+export function resolveCursorCompileCacheDirs(
+  profile = resolveHostProfilePaths()
+): string[] {
+  const candidates =
+    process.platform === 'darwin'
+      ? [join(profile.localAppData, 'cursor-compile-cache')]
+      : process.platform === 'win32'
+        ? [join(profile.localAppData, 'cursor-compile-cache')]
+        : [join(profile.home, '.cache', 'cursor-compile-cache')]
+  return candidates.filter((path) => existsSync(path))
+}
+
+export function resolveDarwinKeychainReadRoots(
+  profile = resolveHostProfilePaths()
+): string[] {
+  if (process.platform !== 'darwin') return []
+  return [
+    join(profile.home, 'Library', 'Keychains'),
+    join('/Library', 'Keychains')
+  ].filter((path) => existsSync(path))
+}
+
+/**
+ * Cursor Agent keeps a per-process marker next to each installed version.
+ * Grant only those existing `.running` directories, never the version/install
+ * parent where executable replacement would become a persistence boundary.
+ */
+export function resolveCursorAgentMarkerWriteDirs(
+  profile = resolveHostProfilePaths()
+): string[] {
+  const dirs: string[] = []
+  for (const installRoot of resolveCursorAgentInstallDirs(profile)) {
+    const versionsRoot = join(installRoot, 'versions')
+    let versions: Dirent[]
+    try {
+      versions = readdirSync(versionsRoot, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const version of versions) {
+      if (!version.isDirectory()) continue
+      const running = join(versionsRoot, version.name, '.running')
+      if (existsSync(running)) dirs.push(running)
+    }
+  }
   return dirs
 }
 

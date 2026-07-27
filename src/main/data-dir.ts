@@ -43,7 +43,7 @@ export type { DataDirResolution, DataDirSource } from './storage-locator'
  * bootstrap metadata (storage locator and secrets) instead of deriving it from the launch mode.
  */
 export function resolveBootstrapRoot(_mode: AppMode, override?: string): string {
-  const configured = override?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
+  const configured = override?.trim()
   if (configured) return resolve(configured)
   if (process.platform === 'win32') {
     return join(process.env.APPDATA?.trim() || app.getPath('userData'), 'CodeTask')
@@ -64,13 +64,10 @@ export function resolveDataDirSelection(input: {
   bootstrapRoot?: string
   defaultDataDir?: string
 }): DataDirResolution {
-  const bootstrapOverridden = Boolean(
-    input.bootstrapRoot?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
-  )
+  const bootstrapOverridden = Boolean(input.bootstrapRoot?.trim())
   const bootstrapRoot = resolveBootstrapRoot(input.mode, input.bootstrapRoot)
   return resolveStorageLocation({
     explicitDataDir: input.explicitDataDir,
-    envDataDir: process.env.CODETASK_DATA_DIR,
     mode: input.mode,
     bootstrapRoot,
     // Before bootstrap roots were unified, desktop mode stored these files under Electron's
@@ -82,7 +79,7 @@ export function resolveDataDirSelection(input: {
 }
 
 export function resolveDataDir(explicitDataDir?: string): string {
-  const configured = explicitDataDir?.trim() || process.env.CODETASK_DATA_DIR?.trim()
+  const configured = explicitDataDir?.trim()
   if (configured) return resolve(configured)
   return resolveDefaultDataDir()
 }

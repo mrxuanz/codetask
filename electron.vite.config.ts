@@ -4,7 +4,6 @@ import { defineConfig } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
 import type { Plugin } from 'vite'
 
-const standaloneOnly = process.env.CODETASK_BUILD_TARGET === 'standalone'
 const sandboxInputs = {
   'sandbox/role-worker': resolve('src/sandbox/role-worker.ts'),
   'sandbox/role-worker-cursor-job': resolve('src/sandbox/role-worker-cursor-job.ts'),
@@ -24,35 +23,38 @@ function standaloneRendererAssetBasePlugin(): Plugin {
   }
 }
 
-export default defineConfig({
-  main: {
-    resolve: {
-      alias: {
-        '@shared': resolve('src/shared')
-      }
-    },
-    build: {
-      rollupOptions: {
-        input: {
-          ...(!standaloneOnly ? { index: resolve('src/main/index.ts') } : {}),
-          standalone: resolve('src/standalone/index.ts'),
-          ...sandboxInputs
+export default defineConfig(({ mode }) => {
+  const standaloneOnly = mode === 'standalone'
+  return {
+    main: {
+      resolve: {
+        alias: {
+          '@shared': resolve('src/shared')
+        }
+      },
+      build: {
+        rollupOptions: {
+          input: {
+            ...(!standaloneOnly ? { index: resolve('src/main/index.ts') } : {}),
+            standalone: resolve('src/standalone/index.ts'),
+            ...sandboxInputs
+          }
         }
       }
-    }
-  },
-  preload: {},
-  renderer: {
-    resolve: {
-      alias: {
-        '@renderer': resolve('src/renderer/src'),
-        '@shared': resolve('src/shared')
-      }
     },
-    plugins: [
-      vue(),
-      tailwindcss(),
-      ...(standaloneOnly ? [standaloneRendererAssetBasePlugin()] : [])
-    ]
+    preload: {},
+    renderer: {
+      resolve: {
+        alias: {
+          '@renderer': resolve('src/renderer/src'),
+          '@shared': resolve('src/shared')
+        }
+      },
+      plugins: [
+        vue(),
+        tailwindcss(),
+        ...(standaloneOnly ? [standaloneRendererAssetBasePlugin()] : [])
+      ]
+    }
   }
 })

@@ -6,6 +6,8 @@ import {
 import { api, ApiError } from './client'
 import type { ApiResponse } from './types'
 import type { JobSnapshot } from './jobs'
+import type { SupportedCoreCode } from '@shared/providers/codes'
+import type { ConversationThread } from './conversation'
 
 export type DraftStatus = 'editing' | 'generating' | 'tree_ready' | 'submitted'
 export interface DraftRecord {
@@ -18,6 +20,7 @@ export interface DraftRecord {
   requirements: string
   constraints: string
   acceptanceCriteria: string
+  plannerPhase: 'gathering' | 'ready'
   status: DraftStatus
   revision: number
   activeTreeId: string | null
@@ -74,8 +77,8 @@ export interface DraftExecutionTreeRecord {
   generationRunId: string
   treeRevision: number
   sourceDraftRevision: number
+  provider: SupportedCoreCode
   schemaVersion: 1
-  model: string | null
   createdAtMs: number
   tree: ExecutionTree
 }
@@ -97,11 +100,16 @@ export interface DraftDetails {
   handoff: JobIntakeHandoff | null
 }
 export interface DraftSettings {
-  provider: 'cursorcli'
-  model: string | null
+  discussionPrompt: { value: string; useDefault: boolean }
+  discussionSkillsManual: { value: string; useDefault: boolean }
   plannerPrompt: { value: string; useDefault: boolean }
   skillsManual: { value: string; useDefault: boolean }
-  defaults: { plannerPrompt: string; skillsManual: string }
+  defaults: {
+    discussionPrompt: string
+    discussionSkillsManual: string
+    plannerPrompt: string
+    skillsManual: string
+  }
   revision: number
   updatedAtMs: number
 }
@@ -121,17 +129,35 @@ export type DraftGenerationEvent =
   | { type: 'completed'; treeId: string; treeRevision: number; tree: ExecutionTree }
   | { type: 'error'; status: number; message: string; data: unknown }
 
+export type PlannerTurnEvent =
+  | { type: 'started'; turnId: string }
+  | { type: 'thinking'; content: string }
+  | { type: 'progress'; receivedCharacters: number }
+  | { type: 'completed'; messageId: string; message: string; draft: DraftRecord }
+  | { type: 'error'; status: number; message: string; data: unknown }
+
 export function fetchDraftSettings(): Promise<ApiResponse<DraftSettings>> {
   return api<DraftSettings>('/api/draft-settings')
 }
 export function updateDraftSettings(input: {
-  model: string | null
+  discussionPrompt: string | null
+  discussionSkillsManual: string | null
   plannerPrompt: string | null
   skillsManual: string | null
   expectedRevision: number
 }): Promise<ApiResponse<DraftSettings>> {
   return api<DraftSettings>('/api/draft-settings', {
     method: 'PUT',
+    body: JSON.stringify(input)
+  })
+}
+export function startPlannerSession(input: {
+  workspaceId: string
+  provider: SupportedCoreCode
+  initialPrompt: string
+}): Promise<ApiResponse<{ draft: DraftRecord; thread: ConversationThread }>> {
+  return api('/api/drafts/planner-sessions', {
+    method: 'POST',
     body: JSON.stringify(input)
   })
 }
@@ -226,6 +252,47 @@ export async function streamDraftGeneration(
     for (const line of lines) {
       if (!line.trim()) continue
       const event = JSON.parse(line) as DraftGenerationEvent
+      if (event.type === 'error') {
+        if (shouldClearSessionOnApiError(200, event.status, event.message, event.data)) {
+          handleUnauthorizedApiError()
+        }
+        throw new ApiError(event.message, 200, event.data, event.message)
+      }
+      onEvent(event)
+    }
+    if (done) break
+  }
+}
+
+export async function streamPlannerTurn(
+  draftId: string,
+  prompt: string,
+  onEvent: (event: PlannerTurnEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const headers = new Headers(authHeaders())
+  headers.set('Content-Type', 'application/json')
+  const response = await fetch(`/api/drafts/${encodeURIComponent(draftId)}/planner-turns`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify({ prompt }),
+    signal
+  })
+  if (!response.ok || !response.body) {
+    throw new ApiError(await response.text(), response.status, null)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    pending += decoder.decode(value, { stream: !done })
+    const lines = pending.split('\n')
+    pending = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const event = JSON.parse(line) as PlannerTurnEvent
       if (event.type === 'error') {
         if (shouldClearSessionOnApiError(200, event.status, event.message, event.data)) {
           handleUnauthorizedApiError()

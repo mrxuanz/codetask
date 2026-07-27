@@ -22,8 +22,7 @@ function baseInput(role: AgentTurnInput['role'], runtimeRoot: string): AgentTurn
     role,
     cwd: '/workspace',
     runtimeRoot,
-    prompt: 'parity',
-    model: 'gpt-test-model'
+    prompt: 'parity'
   }
 }
 
@@ -33,7 +32,6 @@ function planSnapshot(plan: ReturnType<typeof buildCodexTurnPlan>): Record<strin
     sandboxMode: plan.threadOptions.sandboxMode,
     networkAccessEnabled: plan.threadOptions.networkAccessEnabled,
     approvalPolicy: plan.threadOptions.approvalPolicy,
-    model: plan.threadOptions.model,
     mcpToolNames: plan.mcpToolNames ? [...plan.mcpToolNames].sort() : null,
     sdkSandboxMode: plan.sdkConfig?.sandbox_mode ?? null,
     hasSystemMcp: Boolean(
@@ -75,7 +73,7 @@ test('Codex registry production driver matches descriptor and settings slot', ()
   assert.equal(driver.descriptor.capabilities.authMode, 'runtime-copy')
 })
 
-test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', () => {
+test('Codex turn plan parity snapshots stay stable for host-model/MCP/permissions', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'cctask-codex-parity-'))
   try {
     const conversation = planSnapshot(
@@ -114,7 +112,6 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
       sandboxMode: 'workspace-write',
       networkAccessEnabled: true,
       approvalPolicy: 'never',
-      model: 'gpt-test-model',
       mcpToolNames: null,
       sdkSandboxMode: null,
       hasSystemMcp: true,
@@ -125,7 +122,6 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
       sandboxMode: 'read-only',
       networkAccessEnabled: false,
       approvalPolicy: 'never',
-      model: 'gpt-test-model',
       mcpToolNames: [
         'finalize_plan',
         'register_plan_outline',
@@ -141,7 +137,6 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
       sandboxMode: 'danger-full-access',
       networkAccessEnabled: true,
       approvalPolicy: 'never',
-      model: 'gpt-test-model',
       mcpToolNames: ['report_task_result'],
       sdkSandboxMode: 'danger-full-access',
       hasSystemMcp: true,

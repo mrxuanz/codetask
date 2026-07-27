@@ -84,8 +84,6 @@ export interface ProviderChildEnvOptions {
   preserveHostIdentity?: boolean
 }
 
-const TASK_IDEMPOTENCY_ENV_KEY = 'CODETASK_TASK_IDEMPOTENCY_KEY'
-const TASK_IDEMPOTENCY_SCOPE_ENV_KEY = 'CODETASK_TASK_IDEMPOTENCY_SCOPE'
 const LOOPBACK_NO_PROXY_ENTRIES = ['127.0.0.1', 'localhost', '::1'] as const
 
 /**
@@ -120,28 +118,6 @@ export function applyLoopbackNoProxyEnv(env: Record<string, string>): Record<str
   const merged = entries.join(',')
   env.NO_PROXY = merged
   env.no_proxy = merged
-  return env
-}
-
-/**
- * Add the durable logical-task identity to the environment consumed by the
- * Provider process.  This is deliberately applied at the last possible
- * boundary (the actual SDK/ACP child environment), rather than only keeping
- * the value in the in-process runner input where a provider cannot use it.
- */
-export function applyTaskIdempotencyEnv(
-  env: Record<string, string>,
-  idempotencyKey?: string | null
-): Record<string, string> {
-  const key = idempotencyKey?.trim()
-  if (!key) {
-    delete env[TASK_IDEMPOTENCY_ENV_KEY]
-    delete env[TASK_IDEMPOTENCY_SCOPE_ENV_KEY]
-    return env
-  }
-
-  env[TASK_IDEMPOTENCY_ENV_KEY] = key
-  env[TASK_IDEMPOTENCY_SCOPE_ENV_KEY] = 'logical-task'
   return env
 }
 

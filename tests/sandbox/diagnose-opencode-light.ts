@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { getProviderDriverForTest, prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import {
   materializeOpencodeAuth,
@@ -20,6 +21,36 @@ const skipLive = args.includes('--skip-live')
 const caseFilter = readArg('--case') ?? 'all'
 const executablePath = readArg('--bin')
 
+async function stopProviderProcess(
+  proc: ReturnType<typeof spawnProviderInvocation>
+): Promise<void> {
+  if (process.platform === 'win32' && proc.pid) {
+    spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true
+    })
+  } else if (proc.exitCode === null && proc.signalCode === null) {
+    proc.kill('SIGTERM')
+  }
+
+  if (proc.exitCode === null && proc.signalCode === null) {
+    await Promise.race([
+      new Promise<void>((resolve) => proc.once('exit', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+    ])
+  }
+  if (proc.exitCode === null && proc.signalCode === null) {
+    proc.kill('SIGKILL')
+    await Promise.race([
+      new Promise<void>((resolve) => proc.once('exit', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+    ])
+  }
+  proc.stdout?.destroy()
+  proc.stderr?.destroy()
+  proc.stdin?.destroy()
+}
+
 function log(step: string, message: string, extra?: unknown): void {
   const prefix = `[opencode-light:${step}]`
   if (extra !== undefined) console.log(prefix, message, extra)
@@ -32,7 +63,6 @@ function buildMergedEnv(envPatch: Record<string, string>): Record<string, string
     if (typeof value === 'string') env[key] = value
   }
   Object.assign(env, envPatch)
-  env.CODETASK_OUTER_SANDBOX = '1'
   return env
 }
 
@@ -61,7 +91,8 @@ async function runStatic(runtimeRoot: string): Promise<{
   writeRoots: string[]
   layout: unknown
   materialized: {
-    configCopied: boolean
+    authMaterialized: boolean
+    materializations: string[]
     runtimeConfigDir: string
     runtimeDataDir: string
   }
@@ -84,7 +115,8 @@ async function runStatic(runtimeRoot: string): Promise<{
     writeRoots: prepared.writeRoots ?? [],
     layout,
     materialized: {
-      configCopied: materialized.configCopied,
+      authMaterialized: materialized.authMaterialized,
+      materializations: materialized.materializations,
       runtimeConfigDir: materialized.runtimeConfigDir,
       runtimeDataDir: materialized.runtimeDataDir
     },
@@ -198,12 +230,7 @@ async function runServerProbe(runtimeRoot: string): Promise<unknown> {
       authCopied: existsSync(join(env.XDG_CONFIG_HOME ?? '', 'opencode', 'auth.json'))
     }
   } finally {
-    if (proc.pid && process.platform === 'win32') {
-      const { spawnSync } = await import('node:child_process')
-      spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
-    } else {
-      proc.kill()
-    }
+    await stopProviderProcess(proc)
   }
 }
 

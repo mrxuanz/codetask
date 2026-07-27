@@ -1,6 +1,6 @@
 # ADR 0001: Host auth, Provider resolution, Control Plane authority
 
-- Status: Accepted
+- Status: Partially superseded by the 2026-07-26 scope reset
 - Date: 2026-07-23
 - Related: [OPEN_SOURCE_REMEDIATION_PLAN.zh-CN.md](../OPEN_SOURCE_REMEDIATION_PLAN.zh-CN.md)
 
@@ -16,6 +16,10 @@ records product boundaries that must not drift between PRs.
 - CodeTask uses each CLI’s existing host login state and environment variables.
 - CodeTask does not store, copy, switch, or sync OAuth tokens or API keys for
   Codex, Claude Code, Cursor CLI, or OpenCode.
+- A sandbox turn may materialize a short-lived, filtered credential snapshot
+  under that turn's private runtime root. It is not product settings, is never
+  written to the application database or logs, and is deleted by the sandbox
+  credential manifest lifecycle.
 - CodeTask does not create “work account” / “personal account” auth profiles.
 - Provider preflight only checks whether host auth appears available and how to
   repair it; it does not replace CLI login.
@@ -29,12 +33,14 @@ records product boundaries that must not drift between PRs.
 - Provider-specific launch adapters may remain separate files; the candidate
   tables and `resolveProviderExecutable` results must not diverge.
 
-### 3. Legacy remains the production authority for now
+### 3. No business control plane exists in the reset baseline
 
-- Until V3 meets release gates, Legacy is the only production control plane.
-- V3 may continue behind explicit experimental boundaries and tests.
-- Do not cast Legacy DTOs into V3 DTOs to fake unification.
-- Enabling `v3_authoritative` and deleting Legacy are separate, gated stages.
+- Legacy, V3 and experimental business control planes were deleted from the
+  reset branch.
+- The production HTTP surface contains initialization, authentication, health
+  and sandbox health only.
+- Future Thread/Plan/Job/Task functionality requires a new authority decision
+  and implementation; deleted Legacy code must not be restored as a shortcut.
 
 ## Consequences
 
@@ -42,5 +48,5 @@ records product boundaries that must not drift between PRs.
   switching.
 - Provider refactors must prove detect and launch use the same resolved
   executable.
-- Control Plane PRs must keep Legacy write guards and release gates intact
-  until cutover is approved.
+- Future business-control-plane PRs must define their authority and release
+  gates before exposing routes or creating tables.

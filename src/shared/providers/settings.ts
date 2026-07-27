@@ -7,7 +7,6 @@ export type ProviderExecutableSetting =
 export interface ProviderSettings {
   readonly enabled: boolean
   readonly executable: ProviderExecutableSetting
-  readonly model?: string | undefined
   readonly endpoint?: string | undefined
   readonly approveMcps: boolean
 }
@@ -70,7 +69,6 @@ export function validateProviderSettings(
   return Object.freeze({
     enabled: value.enabled,
     executable,
-    model: optionalTrimmedString(value.model, `providers.${code}.model`),
     endpoint: optionalTrimmedString(value.endpoint, `providers.${code}.endpoint`),
     approveMcps: value.approveMcps
   })
@@ -115,7 +113,7 @@ export function mergeProvidersConfigOverrides(
   ) as ProvidersConfigOverrides
 }
 
-const PROVIDER_SETTING_KEYS = new Set(['enabled', 'executable', 'model', 'endpoint', 'approveMcps'])
+const PROVIDER_SETTING_KEYS = new Set(['enabled', 'executable', 'endpoint', 'approveMcps'])
 
 export function parseProvidersConfigOverrides(value: unknown): ProvidersConfigOverrides {
   if (value === undefined || value === null) return {}

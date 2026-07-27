@@ -59,8 +59,7 @@ export interface AuthCleanupResult {
 
 export interface ConversationSettingsRecord {
   readonly userId: string
-  readonly provider: 'cursorcli'
-  readonly model: string | null
+  readonly provider: SupportedCoreCode
   readonly revision: number
   readonly updatedAtMs: number
 }
@@ -78,9 +77,9 @@ export interface ConversationWorkspaceRecord {
 export interface ConversationThreadRecord {
   readonly id: string
   readonly workspaceId: string
+  readonly kind: 'chat' | 'planner'
   readonly title: string
-  readonly provider: 'cursorcli'
-  readonly model: string | null
+  readonly provider: SupportedCoreCode
   readonly runtimeSessionId: string | null
   readonly createdAtMs: number
   readonly updatedAtMs: number
@@ -101,8 +100,7 @@ export interface ConversationTurnRecord {
   readonly threadId: string
   readonly userMessageId: string
   readonly state: 'running' | 'completed' | 'failed' | 'cancelled'
-  readonly provider: 'cursorcli'
-  readonly model: string | null
+  readonly provider: SupportedCoreCode
   readonly errorCode: string | null
   readonly errorMessage: string | null
   readonly startedAtMs: number
@@ -111,8 +109,8 @@ export interface ConversationTurnRecord {
 
 export interface DraftSettingsRecord {
   readonly userId: string
-  readonly provider: 'cursorcli'
-  readonly model: string | null
+  readonly discussionPrompt: string | null
+  readonly discussionSkillsManual: string | null
   readonly plannerPrompt: string | null
   readonly skillsManual: string | null
   readonly revision: number
@@ -131,6 +129,7 @@ export interface DraftRecord {
   readonly requirements: string
   readonly constraints: string
   readonly acceptanceCriteria: string
+  readonly plannerPhase: 'gathering' | 'ready'
   readonly status: DraftStatus
   readonly revision: number
   readonly activeTreeId: string | null
@@ -157,8 +156,7 @@ export interface DraftGenerationRunRecord {
   readonly state: 'running' | 'completed' | 'failed' | 'cancelled'
   readonly sourceDraftRevision: number
   readonly settingsRevision: number
-  readonly provider: 'cursorcli'
-  readonly model: string | null
+  readonly provider: SupportedCoreCode
   readonly errorCode: string | null
   readonly errorMessage: string | null
   readonly startedAtMs: number
@@ -171,11 +169,11 @@ export interface DraftExecutionTreeRecord {
   readonly generationRunId: string
   readonly treeRevision: number
   readonly sourceDraftRevision: number
+  readonly provider: SupportedCoreCode
   readonly schemaVersion: 1
   readonly treeJson: string
   readonly plannerPromptSnapshot: string
   readonly skillsManualSnapshot: string
-  readonly model: string | null
   readonly createdAtMs: number
 }
 
@@ -221,22 +219,18 @@ export interface JobSettingsRecord {
   readonly userId: string
   readonly maxConcurrentJobs: 1 | 2
   readonly workProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
-  readonly workModel: string | null
   readonly workPrompt: string | null
   readonly workSkillsManual: string | null
   readonly workValidationEnabled: boolean
   readonly workValidationProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
-  readonly workValidationModel: string | null
   readonly workValidationPrompt: string | null
   readonly workValidationSkillsManual: string | null
   readonly sliceValidationEnabled: boolean
   readonly sliceValidationProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
-  readonly sliceValidationModel: string | null
   readonly sliceValidationPrompt: string | null
   readonly sliceValidationSkillsManual: string | null
   readonly milestoneValidationEnabled: boolean
   readonly milestoneValidationProvider: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
-  readonly milestoneValidationModel: string | null
   readonly milestoneValidationPrompt: string | null
   readonly milestoneValidationSkillsManual: string | null
   readonly revision: number
@@ -288,7 +282,6 @@ export interface JobWorkItemRecord {
   readonly attempt: number
   readonly repairGeneration: number
   readonly providerCode: 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
-  readonly model: string | null
   readonly promptSnapshot: string
   readonly skillsManualSnapshot: string
   readonly resultJson: string | null
@@ -340,10 +333,20 @@ export interface ConversationRepository {
   ): ConversationWorkspaceRecord | null
   insertWorkspace(record: ConversationWorkspaceRecord): void
   deleteWorkspace(userId: string, workspaceId: string): boolean
-  listThreads(userId: string, workspaceId: string): ConversationThreadRecord[]
+  listThreads(
+    userId: string,
+    workspaceId: string,
+    kind?: ConversationThreadRecord['kind']
+  ): ConversationThreadRecord[]
   getThread(userId: string, threadId: string): ConversationThreadRecord | null
   insertThread(record: ConversationThreadRecord): void
   updateThreadTitle(userId: string, threadId: string, title: string, updatedAtMs: number): boolean
+  updateThreadProvider(
+    userId: string,
+    threadId: string,
+    provider: SupportedCoreCode,
+    updatedAtMs: number
+  ): boolean
   deleteThread(userId: string, threadId: string): boolean
   listMessages(userId: string, threadId: string): ConversationMessageRecord[]
   nextMessageSequence(threadId: string): number
@@ -521,3 +524,4 @@ export interface KernelTransaction {
 export interface UnitOfWork {
   transaction<T>(work: (transaction: KernelTransaction) => T): T
 }
+import type { SupportedCoreCode } from '../../../../shared/providers/codes'

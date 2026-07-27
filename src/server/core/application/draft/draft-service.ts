@@ -13,6 +13,8 @@ import type {
   UnitOfWork
 } from '../ports'
 import {
+  DEFAULT_DRAFT_DISCUSSION_PROMPT,
+  DEFAULT_DRAFT_DISCUSSION_SKILLS_MANUAL,
   DEFAULT_DRAFT_PLANNER_PROMPT,
   DEFAULT_DRAFT_SKILLS_MANUAL,
   DraftError,
@@ -20,18 +22,22 @@ import {
   type ExecutionTree,
   validateAttachmentName,
   validateDraftContent,
-  validateDraftModel,
   validateEditablePlanningText
 } from '../../domain/draft'
 
 export const MAX_DRAFT_ATTACHMENT_BYTES = 16 * 1024 * 1024
 
 export interface DraftSettingsView {
-  readonly provider: 'cursorcli'
-  readonly model: string | null
+  readonly discussionPrompt: { readonly value: string; readonly useDefault: boolean }
+  readonly discussionSkillsManual: { readonly value: string; readonly useDefault: boolean }
   readonly plannerPrompt: { readonly value: string; readonly useDefault: boolean }
   readonly skillsManual: { readonly value: string; readonly useDefault: boolean }
-  readonly defaults: { readonly plannerPrompt: string; readonly skillsManual: string }
+  readonly defaults: {
+    readonly discussionPrompt: string
+    readonly discussionSkillsManual: string
+    readonly plannerPrompt: string
+    readonly skillsManual: string
+  }
   readonly revision: number
   readonly updatedAtMs: number
 }
@@ -66,8 +72,14 @@ function asTree(record: DraftExecutionTreeRecord | null): DraftDetails['executio
 }
 function settingsView(record: DraftSettingsRecord | null): DraftSettingsView {
   return {
-    provider: 'cursorcli',
-    model: record?.model ?? null,
+    discussionPrompt: {
+      value: record?.discussionPrompt ?? DEFAULT_DRAFT_DISCUSSION_PROMPT,
+      useDefault: record?.discussionPrompt == null
+    },
+    discussionSkillsManual: {
+      value: record?.discussionSkillsManual ?? DEFAULT_DRAFT_DISCUSSION_SKILLS_MANUAL,
+      useDefault: record?.discussionSkillsManual == null
+    },
     plannerPrompt: {
       value: record?.plannerPrompt ?? DEFAULT_DRAFT_PLANNER_PROMPT,
       useDefault: record?.plannerPrompt == null
@@ -77,6 +89,8 @@ function settingsView(record: DraftSettingsRecord | null): DraftSettingsView {
       useDefault: record?.skillsManual == null
     },
     defaults: {
+      discussionPrompt: DEFAULT_DRAFT_DISCUSSION_PROMPT,
+      discussionSkillsManual: DEFAULT_DRAFT_DISCUSSION_SKILLS_MANUAL,
       plannerPrompt: DEFAULT_DRAFT_PLANNER_PROMPT,
       skillsManual: DEFAULT_DRAFT_SKILLS_MANUAL
     },
@@ -120,13 +134,21 @@ export class DraftService {
   updateSettings(
     userId: string,
     input: {
-      readonly model?: unknown
+      readonly discussionPrompt?: unknown
+      readonly discussionSkillsManual?: unknown
       readonly plannerPrompt?: unknown
       readonly skillsManual?: unknown
       readonly expectedRevision?: number | undefined
     }
   ): DraftSettingsView {
-    const model = validateDraftModel(input.model)
+    const discussionPrompt = validateEditablePlanningText(
+      input.discussionPrompt,
+      'discussionPrompt'
+    )
+    const discussionSkillsManual = validateEditablePlanningText(
+      input.discussionSkillsManual,
+      'discussionSkillsManual'
+    )
     const plannerPrompt = validateEditablePlanningText(input.plannerPrompt, 'plannerPrompt')
     const skillsManual = validateEditablePlanningText(input.skillsManual, 'skillsManual')
     const record = this.dependencies.unitOfWork.transaction((tx) => {
@@ -139,8 +161,8 @@ export class DraftService {
       }
       const next: DraftSettingsRecord = {
         userId,
-        provider: 'cursorcli',
-        model,
+        discussionPrompt,
+        discussionSkillsManual,
         plannerPrompt,
         skillsManual,
         revision: (current?.revision ?? 0) + 1,
@@ -180,6 +202,7 @@ export class DraftService {
     input: DraftContent & {
       readonly workspaceId: string
       readonly sourceThreadId?: string | null | undefined
+      readonly plannerPhase?: DraftRecord['plannerPhase'] | undefined
     }
   ): DraftRecord {
     const content = validateDraftContent(input)
@@ -200,6 +223,7 @@ export class DraftService {
         workspaceId: input.workspaceId,
         sourceThreadId: input.sourceThreadId ?? null,
         ...content,
+        plannerPhase: input.plannerPhase ?? 'ready',
         status: 'editing',
         revision: 1,
         activeTreeId: null,
@@ -232,6 +256,49 @@ export class DraftService {
       const next: DraftRecord = {
         ...current,
         ...content,
+        status: 'editing',
+        revision: current.revision + 1,
+        activeTreeId: null,
+        updatedAtMs: this.dependencies.clock.nowMs()
+      }
+      if (!tx.draft.updateDraftContent(next, current.revision)) {
+        throw new DraftError('draft.revision_conflict')
+      }
+      return next
+    })
+  }
+
+  applyPlannerResult(
+    userId: string,
+    draftId: string,
+    input: DraftContent & {
+      readonly expectedRevision: number
+      readonly plannerPhase: DraftRecord['plannerPhase']
+    }
+  ): DraftRecord {
+    const content = validateDraftContent(input)
+    return this.dependencies.unitOfWork.transaction((tx) => {
+      const current = tx.draft.getDraft(userId, draftId)
+      if (!current) throw new DraftError('draft.not_found')
+      if (current.status === 'submitted') throw new DraftError('draft.locked')
+      if (tx.draft.getRunningGeneration(draftId)) {
+        throw new DraftError('draft.generation_in_progress')
+      }
+      if (current.revision !== input.expectedRevision) {
+        throw new DraftError('draft.revision_conflict')
+      }
+      const unchanged =
+        current.title === content.title &&
+        current.objective === content.objective &&
+        current.requirements === content.requirements &&
+        current.constraints === content.constraints &&
+        current.acceptanceCriteria === content.acceptanceCriteria &&
+        current.plannerPhase === input.plannerPhase
+      if (unchanged) return current
+      const next: DraftRecord = {
+        ...current,
+        ...content,
+        plannerPhase: input.plannerPhase,
         status: 'editing',
         revision: current.revision + 1,
         activeTreeId: null,
@@ -373,11 +440,18 @@ export class DraftService {
     await this.dependencies.assets.removeDraft(draftId).catch(() => undefined)
   }
 
-  beginGeneration(userId: string, draftId: string): BeginDraftGenerationResult {
+  beginGeneration(
+    userId: string,
+    draftId: string,
+    provider: DraftGenerationRunRecord['provider']
+  ): BeginDraftGenerationResult {
     return this.dependencies.unitOfWork.transaction((tx) => {
       const draft = tx.draft.getDraft(userId, draftId)
       if (!draft) throw new DraftError('draft.not_found')
       if (draft.status === 'submitted') throw new DraftError('draft.locked')
+      if (draft.plannerPhase !== 'ready') {
+        throw new DraftError('draft.requirements_not_confirmed')
+      }
       if (tx.draft.getRunningGeneration(draftId)) {
         throw new DraftError('draft.generation_in_progress')
       }
@@ -391,8 +465,7 @@ export class DraftService {
         state: 'running',
         sourceDraftRevision: draft.revision,
         settingsRevision: settings.revision,
-        provider: 'cursorcli',
-        model: settings.model,
+        provider,
         errorCode: null,
         errorMessage: null,
         startedAtMs: nowMs,
@@ -452,11 +525,11 @@ export class DraftService {
         generationRunId: runId,
         treeRevision: tx.draft.nextTreeRevision(draftId),
         sourceDraftRevision: run.sourceDraftRevision,
+        provider: run.provider,
         schemaVersion: 1,
         treeJson: JSON.stringify(tree),
         plannerPromptSnapshot: snapshots.plannerPrompt,
         skillsManualSnapshot: snapshots.skillsManual,
-        model: run.model,
         createdAtMs: nowMs
       }
       tx.draft.insertExecutionTree(record)
@@ -615,7 +688,7 @@ export class DraftService {
               treeId: prepared.tree.id,
               treeRevision: prepared.tree.treeRevision,
               draftRevision: prepared.tree.sourceDraftRevision,
-              model: prepared.tree.model,
+              provider: prepared.tree.provider,
               plannerPrompt: prepared.tree.plannerPromptSnapshot,
               skillsManual: prepared.tree.skillsManualSnapshot
             },

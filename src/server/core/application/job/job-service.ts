@@ -48,28 +48,24 @@ function effectiveSettings(record: JobSettingsRecord | null, nowMs = 0): JobSett
     maxConcurrentJobs: record.maxConcurrentJobs,
     work: {
       provider: record.workProvider,
-      model: record.workModel,
       prompt: record.workPrompt ?? defaults.work.prompt,
       skillsManual: record.workSkillsManual ?? defaults.work.skillsManual
     },
     workValidation: {
       enabled: record.workValidationEnabled,
       provider: record.workValidationProvider,
-      model: record.workValidationModel,
       prompt: record.workValidationPrompt ?? defaults.workValidation.prompt,
       skillsManual: record.workValidationSkillsManual ?? defaults.workValidation.skillsManual
     },
     sliceValidation: {
       enabled: record.sliceValidationEnabled,
       provider: record.sliceValidationProvider,
-      model: record.sliceValidationModel,
       prompt: record.sliceValidationPrompt ?? defaults.sliceValidation.prompt,
       skillsManual: record.sliceValidationSkillsManual ?? defaults.sliceValidation.skillsManual
     },
     milestoneValidation: {
       enabled: record.milestoneValidationEnabled,
       provider: record.milestoneValidationProvider,
-      model: record.milestoneValidationModel,
       prompt: record.milestoneValidationPrompt ?? defaults.milestoneValidation.prompt,
       skillsManual:
         record.milestoneValidationSkillsManual ?? defaults.milestoneValidation.skillsManual
@@ -89,12 +85,10 @@ function settingsRecord(userId: string, settings: JobSettings): JobSettingsRecor
     userId,
     maxConcurrentJobs: settings.maxConcurrentJobs,
     workProvider: settings.work.provider,
-    workModel: settings.work.model,
     workPrompt: storedText(settings.work.prompt, defaults.work.prompt),
     workSkillsManual: storedText(settings.work.skillsManual, defaults.work.skillsManual),
     workValidationEnabled: settings.workValidation.enabled,
     workValidationProvider: settings.workValidation.provider,
-    workValidationModel: settings.workValidation.model,
     workValidationPrompt: storedText(
       settings.workValidation.prompt,
       defaults.workValidation.prompt
@@ -105,7 +99,6 @@ function settingsRecord(userId: string, settings: JobSettings): JobSettingsRecor
     ),
     sliceValidationEnabled: settings.sliceValidation.enabled,
     sliceValidationProvider: settings.sliceValidation.provider,
-    sliceValidationModel: settings.sliceValidation.model,
     sliceValidationPrompt: storedText(
       settings.sliceValidation.prompt,
       defaults.sliceValidation.prompt
@@ -116,7 +109,6 @@ function settingsRecord(userId: string, settings: JobSettings): JobSettingsRecor
     ),
     milestoneValidationEnabled: settings.milestoneValidation.enabled,
     milestoneValidationProvider: settings.milestoneValidation.provider,
-    milestoneValidationModel: settings.milestoneValidation.model,
     milestoneValidationPrompt: storedText(
       settings.milestoneValidation.prompt,
       defaults.milestoneValidation.prompt
@@ -162,12 +154,13 @@ function itemSnapshot(record: JobWorkItemRecord): JobItemSnapshot {
     attempt: record.attempt,
     repairGeneration: record.repairGeneration,
     provider: record.providerCode,
-    model: record.model,
     result,
     error:
       record.errorCode && record.errorMessage
         ? { code: record.errorCode, message: record.errorMessage }
-        : null
+        : null,
+    startedAtMs: record.startedAtMs,
+    finishedAtMs: record.finishedAtMs
   }
 }
 
@@ -192,6 +185,42 @@ function draftSnapshot(handoff: JobIntakeHandoffRecord): {
     }
   } catch {
     throw new JobError('job.handoff_snapshot_invalid')
+  }
+}
+
+function sourceDraftSnapshot(record: JobRecord): JobSnapshot['sourceDraft'] {
+  try {
+    const parsed = JSON.parse(record.sourceSnapshotJson) as {
+      content?: Partial<JobSnapshot['sourceDraft']>
+    }
+    return {
+      title: typeof parsed.content?.title === 'string' ? parsed.content.title : record.title,
+      objective:
+        typeof parsed.content?.objective === 'string' ? parsed.content.objective : record.summary,
+      requirements:
+        typeof parsed.content?.requirements === 'string' ? parsed.content.requirements : '',
+      constraints:
+        typeof parsed.content?.constraints === 'string' ? parsed.content.constraints : '',
+      acceptanceCriteria:
+        typeof parsed.content?.acceptanceCriteria === 'string'
+          ? parsed.content.acceptanceCriteria
+          : ''
+    }
+  } catch {
+    throw new JobError('job.handoff_snapshot_invalid')
+  }
+}
+
+function executionTreeSnapshot(record: JobRecord): ExecutionTree {
+  try {
+    const tree = JSON.parse(record.executionTreeJson) as ExecutionTree
+    if (tree.schemaVersion !== 1 || !Array.isArray(tree.milestones)) {
+      throw new JobError('job.execution_tree_invalid')
+    }
+    return tree
+  } catch (error) {
+    if (error instanceof JobError) throw error
+    throw new JobError('job.execution_tree_invalid')
   }
 }
 
@@ -349,7 +378,6 @@ export class JobService {
         acceptanceCriteria: readonly string[]
         attachmentIds: readonly string[]
         providerCode: JobWorkItemRecord['providerCode']
-        model: string | null
         prompt: string
         skills: string
       }
@@ -370,7 +398,6 @@ export class JobService {
       attempt: 0,
       repairGeneration: 0,
       providerCode: input.providerCode,
-      model: input.model,
       promptSnapshot: input.prompt,
       skillsManualSnapshot: input.skills,
       resultJson: null,
@@ -398,7 +425,6 @@ export class JobService {
             acceptanceCriteria: task.acceptanceCriteria,
             attachmentIds: task.attachmentIds,
             providerCode: settings.work.provider,
-            model: settings.work.model,
             prompt: settings.work.prompt,
             skills: settings.work.skillsManual
           })
@@ -419,7 +445,6 @@ export class JobService {
                 acceptanceCriteria: task.acceptanceCriteria,
                 attachmentIds: task.attachmentIds,
                 providerCode: settings.workValidation.provider,
-                model: settings.workValidation.model,
                 prompt: settings.workValidation.prompt,
                 skills: settings.workValidation.skillsManual
               })
@@ -436,7 +461,6 @@ export class JobService {
               acceptanceCriteria: [slice.successCriteria],
               attachmentIds: unique(sliceAttachments),
               providerCode: settings.sliceValidation.provider,
-              model: settings.sliceValidation.model,
               prompt: settings.sliceValidation.prompt,
               skills: settings.sliceValidation.skillsManual
             })
@@ -453,7 +477,6 @@ export class JobService {
             acceptanceCriteria: [milestone.successCriteria],
             attachmentIds: unique(milestoneAttachments),
             providerCode: settings.milestoneValidation.provider,
-            model: settings.milestoneValidation.model,
             prompt: settings.milestoneValidation.prompt,
             skills: settings.milestoneValidation.skillsManual
           })
@@ -472,7 +495,13 @@ export class JobService {
         .sort((a, b) => a.queueOrder - b.queueOrder || a.createdAtMs - b.createdAtMs)
       const positions = new Map(queued.map((record, index) => [record.id, index + 1]))
       return records.map((record) =>
-        this.snapshot(record, tx.job.listWorkItems(record.id), positions.get(record.id) ?? null)
+        this.snapshot(
+          record,
+          tx.job.listWorkItems(record.id),
+          positions.get(record.id) ?? null,
+          tx.conversation.getWorkspace(userId, record.workspaceId),
+          tx.job.listAttachments(record.id)
+        )
       )
     })
   }
@@ -486,20 +515,39 @@ export class JobService {
         .filter((candidate) => candidate.state === 'queued')
         .sort((a, b) => a.queueOrder - b.queueOrder || a.createdAtMs - b.createdAtMs)
       const position = queued.findIndex((candidate) => candidate.id === jobId)
-      return this.snapshot(record, tx.job.listWorkItems(jobId), position < 0 ? null : position + 1)
+      return this.snapshot(
+        record,
+        tx.job.listWorkItems(jobId),
+        position < 0 ? null : position + 1,
+        tx.conversation.getWorkspace(userId, record.workspaceId),
+        tx.job.listAttachments(jobId)
+      )
     })
   }
 
   private snapshot(
     record: JobRecord,
     items: readonly JobWorkItemRecord[],
-    queuePosition: number | null
+    queuePosition: number | null,
+    workspace: ConversationWorkspaceRecord | null,
+    attachments: readonly JobAttachmentRecord[]
   ): JobSnapshot {
+    if (!workspace) throw new JobError('job.workspace_not_found')
     return {
       id: record.id,
       workspaceId: record.workspaceId,
       title: record.title,
       summary: record.summary,
+      workspace: { id: workspace.id, title: workspace.title, rootPath: workspace.rootPath },
+      sourceDraft: sourceDraftSnapshot(record),
+      executionTree: executionTreeSnapshot(record),
+      attachments: attachments.map((attachment) => ({
+        id: attachment.id,
+        sourceAttachmentId: attachment.sourceAttachmentId,
+        displayName: attachment.displayName,
+        mediaType: attachment.mediaType,
+        sizeBytes: attachment.sizeBytes
+      })),
       state: record.state,
       revision: record.revision,
       queuePosition,
@@ -782,7 +830,6 @@ export class JobService {
       attempt: 0,
       repairGeneration: generation,
       providerCode: workTemplate.providerCode,
-      model: workTemplate.model,
       promptSnapshot: workTemplate.promptSnapshot,
       skillsManualSnapshot: workTemplate.skillsManualSnapshot,
       resultJson: null,

@@ -1,6 +1,5 @@
 import { existsSync } from 'fs'
 import { spawnSync } from 'child_process'
-import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { SandboxBackend, SandboxBootstrapInfo } from './types'
 import { isOuterSandboxEnabled } from './outer-sandbox-flag'
@@ -8,7 +7,7 @@ import { getSandboxSupervisorManager } from './supervisor-manager'
 import { tryLoadSandboxNative } from './native'
 import { fixedSandboxHome, sandboxSetupIsComplete } from './windows-bootstrap'
 
-export type SandboxHealthStatus = 'ready' | 'degraded' | 'unavailable' | 'disabled'
+export type SandboxHealthStatus = 'ready' | 'degraded' | 'unavailable'
 
 export interface SandboxHealthCheck {
   ok: boolean
@@ -118,10 +117,6 @@ function checkWindowsSetup(dataDir?: string): SandboxHealthCheck {
 }
 
 function checkSupervisor(): SandboxHealthCheck {
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') {
-    return { ok: true, message: 'supervisor disabled (direct native path)' }
-  }
   const manager = getSandboxSupervisorManager()
   const snapshot = manager.statusSnapshot()
   if (snapshot.ready) return { ok: true }
@@ -151,16 +146,6 @@ function resolveBackend(): SandboxBackend | undefined {
 
 export function getSandboxHealth(dataDir?: string): SandboxHealthReport {
   const outerSandboxEnabled = isOuterSandboxEnabled()
-  if (!outerSandboxEnabled) {
-    return {
-      status: 'disabled',
-      platform: process.platform,
-      outerSandboxEnabled: false,
-      native: { ok: true, message: 'CODETASK_DISABLE_OUTER_SANDBOX=1 (desktop only)' },
-      warnings: ['Outer sandbox is disabled; file-role execution will be rejected']
-    }
-  }
-
   const native = checkNative()
   const platformRuntime = checkPlatformRuntime()
   const windowsSetup = checkWindowsSetup(dataDir)
@@ -200,9 +185,6 @@ export function getSandboxHealth(dataDir?: string): SandboxHealthReport {
 
 export function assertSandboxReadyForExecution(dataDir?: string): void {
   const health = getSandboxHealth(dataDir)
-  if (health.status === 'disabled') {
-    throw new SandboxError('Outer sandbox is disabled', 'sandbox.required')
-  }
   if (!health.native.ok) {
     throw new SandboxError(
       health.native.message ?? 'native sandbox unavailable',

@@ -10,16 +10,16 @@ use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use crate::bwrap::create_bwrap_command_args;
 use crate::bwrap::BwrapNetworkMode;
 use crate::bwrap::BwrapOptions;
-use crate::bwrap::create_bwrap_command_args;
 use crate::landlock::apply_permission_profile_to_current_thread;
 use crate::launcher::exec_bwrap;
 use crate::launcher::preferred_bwrap_supports_argv0;
@@ -126,6 +126,10 @@ pub struct LandlockCommand {
     #[arg(long = "proxy-route-spec", hide = true)]
     pub proxy_route_spec: Option<String>,
 
+    /// In-sandbox attestation artifact selected by the parent launcher.
+    #[arg(long = "attestation-file", hide = true)]
+    pub attestation_file: Option<PathBuf>,
+
     /// Extra read-only bind mount overlay (`source` -> `target`) applied after the
     /// normal filesystem policy mounts.
     #[arg(
@@ -163,6 +167,7 @@ pub fn run_main() -> ! {
         apply_seccomp_then_exec,
         allow_network_for_proxy,
         proxy_route_spec,
+        attestation_file,
         extra_ro_bind,
         no_proc,
         command,
@@ -205,7 +210,7 @@ pub fn run_main() -> ! {
         ) {
             panic!("error applying Linux sandbox restrictions: {e:?}");
         }
-        emit_sandbox_attestation_if_requested("linux-bwrap-seccomp");
+        emit_sandbox_attestation_if_requested("linux-bwrap-seccomp", attestation_file.as_deref());
         exec_or_panic(command);
     }
 
@@ -219,7 +224,7 @@ pub fn run_main() -> ! {
         ) {
             panic!("error applying Linux sandbox restrictions: {e:?}");
         }
-        emit_sandbox_attestation_if_requested("linux-bwrap-seccomp");
+        emit_sandbox_attestation_if_requested("linux-bwrap-seccomp", attestation_file.as_deref());
         exec_or_panic(command);
     }
 
@@ -242,6 +247,7 @@ pub fn run_main() -> ! {
             permission_profile: &permission_profile,
             allow_network_for_proxy,
             proxy_route_spec,
+            attestation_file: attestation_file.as_deref(),
             command,
         });
         run_bwrap_with_proc_fallback(
@@ -266,6 +272,7 @@ pub fn run_main() -> ! {
     ) {
         panic!("error applying legacy Linux sandbox restrictions: {e:?}");
     }
+    emit_sandbox_attestation_if_requested("linux-landlock-seccomp", attestation_file.as_deref());
     exec_or_panic(command);
 }
 
@@ -1432,6 +1439,7 @@ struct InnerSeccompCommandArgs<'a> {
     permission_profile: &'a PermissionProfile,
     allow_network_for_proxy: bool,
     proxy_route_spec: Option<String>,
+    attestation_file: Option<&'a Path>,
     command: Vec<String>,
 }
 
@@ -1443,6 +1451,7 @@ fn build_inner_seccomp_command(args: InnerSeccompCommandArgs<'_>) -> Vec<String>
         permission_profile,
         allow_network_for_proxy,
         proxy_route_spec,
+        attestation_file,
         command,
     } = args;
     let current_exe = match std::env::current_exe() {
@@ -1463,6 +1472,10 @@ fn build_inner_seccomp_command(args: InnerSeccompCommandArgs<'_>) -> Vec<String>
         inner.push("--command-cwd".to_string());
         inner.push(command_cwd.to_string_lossy().to_string());
     }
+    if let Some(attestation_file) = attestation_file {
+        inner.push("--attestation-file".to_string());
+        inner.push(attestation_file.to_string_lossy().to_string());
+    }
     inner.extend([
         "--permission-profile".to_string(),
         permission_profile_json,
@@ -1481,32 +1494,21 @@ fn build_inner_seccomp_command(args: InnerSeccompCommandArgs<'_>) -> Vec<String>
 }
 
 /// Emit helper attestation JSON to stderr after sandbox restrictions are active.
-fn emit_sandbox_attestation_if_requested(backend: &str) {
-    let Some(path) = std::env::var("CODETASK_ATTESTATION_FILE").ok() else {
+fn emit_sandbox_attestation_if_requested(backend: &str, path: Option<&Path>) {
+    let Some(path) = path else {
         return;
     };
-    let Ok(contents) = std::fs::read_to_string(&path) else {
+    let Ok(contents) = std::fs::read_to_string(path) else {
         return;
     };
-    let expected = std::env::var("CODETASK_POLICY_SHA256").ok();
-    if let (Ok(value), Some(expected)) = (serde_json::from_str::<serde_json::Value>(&contents), expected)
-    {
-        if value.get("policy_sha256").and_then(|v| v.as_str()) != Some(expected.as_str()) {
-            return;
-        }
-    }
-    let mut value: serde_json::Value = serde_json::from_str(&contents).unwrap_or_else(|_| {
-        serde_json::json!({
-            "protocol_version": std::env::var("CODETASK_POLICY_VERSION").ok().and_then(|v| v.parse().ok()).unwrap_or(2),
-            "active": true,
-            "backend": backend,
-            "policy_sha256": std::env::var("CODETASK_POLICY_SHA256").unwrap_or_default(),
-            "sandbox_pid": std::process::id(),
-            "warnings": [],
-        })
-    });
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return;
+    };
     if let Some(obj) = value.as_object_mut() {
-        obj.insert("backend".to_string(), serde_json::Value::String(backend.to_string()));
+        obj.insert(
+            "backend".to_string(),
+            serde_json::Value::String(backend.to_string()),
+        );
         obj.insert(
             "sandbox_pid".to_string(),
             serde_json::Value::Number(std::process::id().into()),

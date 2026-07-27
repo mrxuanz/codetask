@@ -33,20 +33,17 @@ function secureOsStorageAvailable(): boolean {
 export async function loadMainProcessAuthSecret(input: {
   mode: AppMode
   bootstrapSecretPath: string
+  credentialPath?: string | undefined
 }): Promise<{ value: string; provider: AppSecretProvider }> {
-  // Preserve the existing operator-managed credential file until configuration migration gives
-  // it a typed replacement. Both modes honor it so they cannot derive different MCP vault keys.
-  const credentialPath = process.env.CODETASK_AUTH_SECRET_FILE?.trim()
+  const credentialPath = input.credentialPath?.trim()
   const secretPath = credentialPath || input.bootstrapSecretPath
   const storedFormat = inspectStoredAppSecret(secretPath)
   if (credentialPath) {
     if (storedFormat === 'missing') {
-      throw new Error(`CODETASK_AUTH_SECRET_FILE does not exist: ${credentialPath}`)
+      throw new Error(`Configured auth secret file does not exist: ${credentialPath}`)
     }
     if (storedFormat !== 'plaintext') {
-      throw new Error(
-        `CODETASK_AUTH_SECRET_FILE is not a valid plaintext credential: ${credentialPath}`
-      )
+      throw new Error(`Configured auth secret file is not a valid plaintext credential`)
     }
     const provider = new FileAppSecretProvider(credentialPath, 'credential_file')
     const value = await provider.loadOrCreateAuthSecret()

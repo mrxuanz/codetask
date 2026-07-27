@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import { resolveInvocation } from './run-and-record.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
@@ -25,10 +26,13 @@ if (probe.status === 0) {
 }
 
 console.log('[native] better-sqlite3 is not built for Electron; rebuilding…')
-const rebuild = spawnSync('npm', ['run', 'rebuild:electron'], {
+const rebuildInvocation = resolveInvocation(process.platform, process.execPath, 'npm', [
+  'run',
+  'rebuild:electron'
+])
+const rebuild = spawnSync(rebuildInvocation.command, rebuildInvocation.args, {
   cwd: root,
-  stdio: 'inherit',
-  shell: true
+  stdio: 'inherit'
 })
 if ((rebuild.status ?? 1) !== 0) {
   process.exit(rebuild.status ?? 1)

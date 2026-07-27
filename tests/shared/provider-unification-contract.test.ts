@@ -19,6 +19,7 @@ import {
   mergeProvidersConfigOverrides,
   normalizeProviderCode
 } from '../../src/shared/providers/index.ts'
+import { parseProvidersConfigOverrides } from '../../src/shared/providers/settings.ts'
 import {
   DefaultProviderInstallationResolver,
   ProviderInstallationError
@@ -45,22 +46,21 @@ test('serializable descriptors cover each provider exactly once', () => {
   }
 })
 
-test('typed provider config defaults to auto and supports explicit startup overrides', () => {
+test('typed provider config defaults to auto and supports explicit executable overrides', () => {
   const config = createProvidersConfig({
     codex: {
-      executable: { mode: 'path', path: ' /opt/tools/codex ' },
-      model: ' gpt-test '
+      executable: { mode: 'path', path: ' /opt/tools/codex ' }
     }
   })
   assert.deepEqual(config.codex.executable, {
     mode: 'path',
     path: '/opt/tools/codex'
   })
-  assert.equal(config.codex.model, 'gpt-test')
+  assert.equal('model' in config.codex, false)
   assert.deepEqual(config.opencode.executable, { mode: 'auto' })
 })
 
-test('typed provider config rejects empty paths and non-string models', () => {
+test('typed provider config rejects empty paths and any App-owned model setting', () => {
   assert.throws(
     () =>
       createProvidersConfig({
@@ -70,27 +70,26 @@ test('typed provider config rejects empty paths and non-string models', () => {
   )
   assert.throws(
     () =>
-      createProvidersConfig({
-        codex: { model: 42 as unknown as string }
+      parseProvidersConfigOverrides({
+        codex: { model: 'gpt-test' }
       }),
-    /providers\.codex\.model/
+    /providers\.codex\.model is not supported/
   )
 })
 
 test('startup overrides win over persisted settings without mutating either source', () => {
   const persisted = {
-    codex: { model: 'persisted-model', enabled: false },
+    codex: { enabled: false },
     cursorcli: { endpoint: 'https://persisted.example' }
   }
   const startup = {
-    codex: { model: 'startup-model' }
+    codex: { enabled: true }
   }
   const merged = mergeProvidersConfigOverrides(persisted, startup)
   const config = createProvidersConfig(merged)
-  assert.equal(config.codex.model, 'startup-model')
-  assert.equal(config.codex.enabled, false)
+  assert.equal(config.codex.enabled, true)
   assert.equal(config.cursorcli.endpoint, 'https://persisted.example')
-  assert.equal(persisted.codex.model, 'persisted-model')
+  assert.equal(persisted.codex.enabled, false)
 })
 
 test('resolver rejects configured missing paths and directories', () => {

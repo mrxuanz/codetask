@@ -1,6 +1,5 @@
 //! Shared sandbox attestation artifact + in-sandbox command wrappers.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::protocol::SandboxEvidence;
@@ -14,7 +13,7 @@ pub const ATTESTATION_LAUNCHER_SCRIPT: &str = "launch-sandbox-worker.cjs";
 const EMITTER_SCRIPT_SOURCE: &str = r#"#!/usr/bin/env node
 'use strict';
 const fs = require('fs');
-const path = process.env.CODETASK_ATTESTATION_FILE;
+const path = process.argv[2];
 if (!path || !fs.existsSync(path)) process.exit(0);
 let value;
 try {
@@ -32,7 +31,8 @@ const LAUNCHER_SCRIPT_SOURCE: &str = r#"#!/usr/bin/env node
 'use strict';
 require('./emit-sandbox-attestation.cjs');
 const { spawnSync } = require('child_process');
-const [command, ...args] = process.argv.slice(2);
+const [artifactPath, command, ...args] = process.argv.slice(2);
+void artifactPath;
 if (!command) process.exit(1);
 const result = spawnSync(command, args, {
   stdio: 'inherit',
@@ -44,20 +44,22 @@ process.exit(result.status == null ? 1 : result.status);
 
 #[cfg(target_os = "macos")]
 const UNIX_SHELL_PRELUDE: &str = r#"
-if [ -n "${CODETASK_ATTESTATION_FILE:-}" ] && [ -f "$CODETASK_ATTESTATION_FILE" ]; then
-  emitter="$(dirname "$CODETASK_ATTESTATION_FILE")/emit-sandbox-attestation.cjs"
+attestation_file="$1"
+shift
+if [ -n "$attestation_file" ] && [ -f "$attestation_file" ]; then
+  emitter="$(dirname "$attestation_file")/emit-sandbox-attestation.cjs"
   if [ -f "$emitter" ] && command -v node >/dev/null 2>&1; then
-    node "$emitter" || {
+    node "$emitter" "$attestation_file" || {
       {
         printf '%s' '__CODETASK_ATTEST__'
-        cat "$CODETASK_ATTESTATION_FILE"
+        cat "$attestation_file"
         printf '\n'
       } >&2
     }
   else
     {
       printf '%s' '__CODETASK_ATTEST__'
-      cat "$CODETASK_ATTESTATION_FILE"
+      cat "$attestation_file"
       printf '\n'
     } >&2
   fi
@@ -85,46 +87,19 @@ pub fn write_attestation_artifact(
     Ok(artifact_path)
 }
 
-pub fn apply_attestation_env(
-    env: &mut HashMap<String, String>,
-    artifact_path: &Path,
-    policy_sha256: &str,
-    protocol_version: u32,
-    read_roots_hash: &str,
-    write_roots_hash: &str,
-) {
-    env.insert(
-        "CODETASK_ATTESTATION_FILE".to_string(),
-        artifact_path.to_string_lossy().into_owned(),
-    );
-    env.insert(
-        "CODETASK_POLICY_SHA256".to_string(),
-        policy_sha256.to_string(),
-    );
-    env.insert(
-        "CODETASK_POLICY_VERSION".to_string(),
-        protocol_version.to_string(),
-    );
-    env.insert(
-        "CODETASK_EFFECTIVE_READ_ROOTS_HASH".to_string(),
-        read_roots_hash.to_string(),
-    );
-    env.insert(
-        "CODETASK_EFFECTIVE_WRITE_ROOTS_HASH".to_string(),
-        write_roots_hash.to_string(),
-    );
-    // Node inside macOS seatbelt cannot read the system OpenSSL config by default.
-    env.insert("OPENSSL_CONF".to_string(), "/dev/null".to_string());
-}
-
 /// Wrap a command so attestation is emitted from inside the eventual sandbox process.
 #[cfg(target_os = "macos")]
-pub fn wrap_unix_command(command: &str, args: &[String]) -> (String, Vec<String>) {
+pub fn wrap_unix_command(
+    artifact_path: &Path,
+    command: &str,
+    args: &[String],
+) -> (String, Vec<String>) {
     let script = format!("{UNIX_SHELL_PRELUDE}");
     let mut wrapped_args = vec![
         "-c".to_string(),
         script,
         "codetask-sandbox-attest".to_string(),
+        artifact_path.to_string_lossy().into_owned(),
         command.to_string(),
     ];
     wrapped_args.extend(args.iter().cloned());
@@ -136,12 +111,17 @@ pub fn wrap_unix_command(command: &str, args: &[String]) -> (String, Vec<String>
 pub fn wrap_windows_command(
     node_exe: &str,
     emitter_script: &Path,
+    artifact_path: &Path,
     command: &str,
     args: &[String],
 ) -> (String, Vec<String>) {
     let runtime_root = emitter_script.parent().unwrap_or_else(|| Path::new("."));
     let launcher = runtime_root.join(ATTESTATION_LAUNCHER_SCRIPT);
-    let mut wrapped_args = vec![launcher.to_string_lossy().into_owned(), command.to_string()];
+    let mut wrapped_args = vec![
+        launcher.to_string_lossy().into_owned(),
+        artifact_path.to_string_lossy().into_owned(),
+        command.to_string(),
+    ];
     wrapped_args.extend(args.iter().cloned());
     (node_exe.to_string(), wrapped_args)
 }
@@ -185,13 +165,15 @@ mod tests {
         let (exe, args) = wrap_windows_command(
             r"E:\app\electron.exe",
             Path::new(r"E:\runtime\emit-sandbox-attestation.cjs"),
+            Path::new(r"E:\runtime\.sandbox-attestation.json"),
             r"E:\app\electron.exe",
             &[r"E:\out\role-worker.js".to_string()],
         );
         assert_eq!(exe, r"E:\app\electron.exe");
         assert_eq!(args[0], r"E:\runtime\launch-sandbox-worker.cjs");
-        assert_eq!(args[1], r"E:\app\electron.exe");
-        assert_eq!(args[2], r"E:\out\role-worker.js");
+        assert_eq!(args[1], r"E:\runtime\.sandbox-attestation.json");
+        assert_eq!(args[2], r"E:\app\electron.exe");
+        assert_eq!(args[3], r"E:\out\role-worker.js");
         assert!(!args.iter().any(|arg| arg.contains("cmd.exe")));
     }
 

@@ -99,3 +99,67 @@ test('sandbox policy rejects relative workspace roots instead of resolving proce
       (error as { code?: string }).code === 'sandbox.path.relative'
   )
 })
+
+test('read-only roles cannot gain workspace writes through auxiliary roots', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-policy-overlap-'))
+  const workspaceRoot = join(root, 'workspace')
+  const runtimeRoot = join(root, 'runtime')
+  const workspaceChild = join(workspaceRoot, 'provider-state')
+  mkdirSync(workspaceChild, { recursive: true })
+  mkdirSync(runtimeRoot)
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  assert.throws(
+    () =>
+      createSandboxPolicy({
+        role: 'planner',
+        workspaceRoot,
+        runtimeRoot,
+        providerWriteRoots: [workspaceChild],
+        workspaceAccess: 'live-read'
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      (error as { code?: string }).code === 'sandbox.policy.workspace_write_overlap'
+  )
+})
+
+test('runtime and verifier output roots must not overlap the workspace', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-policy-root-separation-'))
+  const workspaceRoot = join(root, 'workspace')
+  const runtimeInsideWorkspace = join(workspaceRoot, '.runtime')
+  const runtimeRoot = join(root, 'runtime')
+  const verifierInsideWorkspace = join(workspaceRoot, '.verification')
+  mkdirSync(runtimeInsideWorkspace, { recursive: true })
+  mkdirSync(runtimeRoot)
+  mkdirSync(verifierInsideWorkspace)
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  assert.throws(
+    () =>
+      createSandboxPolicy({
+        role: 'planner',
+        workspaceRoot,
+        runtimeRoot: runtimeInsideWorkspace
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      (error as { code?: string }).code === 'sandbox.policy.runtime_workspace_overlap'
+  )
+
+  assert.throws(
+    () =>
+      createSandboxPolicy({
+        role: 'work-verifier',
+        workspaceRoot,
+        runtimeRoot,
+        verifierOutputRoot: verifierInsideWorkspace
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      (error as { code?: string }).code === 'sandbox.policy.workspace_write_overlap'
+  )
+})

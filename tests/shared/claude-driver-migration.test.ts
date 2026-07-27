@@ -381,7 +381,7 @@ test('Claude registry production driver matches descriptor and settings slot', (
   assert.equal(driver.descriptor, CLAUDE_DESCRIPTOR)
   assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG['claude-code'])
   assert.equal(driver.descriptor.capabilities.protocol, 'sdk')
-  assert.equal(driver.descriptor.capabilities.authMode, 'runtime-copy')
+  assert.equal(driver.descriptor.capabilities.authMode, 'host-identity')
 })
 
 test('Claude turn options parity snapshots stay stable for settings/MCP/permissions', () => {
@@ -391,7 +391,6 @@ test('Claude turn options parity snapshots stay stable for settings/MCP/permissi
       {
         ...baseInput({
           runtimeRoot,
-          model: 'claude-test',
           mcpUrl: 'http://127.0.0.1:9/mcp',
           capabilityProfile: 'chat-write'
         })
@@ -403,7 +402,6 @@ test('Claude turn options parity snapshots stay stable for settings/MCP/permissi
         ...baseInput({
           role: 'planner',
           runtimeRoot,
-          model: 'claude-test',
           mcpUrl: 'http://127.0.0.1:9/mcp',
           capabilityProfile: 'planner-read'
         })
@@ -415,20 +413,19 @@ test('Claude turn options parity snapshots stay stable for settings/MCP/permissi
         ...baseInput({
           role: 'task-worker',
           runtimeRoot,
-          model: 'claude-test',
           mcpUrl: 'http://127.0.0.1:9/mcp'
         })
       },
       { outerSandbox: true }
     )
 
-    assert.deepEqual([...conversation.settingSources], ['user', 'project', 'local'])
+    assert.deepEqual([...conversation.settingSources], [])
     assert.equal(conversation.readOnly, false)
     assert.equal(conversation.pinMcpConfig, true)
-    assert.equal(conversation.model, 'claude-test')
+    assert.equal('model' in conversation, false)
     assert.ok(conversation.allowedTools.some((tool) => tool.startsWith('mcp__')))
 
-    assert.deepEqual([...planner.settingSources], ['user', 'project', 'local'])
+    assert.deepEqual([...planner.settingSources], [])
     assert.equal(planner.readOnly, true)
     assert.ok(planner.disallowedTools.includes('Bash'))
     assert.ok(planner.disallowedTools.includes('Edit'))

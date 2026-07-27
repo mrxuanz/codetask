@@ -1,6 +1,5 @@
 import {
   applyLoopbackNoProxyEnv,
-  applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv
 } from '../../agent-runtime/env'
@@ -26,7 +25,6 @@ import {
 export type CodexSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only'
 
 export interface CodexThreadOptions {
-  model?: string
   workingDirectory: string
   skipGitRepoCheck: true
   approvalPolicy: 'never'
@@ -123,7 +121,6 @@ export function buildCodexTurnPlan(
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
   if (input.mcpUrl) applyLoopbackNoProxyEnv(env)
-  applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const sandboxMode: CodexSandboxMode = outerSandbox
     ? 'danger-full-access'
@@ -136,8 +133,7 @@ export function buildCodexTurnPlan(
     skipGitRepoCheck: true,
     approvalPolicy: 'never',
     sandboxMode,
-    networkAccessEnabled: !readOnly,
-    ...(input.model !== undefined ? { model: input.model } : {})
+    networkAccessEnabled: !readOnly
   }
 
   return {

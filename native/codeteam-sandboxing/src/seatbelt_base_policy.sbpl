@@ -102,6 +102,19 @@
   (global-name "com.apple.PowerManagement.control")
 )
 
+; Host-authorized CLIs (for example Claude Code) use the macOS Keychain.
+; Limit the grant to the Security framework's two credential-query services;
+; filesystem access to provider profiles remains governed by explicit roots.
+(allow mach-lookup
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.securityd.xpc")
+)
+(allow ipc-posix-shm-read-data
+  ipc-posix-shm-write-create
+  ipc-posix-shm-write-data
+  (ipc-posix-name "com.apple.AppleDatabaseChanged")
+)
+
 ; allow openpty()
 (allow pseudo-tty)
 (allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))

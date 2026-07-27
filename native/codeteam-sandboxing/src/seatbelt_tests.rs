@@ -166,6 +166,35 @@ fn dynamic_network_policy_allows_tls_without_darwin_user_cache_write() {
 }
 
 #[test]
+fn base_policy_allows_only_the_keychain_query_services_needed_by_host_authorized_clis() {
+    assert!(
+        MACOS_SEATBELT_BASE_POLICY.contains("(global-name \"com.apple.SecurityServer\")"),
+        "base policy should allow Security.framework credential queries"
+    );
+    assert!(
+        MACOS_SEATBELT_BASE_POLICY.contains("(global-name \"com.apple.securityd.xpc\")"),
+        "base policy should allow the modern securityd XPC endpoint"
+    );
+    assert!(
+        !MACOS_SEATBELT_BASE_POLICY.contains("(allow mach-lookup)"),
+        "base policy must not allow unrestricted Mach service lookup"
+    );
+}
+
+#[test]
+fn base_policy_allows_only_the_keychain_database_change_notification_shm() {
+    assert!(
+        MACOS_SEATBELT_BASE_POLICY.contains(
+            "(allow ipc-posix-shm-read-data\n  \
+             ipc-posix-shm-write-create\n  \
+             ipc-posix-shm-write-data\n  \
+             (ipc-posix-name \"com.apple.AppleDatabaseChanged\")\n)"
+        ),
+        "base policy should allow only read/write notification access to the exact Keychain database-change channel"
+    );
+}
+
+#[test]
 fn explicit_unreadable_paths_are_excluded_from_full_disk_read_and_write_access() {
     let unreadable = absolute_path("/tmp/codex-unreadable");
     let file_system_policy = FileSystemSandboxPolicy::restricted(vec![

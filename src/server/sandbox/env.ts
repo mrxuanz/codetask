@@ -76,7 +76,6 @@ export function buildSandboxEnv(input: {
   runtimeRoot: string
   providerEnv?: Record<string, string> | undefined
   authMode?: ProviderAuthMode | undefined
-  mcpToken?: string | undefined
 }): Record<string, string> {
   ensureIsolatedProviderDirs(input.runtimeRoot)
 
@@ -110,10 +109,6 @@ export function buildSandboxEnv(input: {
 
   if (input.authMode === 'host-identity') {
     delete env.CLAUDE_CONFIG_DIR
-  }
-
-  if (input.mcpToken) {
-    env.MCP_BEARER_TOKEN = input.mcpToken
   }
 
   for (const name of BLOCKED_ENV) {

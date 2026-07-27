@@ -1,7 +1,8 @@
-import { resolve } from 'path'
+import { isAbsolute, relative, resolve } from 'path'
 import type { AgentRole, SandboxPolicy } from './types'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
+import { SandboxError } from './types'
 
 const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam', '.git'] as const
 
@@ -19,11 +20,30 @@ function mergeUniqueRoots(existing: string[], extra: string[]): string[] {
   return merged
 }
 
+function pathsOverlap(left: string, right: string): boolean {
+  const fromLeft = relative(left, right)
+  const fromRight = relative(right, left)
+  const contains = (value: string): boolean =>
+    value === '' || (!value.startsWith('..') && !isAbsolute(value))
+  return contains(fromLeft) || contains(fromRight)
+}
+
+function assertWriteRootOutsideWorkspace(workspaceRoot: string, writeRoot: string): void {
+  const canonicalWriteRoot = canonicalizePath(writeRoot)
+  if (pathsOverlap(workspaceRoot, canonicalWriteRoot)) {
+    throw new SandboxError(
+      `Auxiliary writable root overlaps the workspace: ${canonicalWriteRoot}`,
+      'sandbox.policy.workspace_write_overlap'
+    )
+  }
+}
+
 export function applyProviderWriteRoots(
   policy: SandboxPolicy,
   writeRoots: string[] | undefined
 ): SandboxPolicy {
   if (!writeRoots?.length) return policy
+  for (const root of writeRoots) assertWriteRootOutsideWorkspace(policy.cwd, root)
   const merged = mergeUniqueRoots(policy.filesystem.allowedWriteRoots, writeRoots)
   if (merged.length === policy.filesystem.allowedWriteRoots.length) return policy
   return compileSandboxPolicy({
@@ -72,6 +92,12 @@ export function createSandboxPolicy(input: {
 }): SandboxPolicy {
   const workspaceRoot = canonicalizePath(input.workspaceRoot)
   const runtimeRoot = canonicalizePath(input.runtimeRoot)
+  if (pathsOverlap(workspaceRoot, runtimeRoot)) {
+    throw new SandboxError(
+      'Sandbox runtime root must be outside the workspace',
+      'sandbox.policy.runtime_workspace_overlap'
+    )
+  }
 
   const allowedReadRoots = [
     workspaceRoot,
@@ -92,10 +118,15 @@ export function createSandboxPolicy(input: {
       input.role === 'slice-verifier') &&
     input.verifierOutputRoot
   ) {
-    allowedWriteRoots.push(resolve(input.verifierOutputRoot))
+    const verifierOutputRoot = resolve(input.verifierOutputRoot)
+    assertWriteRootOutsideWorkspace(workspaceRoot, verifierOutputRoot)
+    allowedWriteRoots.push(verifierOutputRoot)
   }
 
   if (input.providerWriteRoots?.length) {
+    for (const root of input.providerWriteRoots) {
+      assertWriteRootOutsideWorkspace(workspaceRoot, root)
+    }
     allowedWriteRoots.push(...input.providerWriteRoots)
   }
 

@@ -9,9 +9,6 @@ let initPromise: Promise<void> | null = null
 
 export function fixedSandboxHome(dataDir: string): string {
   const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_HOME?.trim()) {
-    return hostEnv.CODETASK_SANDBOX_HOME.trim()
-  }
   if (process.platform === 'win32') {
     const localAppData = hostEnv.LOCALAPPDATA
     if (localAppData) {

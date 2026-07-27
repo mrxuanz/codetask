@@ -16,7 +16,7 @@ function cookieValue(headers: Headers, name: string): string {
   return match[1] ?? ''
 }
 
-test('authenticated conversation API selects and creates folders without secret settings', async (t) => {
+test('authenticated conversation API creates and switches four-Provider threads without model or secret settings', async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-conversation-api-data-'))
   const folders = mkdtempSync(join(tmpdir(), 'codetask-conversation-api-folders-'))
   const runtime = createRuntime({
@@ -68,21 +68,64 @@ test('authenticated conversation API selects and creates folders without secret 
     body: JSON.stringify({ path: mkdirBody.data.path })
   })
   assert.equal(createWorkspace.status, 201)
+  const createdWorkspaceBody = (await createWorkspace.json()) as { data: { id: string } }
 
   const settings = await app.request('/api/conversation/settings', {
     headers: { Host: 'localhost', Cookie: `codetask_session=${session}` }
   })
   assert.equal(settings.status, 200)
   const settingsBody = (await settings.json()) as { data: Record<string, unknown> }
-  assert.deepEqual(Object.keys(settingsBody.data).sort(), [
-    'model',
-    'provider',
-    'revision',
-    'updatedAtMs',
-    'userId'
-  ])
-  assert.equal(settingsBody.data.provider, 'cursorcli')
+  assert.deepEqual(Object.keys(settingsBody.data).sort(), ['provider', 'revision', 'updatedAtMs', 'userId'])
+  assert.equal(settingsBody.data.provider, 'codex')
   assert.equal(JSON.stringify(settingsBody).toLowerCase().includes('key'), false)
+  assert.equal(JSON.stringify(settingsBody).toLowerCase().includes('model'), false)
+
+  const providers = await app.request('/api/conversation/providers', {
+    headers: { Host: 'localhost', Cookie: `codetask_session=${session}` }
+  })
+  assert.equal(providers.status, 200)
+  const providersBody = (await providers.json()) as {
+    data: Array<{ code: string; protocol: string }>
+  }
+  assert.deepEqual(
+    providersBody.data.map((provider) => [provider.code, provider.protocol]),
+    [
+      ['codex', 'sdk'],
+      ['claude-code', 'sdk'],
+      ['opencode', 'local-server'],
+      ['cursorcli', 'acp']
+    ]
+  )
+
+  const createThread = await app.request(
+    `/api/conversation/workspaces/${createdWorkspaceBody.data.id}/threads`,
+    {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ provider: 'claude-code' })
+    }
+  )
+  assert.equal(createThread.status, 201)
+  const threadBody = (await createThread.json()) as {
+    data: { id: string; provider: string; runtimeSessionId: string | null }
+  }
+  assert.equal(threadBody.data.provider, 'claude-code')
+  assert.equal('model' in threadBody.data, false)
+
+  const switchProvider = await app.request(
+    `/api/conversation/threads/${threadBody.data.id}`,
+    {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ provider: 'opencode' })
+    }
+  )
+  assert.equal(switchProvider.status, 200)
+  const switchedBody = (await switchProvider.json()) as {
+    data: { provider: string; runtimeSessionId: string | null }
+  }
+  assert.equal(switchedBody.data.provider, 'opencode')
+  assert.equal(switchedBody.data.runtimeSessionId, null)
 
   const workspaces = await app.request('/api/conversation/workspaces', {
     headers: { Host: 'localhost', Cookie: `codetask_session=${session}` }
