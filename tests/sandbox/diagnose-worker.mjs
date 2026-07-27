@@ -55,8 +55,6 @@ function probeSpawn(label, command, args, envExtra = {}) {
 }
 
 async function readInput() {
-  const fromEnv = process.env.CODETASK_WORKER_INPUT?.trim()
-  if (fromEnv) return JSON.parse(fromEnv)
   const chunks = []
   for await (const chunk of process.stdin) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))

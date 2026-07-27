@@ -19,7 +19,7 @@ export const DATA_ROOT_FORMAT_VERSION = 1
 
 export type StorageLocationSource = 'desktop_setup' | 'default' | 'recovered' | 'migration'
 
-export type DataDirSource = 'cli' | 'env' | 'locator' | 'candidate'
+export type DataDirSource = 'cli' | 'locator' | 'candidate'
 
 export interface DataDirResolution {
   phase: 'ready' | 'selection_required' | 'recovery_required'
@@ -303,7 +303,6 @@ export function createStorageLocator(input: {
 /** Storage resolver used by both Electron composition and Node integration tests. */
 export function resolveStorageLocation(input: {
   explicitDataDir?: string
-  envDataDir?: string
   mode: 'desktop' | 'server'
   bootstrapRoot: string
   legacyBootstrapRoots?: readonly string[]
@@ -316,17 +315,6 @@ export function resolveStorageLocation(input: {
       phase: 'ready',
       dataDir: resolve(cliDir),
       source: 'cli',
-      managed: true,
-      bootstrap
-    }
-  }
-
-  const envDir = input.envDataDir?.trim()
-  if (envDir) {
-    return {
-      phase: 'ready',
-      dataDir: resolve(envDir),
-      source: 'env',
       managed: true,
       bootstrap
     }

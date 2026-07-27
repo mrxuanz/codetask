@@ -8,10 +8,10 @@ import type {
   IdGenerator,
   UnitOfWork
 } from '../ports'
+import { isSupportedCoreCode } from '../../../../shared/providers/codes'
 import {
   ConversationError,
   titleFromPrompt,
-  validateConversationModel,
   validateConversationPrompt,
   validateConversationTitle
 } from '../../domain/conversation'
@@ -21,6 +21,7 @@ export interface BeginConversationTurnResult {
   readonly thread: ConversationThreadRecord
   readonly turn: ConversationTurnRecord
   readonly prompt: string
+  readonly history: readonly ConversationMessageRecord[]
 }
 
 export class ConversationService {
@@ -36,8 +37,7 @@ export class ConversationService {
     return (
       this.dependencies.unitOfWork.transaction((tx) => tx.conversation.getSettings(userId)) ?? {
         userId,
-        provider: 'cursorcli',
-        model: null,
+        provider: 'codex',
         revision: 0,
         updatedAtMs: 0
       }
@@ -46,16 +46,18 @@ export class ConversationService {
 
   updateSettings(
     userId: string,
-    input: { readonly model?: string | null }
+    input: { readonly provider?: string | null }
   ): ConversationSettingsRecord {
-    const model = validateConversationModel(input.model)
+    const provider = input.provider?.trim() ?? ''
+    if (!isSupportedCoreCode(provider)) {
+      throw new ConversationError('conversation.provider_invalid')
+    }
     const nowMs = this.dependencies.clock.nowMs()
     return this.dependencies.unitOfWork.transaction((tx) => {
       const current = tx.conversation.getSettings(userId)
       const record: ConversationSettingsRecord = {
         userId,
-        provider: 'cursorcli',
-        model,
+        provider,
         revision: (current?.revision ?? 0) + 1,
         updatedAtMs: nowMs
       }
@@ -102,21 +104,42 @@ export class ConversationService {
     if (!deleted) throw new ConversationError('conversation.workspace_not_found')
   }
 
-  listThreads(userId: string, workspaceId: string): ConversationThreadRecord[] {
+  listThreads(
+    userId: string,
+    workspaceId: string,
+    kind: ConversationThreadRecord['kind'] = 'chat'
+  ): ConversationThreadRecord[] {
     return this.dependencies.unitOfWork.transaction((tx) => {
       if (!tx.conversation.getWorkspace(userId, workspaceId)) {
         throw new ConversationError('conversation.workspace_not_found')
       }
-      return tx.conversation.listThreads(userId, workspaceId)
+      return tx.conversation.listThreads(userId, workspaceId, kind)
     })
+  }
+
+  getThread(userId: string, threadId: string): ConversationThreadRecord {
+    const thread = this.dependencies.unitOfWork.transaction((tx) =>
+      tx.conversation.getThread(userId, threadId)
+    )
+    if (!thread) throw new ConversationError('conversation.thread_not_found')
+    return thread
   }
 
   createThread(
     userId: string,
-    input: { readonly workspaceId: string; readonly title?: string }
+    input: {
+      readonly workspaceId: string
+      readonly title?: string
+      readonly provider?: string | null
+      readonly kind?: ConversationThreadRecord['kind']
+    }
   ): ConversationThreadRecord {
     const title = validateConversationTitle(input.title ?? 'New conversation')
     const settings = this.getSettings(userId)
+    const providerInput = input.provider?.trim() || settings.provider
+    if (!isSupportedCoreCode(providerInput)) {
+      throw new ConversationError('conversation.provider_invalid')
+    }
     const nowMs = this.dependencies.clock.nowMs()
     return this.dependencies.unitOfWork.transaction((tx) => {
       if (!tx.conversation.getWorkspace(userId, input.workspaceId)) {
@@ -125,9 +148,9 @@ export class ConversationService {
       const record: ConversationThreadRecord = {
         id: this.dependencies.ids.generate(),
         workspaceId: input.workspaceId,
+        kind: input.kind ?? 'chat',
         title,
-        provider: 'cursorcli',
-        model: settings.model,
+        provider: providerInput,
         runtimeSessionId: null,
         createdAtMs: nowMs,
         updatedAtMs: nowMs,
@@ -144,6 +167,38 @@ export class ConversationService {
       tx.conversation.updateThreadTitle(userId, threadId, title, this.dependencies.clock.nowMs())
     )
     if (!updated) throw new ConversationError('conversation.thread_not_found')
+  }
+
+  switchThreadProvider(
+    userId: string,
+    threadId: string,
+    providerInput: string
+  ): ConversationThreadRecord {
+    const provider = providerInput.trim()
+    if (!isSupportedCoreCode(provider)) {
+      throw new ConversationError('conversation.provider_invalid')
+    }
+    const updated = this.dependencies.unitOfWork.transaction((tx) => {
+      const thread = tx.conversation.getThread(userId, threadId)
+      if (!thread) throw new ConversationError('conversation.thread_not_found')
+      if (thread.provider === provider) return thread
+      if (tx.conversation.getRunningTurn(threadId)) {
+        throw new ConversationError('conversation.turn_in_progress')
+      }
+      if (
+        !tx.conversation.updateThreadProvider(
+          userId,
+          threadId,
+          provider,
+          this.dependencies.clock.nowMs()
+        )
+      ) {
+        throw new ConversationError('conversation.thread_not_found')
+      }
+      return tx.conversation.getThread(userId, threadId)
+    })
+    if (!updated) throw new ConversationError('conversation.thread_not_found')
+    return updated
   }
 
   deleteThread(userId: string, threadId: string): void {
@@ -164,7 +219,6 @@ export class ConversationService {
 
   beginTurn(userId: string, threadId: string, promptInput: string): BeginConversationTurnResult {
     const prompt = validateConversationPrompt(promptInput)
-    const settings = this.getSettings(userId)
     const nowMs = this.dependencies.clock.nowMs()
     return this.dependencies.unitOfWork.transaction((tx) => {
       const thread = tx.conversation.getThread(userId, threadId)
@@ -175,6 +229,7 @@ export class ConversationService {
         throw new ConversationError('conversation.turn_in_progress')
       }
 
+      const history = tx.conversation.listMessages(userId, threadId)
       const sequence = tx.conversation.nextMessageSequence(threadId)
       const userMessage: ConversationMessageRecord = {
         id: this.dependencies.ids.generate(),
@@ -189,8 +244,7 @@ export class ConversationService {
         threadId,
         userMessageId: userMessage.id,
         state: 'running',
-        provider: 'cursorcli',
-        model: settings.model,
+        provider: thread.provider,
         errorCode: null,
         errorMessage: null,
         startedAtMs: nowMs,
@@ -201,7 +255,7 @@ export class ConversationService {
       if (thread.lastMessageAtMs === null && thread.title === 'New conversation') {
         tx.conversation.updateThreadTitle(userId, threadId, titleFromPrompt(prompt), nowMs)
       }
-      return { workspace, thread: { ...thread, model: settings.model }, turn, prompt }
+      return { workspace, thread, turn, prompt, history }
     })
   }
 

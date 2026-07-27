@@ -10,7 +10,7 @@ import type { ProviderDriver } from '../../src/server/providers/driver'
 import { createPreparedProviderTurn } from '../../src/server/providers/delegating-driver'
 import type { AgentTurnChunk } from '../../src/server/agent-runtime/types'
 
-test('conversation module streams Cursor chunks and commits the assistant message', async (t) => {
+test('conversation module exposes all host Providers and streams the selected thread driver', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-conversation-module-'))
   const workspaceRoot = join(root, 'workspace')
   const database = openKernelDatabase({ filename: ':memory:' })
@@ -100,9 +100,19 @@ test('conversation module streams Cursor chunks and commits the assistant messag
     canonicalKey: workspaceRoot,
     title: 'Workspace'
   })
-  const thread = module.service.createThread('user-1', { workspaceId: workspace.id })
-  const status = await module.providerStatus()
-  assert.equal(status.authenticated, true)
+  const thread = module.service.createThread('user-1', {
+    workspaceId: workspace.id,
+    provider: 'cursorcli'
+  })
+  const statuses = await module.providerStatuses()
+  assert.deepEqual(
+    statuses.map((status) => status.code),
+    ['codex', 'claude-code', 'opencode', 'cursorcli']
+  )
+  assert.equal(
+    statuses.find((status) => status.code === 'cursorcli')?.authenticated,
+    true
+  )
 
   const events = []
   for await (const event of module.streamTurn({

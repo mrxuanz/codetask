@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use codeteam_sandbox_adapter::{effective_roots_attestation, parse_task_policy_json};
 
-use crate::attestation::{apply_attestation_env, write_attestation_artifact};
-use crate::protocol::{SandboxEvidence, SandboxPolicy, sha256_policy_json};
+use crate::attestation::write_attestation_artifact;
+use crate::protocol::{sha256_policy_json, SandboxEvidence, SandboxPolicy};
 
 #[cfg(windows)]
 pub struct SpawnedSandbox {
@@ -49,14 +49,8 @@ pub fn spawn_sandboxed(
 
     let artifact_path = write_attestation_artifact(policy.runtime_root(), &evidence)?;
     let mut child_env = env.clone();
-    apply_attestation_env(
-        &mut child_env,
-        &artifact_path,
-        &hash,
-        protocol_version,
-        &attestation.effective_read_roots_hash,
-        &attestation.effective_write_roots_hash,
-    );
+    // Node inside macOS seatbelt cannot read the system OpenSSL config by default.
+    child_env.insert("OPENSSL_CONF".to_string(), "/dev/null".to_string());
 
     #[cfg(windows)]
     let (read_roots, write_roots, include_platform_defaults) = (
@@ -74,6 +68,7 @@ pub fn spawn_sandboxed(
             command,
             args,
             &child_env,
+            &artifact_path,
             &read_roots,
             &write_roots,
             include_platform_defaults,
@@ -84,14 +79,28 @@ pub fn spawn_sandboxed(
 
     #[cfg(target_os = "linux")]
     {
-        let child = crate::linux::spawn(&policy, policy_json, command, args, &child_env)?;
+        let child = crate::linux::spawn(
+            &policy,
+            policy_json,
+            command,
+            args,
+            &child_env,
+            &artifact_path,
+        )?;
         evidence.sandbox_pid = child.id();
         return Ok(SpawnedSandbox { child, evidence });
     }
 
     #[cfg(target_os = "macos")]
     {
-        let child = crate::macos::spawn(&policy, policy_json, command, args, &child_env)?;
+        let child = crate::macos::spawn(
+            &policy,
+            policy_json,
+            command,
+            args,
+            &child_env,
+            &artifact_path,
+        )?;
         evidence.sandbox_pid = child.id();
         return Ok(SpawnedSandbox { child, evidence });
     }

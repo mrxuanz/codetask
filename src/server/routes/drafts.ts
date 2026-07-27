@@ -5,6 +5,7 @@ import type { AppContext } from '../context'
 import { getRequestAuthPrincipal } from '../auth/session'
 import { AppError, toErrorHttpResult } from '../error'
 import { DraftError } from '../core/domain/draft'
+import { isSupportedCoreCode } from '../../shared/providers/codes'
 import { ok } from '../response'
 
 function userIdFrom(context: Parameters<typeof getRequestAuthPrincipal>[0]): string {
@@ -30,7 +31,8 @@ export function createDraftRoutes(ctx: AppContext): Hono {
   routes.get('/draft-settings', (c) => c.json(ok(service.getSettings(userIdFrom(c)))))
   routes.put('/draft-settings', async (c) => {
     const body = await c.req.json<{
-      model?: unknown
+      discussionPrompt?: unknown
+      discussionSkillsManual?: unknown
       plannerPrompt?: unknown
       skillsManual?: unknown
       expectedRevision?: number
@@ -41,6 +43,28 @@ export function createDraftRoutes(ctx: AppContext): Hono {
   routes.get('/drafts', (c) => {
     const workspaceId = c.req.query('workspaceId')?.trim() || undefined
     return c.json(ok(service.listDrafts(userIdFrom(c), workspaceId)))
+  })
+  routes.post('/drafts/planner-sessions', async (c) => {
+    const body = await c.req.json<{
+      workspaceId?: string
+      provider?: string
+      initialPrompt?: string
+    }>()
+    const provider = body.provider ?? ''
+    if (!isSupportedCoreCode(provider)) {
+      throw new DraftError('draft.provider_invalid')
+    }
+    return c.json(
+      ok(
+        ctx.draft.startPlannerSession({
+          userId: userIdFrom(c),
+          workspaceId: body.workspaceId?.trim() ?? '',
+          provider,
+          initialPrompt: body.initialPrompt ?? ''
+        })
+      ),
+      201
+    )
   })
   routes.post('/drafts', async (c) => {
     const body = await c.req.json<{
@@ -93,7 +117,7 @@ export function createDraftRoutes(ctx: AppContext): Hono {
     )
   })
   routes.delete('/drafts/:draftId', async (c) => {
-    await service.deleteDraft(userIdFrom(c), c.req.param('draftId'))
+    await ctx.draft.deletePlannerDraft(userIdFrom(c), c.req.param('draftId'))
     return c.json(ok({ deleted: true }))
   })
 
@@ -146,6 +170,36 @@ export function createDraftRoutes(ctx: AppContext): Hono {
         for await (const event of ctx.draft.streamGeneration({
           userId,
           draftId,
+          signal: c.req.raw.signal
+        })) {
+          await writer.write(ndjson(event))
+        }
+      } catch (error) {
+        const result = toErrorHttpResult(error)
+        await writer.write(
+          ndjson({
+            type: 'error',
+            status: result.body.status,
+            message: result.body.message,
+            data: result.body.data
+          })
+        )
+      }
+    })
+  })
+  routes.post('/drafts/:draftId/planner-turns', async (c) => {
+    const body = await c.req.json<{ prompt?: string }>()
+    const userId = userIdFrom(c)
+    const draftId = c.req.param('draftId')
+    c.header('Content-Type', 'application/x-ndjson; charset=utf-8')
+    c.header('Cache-Control', 'no-store, no-transform')
+    c.header('X-Content-Type-Options', 'nosniff')
+    return stream(c, async (writer) => {
+      try {
+        for await (const event of ctx.draft.streamPlannerTurn({
+          userId,
+          draftId,
+          prompt: body.prompt ?? '',
           signal: c.req.raw.signal
         })) {
           await writer.write(ndjson(event))

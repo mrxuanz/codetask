@@ -47,6 +47,7 @@ impl ElevatedChild {
         command: &str,
         args: &[String],
         env: &HashMap<String, String>,
+        artifact_path: &Path,
         allowed_read_roots: &[PathBuf],
         allowed_write_roots: &[PathBuf],
         allow_system_runtime: bool,
@@ -71,13 +72,10 @@ impl ElevatedChild {
         {
             command.to_string()
         } else {
-            host_launcher
-                .host_exe
-                .to_string_lossy()
-                .into_owned()
+            host_launcher.host_exe.to_string_lossy().into_owned()
         };
         let (wrapped_command, wrapped_args) =
-            wrap_windows_command(&node_exe, &emitter_script, command, args);
+            wrap_windows_command(&node_exe, &emitter_script, artifact_path, command, args);
 
         Ok(Self {
             policy_json: legacy_json,
@@ -91,11 +89,6 @@ impl ElevatedChild {
             sandbox_home,
             env_map: {
                 let mut env_map = env.clone();
-                env_map.insert("CODETASK_OUTER_SANDBOX".to_string(), "1".to_string());
-                env_map.insert(
-                    "CODETASK_RUNTIME_ROOT".to_string(),
-                    policy.runtime_root().to_string(),
-                );
                 apply_electron_node_env(&mut env_map);
                 env_map
             },
@@ -117,10 +110,8 @@ impl ElevatedChild {
         if !self.stdin_buffer.is_empty() {
             let input_path = self.runtime_root.join("worker-input.json");
             fs::write(&input_path, &self.stdin_buffer)?;
-            self.env_map.insert(
-                "CODETASK_WORKER_INPUT_FILE".to_string(),
-                input_path.to_string_lossy().into_owned(),
-            );
+            self.command.push("--worker-input-file".to_string());
+            self.command.push(input_path.to_string_lossy().into_owned());
         }
 
         let stdout = Arc::new(Mutex::new(Vec::new()));
@@ -171,10 +162,7 @@ impl ElevatedChild {
                 deny_write_paths_override: &[],
             };
             let result = run_windows_sandbox_capture_streaming_elevated(
-                request,
-                &control_t,
-                stdout_t,
-                stderr_t,
+                request, &control_t, stdout_t, stderr_t,
             )?;
             *exit_t.lock().unwrap() = Some(result.exit_code);
             Ok(())

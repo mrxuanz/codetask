@@ -3,16 +3,13 @@ use std::path::{Path, PathBuf};
 
 use codeteam_sandbox_policy::protocol::SandboxPolicy as LegacySandboxPolicy;
 use codeteam_windows_sandbox::{
-    SandboxSetupRequest, SetupRootOverrides, execute_setup_payload_b64, run_elevated_setup,
-    sandbox_setup_is_complete, write_host_launcher_config,
+    execute_setup_payload_b64, run_elevated_setup, sandbox_setup_is_complete,
+    write_host_launcher_config, SandboxSetupRequest, SetupRootOverrides,
 };
 
 pub fn resolve_sandbox_home(explicit: Option<&str>) -> PathBuf {
     if let Some(value) = explicit {
         return PathBuf::from(value);
-    }
-    if let Ok(home) = std::env::var("CODETASK_SANDBOX_HOME") {
-        return PathBuf::from(home);
     }
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         return PathBuf::from(local).join("codetask").join("sandbox-home");
@@ -38,12 +35,6 @@ pub fn register_host_launcher(
         Path::new(setup_script),
         Path::new(runner_script),
     )?;
-    // SAFETY: single-threaded NAPI init before spawning sandbox children.
-    unsafe {
-        std::env::set_var("CODETASK_SANDBOX_HOST_EXE", host_exe);
-        std::env::set_var("CODETASK_SANDBOX_SETUP_SCRIPT", setup_script);
-        std::env::set_var("CODETASK_SANDBOX_RUNNER_SCRIPT", runner_script);
-    }
     Ok(())
 }
 

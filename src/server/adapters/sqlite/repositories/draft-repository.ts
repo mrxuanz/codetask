@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { SupportedCoreCode } from '../../../../shared/providers/codes'
 import type {
   DraftAttachmentRecord,
   DraftExecutionTreeRecord,
@@ -11,8 +12,8 @@ import type {
 
 type SettingsRow = {
   user_id: string
-  provider_code: 'cursorcli'
-  model: string | null
+  discussion_prompt: string | null
+  discussion_skills_manual: string | null
   planner_prompt: string | null
   skills_manual: string | null
   revision: number
@@ -28,6 +29,7 @@ type DraftRow = {
   requirements: string
   constraints_text: string
   acceptance_criteria: string
+  planner_phase: 'gathering' | 'ready'
   status: DraftStatus
   revision: number
   active_tree_id: string | null
@@ -52,8 +54,7 @@ type GenerationRow = {
   state: DraftGenerationRunRecord['state']
   source_draft_revision: number
   settings_revision: number
-  provider_code: 'cursorcli'
-  model: string | null
+  selected_provider_code: SupportedCoreCode
   error_code: string | null
   error_message: string | null
   started_at_ms: number
@@ -65,6 +66,7 @@ type TreeRow = {
   generation_run_id: string
   tree_revision: number
   source_draft_revision: number
+  selected_provider_code: SupportedCoreCode
   schema_version: 1
   tree_json: string
   planner_prompt_snapshot: string
@@ -74,17 +76,18 @@ type TreeRow = {
 }
 
 const DRAFT_COLUMNS = `id, user_id, workspace_id, source_thread_id, title, objective,
-  requirements, constraints_text, acceptance_criteria, status, revision, active_tree_id,
+  requirements, constraints_text, acceptance_criteria, planner_phase, status, revision, active_tree_id,
   submitted_handoff_id, created_at_ms, updated_at_ms, submitted_at_ms`
 const TREE_COLUMNS = `id, draft_id, generation_run_id, tree_revision, source_draft_revision,
-  schema_version, tree_json, planner_prompt_snapshot, skills_manual_snapshot, model, created_at_ms`
+  selected_provider_code, schema_version, tree_json, planner_prompt_snapshot,
+  skills_manual_snapshot, model, created_at_ms`
 
 function settings(row: SettingsRow | undefined): DraftSettingsRecord | null {
   return row
     ? {
         userId: row.user_id,
-        provider: row.provider_code,
-        model: row.model,
+        discussionPrompt: row.discussion_prompt,
+        discussionSkillsManual: row.discussion_skills_manual,
         plannerPrompt: row.planner_prompt,
         skillsManual: row.skills_manual,
         revision: row.revision,
@@ -104,6 +107,7 @@ function draft(row: DraftRow | undefined): DraftRecord | null {
         requirements: row.requirements,
         constraints: row.constraints_text,
         acceptanceCriteria: row.acceptance_criteria,
+        plannerPhase: row.planner_phase,
         status: row.status,
         revision: row.revision,
         activeTreeId: row.active_tree_id,
@@ -134,8 +138,7 @@ function generation(row: GenerationRow | undefined): DraftGenerationRunRecord | 
         state: row.state,
         sourceDraftRevision: row.source_draft_revision,
         settingsRevision: row.settings_revision,
-        provider: row.provider_code,
-        model: row.model,
+        provider: row.selected_provider_code,
         errorCode: row.error_code,
         errorMessage: row.error_message,
         startedAtMs: row.started_at_ms,
@@ -151,11 +154,11 @@ function tree(row: TreeRow | undefined): DraftExecutionTreeRecord | null {
         generationRunId: row.generation_run_id,
         treeRevision: row.tree_revision,
         sourceDraftRevision: row.source_draft_revision,
+        provider: row.selected_provider_code,
         schemaVersion: row.schema_version,
         treeJson: row.tree_json,
         plannerPromptSnapshot: row.planner_prompt_snapshot,
         skillsManualSnapshot: row.skills_manual_snapshot,
-        model: row.model,
         createdAtMs: row.created_at_ms
       }
     : null
@@ -168,7 +171,8 @@ export class SqliteDraftRepository implements DraftRepository {
     return settings(
       this.database
         .prepare(
-          `SELECT user_id, provider_code, model, planner_prompt, skills_manual, revision,
+          `SELECT user_id, discussion_prompt, discussion_skills_manual,
+                  planner_prompt, skills_manual, revision,
                   updated_at_ms FROM draft_settings WHERE user_id = ?`
         )
         .get(userId) as SettingsRow | undefined
@@ -178,17 +182,20 @@ export class SqliteDraftRepository implements DraftRepository {
     this.database
       .prepare(
         `INSERT INTO draft_settings
-           (user_id, provider_code, model, planner_prompt, skills_manual, revision, updated_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET provider_code = excluded.provider_code,
-           model = excluded.model, planner_prompt = excluded.planner_prompt,
+           (user_id, provider_code, model, discussion_prompt, discussion_skills_manual,
+            planner_prompt, skills_manual, revision, updated_at_ms)
+         VALUES (?, 'cursorcli', NULL, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET model = NULL,
+           discussion_prompt = excluded.discussion_prompt,
+           discussion_skills_manual = excluded.discussion_skills_manual,
+           planner_prompt = excluded.planner_prompt,
            skills_manual = excluded.skills_manual, revision = excluded.revision,
            updated_at_ms = excluded.updated_at_ms`
       )
       .run(
         record.userId,
-        record.provider,
-        record.model,
+        record.discussionPrompt,
+        record.discussionSkillsManual,
         record.plannerPrompt,
         record.skillsManual,
         record.revision,
@@ -223,9 +230,9 @@ export class SqliteDraftRepository implements DraftRepository {
       .prepare(
         `INSERT INTO drafts
            (id, user_id, workspace_id, source_thread_id, title, objective, requirements,
-            constraints_text, acceptance_criteria, status, revision, active_tree_id,
+            constraints_text, acceptance_criteria, planner_phase, status, revision, active_tree_id,
             submitted_handoff_id, created_at_ms, updated_at_ms, submitted_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.id,
@@ -237,6 +244,7 @@ export class SqliteDraftRepository implements DraftRepository {
         record.requirements,
         record.constraints,
         record.acceptanceCriteria,
+        record.plannerPhase ?? 'ready',
         record.status,
         record.revision,
         record.activeTreeId,
@@ -251,7 +259,7 @@ export class SqliteDraftRepository implements DraftRepository {
       this.database
         .prepare(
           `UPDATE drafts SET title = ?, objective = ?, requirements = ?,
-             constraints_text = ?, acceptance_criteria = ?, status = ?, revision = ?,
+             constraints_text = ?, acceptance_criteria = ?, planner_phase = ?, status = ?, revision = ?,
              active_tree_id = ?, submitted_handoff_id = ?, submitted_at_ms = ?, updated_at_ms = ?
            WHERE id = ? AND user_id = ? AND revision = ? AND status <> 'submitted'`
         )
@@ -261,6 +269,7 @@ export class SqliteDraftRepository implements DraftRepository {
           record.requirements,
           record.constraints,
           record.acceptanceCriteria,
+          record.plannerPhase ?? 'ready',
           record.status,
           record.revision,
           record.activeTreeId,
@@ -368,8 +377,8 @@ export class SqliteDraftRepository implements DraftRepository {
     return generation(
       this.database
         .prepare(
-          `SELECT id, draft_id, state, source_draft_revision, settings_revision, provider_code,
-                  model, error_code, error_message, started_at_ms, finished_at_ms
+          `SELECT id, draft_id, state, source_draft_revision, settings_revision,
+                  selected_provider_code, error_code, error_message, started_at_ms, finished_at_ms
            FROM draft_generation_runs WHERE draft_id = ? AND state = 'running'`
         )
         .get(draftId) as GenerationRow | undefined
@@ -380,8 +389,8 @@ export class SqliteDraftRepository implements DraftRepository {
       .prepare(
         `INSERT INTO draft_generation_runs
            (id, draft_id, state, source_draft_revision, settings_revision, provider_code,
-            model, error_code, error_message, started_at_ms, finished_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            model, selected_provider_code, error_code, error_message, started_at_ms, finished_at_ms)
+         VALUES (?, ?, ?, ?, ?, 'cursorcli', NULL, ?, ?, ?, ?, ?)`
       )
       .run(
         record.id,
@@ -389,8 +398,7 @@ export class SqliteDraftRepository implements DraftRepository {
         record.state,
         record.sourceDraftRevision,
         record.settingsRevision,
-        record.provider,
-        record.model,
+        record.provider ?? 'cursorcli',
         record.errorCode,
         record.errorMessage,
         record.startedAtMs,
@@ -429,8 +437,8 @@ export class SqliteDraftRepository implements DraftRepository {
       .prepare(
         `INSERT INTO draft_execution_trees
            (id, draft_id, generation_run_id, tree_revision, source_draft_revision,
-            schema_version, tree_json, planner_prompt_snapshot, skills_manual_snapshot,
-            model, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            selected_provider_code, schema_version, tree_json, planner_prompt_snapshot,
+            skills_manual_snapshot, model, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.id,
@@ -438,11 +446,12 @@ export class SqliteDraftRepository implements DraftRepository {
         record.generationRunId,
         record.treeRevision,
         record.sourceDraftRevision,
+        record.provider ?? 'cursorcli',
         record.schemaVersion,
         record.treeJson,
         record.plannerPromptSnapshot,
         record.skillsManualSnapshot,
-        record.model,
+        null,
         record.createdAtMs
       )
   }
@@ -465,7 +474,7 @@ export class SqliteDraftRepository implements DraftRepository {
     const row = this.database
       .prepare(
         `SELECT t.id, t.draft_id, t.generation_run_id, t.tree_revision,
-                t.source_draft_revision, t.schema_version, t.tree_json,
+                t.source_draft_revision, t.selected_provider_code, t.schema_version, t.tree_json,
                 t.planner_prompt_snapshot, t.skills_manual_snapshot, t.model, t.created_at_ms
          FROM draft_execution_trees t
          JOIN drafts d ON d.active_tree_id = t.id AND d.id = t.draft_id

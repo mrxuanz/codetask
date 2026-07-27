@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import { resolveClaudeSettingSources } from '../../src/server/providers/claude/turn-options'
 import { resolveClaudeHostConfigDir } from '../../src/server/sandbox/provider-auth/paths'
+import { streamClaudeTurn } from '../../src/server/agent-runtime/providers/claude-sdk'
 
 const TURN_TIMEOUT_MS = 3 * 60_000
 const args = process.argv.slice(2)
@@ -28,7 +29,6 @@ function buildMergedEnv(envPatch: Record<string, string>): Record<string, string
     if (typeof value === 'string') env[key] = value
   }
   Object.assign(env, envPatch)
-  env.CODETASK_OUTER_SANDBOX = '1'
   return env
 }
 
@@ -70,11 +70,11 @@ async function runStatic(runtimeRoot: string): Promise<{
   settingSourcesConversation: unknown
   hostClaudeInReadRoots: string[]
   injectedAuthKeys: string[]
-  runtimeIsolated: boolean
+  hostIdentityAligned: boolean
 }> {
   const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
   const env = buildMergedEnv(prepared.envPatch)
-  const claudeDir = env.CLAUDE_CONFIG_DIR ?? join(runtimeRoot, '.claude')
+  const claudeDir = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? runtimeRoot, '.claude')
   const hostConfigDir = resolveClaudeHostConfigDir().toLowerCase()
 
   const hostReadRoots = (prepared.readRoots ?? []).filter((root) =>
@@ -95,17 +95,19 @@ async function runStatic(runtimeRoot: string): Promise<{
       'ANTHROPIC_AUTH_TOKEN',
       'CLAUDE_CODE_OAUTH_TOKEN'
     ].filter((key) => Boolean(env[key])),
-    runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-copy' &&
-      env.HOME === runtimeRoot &&
-      claudeDir.startsWith(runtimeRoot) &&
-      (prepared.writeRoots ?? []).length === 0 &&
-      hostReadRoots.length === 0
+    hostIdentityAligned:
+      prepared.diagnostics.mode === 'host-identity' &&
+      env.CLAUDE_CONFIG_DIR === undefined &&
+      env.HOME !== runtimeRoot &&
+      hostReadRoots.length > 0
   }
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('Claude runtime-copy isolation check failed')
+  if (!report.hostIdentityAligned) throw new Error('Claude host-identity alignment check failed')
+  if (report.injectedAuthKeys.length > 0) {
+    throw new Error('Claude must not receive environment-token credentials')
+  }
   if (report.settingSourcesOuterSandbox.length !== 0) {
     throw new Error('outer sandbox must use empty settingSources')
   }
@@ -113,45 +115,61 @@ async function runStatic(runtimeRoot: string): Promise<{
   return report
 }
 
-async function runHello(runtimeRoot: string, workspace: string): Promise<unknown> {
-  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
-  const env = buildMergedEnv(prepared.envPatch)
-  if (!claudeAuthPresent(env)) {
-    return { skipped: true, reason: 'no ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN' }
-  }
-
-  const { query } = await import('@anthropic-ai/claude-agent-sdk')
+async function runOuterSandboxOptions(runtimeRoot: string, workspace: string): Promise<unknown> {
   const started = Date.now()
   let reply = ''
-
-  const stream = query({
-    prompt: 'Reply with exactly: pong',
-    options: {
+  const stream = streamClaudeTurn(
+    {
+      provider: 'claude-code',
+      role: 'work-verifier',
       cwd: workspace,
-      settingSources: resolveClaudeSettingSources(true),
-      permissionMode: 'bypassPermissions',
-      sandbox: { enabled: false },
-      tools: [],
-      allowedTools: [],
-      env,
-      persistSession: false
-    }
-  })
+      runtimeRoot,
+      prompt: 'Reply with exactly: pong',
+      capabilityProfile: 'verifier-sandbox'
+    },
+    { outerSandbox: true }
+  )
 
   const deadline = started + TURN_TIMEOUT_MS
-  for await (const message of stream) {
+  for await (const chunk of stream) {
     if (Date.now() > deadline) throw new Error(`turn timeout (${TURN_TIMEOUT_MS / 1000}s)`)
-    const typed = message as { type?: string; result?: string }
-    if (typed.type === 'result' && typed.result) {
-      reply = typed.result
-      break
+    if (chunk.type === 'error') throw new Error(chunk.message)
+    if (chunk.type === 'completed') reply = chunk.reply
+  }
+
+  return { reply: reply.trim(), elapsedMs: Date.now() - started }
+}
+
+async function runHello(runtimeRoot: string, workspace: string): Promise<unknown> {
+  const started = Date.now()
+  let reply = ''
+  let runtimeSessionId: string | null = null
+  const stream = streamClaudeTurn(
+    {
+      provider: 'claude-code',
+      role: 'conversation',
+      cwd: workspace,
+      runtimeRoot,
+      prompt: 'Reply with exactly: pong',
+      capabilityProfile: 'chat-read'
+    },
+    { outerSandbox: false }
+  )
+
+  const deadline = started + TURN_TIMEOUT_MS
+  for await (const chunk of stream) {
+    if (Date.now() > deadline) throw new Error(`turn timeout (${TURN_TIMEOUT_MS / 1000}s)`)
+    if (chunk.type === 'error') throw new Error(chunk.message)
+    if (chunk.type === 'completed') {
+      reply = chunk.reply
+      runtimeSessionId = chunk.runtimeSessionId
     }
   }
 
   return {
     reply: reply.trim(),
     elapsedMs: Date.now() - started,
-    claudeHome: env.CLAUDE_CONFIG_DIR
+    runtimeSessionId
   }
 }
 
@@ -168,6 +186,7 @@ async function main(): Promise<void> {
     skipLive,
     static: null,
     hello: null,
+    outer: null,
     runtimeJson: null,
     failures: [] as string[]
   }
@@ -202,6 +221,29 @@ async function main(): Promise<void> {
       }
     }
 
+    if (!skipLive && (caseFilter === 'all' || caseFilter === 'outer')) {
+      try {
+        const result = await runOuterSandboxOptions(runtimeRoot, workspace)
+        report.outer = result
+        log('outer', 'done', result)
+        if (
+          result &&
+          typeof result === 'object' &&
+          'reply' in result &&
+          typeof result.reply === 'string' &&
+          !result.reply.toLowerCase().includes('pong')
+        ) {
+          ;(report.failures as string[]).push(
+            `outer: expected pong, got ${result.reply || '(empty)'}`
+          )
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        report.outer = { failed: true, message }
+        ;(report.failures as string[]).push(`outer: ${message}`)
+      }
+    }
+
     report.runtimeJson = listRuntimeFiles(runtimeRoot)
     const reportPath = join(base, 'claude-light-report.json')
     writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8')
@@ -209,6 +251,7 @@ async function main(): Promise<void> {
     console.log('\n========== CLAUDE LIGHT TEST ==========')
     if (report.static) console.log('static: OK')
     if (report.hello) console.log('hello:', report.hello)
+    if (report.outer) console.log('outer:', report.outer)
     if ((report.failures as string[]).length) {
       console.log('\nFailures:')
       for (const f of report.failures as string[]) console.log(`  - ${f}`)

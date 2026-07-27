@@ -1,14 +1,9 @@
 import type { AgentTurnChunk } from '../agent-runtime/types'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
-import { processHostEnvironmentSource } from '../host-environment'
 
 import { streamSandboxedTurnViaSupervisor } from './supervisor-client'
 
-import {
-  streamSandboxedConversationTurnLocal,
-  type RunSandboxedTurnInput
-} from './orchestrator-local'
-import { closeJobCursorSandbox } from './job-cursor-pool'
+import type { RunSandboxedTurnInput } from './orchestrator-local'
 import { getSandboxSupervisorManager } from './supervisor-manager'
 import { SandboxError } from './types'
 
@@ -50,11 +45,7 @@ function abortJobTurns(jobId: string, reason: string): void {
 }
 
 export function shouldUseSandboxSupervisor(): boolean {
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') return false
-
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR_WORKER === '1') return false
-
+  // A single production path avoids supervisor/local state divergence.
   return true
 }
 
@@ -71,21 +62,11 @@ export async function* streamSandboxedConversationTurn(
 
   try {
     const scopedInput = { ...input, signal: controller.signal }
-    if (shouldUseSandboxSupervisor()) {
-      sandboxTurnDebug('orchestrator: routing via supervisor IPC', {
-        role: input.role,
-        coreCode: input.coreCode
-      })
-      yield* streamSandboxedTurnViaSupervisor(scopedInput)
-      return
-    }
-
-    sandboxTurnDebug('orchestrator: routing local (supervisor disabled)', {
+    sandboxTurnDebug('orchestrator: routing via supervisor IPC', {
       role: input.role,
       coreCode: input.coreCode
     })
-
-    yield* streamSandboxedConversationTurnLocal(scopedInput)
+    yield* streamSandboxedTurnViaSupervisor(scopedInput)
   } finally {
     input.signal?.removeEventListener('abort', forwardAbort)
     if (jobId) unregisterJobTurn(jobId, controller)
@@ -97,13 +78,10 @@ export function cancelJobSandboxTurns(jobId: string): void {
   if (!trimmed) return
   abortJobTurns(trimmed, `sandbox turns cancelled for ${trimmed}`)
 
-  if (shouldUseSandboxSupervisor()) {
-    try {
-      getSandboxSupervisorManager().send({ type: 'cancel-job-turns', jobId: trimmed })
-    } catch {
-      // ignore
-    }
-    return
+  try {
+    getSandboxSupervisorManager().send({ type: 'cancel-job-turns', jobId: trimmed })
+  } catch {
+    // ignore
   }
 }
 
@@ -139,31 +117,24 @@ export async function forceTerminateJobSandboxTurns(jobId: string): Promise<void
   try {
     await waitForJobSandboxTurnsIdle(trimmed, { timeoutMs: 5_000 })
     return
-  } catch (error) {
-    if (!shouldUseSandboxSupervisor()) throw error
+  } catch {
+    await getSandboxSupervisorManager().recycle(`sandbox turns for ${trimmed} ignored cancellation`)
+    await waitForJobSandboxTurnsIdle(trimmed, { timeoutMs: 5_000 })
   }
-
-  await getSandboxSupervisorManager().recycle(`sandbox turns for ${trimmed} ignored cancellation`)
-  await waitForJobSandboxTurnsIdle(trimmed, { timeoutMs: 5_000 })
 }
 
 export async function releaseJobCursorResources(jobId: string): Promise<void> {
   const trimmed = jobId.trim()
   if (!trimmed) return
 
-  if (shouldUseSandboxSupervisor()) {
-    try {
-      // Do not spawn the supervisor solely to close a cursor — that leaves a
-      // long-lived child process and can hang unit tests after delete drain.
-      const manager = getSandboxSupervisorManager()
-      if (manager.statusSnapshot().ready) {
-        manager.send({ type: 'close-job-cursor', jobId: trimmed })
-      }
-    } catch {
-      // ignore
+  try {
+    // Do not spawn the supervisor solely to close a cursor — that leaves a
+    // long-lived child process and can hang unit tests after delete drain.
+    const manager = getSandboxSupervisorManager()
+    if (manager.statusSnapshot().ready) {
+      manager.send({ type: 'close-job-cursor', jobId: trimmed })
     }
-    return
+  } catch {
+    // ignore
   }
-
-  await closeJobCursorSandbox(trimmed).catch(() => {})
 }

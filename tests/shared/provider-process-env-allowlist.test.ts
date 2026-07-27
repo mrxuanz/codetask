@@ -153,6 +153,25 @@ test('all Provider child boundaries remove host and overlay credential variables
   }
 })
 
+test('host-identity sandbox preserves HOME but never overrides Claude config discovery', () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-host-identity-'))
+  try {
+    const sandbox = buildSandboxEnv({
+      runtimeRoot,
+      authMode: 'host-identity',
+      providerEnv: {
+        HOME: '/Users/test-host',
+        CLAUDE_CONFIG_DIR: '/Users/test-host/.claude'
+      }
+    })
+
+    assert.equal(sandbox.HOME, '/Users/test-host')
+    assert.equal(sandbox.CLAUDE_CONFIG_DIR, undefined)
+  } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
 test('Provider descriptors have no credential-environment contract', () => {
   for (const relative of [
     'src/shared/providers/descriptor.ts',

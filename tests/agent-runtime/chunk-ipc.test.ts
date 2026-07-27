@@ -19,15 +19,22 @@ test('compactTurnChunkForIpc drops deltas for task-worker', () => {
   )
 })
 
-test('compactTurnChunkForIpc strips reply on completed for non-streaming roles', () => {
-  for (const role of ['task-worker', 'slice-verifier', 'milestone-verifier', 'planner'] as const) {
+test('compactTurnChunkForIpc preserves authoritative completed replies for non-streaming roles', () => {
+  for (const role of [
+    'task-worker',
+    'work-verifier',
+    'slice-verifier',
+    'milestone-verifier',
+    'planner'
+  ] as const) {
+    const completed = {
+      type: 'completed' as const,
+      reply: 'x'.repeat(10_000),
+      runtimeSessionId: 'sess-1'
+    }
     assert.deepEqual(
-      compactTurnChunkForIpc(role, {
-        type: 'completed',
-        reply: 'x'.repeat(10_000),
-        runtimeSessionId: 'sess-1'
-      }),
-      { type: 'completed', reply: '', runtimeSessionId: 'sess-1' }
+      compactTurnChunkForIpc(role, completed),
+      completed
     )
   }
 })

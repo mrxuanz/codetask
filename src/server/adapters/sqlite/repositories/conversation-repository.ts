@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { SupportedCoreCode } from '../../../../shared/providers/codes'
 import type {
   ConversationMessageRecord,
   ConversationRepository,
@@ -10,8 +11,7 @@ import type {
 
 type SettingsRow = {
   user_id: string
-  provider_code: 'cursorcli'
-  model: string | null
+  preferred_provider_code: SupportedCoreCode
   revision: number
   updated_at_ms: number
 }
@@ -29,9 +29,9 @@ type WorkspaceRow = {
 type ThreadRow = {
   id: string
   workspace_id: string
+  thread_kind: 'chat' | 'planner'
   title: string
-  provider_code: 'cursorcli'
-  model: string | null
+  selected_provider_code: SupportedCoreCode
   runtime_session_id: string | null
   created_at_ms: number
   updated_at_ms: number
@@ -52,8 +52,7 @@ type TurnRow = {
   thread_id: string
   user_message_id: string
   state: 'running' | 'completed' | 'failed' | 'cancelled'
-  provider_code: 'cursorcli'
-  model: string | null
+  selected_provider_code: SupportedCoreCode
   error_code: string | null
   error_message: string | null
   started_at_ms: number
@@ -64,8 +63,7 @@ function settings(row: SettingsRow | undefined): ConversationSettingsRecord | nu
   return row
     ? {
         userId: row.user_id,
-        provider: row.provider_code,
-        model: row.model,
+        provider: row.preferred_provider_code,
         revision: row.revision,
         updatedAtMs: row.updated_at_ms
       }
@@ -91,9 +89,9 @@ function thread(row: ThreadRow | undefined): ConversationThreadRecord | null {
     ? {
         id: row.id,
         workspaceId: row.workspace_id,
+        kind: row.thread_kind,
         title: row.title,
-        provider: row.provider_code,
-        model: row.model,
+        provider: row.selected_provider_code,
         runtimeSessionId: row.runtime_session_id,
         createdAtMs: row.created_at_ms,
         updatedAtMs: row.updated_at_ms,
@@ -120,8 +118,7 @@ function turn(row: TurnRow | undefined): ConversationTurnRecord | null {
         threadId: row.thread_id,
         userMessageId: row.user_message_id,
         state: row.state,
-        provider: row.provider_code,
-        model: row.model,
+        provider: row.selected_provider_code,
         errorCode: row.error_code,
         errorMessage: row.error_message,
         startedAtMs: row.started_at_ms,
@@ -131,7 +128,8 @@ function turn(row: TurnRow | undefined): ConversationTurnRecord | null {
 }
 
 const THREAD_SELECT = `SELECT conversation_threads.id, conversation_threads.workspace_id,
-  conversation_threads.title, conversation_threads.provider_code, conversation_threads.model,
+  conversation_threads.thread_kind, conversation_threads.title,
+  conversation_threads.selected_provider_code,
   conversation_threads.runtime_session_id, conversation_threads.created_at_ms,
   conversation_threads.updated_at_ms, conversation_threads.last_message_at_ms
   FROM conversation_threads`
@@ -143,7 +141,7 @@ export class SqliteConversationRepository implements ConversationRepository {
     return settings(
       this.database
         .prepare(
-          `SELECT user_id, provider_code, model, revision, updated_at_ms
+          `SELECT user_id, preferred_provider_code, revision, updated_at_ms
            FROM conversation_settings WHERE user_id = ?`
         )
         .get(userId) as SettingsRow | undefined
@@ -154,15 +152,14 @@ export class SqliteConversationRepository implements ConversationRepository {
     this.database
       .prepare(
         `INSERT INTO conversation_settings
-           (user_id, provider_code, model, revision, updated_at_ms)
-         VALUES (?, ?, ?, ?, ?)
+           (user_id, provider_code, model, preferred_provider_code, revision, updated_at_ms)
+         VALUES (?, 'cursorcli', NULL, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET
-           provider_code = excluded.provider_code,
-           model = excluded.model,
+           preferred_provider_code = excluded.preferred_provider_code,
            revision = excluded.revision,
            updated_at_ms = excluded.updated_at_ms`
       )
-      .run(record.userId, record.provider, record.model, record.revision, record.updatedAtMs)
+      .run(record.userId, record.provider, record.revision, record.updatedAtMs)
   }
 
   listWorkspaces(userId: string): ConversationWorkspaceRecord[] {
@@ -229,18 +226,24 @@ export class SqliteConversationRepository implements ConversationRepository {
     )
   }
 
-  listThreads(userId: string, workspaceId: string): ConversationThreadRecord[] {
+  listThreads(
+    userId: string,
+    workspaceId: string,
+    kind?: ConversationThreadRecord['kind']
+  ): ConversationThreadRecord[] {
+    const kindClause = kind ? ' AND conversation_threads.thread_kind = ?' : ''
+    const values = kind ? [userId, workspaceId, kind] : [userId, workspaceId]
     return (
       this.database
         .prepare(
           `${THREAD_SELECT}
            JOIN conversation_workspaces w ON w.id = conversation_threads.workspace_id
-           WHERE w.user_id = ? AND conversation_threads.workspace_id = ?
+           WHERE w.user_id = ? AND conversation_threads.workspace_id = ?${kindClause}
            ORDER BY conversation_threads.last_message_at_ms DESC,
                     conversation_threads.created_at_ms DESC,
                     conversation_threads.id`
         )
-        .all(userId, workspaceId) as ThreadRow[]
+        .all(...values) as ThreadRow[]
     ).map((row) => thread(row) as ConversationThreadRecord)
   }
 
@@ -260,16 +263,16 @@ export class SqliteConversationRepository implements ConversationRepository {
     this.database
       .prepare(
         `INSERT INTO conversation_threads
-           (id, workspace_id, title, provider_code, model, runtime_session_id,
-            created_at_ms, updated_at_ms, last_message_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, workspace_id, thread_kind, title, provider_code, model, selected_provider_code,
+            runtime_session_id, created_at_ms, updated_at_ms, last_message_at_ms)
+         VALUES (?, ?, ?, ?, 'cursorcli', NULL, ?, ?, ?, ?, ?)`
       )
       .run(
         record.id,
         record.workspaceId,
+        record.kind ?? 'chat',
         record.title,
         record.provider,
-        record.model,
         record.runtimeSessionId,
         record.createdAtMs,
         record.updatedAtMs,
@@ -288,6 +291,25 @@ export class SqliteConversationRepository implements ConversationRepository {
            )`
         )
         .run(title, updatedAtMs, threadId, userId).changes === 1
+    )
+  }
+
+  updateThreadProvider(
+    userId: string,
+    threadId: string,
+    provider: SupportedCoreCode,
+    updatedAtMs: number
+  ): boolean {
+    return (
+      this.database
+        .prepare(
+          `UPDATE conversation_threads
+           SET selected_provider_code = ?, runtime_session_id = NULL, updated_at_ms = ?
+           WHERE id = ? AND workspace_id IN (
+             SELECT id FROM conversation_workspaces WHERE user_id = ?
+           )`
+        )
+        .run(provider, updatedAtMs, threadId, userId).changes === 1
     )
   }
 
@@ -357,7 +379,7 @@ export class SqliteConversationRepository implements ConversationRepository {
     return turn(
       this.database
         .prepare(
-          `SELECT id, thread_id, user_message_id, state, provider_code, model,
+          `SELECT id, thread_id, user_message_id, state, selected_provider_code,
                   error_code, error_message, started_at_ms, finished_at_ms
            FROM conversation_turns WHERE thread_id = ? AND state = 'running'`
         )
@@ -369,9 +391,9 @@ export class SqliteConversationRepository implements ConversationRepository {
     this.database
       .prepare(
         `INSERT INTO conversation_turns
-           (id, thread_id, user_message_id, state, provider_code, model,
+           (id, thread_id, user_message_id, state, provider_code, model, selected_provider_code,
             error_code, error_message, started_at_ms, finished_at_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, 'cursorcli', NULL, ?, ?, ?, ?, ?)`
       )
       .run(
         record.id,
@@ -379,7 +401,6 @@ export class SqliteConversationRepository implements ConversationRepository {
         record.userMessageId,
         record.state,
         record.provider,
-        record.model,
         record.errorCode,
         record.errorMessage,
         record.startedAtMs,

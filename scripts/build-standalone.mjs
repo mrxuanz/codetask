@@ -3,13 +3,14 @@
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveInvocation } from './run-and-record.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-function run(command, args, env = process.env, options = {}) {
+function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
-    env,
+    env: process.env,
     stdio: 'inherit',
     windowsHide: true,
     ...options
@@ -21,13 +22,9 @@ function run(command, args, env = process.env, options = {}) {
 const electronVite = join(root, 'node_modules', 'electron-vite', 'bin', 'electron-vite.js')
 
 run(process.execPath, [join(root, 'scripts', 'ensure-node-native.mjs')])
-// Windows: Node cannot spawn .cmd shims without a shell (EINVAL).
-if (process.platform === 'win32') {
-  run('npm run typecheck', [], process.env, { shell: true })
-} else {
-  run('npm', ['run', 'typecheck'])
-}
-run(process.execPath, [electronVite, 'build'], {
-  ...process.env,
-  CODETASK_BUILD_TARGET: 'standalone'
-})
+const npmTypecheck = resolveInvocation(process.platform, process.execPath, 'npm', [
+  'run',
+  'typecheck'
+])
+run(npmTypecheck.command, npmTypecheck.args)
+run(process.execPath, [electronVite, 'build', '--mode', 'standalone'])

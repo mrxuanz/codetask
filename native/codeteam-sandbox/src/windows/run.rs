@@ -1,5 +1,5 @@
 ﻿use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use codeteam_sandbox_adapter::ParsedTaskPolicy;
 
@@ -14,6 +14,7 @@ pub fn spawn(
     command: &str,
     args: &[String],
     env: &HashMap<String, String>,
+    artifact_path: &Path,
     allowed_read_roots: &[PathBuf],
     allowed_write_roots: &[PathBuf],
     allow_system_runtime: bool,
@@ -25,6 +26,7 @@ pub fn spawn(
         command,
         args,
         env,
+        artifact_path,
         allowed_read_roots,
         allowed_write_roots,
         allow_system_runtime,

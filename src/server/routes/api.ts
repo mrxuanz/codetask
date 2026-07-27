@@ -30,6 +30,17 @@ export function createApiRoutes(ctx: AppContext): Hono {
   api.route('/', createDraftRoutes(ctx))
   api.route('/', createJobRoutes(ctx))
   api.get('/sandbox/health', (c) => c.json(ok(getSandboxHealth(ctx.dataDir))))
+  api.get('/runtime-info', (c) =>
+    c.json(
+      ok({
+        mode: ctx.security.mode,
+        dataDir: ctx.dataDir,
+        storageSource: ctx.storage?.source ?? 'runtime',
+        storageManaged: ctx.storage?.managed ?? false,
+        configurationAuthority: 'typed-runtime'
+      })
+    )
+  )
 
   api.onError((error, c) => {
     console.error('[api] unhandled error:', error)

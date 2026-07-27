@@ -6,6 +6,11 @@ export interface CliOptions {
   port: number
   smokeTest: boolean
   dataDir?: string
+  bootstrapRoot?: string
+  authSecretFile?: string
+  staticDir?: string
+  appRoot?: string
+  rendererDevUrl?: string
 }
 
 const DEFAULT_DESKTOP_PORT = 3000
@@ -29,27 +34,41 @@ function readPort(argv: string[], fallback: number): number {
   return port
 }
 
+function readNonEmptyOption(argv: string[], flag: string, label: string): string | undefined {
+  const raw = readArgValue(argv, flag)
+  const value = raw?.trim()
+  if (argv.includes(flag) && (!value || value.startsWith('--'))) {
+    throw new Error(`Invalid ${label}: expected a value after ${flag}`)
+  }
+  return value
+}
+
 export function parseCliArgs(argv: string[] = process.argv): CliOptions {
   const smokeTest = argv.includes('--smoke-test')
   const serve = argv.includes('--serve') || smokeTest
-  const rawDataDir = readArgValue(argv, '--data-dir')
-  const dataDir = rawDataDir?.trim()
-  if (argv.includes('--data-dir') && !dataDir) {
-    throw new Error('Invalid data directory: expected a path after --data-dir')
+  const dataDir = readNonEmptyOption(argv, '--data-dir', 'data directory')
+  const bootstrapRoot = readNonEmptyOption(argv, '--bootstrap-root', 'bootstrap root')
+  const authSecretFile = readNonEmptyOption(argv, '--auth-secret-file', 'auth secret file')
+  const staticDir = readNonEmptyOption(argv, '--static-dir', 'static directory')
+  const appRoot = readNonEmptyOption(argv, '--app-root', 'application root')
+  const rendererDevUrl = readNonEmptyOption(argv, '--renderer-dev-url', 'renderer development URL')
+  const explicitOptions = {
+    ...(dataDir ? { dataDir } : {}),
+    ...(bootstrapRoot ? { bootstrapRoot } : {}),
+    ...(authSecretFile ? { authSecretFile } : {}),
+    ...(staticDir ? { staticDir } : {}),
+    ...(appRoot ? { appRoot } : {}),
+    ...(rendererDevUrl ? { rendererDevUrl } : {})
   }
-  if (dataDir?.startsWith('--')) {
-    throw new Error('Invalid data directory: expected a path after --data-dir')
-  }
-  const dataDirOption = dataDir ? { dataDir } : {}
 
   if (serve) {
     const host = readArgValue(argv, '--host') ?? (argv.includes('--host') ? '0.0.0.0' : '127.0.0.1')
     const port = readPort(argv, DEFAULT_SERVER_PORT)
-    return { mode: 'server', host, port, smokeTest, ...dataDirOption }
+    return { mode: 'server', host, port, smokeTest, ...explicitOptions }
   }
 
   const port = readPort(argv, DEFAULT_DESKTOP_PORT)
-  return { mode: 'desktop', host: '127.0.0.1', port, smokeTest, ...dataDirOption }
+  return { mode: 'desktop', host: '127.0.0.1', port, smokeTest, ...explicitOptions }
 }
 
 /** Parse the dedicated Node entry point, which is always a server even without `--serve`. */

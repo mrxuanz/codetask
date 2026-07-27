@@ -1,6 +1,5 @@
 import { join } from 'node:path'
 import {
-  applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv,
   ensureCursorAcpRuntimeDirs,
@@ -143,8 +142,6 @@ export function buildCursorTurnPlan(
       ensureCursorAcpRuntimeDirs(input.runtimeRoot, input.cwd)
     }
   }
-  applyTaskIdempotencyEnv(env, input.idempotencyKey)
-
   const mcpServers = buildCursorAcpMcpServers(input.mcpUrl, options.userMcpServers ?? {})
   const pathOverride = resolveCursorPathOverride(input)
   const cliArgs = buildCursorAcpCliArgs({

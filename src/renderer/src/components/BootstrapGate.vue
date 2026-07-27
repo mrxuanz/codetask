@@ -31,7 +31,6 @@ const redirectTarget = computed(() => {
   if (!initialized && path !== '/setup') return '/setup'
   if (initialized && !authenticated && path !== '/login') return '/login'
   if (initialized && authenticated && (path === '/login' || path === '/setup')) return '/home'
-  if (path === '/home' && !authenticated) return '/login'
 
   return null
 })

@@ -386,6 +386,12 @@ describe('durable Job state machine', () => {
     const f = fixture()
     let module: ReturnType<typeof createJobModule> | null = null
     try {
+      const defaults = f.jobs.getSettings(USER_ID)
+      f.jobs.updateSettings(
+        USER_ID,
+        { ...defaults, maxConcurrentJobs: 2 },
+        defaults.revision
+      )
       const first = await f.createJob(undefined, 1)
       const second = await f.createJob(f.createWorkspace(), 1)
       const calls: Array<{ jobId: string; sequence: number }> = []

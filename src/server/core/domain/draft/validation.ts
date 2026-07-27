@@ -66,15 +66,9 @@ export function validateDraftContent(input: Partial<DraftContent>): DraftContent
   }
 }
 
-export function validateDraftModel(value: unknown): string | null {
-  if (value === undefined || value === null) return null
-  const model = text(value, 'model', 120, false)
-  return model || null
-}
-
 export function validateEditablePlanningText(
   value: unknown,
-  field: 'plannerPrompt' | 'skillsManual'
+  field: 'discussionPrompt' | 'discussionSkillsManual' | 'plannerPrompt' | 'skillsManual'
 ): string | null {
   if (value === undefined || value === null) return null
   const result = text(value, field, 100_000, false)

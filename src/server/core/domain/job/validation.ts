@@ -19,11 +19,6 @@ function text(value: unknown, code: string, max = MAX_TEXT): string {
   return result
 }
 
-function optionalText(value: unknown, code: string): string | null {
-  if (value === undefined || value === null || value === '') return null
-  return text(value, code, 200)
-}
-
 function stringList(value: unknown, code: string, max = 100): string[] {
   if (!Array.isArray(value) || value.length > max) throw new JobError(code)
   return value.map((entry) => text(entry, code, 2_000))
@@ -128,7 +123,6 @@ export function validateJobSettingsInput(value: unknown, defaults: JobSettings):
     const item = object(input[key], 'job.settings_invalid')
     const base = {
       provider: provider(item.provider, 'job.settings_invalid'),
-      model: optionalText(item.model, 'job.settings_invalid'),
       prompt: editable(item.prompt, fallback.prompt, 'job.settings_invalid'),
       skillsManual: editable(item.skillsManual, fallback.skillsManual, 'job.settings_invalid')
     }

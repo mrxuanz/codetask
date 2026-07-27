@@ -38,12 +38,10 @@ export interface RunSandboxedTurnInput {
   runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null | undefined
-  model?: string | undefined
   systemPrompt?: string | undefined
   mcpUrl?: string | undefined
   mcpToolNames?: readonly string[] | undefined
   userMcpServers?: Record<string, unknown> | undefined
-  mcpToken?: string | undefined
   signal?: AbortSignal | undefined
   readRoots?: string[] | undefined
   jobId?: string | undefined
@@ -195,7 +193,6 @@ export async function* streamSandboxedConversationTurnLocal(
     runtimeRoot: input.runtimeRoot,
     prompt: input.prompt,
     runtimeSessionId: input.runtimeSessionId,
-    model: input.model,
     systemPrompt: input.systemPrompt,
     mcpUrl: input.mcpUrl,
     mcpToolNames: input.mcpToolNames,
@@ -279,7 +276,7 @@ export async function* streamSandboxedConversationTurnLocal(
   const env = buildSandboxEnv({
     runtimeRoot: input.runtimeRoot,
     providerEnv: { ...contribution.environment },
-    mcpToken: input.mcpToken
+    authMode: authPrepared.mode
   })
   const readRoots = collectPolicyReadRoots(policy)
   const writeRoots = collectPolicyWriteRoots(policy)

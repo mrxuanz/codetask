@@ -79,10 +79,7 @@ export function runPackageSmoke(argv = process.argv) {
       encoding: 'utf8',
       timeout: 120_000,
       windowsHide: true,
-      env: {
-        ...process.env,
-        CODETASK_SANDBOX_READY_MAX_ATTEMPTS: '1'
-      }
+      env: { ...process.env }
     })
     if (result.error) throw result.error
     const marker = result.stdout.split(/\r?\n/u).find((line) => line.startsWith(READY_MARKER))

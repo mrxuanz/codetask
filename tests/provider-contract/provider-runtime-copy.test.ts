@@ -1,13 +1,23 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import {
   materializeCodexAuth,
+  materializeCursorAuth,
   materializeOpencodeAuth,
-  opencodeRuntimeLayout
+  opencodeRuntimeLayout,
+  projectOpencodeHostConfig
 } from '../../src/server/sandbox/provider-auth/materialize'
 import {
   credentialSnapshotManifestPath,
@@ -15,17 +25,21 @@ import {
 } from '../../src/server/sandbox/provider-auth/snapshot-manifest'
 import {
   resolveClaudeHostConfigDir,
+  resolveCursorHostConfigDir,
+  resolveCursorHostCursorHome,
   resolveHostProfilePaths,
-  runtimeCodexHome
+  runtimeCodexHome,
+  runtimeCursorConfigDir,
+  runtimeCursorHome
 } from '../../src/server/sandbox/provider-auth/paths'
 
-const RUNTIME_COPY_PROVIDERS = ['codex', 'claude-code', 'opencode'] as const
+const RUNTIME_ISOLATED_PROVIDERS = ['codex', 'opencode'] as const
 
-test('prepareProviderAuth defaults to runtime-copy with no host write roots', () => {
+test('Codex and OpenCode use isolated runtime homes with no host write roots', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-provider-bridge-'))
   const workspaceRoot = join(runtimeRoot, 'workspace')
   try {
-    for (const provider of RUNTIME_COPY_PROVIDERS) {
+    for (const provider of RUNTIME_ISOLATED_PROVIDERS) {
       const prepared = prepareProviderAuthForTest(provider, runtimeRoot, { workspaceRoot })
       assert.equal(prepared.diagnostics.mode, 'runtime-copy', provider)
       assert.equal(prepared.mode, 'runtime-copy', provider)
@@ -54,7 +68,7 @@ test('prepareProviderAuth defaults to runtime-copy with no host write roots', ()
   }
 })
 
-test('cursor sandbox uses host-identity and never writes outside allowed roots', () => {
+test('cursor sandbox keeps host Keychain identity while isolating all Cursor state writes', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-bridge-'))
   const workspaceRoot = join(runtimeRoot, 'workspace')
   mkdirSync(workspaceRoot)
@@ -68,13 +82,71 @@ test('cursor sandbox uses host-identity and never writes outside allowed roots',
     assert.equal('CODETASK_PROVIDER_AUTH_MODE' in prepared.envPatch, false)
     assert.equal('CODETASK_RUNTIME_ROOT' in prepared.envPatch, false)
     assert.equal(prepared.envPatch.HOME, host.home)
-    assert.equal(prepared.envPatch.CURSOR_DATA_DIR, join(runtimeRoot, '.cursor'))
+    assert.equal(prepared.envPatch.CURSOR_CONFIG_DIR, runtimeCursorConfigDir(runtimeRoot))
+    assert.equal(prepared.envPatch.CURSOR_DATA_DIR, runtimeCursorHome(runtimeRoot))
+    assert.equal(prepared.envPatch.XDG_CONFIG_HOME, join(runtimeRoot, 'config'))
+    assert.equal(prepared.envPatch.XDG_CACHE_HOME, join(runtimeRoot, 'cache'))
+    assert.equal(prepared.envPatch.XDG_DATA_HOME, join(runtimeRoot, 'data'))
+    assert.equal(prepared.envPatch.XDG_STATE_HOME, join(runtimeRoot, 'state'))
     assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
     assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, prepared.writeRoots)
-    assert.ok((prepared.writeRoots ?? []).includes(join(runtimeRoot, '.cursor')))
-    assert.ok((prepared.writeRoots ?? []).includes(join(host.home, '.cursor')))
-    assert.ok((prepared.readRoots ?? []).includes(host.home))
+    assert.equal((prepared.writeRoots ?? []).includes(runtimeCursorHome(runtimeRoot)), false)
+    for (const root of prepared.writeRoots ?? []) {
+      assert.equal(root.endsWith(`${join('cursor-agent', 'versions')}`), false)
+      assert.equal(root.endsWith('.running'), true)
+    }
+    assert.equal((prepared.readRoots ?? []).includes(host.home), false)
+    assert.equal(
+      (prepared.readRoots ?? []).includes(resolveCursorHostCursorHome(host)),
+      false
+    )
+    assert.equal(
+      (prepared.readRoots ?? []).includes(resolveCursorHostConfigDir(host)),
+      false
+    )
+    prepared.cleanupPlan()
   } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeCursorAuth references host identity files without copying them', () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-host-'))
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-runtime-'))
+  const workspaceRoot = join(runtimeRoot, 'workspace')
+  const profile = resolveHostProfilePaths({
+    HOME: hostRoot,
+    USERPROFILE: hostRoot,
+    APPDATA: join(hostRoot, 'AppData', 'Roaming'),
+    LOCALAPPDATA: join(hostRoot, 'AppData', 'Local')
+  })
+  const hostCursorHome = resolveCursorHostCursorHome(profile)
+  const hostConfigDir = resolveCursorHostConfigDir(profile)
+  const hostCliConfig = join(hostConfigDir, 'cli-config.json')
+
+  try {
+    mkdirSync(workspaceRoot)
+    mkdirSync(hostCursorHome, { recursive: true })
+    mkdirSync(hostConfigDir, { recursive: true })
+    writeFileSync(join(hostCursorHome, 'agent-cli-state.json'), '{"state":"host"}', 'utf8')
+    writeFileSync(hostCliConfig, '{"auth":"keychain-reference"}', 'utf8')
+
+    const result = materializeCursorAuth(runtimeRoot, workspaceRoot, profile)
+    const runtimeCliConfig = join(runtimeCursorConfigDir(runtimeRoot), 'cli-config.json')
+
+    assert.equal(result.authMaterialized, true)
+    assert.ok(result.hostReferencePaths.includes(hostCliConfig))
+    assert.equal(readFileSync(runtimeCliConfig, 'utf8'), '{"auth":"keychain-reference"}')
+    assert.equal(
+      lstatSync(runtimeCliConfig).isSymbolicLink(),
+      process.platform !== 'win32'
+    )
+
+    result.cleanup()
+    assert.equal(existsSync(runtimeCliConfig), false)
+    assert.equal(readFileSync(hostCliConfig, 'utf8'), '{"auth":"keychain-reference"}')
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
   }
 })
@@ -89,7 +161,7 @@ test('codex runtime env sets CODEX_HOME under runtimeRoot', () => {
   }
 })
 
-test('materializeCodexAuth copies filtered config.toml without MCP sections', () => {
+test('materializeCodexAuth references host auth and generates a filtered config', () => {
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-host-'))
   const hostCodexHome = join(hostRoot, '.codex')
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-runtime-'))
@@ -97,6 +169,7 @@ test('materializeCodexAuth copies filtered config.toml without MCP sections', ()
 
   try {
     mkdirSync(hostCodexHome)
+    writeFileSync(join(hostCodexHome, 'auth.json'), '{"token":"host"}', 'utf8')
     writeFileSync(
       join(hostCodexHome, 'config.toml'),
       `model = "gpt-test"
@@ -111,10 +184,17 @@ enabled = true
     )
 
     const result = materializeCodexAuth(runtimeRoot, hostProfile)
-    assert.equal(result.configCopied, true)
+    assert.equal(result.authMaterialized, true)
+    assert.equal(result.configGenerated, true)
 
     const runtimeConfig = join(runtimeCodexHome(runtimeRoot), 'config.toml')
+    const runtimeAuth = join(runtimeCodexHome(runtimeRoot), 'auth.json')
     assert.ok(existsSync(runtimeConfig))
+    assert.ok(existsSync(runtimeAuth))
+    assert.equal(
+      lstatSync(runtimeAuth).isSymbolicLink(),
+      process.platform !== 'win32'
+    )
     const raw = readFileSync(runtimeConfig, 'utf8')
     assert.match(raw, /model = "gpt-test"/)
     assert.doesNotMatch(raw, /mcp_servers/)
@@ -173,7 +253,7 @@ test('credential snapshots are manifested and startup scrub removes only recorde
     mkdirSync(join(runtimeRoot, '.codex', 'sessions'), { recursive: true })
     writeFileSync(sessionPath, '{"session":true}', 'utf8')
 
-    assert.equal(materialized.authCopied, true)
+    assert.equal(materialized.authMaterialized, true)
     assert.ok(existsSync(credentialSnapshotManifestPath(runtimeRoot)))
 
     const scrubbed = scrubCredentialSnapshotsInTree(runtimeTree)
@@ -188,7 +268,7 @@ test('credential snapshots are manifested and startup scrub removes only recorde
   }
 })
 
-test('prepareClaude rejects environment-token auth and isolates CLAUDE_CONFIG_DIR', () => {
+test('prepareClaude rejects environment-token auth and keeps host settings read-only', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-claude-env-'))
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-claude-host-'))
   const hostClaude = join(hostRoot, '.claude')
@@ -210,29 +290,26 @@ test('prepareClaude rejects environment-token auth and isolates CLAUDE_CONFIG_DI
     const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot, {
       hostEnvironment: { HOME: hostRoot }
     })
-    assert.equal(prepared.envPatch.CLAUDE_CONFIG_DIR, join(runtimeRoot, '.claude'))
-    assert.equal(prepared.envPatch.HOME, runtimeRoot)
+    assert.equal(prepared.mode, 'host-identity')
+    assert.equal(prepared.envPatch.CLAUDE_CONFIG_DIR, undefined)
+    assert.equal(prepared.envPatch.HOME, hostRoot)
     assert.equal(prepared.envPatch.ANTHROPIC_API_KEY, undefined)
-    assert.equal(prepared.diagnostics.authMaterialPresent, false)
+    assert.equal(prepared.diagnostics.authMaterialPresent, true)
     assert.match(prepared.diagnostics.warnings.join('\n'), /environment-token.*disabled/i)
     assert.notEqual(prepared.envPatch.PATH, '/should-not-inject')
 
     const hostConfigDir = resolveClaudeHostConfigDir(
       resolveHostProfilePaths({ HOME: hostRoot })
     ).toLowerCase()
-    for (const readRoot of prepared.readRoots ?? []) {
-      assert.ok(
-        !readRoot.toLowerCase().startsWith(hostConfigDir),
-        `must not read host claude config: ${readRoot}`
-      )
-    }
+    assert.ok((prepared.readRoots ?? []).some((root) => root.toLowerCase() === hostConfigDir))
+    assert.deepEqual(prepared.writeRoots ?? [], [])
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
   }
 })
 
-test('prepareOpencode aligns XDG env with materializeOpencodeAuth destinations', () => {
+test('prepareOpencode references credentials and drops unsafe host config sections', () => {
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-opencode-host-config-'))
   const hostConfig = join(hostRoot, '.config', 'opencode')
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-opencode-runtime-'))
@@ -241,6 +318,7 @@ test('prepareOpencode aligns XDG env with materializeOpencodeAuth destinations',
   try {
     mkdirSync(hostConfig, { recursive: true })
     writeFileSync(join(hostConfig, 'auth.json'), '{"token":"test"}', 'utf8')
+    writeFileSync(join(hostConfig, 'opencode.json'), '{"mcp":{"host":{"type":"local"}}}', 'utf8')
 
     const layout = opencodeRuntimeLayout(runtimeRoot)
     const materialized = materializeOpencodeAuth(runtimeRoot, hostProfile)
@@ -253,9 +331,51 @@ test('prepareOpencode aligns XDG env with materializeOpencodeAuth destinations',
     assert.equal(prepared.envPatch.XDG_CONFIG_HOME, layout.configHome)
     assert.equal(prepared.envPatch.XDG_DATA_HOME, layout.dataHome)
     assert.equal(prepared.envPatch.XDG_STATE_HOME, layout.stateHome)
-    assert.ok(existsSync(join(layout.configDir, 'auth.json')))
+    const runtimeAuth = join(layout.configDir, 'auth.json')
+    assert.ok(existsSync(runtimeAuth))
+    assert.equal(lstatSync(runtimeAuth).isSymbolicLink(), process.platform !== 'win32')
+    const runtimeConfig = join(layout.configDir, 'opencode.json')
+    assert.ok(existsSync(runtimeConfig))
+    assert.equal(lstatSync(runtimeConfig).isSymbolicLink(), false)
+    assert.deepEqual(JSON.parse(readFileSync(runtimeConfig, 'utf8')), {})
+    assert.ok(prepared.readRoots.includes(join(hostConfig, 'auth.json')))
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
   }
+})
+
+test('OpenCode provider-only host config is safe to reference without copying', () => {
+  const raw = JSON.stringify({
+    $schema: 'https://opencode.ai/config.json',
+    provider: {
+      example: {
+        npm: '@ai-sdk/openai-compatible',
+        options: { apiKey: 'host-only', baseURL: 'https://example.invalid/v1' },
+        models: { current: { name: 'Current' } }
+      }
+    }
+  })
+  const projected = projectOpencodeHostConfig(raw)
+  assert.ok(projected)
+  assert.equal(projected.safeToReference, true)
+  assert.deepEqual(JSON.parse(projected.projected), JSON.parse(raw))
+})
+
+test('OpenCode mixed host config projects only provider/model authority', () => {
+  const projected = projectOpencodeHostConfig(
+    JSON.stringify({
+      provider: { example: { options: { apiKey: 'host-only' } } },
+      model: 'example/current',
+      mcp: { unsafe: { type: 'local', command: ['sh', '-c', 'exit 1'] } },
+      plugin: ['unsafe-plugin'],
+      instructions: ['host-prompt.md']
+    })
+  )
+  assert.ok(projected)
+  assert.equal(projected.safeToReference, false)
+  assert.deepEqual(JSON.parse(projected.projected), {
+    provider: { example: { options: { apiKey: 'host-only' } } },
+    model: 'example/current'
+  })
 })

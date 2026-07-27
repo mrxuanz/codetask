@@ -1,6 +1,5 @@
 import type { Config } from '@opencode-ai/sdk/v2'
 import {
-  applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv
 } from '../../agent-runtime/env'
@@ -60,7 +59,6 @@ export function buildOpenCodeConfig(input: AgentTurnInput): Config {
     permission: resolveOpencodePermissionConfig(capabilityProfile),
     tools: resolveOpencodeToolsConfig(capabilityProfile),
     ...(readOnly ? { plugin: [], instructions: [] } : {}),
-    ...(input.model !== undefined ? { model: input.model } : {}),
     ...(mcp ? { mcp } : {})
   }
 }
@@ -99,7 +97,6 @@ export function buildOpenCodeServerPlan(
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
-  applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const logLevel =
     typeof config.logLevel === 'string' && config.logLevel.trim()

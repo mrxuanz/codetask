@@ -343,7 +343,6 @@ test('OpenCode server plan parity snapshots stay stable for question deny / MCP 
       {
         ...baseInput({
           runtimeRoot,
-          model: 'opencode-test',
           mcpUrl: 'http://127.0.0.1:9/mcp',
           capabilityProfile: 'chat-write'
         })
@@ -355,7 +354,6 @@ test('OpenCode server plan parity snapshots stay stable for question deny / MCP 
         ...baseInput({
           role: 'planner',
           runtimeRoot,
-          model: 'opencode-test',
           mcpUrl: 'http://127.0.0.1:9/mcp',
           capabilityProfile: 'planner-read'
         })
@@ -367,7 +365,6 @@ test('OpenCode server plan parity snapshots stay stable for question deny / MCP 
         ...baseInput({
           role: 'task-worker',
           runtimeRoot,
-          model: 'opencode-test',
           mcpUrl: 'http://127.0.0.1:9/mcp'
         })
       },
@@ -377,7 +374,7 @@ test('OpenCode server plan parity snapshots stay stable for question deny / MCP 
     assert.equal(conversation.pure, false)
     assert.equal(conversation.config.permission?.question, 'deny')
     assert.equal(conversation.config.tools?.question, false)
-    assert.equal(conversation.config.model, 'opencode-test')
+    assert.equal('model' in conversation.config, false)
     assert.ok(conversation.config.mcp)
 
     assert.equal(planner.pure, true)

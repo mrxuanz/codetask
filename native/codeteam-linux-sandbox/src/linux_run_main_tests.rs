@@ -1,4 +1,4 @@
-﻿#[cfg(test)]
+#[cfg(test)]
 use super::*;
 #[cfg(test)]
 use crate::linux_run_main::install_bwrap_signal_forwarders;
@@ -116,10 +116,9 @@ fn rewrites_inner_command_path_when_bwrap_lacks_argv0() {
     );
 
     assert!(!argv.iter().any(|arg| arg == "--argv0"));
-    assert!(
-        argv.windows(2)
-            .any(|window| { window == ["--", "/tmp/codex-arg0-session/codeteam-linux-sandbox"] })
-    );
+    assert!(argv
+        .windows(2)
+        .any(|window| { window == ["--", "/tmp/codex-arg0-session/codeteam-linux-sandbox"] }));
 }
 
 #[test]
@@ -491,10 +490,9 @@ fn inner_command_includes_permission_profile_flag() {
     });
 
     assert!(args.iter().any(|arg| arg == "--permission-profile"));
-    assert!(
-        args.windows(2)
-            .any(|window| { window == ["--command-cwd", "/tmp/link"] })
-    );
+    assert!(args
+        .windows(2)
+        .any(|window| { window == ["--command-cwd", "/tmp/link"] }));
 }
 
 #[test]

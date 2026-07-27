@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process'
 import { dirname, delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveInvocation } from './run-and-record.mjs'
 
 process.env.ELECTRON_MIRROR ??= 'https://npmmirror.com/mirrors/electron/'
 process.env.ELECTRON_BUILDER_BINARIES_MIRROR ??=
@@ -17,9 +18,9 @@ if (!command) {
   process.exit(0)
 }
 
-const result = spawnSync(command, args, {
+const invocation = resolveInvocation(process.platform, process.execPath, command, args)
+const result = spawnSync(invocation.command, invocation.args, {
   stdio: 'inherit',
-  shell: true,
   env: process.env
 })
 process.exit(result.status ?? 1)

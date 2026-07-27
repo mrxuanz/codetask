@@ -38,12 +38,11 @@ describe('conversation SQLite application flow', () => {
     try {
       assert.deepEqual(service.getSettings('user-1'), {
         userId: 'user-1',
-        provider: 'cursorcli',
-        model: null,
+        provider: 'codex',
         revision: 0,
         updatedAtMs: 0
       })
-      assert.equal(service.updateSettings('user-1', { model: 'cursor-model' }).revision, 1)
+      assert.equal(service.updateSettings('user-1', { provider: 'claude-code' }).revision, 1)
 
       const workspace = service.createWorkspace('user-1', {
         rootPath: '/workspace',
@@ -53,7 +52,9 @@ describe('conversation SQLite application flow', () => {
       const thread = service.createThread('user-1', { workspaceId: workspace.id })
       const started = service.beginTurn('user-1', thread.id, 'Build a small app')
 
-      assert.equal(started.turn.model, 'cursor-model')
+      assert.equal(thread.provider, 'claude-code')
+      assert.equal(started.turn.provider, 'claude-code')
+      assert.deepEqual(started.history, [])
       assert.throws(
         () => service.beginTurn('user-1', thread.id, 'Concurrent turn'),
         (error: unknown) =>
@@ -81,6 +82,16 @@ describe('conversation SQLite application flow', () => {
       assert.equal(threads[0]?.title, 'Build a small app')
       assert.equal(threads[0]?.runtimeSessionId, 'cursor-session-1')
       assert.equal(threads[0]?.lastMessageAtMs, assistant.createdAtMs)
+
+      const switched = service.switchThreadProvider('user-1', thread.id, 'opencode')
+      assert.equal(switched.provider, 'opencode')
+      assert.equal(switched.runtimeSessionId, null)
+      const resumed = service.beginTurn('user-1', thread.id, 'Continue with OpenCode')
+      assert.equal(resumed.turn.provider, 'opencode')
+      assert.deepEqual(
+        resumed.history.map((message) => message.content),
+        ['Build a small app', 'Done']
+      )
     } finally {
       database.close()
     }

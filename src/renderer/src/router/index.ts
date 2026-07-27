@@ -7,6 +7,7 @@ import DraftsPage from '@renderer/pages/DraftsPage.vue'
 import JobsPage from '@renderer/pages/JobsPage.vue'
 import LoginPage from '@renderer/pages/LoginPage.vue'
 import SetupPage from '@renderer/pages/SetupPage.vue'
+import HomeLayout from '@renderer/layouts/HomeLayout.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -18,10 +19,19 @@ const router = createRouter({
       children: [
         { path: 'setup', component: SetupPage },
         { path: 'login', component: LoginPage },
-        { path: 'home', component: ConversationPage },
-        { path: 'drafts', component: DraftsPage },
-        { path: 'jobs', component: JobsPage },
-        { path: 'settings', component: SettingsPage }
+        {
+          path: 'home',
+          component: HomeLayout,
+          children: [
+            { path: '', component: ConversationPage },
+            { path: 'create', component: DraftsPage },
+            { path: 'tasks/:jobId?', component: JobsPage },
+            { path: 'settings', component: SettingsPage }
+          ]
+        },
+        { path: 'drafts', redirect: '/home/create' },
+        { path: 'jobs', redirect: '/home/tasks' },
+        { path: 'settings', redirect: '/home/settings' }
       ]
     }
   ]

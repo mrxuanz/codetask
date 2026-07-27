@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { AgentTurnChunk } from '../../src/server/agent-runtime/types'
-import { readSandboxChunks, TURN_DONE_MARKER } from '../../src/server/sandbox/stdout-reader'
+import {
+  readSandboxChunks,
+  sandboxErrorFromErrorChunk,
+  TURN_DONE_MARKER
+} from '../../src/server/sandbox/stdout-reader'
 
 async function* lines(values: string[]): AsyncGenerator<string> {
   for (const value of values) yield value
@@ -34,4 +38,19 @@ test('persistent Cursor reader consumes turn marker before yielding completed', 
     ['delta', 'completed']
   )
   assert.deepEqual(chunks.at(-1), completed)
+})
+
+test('sandbox error keeps the provider detail across the worker boundary', () => {
+  const error = sandboxErrorFromErrorChunk({
+    type: 'error',
+    message: 'Internal error',
+    error: {
+      code: 'provider.cursor.acp_failed',
+      message: 'Internal error',
+      detail: 'Cursor ACP closed during authenticate'
+    }
+  })
+
+  assert.equal(error.code, 'provider.cursor.acp_failed')
+  assert.equal(error.detail, 'Cursor ACP closed during authenticate')
 })

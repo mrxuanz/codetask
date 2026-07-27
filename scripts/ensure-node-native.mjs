@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import { resolveInvocation } from './run-and-record.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -21,10 +22,13 @@ if (probe.status === 0) {
 }
 
 console.log('[native] better-sqlite3 is not built for system Node; rebuilding…')
-const rebuild = spawnSync('npm', ['run', 'rebuild:node'], {
+const rebuildInvocation = resolveInvocation(process.platform, process.execPath, 'npm', [
+  'run',
+  'rebuild:node'
+])
+const rebuild = spawnSync(rebuildInvocation.command, rebuildInvocation.args, {
   cwd: root,
-  stdio: 'inherit',
-  shell: true
+  stdio: 'inherit'
 })
 if ((rebuild.status ?? 1) !== 0) {
   process.exit(rebuild.status ?? 1)

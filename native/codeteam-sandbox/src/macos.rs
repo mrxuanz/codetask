@@ -28,6 +28,7 @@ pub fn spawn(
     command: &str,
     args: &[String],
     env: &HashMap<String, String>,
+    artifact_path: &Path,
 ) -> anyhow::Result<std::process::Child> {
     preflight()?;
 
@@ -44,7 +45,7 @@ pub fn spawn(
         .map(|socket| AbsolutePathBuf::resolve_path_against_base(socket, policy.cwd()))
         .collect();
 
-    let (wrapped_command, wrapped_args) = wrap_unix_command(command, args);
+    let (wrapped_command, wrapped_args) = wrap_unix_command(artifact_path, command, args);
     let seatbelt_args = create_seatbelt_command_args(CreateSeatbeltCommandArgsParams {
         command: {
             let mut cmd = vec![wrapped_command];
@@ -68,6 +69,5 @@ pub fn spawn(
     for (key, value) in env {
         cmd.env(key, value);
     }
-    cmd.env("CODETASK_OUTER_SANDBOX", "1");
     Ok(cmd.spawn()?)
 }

@@ -5,7 +5,6 @@ import {
   resolveInputCapabilityProfile
 } from '../../agent-runtime/capabilities'
 import {
-  applyTaskIdempotencyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv
 } from '../../agent-runtime/env'
@@ -48,16 +47,17 @@ export function resolveClaudeSystemPrompt(systemPrompt?: string): ClaudeSystemPr
 }
 
 /**
- * Outer-sandbox turns isolate via runtime-copy auth and must not load host
- * CLAUDE.md / skills / hooks. Direct conversation turns (including read-only)
- * load user/project/local settings so host `settings.json` env auth and model
- * defaults stay available; MCP and skills are overridden in streamClaudeTurn.
+ * CodeTask never loads Claude filesystem settings. Those settings may inject
+ * environment credentials, model overrides, hooks, skills, or project prompts,
+ * all of which conflict with the typed Provider boundary. Authentication still
+ * uses the CLI's native host login store; CodeTask supplies prompts, skills and
+ * MCP configuration explicitly.
  */
 export function resolveClaudeSettingSources(
-  outerSandbox: boolean,
+  _outerSandbox: boolean,
   _capabilityProfile?: AgentCapabilityProfile
 ): ClaudeSettingSource[] {
-  return outerSandbox ? [] : ['user', 'project', 'local']
+  return []
 }
 
 /** Use the SDK-bundled native CLI unless the user explicitly selected a path. */
@@ -119,7 +119,6 @@ export interface ClaudeTurnOptionsPlan {
   readonly permissionMode: ClaudePermissionMode
   readonly allowDangerouslySkipPermissions: boolean
   readonly sandbox: ClaudeSandboxSettings
-  readonly model?: string | undefined
   readonly resume?: string | undefined
   readonly pathToClaudeCodeExecutable?: string | undefined
   readonly installationId?: string | undefined
@@ -152,7 +151,6 @@ export function buildClaudeTurnOptions(
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
-  applyTaskIdempotencyEnv(env, input.idempotencyKey)
 
   const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
   const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
@@ -187,7 +185,6 @@ export function buildClaudeTurnOptions(
           }
         }
       : { enabled: false },
-    ...(input.model !== undefined ? { model: input.model } : {}),
     ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),
     ...pathOverride
   }

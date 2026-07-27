@@ -57,7 +57,8 @@ export class SandboxError extends Error {
   constructor(
     message: string,
     readonly code: string,
-    readonly requirement?: string
+    readonly requirement?: string,
+    readonly detail?: string | null
   ) {
     super(message)
     this.name = 'SandboxError'

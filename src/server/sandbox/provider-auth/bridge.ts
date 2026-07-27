@@ -1,4 +1,4 @@
-import { mkdirSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
 import {
@@ -6,15 +6,23 @@ import {
   resolveCodexHostAuthPath,
   resolveCodexInstallDirs,
   resolveCursorAgentInstallDirs,
-  resolveCursorHostCursorHome,
+  resolveCursorAgentMarkerWriteDirs,
+  resolveCursorCompileCacheDirs,
+  resolveDarwinKeychainReadRoots,
   resolveHostProfilePaths,
   resolveOpencodeInstallDirs,
   runtimeCodexHome,
+  runtimeCursorConfigDir,
+  runtimeCursorHome,
   snapshotCodexHostAuth,
-  snapshotCursorHostAuth,
   snapshotOpencodeHostAuth
 } from './paths'
-import { materializeCodexAuth, materializeOpencodeAuth, opencodeRuntimeLayout } from './materialize'
+import {
+  materializeCodexAuth,
+  materializeCursorAuth,
+  materializeOpencodeAuth,
+  opencodeRuntimeLayout
+} from './materialize'
 import type { ProviderAuthDiagnostics, ProviderAuthPrepared } from './types'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
 
@@ -166,7 +174,7 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
     ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
     CODEX_HOME: codexHome
   }
-  const authMaterialPresent = materialized.authCopied || hostAuth.present
+  const authMaterialPresent = materialized.authMaterialized || hostAuth.present
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'codex',
@@ -176,16 +184,21 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
     runtimeAuthPath: materialized.runtimeAuthPath,
     warnings: authMaterialPresent
       ? [
-          'Codex auth/config snapshotted to runtime (config.toml filtered for MCP/sandbox); inner danger-full-access + approval_policy=never.'
+          materialized.authMaterialization === 'reference'
+            ? 'Codex uses a read-only reference to the exact host auth file; a sanitized runtime config projection keeps the host CLI model/provider while dropping MCP, plugins, projects, hooks, and trust settings.'
+            : 'Codex uses a narrow runtime auth snapshot on this platform; a sanitized runtime config projection drops MCP, plugins, projects, hooks, and trust settings.'
         ]
       : [
-          materialized.configCopied
-            ? `Codex config snapshotted, but no host login was found: ${hostAuthPath} (run codex login)`
+          materialized.configGenerated
+            ? `Codex runtime model/provider config was generated, but no host login was found: ${hostAuthPath} (run codex login)`
             : `Host Codex login file not found: ${hostAuthPath} (run codex login)`
         ]
   }
 
-  const readRoots = uniqueRoots([...resolveCodexInstallDirs()])
+  const readRoots = uniqueRoots([
+    ...(existsSync(hostAuthPath) ? [hostAuthPath] : []),
+    ...resolveCodexInstallDirs()
+  ])
   return {
     mode: 'runtime-copy',
     runtimeRoot,
@@ -209,49 +222,48 @@ export function prepareCodexAuth(input: ProviderAuthPreparationOptions): Provide
 }
 
 export function prepareCursorAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
-  const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
+  const { runtimeRoot, workspaceRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
-  const hostAuth = snapshotCursorHostAuth(profile)
-  const cursorHome = resolveCursorHostCursorHome(profile)
-  // Keep project metadata under runtime (P5), but use host identity so macOS Keychain /
-  // seatbelt ACP can authenticate. runtime-copy HOME breaks Keychain and still fails ACP
-  // under outer sandbox even with file-store auth.
-
+  const materialized = materializeCursorAuth(runtimeRoot, workspaceRoot, profile)
+  const runtimeEnv = buildRuntimeBaseEnv(runtimeRoot, hostEnvironment)
   const envPatch = {
-    ...buildHostIdentityEnv(runtimeRoot, profile, hostEnvironment),
-    CURSOR_DATA_DIR: join(runtimeRoot, '.cursor')
+    ...runtimeEnv,
+    // macOS Keychain discovery uses the real HOME to resolve the login
+    // keychain. Every Cursor/XDG state directory is nevertheless overridden
+    // below, so Provider writes remain inside runtime.
+    HOME: profile.home,
+    CURSOR_CONFIG_DIR: runtimeCursorConfigDir(runtimeRoot),
+    CURSOR_DATA_DIR: runtimeCursorHome(runtimeRoot)
   }
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'cursorcli',
     mode: 'host-identity',
-    authMaterialPresent: hostAuth.present || hostAuth.sources.length > 0,
-    hostAuthPath: hostAuth.authPath,
-    runtimeAuthPath: hostAuth.authPath,
+    authMaterialPresent: materialized.authMaterialized,
+    hostAuthPath: materialized.hostAuthPath,
+    runtimeAuthPath: materialized.runtimeAuthPath,
     warnings: [
-      hostAuth.present || hostAuth.sources.length > 0
-        ? 'Cursor uses the host profile identity (including macOS Keychain); outer sandbox allows read/write to ~/.cursor and related directories.'
+      materialized.authMaterialized
+        ? 'Cursor keeps the host HOME only for macOS Keychain identity; exact host config files are read-only references, credentials are not copied, and Cursor/XDG state writes are redirected under runtime.'
         : 'Cursor host login was not detected from files (macOS may use Keychain); run `agent login`.',
       'ACP uses --force --sandbox disabled --approve-mcps --trust; temp files written to runtime.'
     ]
   }
 
   const readRoots = uniqueRoots([
-    profile.home,
-    cursorHome,
-    hostAuth.configDir,
-    profile.appData,
-    profile.localAppData,
+    ...materialized.hostReferencePaths,
+    ...resolveCursorCompileCacheDirs(profile),
+    ...resolveDarwinKeychainReadRoots(profile),
     ...resolveCursorAgentInstallDirs()
   ])
-  const writeRoots = uniqueRoots([cursorHome, hostAuth.configDir, join(runtimeRoot, '.cursor')])
+  const writeRoots = uniqueRoots([...resolveCursorAgentMarkerWriteDirs(profile)])
   return {
     mode: 'host-identity',
     runtimeRoot,
     envPatch,
     readRoots,
     writeRoots,
-    cleanupPlan: () => undefined,
+    cleanupPlan: () => materialized.cleanup(),
     diagnostics: {
       ...diagnostics,
       warnings: [
@@ -265,7 +277,14 @@ export function prepareCursorAuth(input: ProviderAuthPreparationOptions): Provid
       hostWriteRoots: writeRoots,
       runtimeEnv: envPatch,
       credentialSnapshots: [],
-      scrubPatterns: []
+      scrubPatterns: [
+        '.cursor/cli-config.json',
+        '.cursor/agent-cli-state.json',
+        'config/cursor/cli-config.json',
+        'config/cursor/acp-config.json',
+        '.cursor/auth.json',
+        'config/cursor/auth.json'
+      ]
     }
   }
 }
@@ -273,42 +292,50 @@ export function prepareCursorAuth(input: ProviderAuthPreparationOptions): Provid
 export function prepareClaudeAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
   const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
   const profile = resolveHostProfilePaths(hostEnvironment)
-  const claudeDir = join(runtimeRoot, '.claude')
-  mkdirSync(claudeDir, { recursive: true })
+  const claudeDir = join(profile.home, '.claude')
+  const claudeJson = join(profile.home, '.claude.json')
 
-  const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
-    CLAUDE_CONFIG_DIR: claudeDir
-  }
+  // Keep Claude's host login namespace exactly as the selected CLI sees it.
+  // Setting CLAUDE_CONFIG_DIR, even to ~/.claude, changes how Claude Code
+  // resolves host credentials on some installations (notably macOS Keychain).
+  const envPatch = buildHostIdentityEnv(runtimeRoot, profile, hostEnvironment)
+  const authMaterialPresent = existsSync(claudeDir) || existsSync(claudeJson)
 
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'claude-code',
-    mode: 'runtime-copy',
-    authMaterialPresent: false,
-    hostAuthPath: join(profile.home, '.claude'),
+    mode: 'host-identity',
+    authMaterialPresent,
+    hostAuthPath: claudeDir,
     runtimeAuthPath: claudeDir,
     warnings: [
-      'Claude environment-token authentication is disabled; this Provider remains unavailable until a file/OS-store host-login bridge is implemented.',
+      'Claude uses the selected host CLI login identity; authentication is verified with `claude auth status` and environment-token credentials remain disabled.',
+      'Host Claude files are read-only; the outer sandbox never grants a task permission to mutate host credentials or settings.',
       'Claude inner bypassPermissions + sandbox disabled; settingSources=[]; outer sandbox is the only boundary.'
     ]
   }
 
-  const readRoots = uniqueRoots([...resolveClaudeInstallDirs()])
+  const readRoots = uniqueRoots([
+    claudeDir,
+    claudeJson,
+    ...resolveDarwinKeychainReadRoots(profile),
+    ...resolveClaudeInstallDirs()
+  ])
+  const writeRoots: string[] = []
   return {
-    mode: 'runtime-copy',
+    mode: 'host-identity',
     runtimeRoot,
     envPatch,
     readRoots,
-    writeRoots: [],
+    writeRoots,
     cleanupPlan: () => undefined,
     diagnostics,
     filesystemProfile: {
       provider: 'claude-code',
       hostReadRoots: readRoots,
-      hostWriteRoots: [],
+      hostWriteRoots: writeRoots,
       runtimeEnv: envPatch,
       credentialSnapshots: [],
-      scrubPatterns: []
+      scrubPatterns: ['.claude', '.claude.json']
     }
   }
 }
@@ -330,17 +357,26 @@ export function prepareOpenCodeAuth(input: ProviderAuthPreparationOptions): Prov
   const diagnostics: ProviderAuthDiagnostics = {
     provider: 'opencode',
     mode: 'runtime-copy',
-    authMaterialPresent: materialized.configCopied || hostAuth.present,
+    authMaterialPresent:
+      materialized.authMaterialized || materialized.configMaterialized || hostAuth.present,
     hostAuthPath: materialized.hostConfigDir,
     runtimeAuthPath: materialized.runtimeConfigDir,
-    warnings: materialized.configCopied
+    warnings: materialized.authMaterialized || materialized.configMaterialized
       ? [
-          'OpenCode config/auth snapshotted to runtime XDG directories; question denied + auto-replied if asked; MCP injected via OPENCODE_CONFIG_CONTENT.'
+          [...materialized.materializations, ...materialized.configMaterializations].every(
+            (method) => method === 'reference'
+          )
+            ? 'OpenCode uses read-only references to exact host credential/provider files. Only provider/model host config is accepted; runtime policy/MCP config is injected by typed server input.'
+            : 'OpenCode uses a sanitized provider/model projection or narrow credential snapshot where safe file references are unavailable; host MCP, plugins, commands, Skills, prompts, and environment config are dropped.'
         ]
       : ['OpenCode host login files were not found; environment-token authentication is disabled.']
   }
 
-  const readRoots = uniqueRoots([...resolveOpencodeInstallDirs()])
+  const readRoots = uniqueRoots([
+    ...materialized.hostCredentialPaths,
+    ...materialized.hostConfigPaths,
+    ...resolveOpencodeInstallDirs()
+  ])
   return {
     mode: 'runtime-copy',
     runtimeRoot,

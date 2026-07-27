@@ -30,14 +30,17 @@ export function runStandaloneSmoke(argv = process.argv) {
     const env = { ...process.env }
     delete env.DISPLAY
     delete env.WAYLAND_DISPLAY
-    env.CODETASK_BOOTSTRAP_ROOT = join(root, 'bootstrap')
-    env.CODETASK_SANDBOX_READY_MAX_ATTEMPTS = '1'
 
+    const appArgs = [
+      '--smoke-test',
+      '--data-dir',
+      join(root, 'data'),
+      '--bootstrap-root',
+      join(root, 'bootstrap')
+    ]
     const result = spawnSync(
       executableMode ? entry : process.execPath,
-      executableMode
-        ? ['--smoke-test', '--data-dir', join(root, 'data')]
-        : [entry, '--smoke-test', '--data-dir', join(root, 'data')],
+      executableMode ? appArgs : [entry, ...appArgs],
       {
         cwd: executableMode ? resolve(entry, '..', '..') : undefined,
         encoding: 'utf8',

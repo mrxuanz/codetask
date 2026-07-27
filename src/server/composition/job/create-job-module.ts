@@ -20,6 +20,14 @@ import {
   streamSandboxedConversationTurn
 } from '../../sandbox/orchestrator'
 import type { HostEnvironmentSnapshot } from '../../host-environment'
+import {
+  captureDeclaredWorkspaceState,
+  recoverEmptyWorkReply
+} from './workspace-change-evidence'
+import {
+  buildVerificationFinalizationPrompt,
+  needsVerificationFinalizationRetry
+} from './verification-finalization'
 
 class SystemClock implements Clock {
   nowMs(): number {
@@ -181,39 +189,66 @@ function createProductionExecutor(input: {
       `attempt-${context.item.attempt}`
     )
     mkdirSync(turnRoot, { recursive: true })
-    let reply = ''
-    const stream = streamSandboxedConversationTurn({
-      role: roleForItem(context.item.kind),
-      coreCode: context.item.providerCode,
-      workspaceRoot: context.workspace.rootPath,
-      runtimeRoot: turnRoot,
-      prompt: userPrompt(context, resolvedAttachments),
-      systemPrompt: systemPrompt(context),
-      model: context.item.model ?? undefined,
-      signal,
-      readRoots: resolvedAttachments.map((attachment) => attachment.absolutePath),
-      jobId: context.job.id,
-      idempotencyKey: `${context.job.id}:${context.item.id}`,
-      workspaceAccess: context.item.kind === 'work' ? 'exclusive-write' : 'live-read',
-      workspaceLease:
-        context.item.kind === 'work'
-          ? {
-              leaseId: context.lease.leaseId,
-              ownerKind: 'job',
-              ownerId: context.job.id
-            }
-          : undefined,
-      capabilityProfile,
-      installation,
-      providerSettings: driver.settings
-    })
-    for await (const chunk of stream) {
-      if (chunk.type === 'delta') reply += chunk.content
-      else if (chunk.type === 'completed') reply = chunk.reply || reply
-      else if (chunk.type === 'error') throw new Error(chunk.message)
+    const declaredFiles = JSON.parse(context.item.filesJson) as string[]
+    const workspaceBefore =
+      context.item.kind === 'work'
+        ? captureDeclaredWorkspaceState(context.workspace.rootPath, declaredFiles)
+        : null
+    const boundPrompt = userPrompt(context, resolvedAttachments)
+    const runTurn = async (
+      runtimeRoot: string,
+      prompt: string,
+      idempotencyKey: string
+    ): Promise<string> => {
+      mkdirSync(runtimeRoot, { recursive: true })
+      let turnReply = ''
+      const stream = streamSandboxedConversationTurn({
+        role: roleForItem(context.item.kind),
+        coreCode: context.item.providerCode,
+        workspaceRoot: context.workspace.rootPath,
+        runtimeRoot,
+        prompt,
+        systemPrompt: systemPrompt(context),
+        signal,
+        readRoots: resolvedAttachments.map((attachment) => attachment.absolutePath),
+        jobId: context.job.id,
+        idempotencyKey,
+        workspaceAccess: context.item.kind === 'work' ? 'exclusive-write' : 'live-read',
+        workspaceLease:
+          context.item.kind === 'work'
+            ? {
+                leaseId: context.lease.leaseId,
+                ownerKind: 'job',
+                ownerId: context.job.id
+              }
+            : undefined,
+        capabilityProfile,
+        installation,
+        providerSettings: driver.settings
+      })
+      for await (const chunk of stream) {
+        if (chunk.type === 'delta') turnReply += chunk.content
+        else if (chunk.type === 'completed') turnReply = chunk.reply || turnReply
+        else if (chunk.type === 'error') throw new Error(chunk.message)
+      }
+      return turnReply
     }
-    if (!reply.trim()) throw new JobError('job.empty_result')
-    return reply
+
+    let reply = await runTurn(turnRoot, boundPrompt, `${context.job.id}:${context.item.id}`)
+    if (needsVerificationFinalizationRetry(context.item.kind, reply)) {
+      reply = await runTurn(
+        join(turnRoot, 'finalization-retry'),
+        buildVerificationFinalizationPrompt(boundPrompt),
+        `${context.job.id}:${context.item.id}:finalization-retry`
+      )
+    }
+    if (reply.trim()) return reply
+    if (!workspaceBefore) throw new JobError('job.empty_result')
+    return recoverEmptyWorkReply(
+      reply,
+      workspaceBefore,
+      captureDeclaredWorkspaceState(context.workspace.rootPath, declaredFiles)
+    )
   }
 }
 

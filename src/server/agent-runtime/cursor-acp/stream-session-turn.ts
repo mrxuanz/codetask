@@ -84,7 +84,6 @@ export async function* streamCursorSessionTurn(
       scopeId: runtimeScopeId,
       provider: input.provider,
       workspaceRoot: input.cwd,
-      model: input.model,
       mcpProfile,
       capabilityProfile: plan.capabilityProfile
     })
@@ -100,7 +99,6 @@ export async function* streamCursorSessionTurn(
     cwd: input.cwd,
     prompt: input.prompt,
     systemPrompt: input.systemPrompt,
-    model: input.model,
     mcpServers: plan.mcpServers,
     runtimeSessionId: input.runtimeSessionId,
     signal: options?.signal
@@ -156,7 +154,6 @@ export type JobCursorRuntimeKeyInput = {
   jobId: string
   provider: string
   workspaceRoot: string
-  model?: string
   mcpProfile: string
   capabilityProfile?: import('../capabilities').AgentCapabilityProfile
 }

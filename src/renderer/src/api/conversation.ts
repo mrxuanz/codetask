@@ -5,23 +5,24 @@ import {
 } from '@renderer/auth/sessionRedirect'
 import { api, ApiError } from './client'
 import type { ApiResponse } from './types'
+import type { SupportedCoreCode } from '@shared/providers/codes'
 
 export interface ConversationSettings {
   userId: string
-  provider: 'cursorcli'
-  model: string | null
+  provider: SupportedCoreCode
   revision: number
   updatedAtMs: number
 }
 
 export interface ConversationProviderStatus {
-  code: 'cursorcli'
-  label: 'Cursor CLI'
+  code: SupportedCoreCode
+  label: string
+  protocol: 'sdk' | 'local-server' | 'acp'
   installed: boolean
   authenticated: boolean
   authMode: 'host-login'
-  loginCommand: 'agent login'
-  statusCommand: 'agent status'
+  loginCommand: string
+  statusCommand: string
   message: string
 }
 
@@ -39,9 +40,9 @@ export interface ConversationWorkspace {
 export interface ConversationThread {
   id: string
   workspaceId: string
+  kind: 'chat' | 'planner'
   title: string
-  provider: 'cursorcli'
-  model: string | null
+  provider: SupportedCoreCode
   runtimeSessionId: string | null
   createdAtMs: number
   updatedAtMs: number
@@ -74,18 +75,18 @@ export function fetchConversationSettings(): Promise<ApiResponse<ConversationSet
 }
 
 export function updateConversationSettings(
-  model: string | null
+  provider: SupportedCoreCode
 ): Promise<ApiResponse<ConversationSettings>> {
   return api<ConversationSettings>('/api/conversation/settings', {
     method: 'PUT',
-    body: JSON.stringify({ model })
+    body: JSON.stringify({ provider })
   })
 }
 
-export function fetchConversationProviderStatus(): Promise<
-  ApiResponse<ConversationProviderStatus>
+export function fetchConversationProviderStatuses(): Promise<
+  ApiResponse<ConversationProviderStatus[]>
 > {
-  return api<ConversationProviderStatus>('/api/conversation/provider-status')
+  return api<ConversationProviderStatus[]>('/api/conversation/providers')
 }
 
 export function fetchConversationWorkspaces(): Promise<ApiResponse<ConversationWorkspace[]>> {
@@ -116,15 +117,30 @@ export function fetchConversationThreads(
 }
 
 export function createConversationThread(
-  workspaceId: string
+  workspaceId: string,
+  provider: SupportedCoreCode
 ): Promise<ApiResponse<ConversationThread>> {
   return api<ConversationThread>(
     `/api/conversation/workspaces/${encodeURIComponent(workspaceId)}/threads`,
     {
       method: 'POST',
-      body: JSON.stringify({})
+      body: JSON.stringify({ provider })
     }
   )
+}
+
+export function updateConversationThread(
+  id: string,
+  patch: { readonly title?: string; readonly provider?: SupportedCoreCode }
+): Promise<ApiResponse<ConversationThread>> {
+  return api<ConversationThread>(`/api/conversation/threads/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch)
+  })
+}
+
+export function fetchConversationThread(id: string): Promise<ApiResponse<ConversationThread>> {
+  return api<ConversationThread>(`/api/conversation/threads/${encodeURIComponent(id)}`)
 }
 
 export function deleteConversationThread(id: string): Promise<ApiResponse<{ deleted: true }>> {

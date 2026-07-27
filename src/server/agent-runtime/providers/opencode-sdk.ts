@@ -103,6 +103,24 @@ function formatOpencodeError(error: unknown): string {
   return 'OpenCode request failed'
 }
 
+export function formatOpencodeProviderError(error: unknown): string {
+  if (!error || typeof error !== 'object') return formatOpencodeError(error)
+  const typed = error as {
+    name?: unknown
+    message?: unknown
+    data?: { message?: unknown }
+  }
+  const name = typeof typed.name === 'string' ? typed.name.trim() : ''
+  const message =
+    typeof typed.data?.message === 'string'
+      ? typed.data.message.trim()
+      : typeof typed.message === 'string'
+        ? typed.message.trim()
+        : ''
+  if (name && message) return `${name}: ${message}`
+  return message || name || formatOpencodeError(error)
+}
+
 function createOpencodeSessionTurnError(detail: string): TurnError {
   if (isTransientOpencodeTransportDetail(detail)) {
     return createTurnError('provider.opencode.stream_disconnected', { detail })
@@ -611,10 +629,15 @@ export async function* streamOpencodeTurn(
 
         if (event.type === 'message.updated') {
           const props = event.properties as {
-            info?: { id?: string; role?: string; finish?: string }
+            info?: { id?: string; role?: string; finish?: string; error?: unknown }
           }
           if (props.info?.role === 'assistant' && props.info.id) {
             assistantMessageIds.add(props.info.id)
+          }
+          if (props.info?.role === 'assistant' && props.info.error) {
+            throw createOpencodeSessionTurnError(
+              formatOpencodeProviderError(props.info.error)
+            )
           }
           if (props.info?.role === 'assistant' && isTerminalAssistantFinish(props.info.finish)) {
             turnScope.recordProgress('tool_completed')
@@ -646,8 +669,12 @@ export async function* streamOpencodeTurn(
         }
 
         if (event.type === 'session.error') {
-          const props = event.properties as { error?: { message?: string } }
-          throw createOpencodeSessionTurnError(props.error?.message ?? 'OpenCode session error')
+          const props = event.properties as { error?: unknown }
+          throw createOpencodeSessionTurnError(
+            props.error
+              ? formatOpencodeProviderError(props.error)
+              : 'OpenCode session error'
+          )
         }
 
         if (event.type === 'session.idle') {
@@ -678,6 +705,14 @@ export async function* streamOpencodeTurn(
     }
     if (promptResult?.error) {
       throw createOpencodeSessionTurnError(formatOpencodeError(promptResult.error))
+    }
+    const assistantError = (
+      promptResult?.data?.info as { error?: unknown } | undefined
+    )?.error
+    if (assistantError) {
+      throw createOpencodeSessionTurnError(
+        formatOpencodeProviderError(assistantError)
+      )
     }
 
     if (!reply.trim()) {

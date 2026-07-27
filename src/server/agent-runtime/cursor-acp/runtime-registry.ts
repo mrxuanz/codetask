@@ -15,7 +15,6 @@ export interface JobCursorRuntimeKeyInput {
   jobId: string
   provider: string
   workspaceRoot: string
-  model?: string | undefined
   mcpProfile: string
   capabilityProfile?: AgentCapabilityProfile | undefined
 }
@@ -24,7 +23,6 @@ export interface CursorRuntimeKeyInput {
   scopeId: string
   provider: string
   workspaceRoot: string
-  model?: string | undefined
   mcpProfile: string
   capabilityProfile?: AgentCapabilityProfile | undefined
 }
@@ -54,7 +52,6 @@ export function buildCursorRuntimeKey(input: CursorRuntimeKeyInput): string {
     input.scopeId,
     input.provider,
     input.workspaceRoot,
-    input.model ?? '',
     mcpProfile,
     input.capabilityProfile ?? ''
   ].join('\0')
@@ -66,7 +63,6 @@ export function buildJobCursorRuntimeKey(input: JobCursorRuntimeKeyInput): strin
     scopeId: input.jobId,
     provider: input.provider,
     workspaceRoot: input.workspaceRoot,
-    model: input.model,
     mcpProfile: input.mcpProfile,
     capabilityProfile: input.capabilityProfile
   })

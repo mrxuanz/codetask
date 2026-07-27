@@ -23,7 +23,7 @@ function fixture(t: test.TestContext): { root: string; bootstrapRoot: string; ca
   }
 }
 
-test('storage source priority is CLI > env > locator > candidate', (t) => {
+test('storage source priority is explicit CLI > locator > candidate', (t) => {
   const f = fixture(t)
   const locatorData = join(f.root, 'locator-data')
   const marker = writeDataRootMarker(locatorData)
@@ -37,20 +37,11 @@ test('storage source priority is CLI > env > locator > candidate', (t) => {
 
   const cli = resolveStorageLocation({
     explicitDataDir: join(f.root, 'cli-data'),
-    envDataDir: join(f.root, 'env-data'),
     mode: 'desktop',
     bootstrapRoot: f.bootstrapRoot,
     defaultDataDir: f.candidate
   })
   assert.equal(cli.source, 'cli')
-
-  const env = resolveStorageLocation({
-    envDataDir: join(f.root, 'env-data'),
-    mode: 'desktop',
-    bootstrapRoot: f.bootstrapRoot,
-    defaultDataDir: f.candidate
-  })
-  assert.equal(env.source, 'env')
 
   const locator = resolveStorageLocation({
     mode: 'desktop',

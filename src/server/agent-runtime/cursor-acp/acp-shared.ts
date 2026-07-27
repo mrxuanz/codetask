@@ -467,34 +467,6 @@ export async function openCursorAcpSession(
   return router.attach(ctx, created.sessionId)
 }
 
-export async function applyCursorModel(
-  ctx: ClientContext,
-  session: Pick<CursorAcpSessionHandle, 'sessionId'>,
-  model?: string
-): Promise<void> {
-  const modelId = model?.trim() || undefined
-  if (!modelId) {
-    debugCursor('model skipped (use cursor cli default)')
-    return
-  }
-
-  debugCursor('set model', { modelId })
-  await Promise.race([
-    ctx.request(methods.agent.session.setConfigOption, {
-      sessionId: session.sessionId,
-      configId: 'model',
-      value: modelId
-    }),
-    new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('setConfigOption timeout')), 5_000)
-    })
-  ]).catch((error) => {
-    debugCursor('set model skipped', {
-      message: error instanceof Error ? error.message : String(error)
-    })
-  })
-}
-
 export async function cancelCursorAcpSession(ctx: ClientContext, sessionId: string): Promise<void> {
   try {
     await ctx.notify(methods.agent.session.cancel, { sessionId })

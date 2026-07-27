@@ -68,7 +68,6 @@ export async function* streamClaudeTurn(
       abortController: turnAbort,
       env: plan.env,
       sandbox: plan.sandbox,
-      ...(plan.model !== undefined ? { model: plan.model } : {}),
       ...(plan.resume ? { resume: plan.resume } : {}),
       ...(plan.pathToClaudeCodeExecutable
         ? { pathToClaudeCodeExecutable: plan.pathToClaudeCodeExecutable }

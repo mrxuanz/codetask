@@ -20,14 +20,18 @@ async function runTurn(input: AgentTurnInput): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const inputFile = process.env.CODETASK_WORKER_INPUT_FILE?.trim()
-  const envInput = process.env.CODETASK_WORKER_INPUT?.trim()
+  const inputFileFlag = process.argv.indexOf('--worker-input-file')
+  const inputFile =
+    inputFileFlag >= 0 && process.argv[inputFileFlag + 1]
+      ? process.argv[inputFileFlag + 1]?.trim()
+      : undefined
+  if (inputFileFlag >= 0 && (!inputFile || inputFile.startsWith('--'))) {
+    throw new Error('role-worker: invalid --worker-input-file argument')
+  }
   let raw = ''
   if (inputFile) {
     const { readFile } = await import('fs/promises')
     raw = (await readFile(inputFile, 'utf8')).trim()
-  } else if (envInput) {
-    raw = envInput
   } else {
     const chunks: Buffer[] = []
     for await (const chunk of process.stdin) {
@@ -36,9 +40,7 @@ async function main(): Promise<void> {
     raw = Buffer.concat(chunks).toString('utf8').trim()
   }
   if (!raw) {
-    throw new Error(
-      'role-worker: empty input (stdin, CODETASK_WORKER_INPUT, or CODETASK_WORKER_INPUT_FILE)'
-    )
+    throw new Error('role-worker: empty input (stdin or --worker-input-file)')
   }
   const input = JSON.parse(raw) as AgentTurnInput
   await runTurn(input)

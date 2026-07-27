@@ -25,3 +25,15 @@ export interface SandboxHealthReport {
 export function fetchSandboxHealth(): Promise<{ data: SandboxHealthReport }> {
   return api<SandboxHealthReport>('/api/sandbox/health')
 }
+
+export interface RuntimeInfo {
+  mode: 'desktop' | 'server'
+  dataDir: string
+  storageSource: string
+  storageManaged: boolean
+  configurationAuthority: 'typed-runtime'
+}
+
+export function fetchRuntimeInfo(): Promise<{ data: RuntimeInfo }> {
+  return api<RuntimeInfo>('/api/runtime-info')
+}

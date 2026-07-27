@@ -7,9 +7,6 @@ use std::process::Command;
 
 use crate::winutil::quote_windows_arg;
 
-const HOST_EXE_ENV: &str = "CODETASK_SANDBOX_HOST_EXE";
-const SETUP_SCRIPT_ENV: &str = "CODETASK_SANDBOX_SETUP_SCRIPT";
-const RUNNER_SCRIPT_ENV: &str = "CODETASK_SANDBOX_RUNNER_SCRIPT";
 pub const ELECTRON_RUN_AS_NODE_ENV: &str = "ELECTRON_RUN_AS_NODE";
 const ELECTRON_DISABLE_CRASH_REPORTER_ENV: &str = "ELECTRON_DISABLE_CRASH_REPORTER";
 const ELECTRON_ENABLE_LOGGING_ENV: &str = "ELECTRON_ENABLE_LOGGING";
@@ -227,21 +224,6 @@ pub fn system_cmd_exe() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32\cmd.exe"))
 }
 
-pub fn host_launcher_from_env() -> Option<HostLauncher> {
-    let host_exe = std::env::var(HOST_EXE_ENV).ok().map(PathBuf::from)?;
-    let setup_script = std::env::var(SETUP_SCRIPT_ENV).ok().map(PathBuf::from)?;
-    let runner_script = std::env::var(RUNNER_SCRIPT_ENV).ok().map(PathBuf::from)?;
-    if host_exe.is_file() && setup_script.is_file() && runner_script.is_file() {
-        Some(HostLauncher {
-            host_exe,
-            setup_script,
-            runner_script,
-        })
-    } else {
-        None
-    }
-}
-
 pub fn write_host_launcher_config(
     codex_home: &Path,
     host_exe: &Path,
@@ -280,7 +262,7 @@ pub fn read_host_launcher_config(codex_home: &Path) -> Option<HostLauncher> {
 }
 
 pub fn resolve_host_launcher(codex_home: &Path) -> Option<HostLauncher> {
-    host_launcher_from_env().or_else(|| read_host_launcher_config(codex_home))
+    read_host_launcher_config(codex_home)
 }
 
 #[cfg(test)]

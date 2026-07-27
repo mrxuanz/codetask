@@ -109,7 +109,7 @@ test('draft API hands an image-safe snapshot through all SDK/ACP Job actors', as
       }
     }
   }
-  assert.equal(jobSettings.data.settings.maxConcurrentJobs, 2)
+  assert.equal(jobSettings.data.settings.maxConcurrentJobs, 1)
   assert.equal(jobSettings.data.settings.work.provider, 'codex')
   assert.match(jobSettings.data.settings.work.skillsManual, /untrusted project data/i)
   assert.equal(JSON.stringify(jobSettings).toLowerCase().includes('apikey'), false)

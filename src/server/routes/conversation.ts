@@ -32,12 +32,18 @@ export function createConversationRoutes(ctx: AppContext): Hono {
   })
 
   routes.put('/conversation/settings', async (c) => {
-    const body = await c.req.json<{ model?: string | null }>()
-    return c.json(ok(service.updateSettings(userIdFrom(c), { model: body.model })))
+    const body = await c.req.json<{ provider?: string | null }>()
+    return c.json(ok(service.updateSettings(userIdFrom(c), { provider: body.provider })))
+  })
+
+  routes.get('/conversation/providers', async (c) => {
+    userIdFrom(c)
+    return c.json(ok(await ctx.conversation.providerStatuses()))
   })
 
   routes.get('/conversation/provider-status', async (c) => {
-    return c.json(ok(await ctx.conversation.providerStatus()))
+    userIdFrom(c)
+    return c.json(ok(await ctx.conversation.providerStatuses()))
   })
 
   routes.get('/conversation/workspaces', (c) => {
@@ -75,18 +81,30 @@ export function createConversationRoutes(ctx: AppContext): Hono {
   })
 
   routes.post('/conversation/workspaces/:workspaceId/threads', async (c) => {
-    const body = await c.req.json<{ title?: string }>().catch((): { title?: string } => ({}))
+    const body = await c.req
+      .json<{ title?: string; provider?: string }>()
+      .catch((): { title?: string; provider?: string } => ({}))
     const thread = service.createThread(userIdFrom(c), {
       workspaceId: c.req.param('workspaceId'),
-      title: body.title
+      title: body.title,
+      provider: body.provider
     })
     return c.json(ok(thread), 201)
   })
 
   routes.patch('/conversation/threads/:threadId', async (c) => {
-    const body = await c.req.json<{ title?: string }>()
-    service.renameThread(userIdFrom(c), c.req.param('threadId'), body.title ?? '')
-    return c.json(ok({ updated: true }))
+    const body = await c.req.json<{ title?: string; provider?: string }>()
+    const userId = userIdFrom(c)
+    const threadId = c.req.param('threadId')
+    if (typeof body.title === 'string') service.renameThread(userId, threadId, body.title)
+    if (typeof body.provider === 'string') {
+      service.switchThreadProvider(userId, threadId, body.provider)
+    }
+    return c.json(ok(service.getThread(userId, threadId)))
+  })
+
+  routes.get('/conversation/threads/:threadId', (c) => {
+    return c.json(ok(service.getThread(userIdFrom(c), c.req.param('threadId'))))
   })
 
   routes.delete('/conversation/threads/:threadId', (c) => {

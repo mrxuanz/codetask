@@ -1,7 +1,6 @@
 import { createRequire } from 'module'
 import { existsSync } from 'fs'
-import { join } from 'path'
-import { processHostEnvironmentSource } from '../host-environment'
+import { dirname, join } from 'path'
 import { SandboxError } from './types'
 import type { CodeteamSandboxNative } from './types'
 
@@ -20,11 +19,6 @@ function packagedAppPath(): string | null {
 
 function resolveAddonDir(): string | null {
   const paths: string[] = []
-  const hostEnv = processHostEnvironmentSource.snapshot()
-
-  if (hostEnv.CODETEAM_SANDBOX_NATIVE?.trim()) {
-    paths.push(hostEnv.CODETEAM_SANDBOX_NATIVE.trim())
-  }
 
   const appPath = packagedAppPath()
   const resourcesPath = getResourcesPath()
@@ -34,6 +28,10 @@ function resolveAddonDir(): string | null {
     paths.push(join(resourcesPath, 'native', 'codeteam-sandbox'))
   }
 
+  // Standalone SEA packages place the executable under <package>/bin and the
+  // native addon under <package>/native. This is structural discovery, not
+  // process-global configuration.
+  paths.push(join(dirname(dirname(process.execPath)), 'native', 'codeteam-sandbox'))
   paths.push(join(__dirname, '..', '..', '..', 'native', 'codeteam-sandbox'))
   paths.push(join(process.cwd(), 'native', 'codeteam-sandbox'))
 

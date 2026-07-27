@@ -24,6 +24,24 @@ test('Windows npm recording runs npm CLI through node.exe without a shell', () =
   })
 })
 
+test('Windows npx recording runs npx CLI through node.exe without a shell', () => {
+  const invocation = resolveInvocation(
+    'win32',
+    'C:\\hostedtoolcache\\node\\24\\x64\\node.exe',
+    'npx',
+    ['electron-builder', '--dir']
+  )
+  assert.deepEqual(invocation, {
+    command: 'C:\\hostedtoolcache\\node\\24\\x64\\node.exe',
+    args: [
+      'C:\\hostedtoolcache\\node\\24\\x64\\node_modules\\npm\\bin\\npx-cli.js',
+      'electron-builder',
+      '--dir'
+    ],
+    npmCli: true
+  })
+})
+
 test('run-and-record preserves output and the child exit status', () => {
   const root = mkdtempSync(join(tmpdir(), 'run-and-record-'))
   try {
