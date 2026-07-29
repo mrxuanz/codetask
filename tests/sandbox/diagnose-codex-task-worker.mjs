@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 
 import {
   loadNative,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   sandboxTestsEnabled,
   wirePolicy
 } from './sandbox-test-utils.mjs'
@@ -280,8 +280,8 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = [])
           dataDir
         ])
       : []
-  if (typeof prod.policyForRoleV2 === 'function') {
-    return prod.policyForRoleV2({
+  if (typeof prod.createSandboxPolicy === 'function') {
+    return prod.createSandboxPolicy({
       role: 'task-worker',
       workspaceRoot,
       runtimeRoot,
@@ -290,7 +290,7 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = [])
       attachmentReadRoots: readRoots
     })
   }
-  return policyForRoleV2('task-worker', workspaceRoot, runtimeRoot)
+  return sandboxPolicyForRole('task-worker', workspaceRoot, runtimeRoot)
 }
 
 function buildMinimalSandboxEnv(runtimeRoot) {
@@ -550,7 +550,7 @@ async function runSandboxCodexCase(
 ) {
   const policy = prod
     ? buildProductionPolicy(prod, runtimeRoot, workspace)
-    : policyForRoleV2('task-worker', workspace, runtimeRoot)
+    : sandboxPolicyForRole('task-worker', workspace, runtimeRoot)
   const envBundle = prod
     ? buildProductionSandboxEnv(prod, runtimeRoot, workspace)
     : { envRecord: buildMinimalSandboxEnv(runtimeRoot), authPrepared: null }
@@ -839,7 +839,7 @@ async function main() {
       }
 
       if (caseFilter === 'all' || caseFilter === 'sandbox-smoke') {
-        const policy = policyForRoleV2('task-worker', workspacePath, runtimeRoot)
+        const policy = sandboxPolicyForRole('task-worker', workspacePath, runtimeRoot)
         const handle = native.launchSandboxedWorker({
           policyJson: wirePolicy(policy),
           command: process.execPath,

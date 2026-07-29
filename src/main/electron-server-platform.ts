@@ -8,9 +8,12 @@ import type { AppServerPlatform } from './server'
 export function createElectronServerPlatform(): AppServerPlatform {
   return {
     isDev: is.dev,
-    rendererDevUrl: process.env.ELECTRON_RENDERER_URL,
+    rendererDevUrl: is.dev ? 'http://localhost:5173' : undefined,
     staticDir: is.dev ? undefined : join(__dirname, '../renderer'),
     appRoot: app.getAppPath(),
+    shellChildEnvironment: {
+      ELECTRON_RUN_AS_NODE: '1'
+    },
     resolveDataDirSelection
   }
 }

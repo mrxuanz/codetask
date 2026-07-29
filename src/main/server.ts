@@ -31,6 +31,7 @@ export interface AppServerPlatform {
   rendererDevUrl?: string
   staticDir?: string
   appRoot: string
+  shellChildEnvironment?: Record<string, string>
   resolveDataDirSelection(input: {
     explicitDataDir?: string
     mode: CliOptions['mode']
@@ -106,6 +107,7 @@ async function createReadyApp(
     dataDir,
     mode: cli.mode,
     mcpSecretPath: storage.bootstrap.mcpSecretFile,
+    shellChildEnvironment: platform.shellChildEnvironment,
     storage: {
       bootstrapRoot: storage.bootstrap.root,
       source: storage.source,

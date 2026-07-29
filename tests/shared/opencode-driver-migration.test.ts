@@ -73,7 +73,7 @@ test('OpenCodeDriver prepareTurn delegates to stream factory without altering ch
       input: baseInput(),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )
 
@@ -258,7 +258,7 @@ test('OpenCodeDriver turn handle uses RuntimeManager cancel/close contract', asy
       input: baseInput({ role: 'task-worker', prompt: 'managed' }),
       options: { outerSandbox: true },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )
 
@@ -292,7 +292,7 @@ test('OpenCodeDriver turn handle uses RuntimeManager cancel/close contract', asy
       input: baseInput({ prompt: 'ok' }),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )) {
     chunks.push(chunk)
@@ -333,7 +333,7 @@ test('OpenCode registry production driver matches descriptor and settings slot',
   assert.equal(driver.descriptor, OPENCODE_DESCRIPTOR)
   assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG.opencode)
   assert.equal(driver.descriptor.capabilities.protocol, 'local-server')
-  assert.equal(driver.descriptor.capabilities.authMode, 'runtime-copy')
+  assert.equal(driver.descriptor.capabilities.authMode, 'runtime-reference')
 })
 
 test('OpenCode server plan parity snapshots stay stable for question deny / MCP / pure', () => {

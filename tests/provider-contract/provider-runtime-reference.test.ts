@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
 import {
   materializeCodexAuth,
+  materializeCursorAuth,
   materializeOpencodeAuth,
   opencodeRuntimeLayout
 } from '../../src/server/sandbox/provider-auth/materialize'
@@ -14,21 +23,21 @@ import {
   scrubCredentialSnapshotsInTree
 } from '../../src/server/sandbox/provider-auth/snapshot-manifest'
 import {
-  resolveClaudeHostConfigDir,
   resolveHostProfilePaths,
-  runtimeCodexHome
+  runtimeCodexHome,
+  runtimeCursorAuthPath
 } from '../../src/server/sandbox/provider-auth/paths'
 
-const RUNTIME_COPY_PROVIDERS = ['codex', 'claude-code', 'opencode'] as const
+const RUNTIME_REFERENCE_PROVIDERS = ['codex', 'opencode'] as const
 
-test('prepareProviderAuth defaults to runtime-copy with no host write roots', () => {
+test('runtime-reference providers never receive host write roots', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-provider-bridge-'))
   const workspaceRoot = join(runtimeRoot, 'workspace')
   try {
-    for (const provider of RUNTIME_COPY_PROVIDERS) {
+    for (const provider of RUNTIME_REFERENCE_PROVIDERS) {
       const prepared = prepareProviderAuthForTest(provider, runtimeRoot, { workspaceRoot })
-      assert.equal(prepared.diagnostics.mode, 'runtime-copy', provider)
-      assert.equal(prepared.mode, 'runtime-copy', provider)
+      assert.equal(prepared.diagnostics.mode, 'runtime-reference', provider)
+      assert.equal(prepared.mode, 'runtime-reference', provider)
       assert.equal(prepared.runtimeRoot, runtimeRoot, provider)
       assert.equal('CODETASK_PROVIDER_AUTH_MODE' in prepared.envPatch, false, provider)
       assert.deepEqual(prepared.writeRoots ?? [], [], provider)
@@ -71,10 +80,34 @@ test('cursor sandbox uses host-identity and never writes outside allowed roots',
     assert.equal(prepared.envPatch.CURSOR_DATA_DIR, join(runtimeRoot, '.cursor'))
     assert.deepEqual(prepared.filesystemProfile.hostReadRoots, prepared.readRoots)
     assert.deepEqual(prepared.filesystemProfile.hostWriteRoots, prepared.writeRoots)
-    assert.ok((prepared.writeRoots ?? []).includes(join(runtimeRoot, '.cursor')))
-    assert.ok((prepared.writeRoots ?? []).includes(join(host.home, '.cursor')))
-    assert.ok((prepared.readRoots ?? []).includes(host.home))
+    assert.ok(!(prepared.readRoots ?? []).includes(host.home))
+    assert.ok(!(prepared.writeRoots ?? []).includes(join(host.home, '.cursor')))
   } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('Cursor configuration alone is not reported as login material', () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-host-'))
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-runtime-'))
+  const workspaceRoot = join(runtimeRoot, 'workspace')
+  const hostProfile = resolveHostProfilePaths({ HOME: hostRoot })
+
+  try {
+    mkdirSync(join(hostRoot, '.cursor'), { recursive: true })
+    mkdirSync(workspaceRoot)
+    writeFileSync(join(hostRoot, '.cursor', 'cli-config.json'), '{"theme":"dark"}', 'utf8')
+
+    const materialized = materializeCursorAuth(runtimeRoot, workspaceRoot, hostProfile)
+    assert.equal(materialized.authMaterialized, false)
+    assert.equal(materialized.configMaterialized, true)
+    assert.equal(materialized.runtimeAuthPath, runtimeCursorAuthPath(runtimeRoot))
+    assert.equal(
+      lstatSync(join(runtimeRoot, '.cursor', 'cli-config.json')).isSymbolicLink(),
+      true
+    )
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
   }
 })
@@ -89,7 +122,7 @@ test('codex runtime env sets CODEX_HOME under runtimeRoot', () => {
   }
 })
 
-test('materializeCodexAuth copies filtered config.toml without MCP sections', () => {
+test('materializeCodexAuth generates filtered config.toml without MCP sections', () => {
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-host-'))
   const hostCodexHome = join(hostRoot, '.codex')
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-runtime-'))
@@ -111,7 +144,7 @@ enabled = true
     )
 
     const result = materializeCodexAuth(runtimeRoot, hostProfile)
-    assert.equal(result.configCopied, true)
+    assert.equal(result.configGenerated, true)
 
     const runtimeConfig = join(runtimeCodexHome(runtimeRoot), 'config.toml')
     assert.ok(existsSync(runtimeConfig))
@@ -147,6 +180,7 @@ test('materializeCodexAuth preserves existing session rollouts across turns', ()
     materializeCodexAuth(runtimeRoot, hostProfile)
 
     assert.equal(readFileSync(rolloutPath, 'utf8'), '{"thread":"preserved"}')
+    assert.equal(lstatSync(join(codexHome, 'auth.json')).isSymbolicLink(), true)
     assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), '{"token":"host"}')
     assert.match(readFileSync(join(codexHome, 'config.toml'), 'utf8'), /model = "gpt-test"/)
   } finally {
@@ -169,18 +203,21 @@ test('credential snapshots are manifested and startup scrub removes only recorde
     writeFileSync(join(hostCodexHome, 'config.toml'), 'model = "gpt-test"\n', 'utf8')
 
     const materialized = materializeCodexAuth(runtimeRoot, hostProfile)
-    const sessionPath = join(runtimeRoot, '.codex', 'sessions', 'keep.json')
-    mkdirSync(join(runtimeRoot, '.codex', 'sessions'), { recursive: true })
+    const codexHome = runtimeCodexHome(runtimeRoot)
+    const sessionPath = join(codexHome, 'sessions', 'keep.json')
+    mkdirSync(join(codexHome, 'sessions'), { recursive: true })
     writeFileSync(sessionPath, '{"session":true}', 'utf8')
 
-    assert.equal(materialized.authCopied, true)
+    assert.equal(materialized.authMaterialized, true)
+    assert.equal(materialized.authMaterialization, 'reference')
+    assert.equal(lstatSync(join(codexHome, 'auth.json')).isSymbolicLink(), true)
     assert.ok(existsSync(credentialSnapshotManifestPath(runtimeRoot)))
 
     const scrubbed = scrubCredentialSnapshotsInTree(runtimeTree)
     assert.equal(scrubbed.manifests, 1)
     assert.equal(scrubbed.files, 2)
-    assert.equal(existsSync(join(runtimeRoot, '.codex', 'auth.json')), false)
-    assert.equal(existsSync(join(runtimeRoot, '.codex', 'config.toml')), false)
+    assert.equal(existsSync(join(codexHome, 'auth.json')), false)
+    assert.equal(existsSync(join(codexHome, 'config.toml')), false)
     assert.equal(readFileSync(sessionPath, 'utf8'), '{"session":true}')
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
@@ -188,7 +225,7 @@ test('credential snapshots are manifested and startup scrub removes only recorde
   }
 })
 
-test('prepareClaude isolates CLAUDE_CONFIG_DIR and does not expose host ~/.claude read roots', () => {
+test('prepareClaude whitelists login identity files and rejects settings env credentials', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-claude-env-'))
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-claude-host-'))
   const hostClaude = join(hostRoot, '.claude')
@@ -210,20 +247,22 @@ test('prepareClaude isolates CLAUDE_CONFIG_DIR and does not expose host ~/.claud
     const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot, {
       hostEnvironment: { HOME: hostRoot }
     })
-    assert.equal(prepared.envPatch.CLAUDE_CONFIG_DIR, join(runtimeRoot, '.claude'))
-    assert.equal(prepared.envPatch.HOME, runtimeRoot)
-    assert.equal(prepared.envPatch.ANTHROPIC_API_KEY, 'sk-test')
+    assert.equal(prepared.mode, 'host-identity')
+    assert.equal(prepared.envPatch.CLAUDE_CONFIG_DIR, undefined)
+    assert.equal(prepared.envPatch.HOME, hostRoot)
+    assert.equal(prepared.envPatch.ANTHROPIC_API_KEY, undefined)
     assert.notEqual(prepared.envPatch.PATH, '/should-not-inject')
+    assert.equal(prepared.diagnostics.authMaterialPresent, false)
+    assert.ok(!(prepared.readRoots ?? []).includes(hostClaude))
+    assert.ok(!(prepared.readRoots ?? []).includes(join(hostClaude, 'settings.json')))
+    assert.ok(!(prepared.writeRoots ?? []).includes(hostClaude))
 
-    const hostConfigDir = resolveClaudeHostConfigDir(
-      resolveHostProfilePaths({ HOME: hostRoot })
-    ).toLowerCase()
-    for (const readRoot of prepared.readRoots ?? []) {
-      assert.ok(
-        !readRoot.toLowerCase().startsWith(hostConfigDir),
-        `must not read host claude config: ${readRoot}`
-      )
-    }
+    writeFileSync(join(hostClaude, '.credentials.json'), '{"oauth":"host"}', 'utf8')
+    const withLogin = prepareProviderAuthForTest('claude-code', runtimeRoot, {
+      hostEnvironment: { HOME: hostRoot }
+    })
+    assert.equal(withLogin.diagnostics.authMaterialPresent, true)
+    assert.ok((withLogin.readRoots ?? []).includes(join(hostClaude, '.credentials.json')))
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })
@@ -252,6 +291,27 @@ test('prepareOpencode aligns XDG env with materializeOpencodeAuth destinations',
     assert.equal(prepared.envPatch.XDG_DATA_HOME, layout.dataHome)
     assert.equal(prepared.envPatch.XDG_STATE_HOME, layout.stateHome)
     assert.ok(existsSync(join(layout.configDir, 'auth.json')))
+    assert.equal(lstatSync(join(layout.configDir, 'auth.json')).isSymbolicLink(), true)
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true })
+    rmSync(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('OpenCode provider configuration alone is not reported as login material', () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-opencode-config-only-'))
+  const hostConfig = join(hostRoot, '.config', 'opencode')
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-opencode-runtime-'))
+
+  try {
+    mkdirSync(hostConfig, { recursive: true })
+    writeFileSync(join(hostConfig, 'opencode.json'), '{"model":"test/model"}', 'utf8')
+
+    const prepared = prepareProviderAuthForTest('opencode', runtimeRoot, {
+      hostEnvironment: { HOME: hostRoot }
+    })
+    assert.equal(prepared.diagnostics.authMaterialPresent, false)
+    assert.ok(existsSync(join(opencodeRuntimeLayout(runtimeRoot).configDir, 'opencode.json')))
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeRoot, { recursive: true, force: true })

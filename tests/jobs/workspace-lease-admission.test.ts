@@ -289,27 +289,20 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
       turnId: 'turn-blocked'
     })
     assert.equal(blocked.workspaceAccess, 'live-read')
-    assert.equal(blocked.workspaceLeaseId, null)
     getAppContext().runtimeRegistry.removeInflightThread('chat-blocked')
 
     releaseWorkspaceLease(taskLease.leaseId)
 
-    const writable = await prepareConversationTurn({
+    const readable = await prepareConversationTurn({
       username: 'user',
       threadId: 'chat-writable',
       requestedCreateTaskMode: false,
       requestedDraft: false,
       turnId: 'turn-writable'
     })
-    assert.equal(writable.workspaceAccess, 'exclusive-write')
-    assert.ok(writable.workspaceLeaseId)
-    const accessWhileConversationWrites = await getProjectWorkspaceAccess('user', projectId)
-    assert.equal(accessWhileConversationWrites.mode, 'read_only')
-    assert.equal(accessWhileConversationWrites.blocker?.kind, 'conversation')
-    if (accessWhileConversationWrites.blocker?.kind === 'conversation') {
-      assert.equal(accessWhileConversationWrites.blocker.turnId, 'turn-writable')
-    }
-    releaseWorkspaceLease(writable.workspaceLeaseId!)
+    assert.equal(readable.workspaceAccess, 'live-read')
+    const accessWhileConversationReads = await getProjectWorkspaceAccess('user', projectId)
+    assert.equal(accessWhileConversationReads.mode, 'read_write')
     getAppContext().runtimeRegistry.removeInflightThread('chat-writable')
 
     const draft = await prepareConversationTurn({
@@ -320,7 +313,6 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
       turnId: 'turn-draft'
     })
     assert.equal(draft.workspaceAccess, 'live-read')
-    assert.equal(draft.workspaceLeaseId, null)
     getAppContext().runtimeRegistry.removeInflightThread('draft-readonly')
   } finally {
     await teardown()
@@ -353,7 +345,7 @@ test('queue-coordinator releases lease by leaseId on slot failure', () => {
   assert.doesNotMatch(source, /releaseWorkspaceLeaseForOwner/)
 })
 
-test('conversation lease release advances pending task queues and snapshots resolved access', () => {
+test('conversation is lease-free and snapshots resolved read access', () => {
   const conversationSource = readFileSync(
     join(process.cwd(), 'src/server/conversation/service.ts'),
     'utf8'
@@ -362,8 +354,9 @@ test('conversation lease release advances pending task queues and snapshots reso
     join(process.cwd(), 'src/server/conversation/turn-queue.ts'),
     'utf8'
   )
-  assert.match(conversationSource, /releaseWorkspaceLease\(\{ leaseId:/)
-  assert.match(conversationSource, /advanceExecutionQueue\(username\)/)
+  assert.doesNotMatch(conversationSource, /acquireWorkspaceLease/)
+  assert.doesNotMatch(conversationSource, /releaseWorkspaceLease\(\{ leaseId:/)
+  assert.match(conversationSource, /workspacePath \? 'live-read' : 'metadata'/)
   assert.match(turnQueueSource, /onWorkspaceAccessResolved/)
   assert.match(turnQueueSource, /event: 'turn_snapshot'/)
 })

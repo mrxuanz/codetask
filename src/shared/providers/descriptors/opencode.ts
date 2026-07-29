@@ -15,7 +15,7 @@ export const OPENCODE_DESCRIPTOR = Object.freeze({
   ],
   mcpRootKey: 'mcp',
   capabilities: {
-    authMode: 'runtime-copy',
+    authMode: 'runtime-reference',
     protocol: 'local-server',
     supportedProfiles: [
       'chat-write',

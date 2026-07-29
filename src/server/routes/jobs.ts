@@ -11,6 +11,7 @@ import {
   addLocalCorpusDraftReference,
   listUserJobs,
   updateDraftAbilityCores,
+  updateDraftExecutionConfig,
   updateDraftReferenceDescription,
   uploadDraftReferences
 } from '../legacy-control-plane/service'
@@ -321,6 +322,21 @@ export function createJobRoutes(_ctx: AppContext): Hono {
     )
     return c.json(ok(result))
   })
+
+  routes.patch(
+    '/:threadId/messages/:messageId/draft/execution-config',
+    legacyWriteGuard,
+    async (c) => {
+      const username = await requireUsername(c.req.header('Authorization'))
+      const result = await updateDraftExecutionConfig(
+        username,
+        c.req.param('threadId'),
+        c.req.param('messageId'),
+        await c.req.json()
+      )
+      return c.json(ok(result))
+    }
+  )
 
   routes.post(
     '/:threadId/messages/:messageId/draft/references',

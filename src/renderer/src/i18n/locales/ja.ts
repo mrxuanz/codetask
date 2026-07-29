@@ -467,6 +467,13 @@ export default {
       saving: '保存中…',
       contractSaveFailed: '要件契約の保存に失敗しました',
       abilitiesCli: '能力 / CLI',
+      executionConfig: '今回の実行設定',
+      executionConfigHint:
+        'Planner と検証 CLI の選択は独立した実行プロファイルに保存され、Job はその設定を使用します。',
+      plannerCli: 'Planner CLI',
+      sliceVerifierCli: 'Slice Verifier CLI',
+      milestoneVerifierCli: 'Milestone Verifier CLI',
+      executionConfigSaveFailed: '実行設定の保存に失敗しました',
       selectCli: 'CLI を選択',
       cliUnavailable: '利用不可',
       references: '参考資料',
@@ -515,6 +522,7 @@ export default {
         storage: 'データストレージ',
         sandbox: 'サンドボックス',
         controlPlane: 'Control Plane',
+        skills: 'Business Skills',
         mcp: 'MCP',
         prompts: 'Prompts'
       },
@@ -573,6 +581,28 @@ export default {
         sliceVerifier: 'Slice Verifier',
         milestoneVerifier: 'Milestone Verifier',
         unavailable: '利用不可'
+      },
+      skills: {
+        title: 'Business Skills',
+        description:
+          '再利用可能な業務指示を管理し、会話、ドラフト、Planner、検証フローに割り当てます。',
+        hint: '任意の Skill を追加できます。Planner と検証 Skill は計画開始時に実行ツリーへ保存されます。',
+        add: 'Skill を追加',
+        newSkill: '新しい Business Skill',
+        enabled: '有効',
+        id: 'Skill ID（小文字・数字・ハイフン）',
+        name: '名前',
+        descriptionLabel: '説明',
+        instructions: '業務指示',
+        workflows: '使用フロー',
+        workflow: {
+          conversation: '通常会話',
+          draft: 'ドラフト会話',
+          planner: 'Planner',
+          taskWorker: 'Task Worker',
+          sliceVerifier: 'Slice Verifier',
+          milestoneVerifier: 'Milestone Verifier'
+        }
       },
       prompts: {
         title: 'プロンプトポリシー',

@@ -6,6 +6,7 @@ const NAMESPACE_TO_PROPERTY = {
   control_plane: 'controlPlane',
   prompts: 'prompts',
   retention: 'retention',
+  business_skills: 'businessSkills',
   user_mcp: 'userMcp',
   provider_runtime: 'providerRuntime',
   ui_server_preferences: 'uiServerPreferences'

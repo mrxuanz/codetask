@@ -25,6 +25,8 @@ import {
 import { validateStorageTarget } from '../../main/storage-validation'
 import { SettingsRevisionConflictError } from '../context/settings-store'
 import { loadProviderSettings, saveProviderSettings } from '../settings/providers'
+import { loadBusinessSkillsSettings, saveBusinessSkillsSettings } from '../settings/business-skills'
+import type { BusinessSkillsSettings } from '@shared/contracts/business-skills'
 
 function unwrapSettings<T extends object>(body: T | { settings?: T }): T {
   if ('settings' in body && body.settings !== undefined) return body.settings
@@ -73,6 +75,31 @@ export function createSettingsRoutes(ctx: AppContext): Hono {
     const settings = unwrapSettings(body)
     const saved = savePromptSettings(settings)
     return c.json(ok({ settings: saved }))
+  })
+
+  routes.get('/business-skills', async (c) => {
+    await requireUsername(c.req.header('Authorization'))
+    return c.json(ok({ settings: loadBusinessSkillsSettings() }))
+  })
+
+  routes.put('/business-skills', async (c) => {
+    await requireUsername(c.req.header('Authorization'))
+    const body = await c.req.json<BusinessSkillsSettings | { settings?: BusinessSkillsSettings }>()
+    try {
+      const saved = saveBusinessSkillsSettings(unwrapSettings(body))
+      return c.json(ok({ settings: saved }))
+    } catch (error) {
+      if (error instanceof SettingsRevisionConflictError) {
+        throw AppError.conflict('Business skills were updated by another request', {
+          expectedRevision: error.expectedRevision,
+          currentRevision: error.actualRevision
+        })
+      }
+      throw AppError.badRequest(
+        error instanceof Error ? error.message : 'Failed to save business skills',
+        'settings.business_skills.save_failed'
+      )
+    }
   })
 
   routes.get('/mcp', async (c) => {

@@ -42,6 +42,10 @@ import { createProviderRegistry } from './providers/composition'
 import { ProviderRuntimeManager } from './providers/lifecycle'
 import { SecureAuthService } from './auth/service'
 import { configureRuntimeMode, resetRuntimeMode } from './runtime-mode'
+import {
+  configureShellChildEnvironment,
+  resetShellChildEnvironment
+} from './shell-child-environment'
 
 export type { AppContext } from './context'
 
@@ -52,6 +56,7 @@ export interface BootstrapOptions {
   mode?: AppMode
   config?: AppConfigOverrides
   mcpSecretPath?: string
+  shellChildEnvironment?: Record<string, string>
   storage?: {
     bootstrapRoot: string
     source: string
@@ -112,6 +117,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
     const mode = options.mode ?? 'desktop'
     configureRuntimeMode(mode)
+    configureShellChildEnvironment(options.shellChildEnvironment)
     const settings = new SettingsStore(options.dataDir, db)
     const authSecret = loadDatabaseAuthSecret(db)
     const mcpSecrets = options.mcpSecretPath
@@ -190,6 +196,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     return appContext
   } catch (error) {
     resetRuntimeMode()
+    resetShellChildEnvironment()
     closeDatabaseForTests()
     throw error
   }
@@ -239,5 +246,6 @@ export async function resetAppContextForTests(): Promise<void> {
 
   appContext = null
   resetRuntimeMode()
+  resetShellChildEnvironment()
   closeDatabaseForTests()
 }

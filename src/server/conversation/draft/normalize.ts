@@ -5,6 +5,7 @@ import {
   THREAD_WORKSPACE_FIELD_KEYS,
   type ProposedTaskDraft,
   type TaskLaunchDraftAbility,
+  type DraftExecutionConfig,
   type TaskLaunchDraftPayload,
   type TaskLaunchDraftRequirementsContract
 } from './types'
@@ -22,6 +23,34 @@ function normalizeCoreCode(value: unknown): SupportedCoreCode | null {
   if (trimmed === 'claude' || trimmed === 'claudecode') return 'claude-code'
   if (trimmed === 'cursor-cli' || trimmed === 'cursor-agent') return 'cursorcli'
   return null
+}
+
+export function resolveDraftExecutionConfig(
+  payload: Pick<TaskLaunchDraftPayload, 'executionConfig' | 'abilities'>,
+  fallbackCoreCode: SupportedCoreCode
+): DraftExecutionConfig {
+  const abilityCore = payload.abilities.find(
+    (ability) => ability.recommendedCoreCode
+  )?.recommendedCoreCode
+  const fallback = abilityCore ?? fallbackCoreCode
+  return {
+    plannerCoreCode:
+      normalizeCoreCode(payload.executionConfig?.plannerCoreCode) ?? fallbackCoreCode,
+    sliceVerifierCoreCode:
+      normalizeCoreCode(payload.executionConfig?.sliceVerifierCoreCode) ?? fallback,
+    milestoneVerifierCoreCode:
+      normalizeCoreCode(payload.executionConfig?.milestoneVerifierCoreCode) ?? fallback
+  }
+}
+
+export function withDraftExecutionConfig(
+  payload: TaskLaunchDraftPayload,
+  fallbackCoreCode: SupportedCoreCode
+): TaskLaunchDraftPayload {
+  return {
+    ...payload,
+    executionConfig: resolveDraftExecutionConfig(payload, fallbackCoreCode)
+  }
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -260,6 +289,7 @@ export function createTaskLaunchDraftPayload(input: {
   sourceMessageId: string
   proposed: ProposedTaskDraft
   workspacePath: string
+  coreCode: SupportedCoreCode
   sourceAttachments?: import('../types').MessageAttachment[]
 }): TaskLaunchDraftPayload {
   const requirementsMarkdown = buildDraftRequirementsContract({
@@ -308,6 +338,10 @@ export function createTaskLaunchDraftPayload(input: {
       abilities: input.proposed.abilities,
       references,
       sourceAttachments,
+      executionConfig: resolveDraftExecutionConfig(
+        { abilities: input.proposed.abilities },
+        input.coreCode
+      ),
       revision: 1
     },
     input.workspacePath

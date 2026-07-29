@@ -13,6 +13,7 @@ import {
   processHostEnvironmentSource,
   type HostEnvironmentSnapshot
 } from '../host-environment'
+import { getShellChildEnvironment } from '../shell-child-environment'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -54,7 +55,6 @@ function applyWindowsSandboxSystemEnv(
   runtimeRoot: string,
   hostEnvironment: HostEnvironmentSnapshot
 ): void {
-  env.ELECTRON_RUN_AS_NODE = '1'
   applyWindowsCrashReporterEnv(env)
   if (!env.USERPROFILE) env.USERPROFILE = runtimeRoot
   if (!env.APPDATA) env.APPDATA = join(runtimeRoot, 'AppData', 'Roaming')
@@ -87,6 +87,7 @@ export function buildSandboxEnv(input: {
   const env: Record<string, string> = {
     PATH: host.PATH ?? '',
     LANG: host.LANG ?? 'C.UTF-8',
+    ...getShellChildEnvironment(),
     ...buildSandboxAuthPassthrough(),
     ...providerEnv
   }
@@ -104,8 +105,6 @@ export function buildSandboxEnv(input: {
 
   if (process.platform === 'win32') {
     applyWindowsSandboxSystemEnv(env, input.runtimeRoot, processHostEnvironmentSource.snapshot())
-  } else {
-    env.ELECTRON_RUN_AS_NODE = '1'
   }
 
   if (input.authMode === 'host-identity') {

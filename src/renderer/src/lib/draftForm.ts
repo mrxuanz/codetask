@@ -55,6 +55,11 @@ export interface TaskLaunchDraftPayload {
     kind: 'image' | 'file'
     assetUrl: string
   }>
+  executionConfig?: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  }
   revision?: number
 }
 

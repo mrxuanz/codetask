@@ -1,4 +1,4 @@
-import type { SavedJobPlan } from './plan'
+import type { JobExecutionProfile, SavedJobPlan } from './plan'
 import type { JobReferenceManifest } from '../job-references'
 import type { ThreadJobAbilityDto } from './jobs'
 
@@ -10,5 +10,6 @@ export interface JobSnapshot {
   workspaceRoot: string
   referenceManifest: JobReferenceManifest
   executionPlan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   abilities: ThreadJobAbilityDto[]
 }

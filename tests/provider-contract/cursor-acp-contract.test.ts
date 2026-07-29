@@ -164,7 +164,7 @@ test('buildCursorTurnPlan: conversation/planner run directly with scoped MCP', (
   }
 })
 
-test('buildCursorTurnPlan: task-worker uses outer sandbox full-access CLI and key', () => {
+test('buildCursorTurnPlan: task-worker uses outer sandbox without control env', () => {
   const plan = buildCursorTurnPlan(
     { ...baseInput('task-worker'), idempotencyKey: 'logical-task-key' },
     { outerSandbox: true }
@@ -174,7 +174,7 @@ test('buildCursorTurnPlan: task-worker uses outer sandbox full-access CLI and ke
   assert.ok(plan.cliArgs.includes('disabled'))
   assert.deepEqual(plan.cliArgs.slice(-3), ['--workspace', '/workspace', 'acp'])
   assert.ok(plan.cliArgs.includes('--approve-mcps'))
-  assert.equal(plan.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
+  assert.equal('CODETASK_TASK_IDEMPOTENCY_KEY' in plan.env, false)
 })
 
 test('Cursor ACP loads sessions only through the advertised public capability and pins cwd', async () => {

@@ -18,6 +18,7 @@ import {
 } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from '../legacy-control-plane/types'
 import type { SavedJobPlan } from '../planner/plan-types'
+import type { JobExecutionProfile } from '@shared/contracts/plan'
 import { defaultTaskProgress } from '../planner/save-plan'
 import { mapJob } from '../legacy-control-plane/repository'
 import { AppError } from '../error'
@@ -26,6 +27,7 @@ import {
   assertConfirmRevisionMatches,
   buildJobSnapshot,
   captureConfirmRevisionExpectations,
+  parseSessionExecutionProfile,
   parseSessionManifest,
   validateLaunchPreconditions
 } from './launch'
@@ -45,6 +47,7 @@ export type DesignSessionRowPatch = Partial<{
   phase: string
   planRevision: number
   plan: SavedJobPlan | null
+  executionProfile: JobExecutionProfile | null
   planProgress: PlanProgressDto
   taskProgress: TaskProgressDto
   lastError: TurnErrorDto | string | null
@@ -122,6 +125,7 @@ export async function updateDesignSessionRow(
   const now = nowSec()
   const {
     plan,
+    executionProfile,
     planProgress,
     taskProgress,
     lastError,
@@ -130,6 +134,9 @@ export async function updateDesignSessionRow(
   } = patch
 
   const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
+  if (executionProfile !== undefined) {
+    dbPatch.executionProfileJson = executionProfile ? JSON.stringify(executionProfile) : null
+  }
   if (lastError !== undefined) {
     dbPatch.lastError = coercePersistedTurnError(lastError)
   }
@@ -205,6 +212,7 @@ export async function updateDesignSessionRowFenced(
     const now = nowSec()
     const {
       plan,
+      executionProfile,
       planProgress,
       taskProgress,
       lastError,
@@ -213,6 +221,9 @@ export async function updateDesignSessionRowFenced(
     } = patch
 
     const dbPatch: Record<string, unknown> = { ...rowPatch, updatedAt: now }
+    if (executionProfile !== undefined) {
+      dbPatch.executionProfileJson = executionProfile ? JSON.stringify(executionProfile) : null
+    }
     if (lastError !== undefined) {
       dbPatch.lastError = coercePersistedTurnError(lastError)
     }
@@ -514,6 +525,7 @@ export async function launchJobFromDesignSession(
       const currentPlan = loadJobPlanInTx(db, designSessionId)
       const currentAbilities = loadJobAbilitiesInTx(db, designSessionId)
       const currentManifest = parseSessionManifest(current)
+      const currentExecutionProfile = parseSessionExecutionProfile(current)
 
       validateLaunchPreconditions({
         session: current,
@@ -524,6 +536,7 @@ export async function launchJobFromDesignSession(
       const currentSnapshot = buildJobSnapshot({
         session: current,
         plan: currentPlan!,
+        executionProfile: currentExecutionProfile!,
         abilities: currentAbilities,
         manifest: stagedAssets.manifest
       })

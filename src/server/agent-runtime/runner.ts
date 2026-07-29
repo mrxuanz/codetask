@@ -240,7 +240,7 @@ async function* streamAgentTurnOnce(
   if (capabilityProfileRequiresOuterSandbox(input.capabilityProfile) && !useFakeInProcess) {
     if (!isOuterSandboxEnabled()) {
       throw new SandboxError(
-        `${input.role} must run inside the OS outer sandbox via the Agent SDK; CODETASK_DISABLE_OUTER_SANDBOX=1 is not allowed`,
+        `${input.role} must run inside the OS outer sandbox via the Agent SDK; this policy cannot be disabled at runtime`,
         'sandbox.required'
       )
     }
@@ -276,10 +276,10 @@ async function* streamAgentTurnOnce(
     })
     try {
       yield* withSandboxLeaseRefresh(sandboxStream, {
-        workloadRunId,
-        workspaceLease,
+        ...(workloadRunId !== undefined ? { workloadRunId } : {}),
+        ...(workspaceLease !== undefined ? { workspaceLease } : {}),
         controller: sandboxAbort,
-        externalSignal: input.signal
+        ...(input.signal !== undefined ? { externalSignal: input.signal } : {})
       })
     } finally {
       input.signal?.removeEventListener('abort', abortSandbox)

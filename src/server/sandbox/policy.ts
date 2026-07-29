@@ -1,5 +1,5 @@
 import { resolve } from 'path'
-import type { AgentRole, AnySandboxPolicy, SandboxPolicyV2 } from './types'
+import type { AgentRole, SandboxPolicy } from './types'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
 
@@ -19,115 +19,28 @@ function mergeUniqueRoots(existing: string[], extra: string[]): string[] {
   return merged
 }
 
-function isSandboxPolicyV2(policy: AnySandboxPolicy): policy is SandboxPolicyV2 {
-  return policy.version === 2
-}
-
-export function policyForRole(input: {
-  role: AgentRole
-  workspaceRoot: string
-  runtimeRoot: string
-  verifierOutputRoot?: string
-  workspaceAccess?: WorkspaceAccessMode
-}): SandboxPolicyV2 {
-  const workspaceRoot = canonicalizePath(input.workspaceRoot)
-  const runtimeRoot = canonicalizePath(input.runtimeRoot)
-
-  const allowedReadRoots = [workspaceRoot, runtimeRoot]
-  const allowedWriteRoots = [runtimeRoot]
-
-  // Task workers write the checkout under their execution lease. Ordinary conversation turns may
-  // also write it only when preflight persisted exclusive-write and installed a matching lease
-  // context. Draft/planner turns remain live-read.
-  if (input.role === 'task-worker' || input.workspaceAccess === 'exclusive-write') {
-    allowedWriteRoots.push(workspaceRoot)
-  }
-
-  if (
-    (input.role === 'milestone-verifier' || input.role === 'slice-verifier') &&
-    input.verifierOutputRoot
-  ) {
-    allowedWriteRoots.push(resolve(input.verifierOutputRoot))
-  }
-
-  const base: SandboxPolicyV2 = {
-    version: 2,
-    role: input.role,
-    cwd: workspaceRoot,
-    runtimeRoot,
-    filesystem: {
-      defaultAccess: 'none',
-      allowedReadRoots,
-      allowedWriteRoots,
-      protectedNames: [...PROTECTED_NAMES],
-      allowSystemRuntime: true
-    },
-    // Agent providers need outbound HTTPS (LLM APIs). OpenCode also binds a
-    // local 127.0.0.1 serve port; Linux restricted seccomp denies bind/listen
-    // (listen EPERM). mode "none"/"restricted" collapses to Restricted in the
-    // native adapter and ignores allowLoopback on Linux.
-    network: {
-      mode: 'full',
-      allowLoopback: true,
-      allowUnixSockets: []
-    },
-    process: {
-      isolateFromHost: true,
-      allowOwnDescendantSignals: true,
-      denyPtrace: true
-    }
-  }
-
-  return compileSandboxPolicy(base) as SandboxPolicyV2
-}
-
 export function applyProviderWriteRoots(
-  policy: AnySandboxPolicy,
+  policy: SandboxPolicy,
   writeRoots: string[] | undefined
-): AnySandboxPolicy {
+): SandboxPolicy {
   if (!writeRoots?.length) return policy
 
-  if (isSandboxPolicyV2(policy)) {
-    const merged = mergeUniqueRoots(policy.filesystem.allowedWriteRoots, writeRoots)
-    if (merged.length === policy.filesystem.allowedWriteRoots.length) return policy
-    return compileSandboxPolicy({
-      ...policy,
-      filesystem: {
-        ...policy.filesystem,
-        allowedWriteRoots: merged
-      }
-    })
-  }
-
-  const existingWrite = new Set(
-    policy.filesystem.rules
-      .filter((rule) => rule.access === 'write')
-      .map((rule) => rule.path.toLowerCase())
-  )
-
-  const extraRules = writeRoots
-    .map((root) => root.trim())
-    .filter((trimmed) => trimmed && !existingWrite.has(trimmed.toLowerCase()))
-    .map((path) => ({ path, access: 'write' as const }))
-
-  if (extraRules.length === 0) return policy
-
+  const merged = mergeUniqueRoots(policy.filesystem.allowedWriteRoots, writeRoots)
+  if (merged.length === policy.filesystem.allowedWriteRoots.length) return policy
   return compileSandboxPolicy({
     ...policy,
     filesystem: {
       ...policy.filesystem,
-      rules: [...policy.filesystem.rules, ...extraRules]
+      allowedWriteRoots: merged
     }
   })
 }
 
 export function applyProviderReadRoots(
-  policy: AnySandboxPolicy,
+  policy: SandboxPolicy,
   readRoots: string[] | undefined
-): AnySandboxPolicy {
+): SandboxPolicy {
   if (!readRoots?.length) return policy
-
-  if (!isSandboxPolicyV2(policy)) return policy
 
   const merged = mergeUniqueRoots(policy.filesystem.allowedReadRoots, readRoots)
   if (merged.length === policy.filesystem.allowedReadRoots.length) return policy
@@ -141,42 +54,15 @@ export function applyProviderReadRoots(
   })
 }
 
-export function collectPolicyWriteRoots(policy: AnySandboxPolicy): string[] {
-  if (isSandboxPolicyV2(policy)) {
-    return [...policy.filesystem.allowedWriteRoots]
-  }
-
-  const seen = new Set<string>()
-  const roots: string[] = []
-
-  const add = (path: string): void => {
-    const trimmed = path.trim()
-    if (!trimmed) return
-    const key = trimmed.toLowerCase()
-    if (seen.has(key)) return
-    seen.add(key)
-    roots.push(trimmed)
-  }
-
-  for (const rule of policy.filesystem.rules) {
-    if (rule.access === 'write') add(rule.path)
-  }
-
-  if (policy.role === 'task-worker') {
-    add(policy.cwd)
-  }
-
-  return roots
+export function collectPolicyWriteRoots(policy: SandboxPolicy): string[] {
+  return [...policy.filesystem.allowedWriteRoots]
 }
 
-export function collectPolicyReadRoots(policy: AnySandboxPolicy): string[] {
-  if (isSandboxPolicyV2(policy)) {
-    return [...policy.filesystem.allowedReadRoots]
-  }
-  return []
+export function collectPolicyReadRoots(policy: SandboxPolicy): string[] {
+  return [...policy.filesystem.allowedReadRoots]
 }
 
-export function policyForRoleV2(input: {
+export function createSandboxPolicy(input: {
   role: AgentRole
   workspaceRoot: string
   runtimeRoot: string
@@ -185,7 +71,7 @@ export function policyForRoleV2(input: {
   providerWriteRoots?: string[]
   attachmentReadRoots?: string[]
   workspaceAccess?: WorkspaceAccessMode
-}): SandboxPolicyV2 {
+}): SandboxPolicy {
   const workspaceRoot = canonicalizePath(input.workspaceRoot)
   const runtimeRoot = canonicalizePath(input.runtimeRoot)
 
@@ -216,7 +102,6 @@ export function policyForRoleV2(input: {
   const uniqueRead = mergeUniqueRoots([], allowedReadRoots)
 
   return compileSandboxPolicy({
-    version: 2,
     role: input.role,
     cwd: canonicalizePath(workspaceRoot),
     runtimeRoot: canonicalizePath(runtimeRoot),
@@ -237,11 +122,7 @@ export function policyForRoleV2(input: {
       allowOwnDescendantSignals: true,
       denyPtrace: true
     }
-  }) as SandboxPolicyV2
-}
-
-export function collectPolicyWriteRootsV2(policy: SandboxPolicyV2): string[] {
-  return [...policy.filesystem.allowedWriteRoots]
+  })
 }
 
 export function isTaskRole(role: AgentRole): boolean {

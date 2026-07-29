@@ -493,6 +493,12 @@ export default {
       saving: '保存中…',
       contractSaveFailed: '保存需求合同失败',
       abilitiesCli: '能力 / CLI',
+      executionConfig: '本次执行配置',
+      executionConfigHint: 'Planner 与校验器选择会固化到独立运行配置，后续 Job 按此配置运行。',
+      plannerCli: 'Planner CLI',
+      sliceVerifierCli: '切片校验 CLI',
+      milestoneVerifierCli: '里程碑校验 CLI',
+      executionConfigSaveFailed: '保存本次执行配置失败',
       selectCli: '选择 CLI',
       cliUnavailable: '不可用',
       references: '参考资料',
@@ -551,6 +557,7 @@ export default {
         storage: '数据存储',
         sandbox: '沙箱',
         controlPlane: '控制平面',
+        skills: '业务 Skills',
         mcp: 'MCP',
         prompts: '提示词'
       },
@@ -606,6 +613,27 @@ export default {
         sliceVerifier: '切片校验器',
         milestoneVerifier: '里程碑校验器',
         unavailable: '不可用'
+      },
+      skills: {
+        title: '业务 Skills',
+        description: '维护可复用的业务指令，并把它们绑定到对话、草案、Planner 和校验流程。',
+        hint: '可以新增任意 Skill；Job 开始规划时会把 Planner 与校验 Skill 固化进执行树。',
+        add: '添加 Skill',
+        newSkill: '新业务 Skill',
+        enabled: '启用',
+        id: 'Skill ID（小写字母、数字与连字符）',
+        name: '名称',
+        descriptionLabel: '说明',
+        instructions: '业务指令',
+        workflows: '使用流程',
+        workflow: {
+          conversation: '普通对话',
+          draft: '草案对话',
+          planner: 'Planner',
+          taskWorker: '任务执行',
+          sliceVerifier: '切片校验',
+          milestoneVerifier: '里程碑校验'
+        }
       },
       prompts: {
         title: '提示词策略',

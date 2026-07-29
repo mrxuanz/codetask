@@ -53,7 +53,7 @@ function samplePlan(confirmed = true): SavedJobPlan {
   }
 }
 
-test('migration 019 adds design plan artifact columns', () => {
+test('current thread_jobs schema includes plan artifacts and a separate execution profile', () => {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   applyMigrations(sqlite)
@@ -64,11 +64,13 @@ test('migration 019 adds design plan artifact columns', () => {
   assert.ok(names.has('plan_artifact_id'))
   assert.ok(names.has('plan_summary_json'))
   assert.ok(names.has('plan_artifact_path'))
+  assert.ok(names.has('execution_profile_json'))
   sqlite.close()
 })
 
 test('clearPlanConfirmedFlags resets all confirmed fields', () => {
-  const cleared = clearPlanConfirmedFlags(samplePlan(true))
+  const plan = samplePlan(true)
+  const cleared = clearPlanConfirmedFlags(plan)
   assert.equal(cleared.milestones[0]?.confirmed, undefined)
   assert.equal(cleared.milestones[0]?.slices[0]?.confirmed, undefined)
   assert.equal(cleared.milestones[0]?.slices[0]?.tasks[0]?.confirmed, undefined)

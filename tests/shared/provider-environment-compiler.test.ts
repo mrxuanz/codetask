@@ -66,7 +66,7 @@ test('EnvironmentCompiler never mutates the host snapshot object', () => {
     taskOverlay: { CODETASK_TASK_IDEMPOTENCY_KEY: 'task-1' }
   })
   assert.deepEqual({ ...host }, before)
-  assert.equal(env.OPENAI_API_KEY, 'overlay-key')
+  assert.equal(env.OPENAI_API_KEY, undefined)
   assert.equal(env.CODETASK_TASK_IDEMPOTENCY_KEY, 'task-1')
   assert.equal('CODETASK_RUNTIME_ROOT' in env, false)
 })
@@ -80,8 +80,27 @@ test('EnvironmentCompiler rejects non-owned provider overlay keys', () => {
       NOT_OWNED_KEY: 'should-not-appear'
     }
   })
-  assert.equal(env.OPENAI_API_KEY, 'overlay')
+  assert.equal(env.OPENAI_API_KEY, undefined)
   assert.equal('NOT_OWNED_KEY' in env, false)
+})
+
+test('EnvironmentCompiler accepts typed provider configuration without accepting env credentials', () => {
+  const env = defaultEnvironmentCompiler.compile({
+    provider: 'claude-code',
+    hostEnvironment: freezeHost({
+      ANTHROPIC_MODEL: 'host-model',
+      ANTHROPIC_BASE_URL: 'https://host.invalid',
+      ANTHROPIC_API_KEY: 'host-key'
+    }),
+    providerOverlay: {
+      ANTHROPIC_MODEL: 'selected-model',
+      ANTHROPIC_BASE_URL: 'https://provider.example',
+      ANTHROPIC_API_KEY: 'overlay-key'
+    }
+  })
+  assert.equal(env.ANTHROPIC_MODEL, 'selected-model')
+  assert.equal(env.ANTHROPIC_BASE_URL, 'https://provider.example')
+  assert.equal(env.ANTHROPIC_API_KEY, undefined)
 })
 
 test('EnvironmentCompiler does not invent CODEX_HOME when absent from host', () => {

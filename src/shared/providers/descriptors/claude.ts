@@ -18,7 +18,7 @@ export const CLAUDE_DESCRIPTOR = Object.freeze({
   ],
   mcpRootKey: 'mcpServers',
   capabilities: {
-    authMode: 'runtime-copy',
+    authMode: 'host-identity',
     protocol: 'sdk',
     supportedProfiles: [
       'chat-write',

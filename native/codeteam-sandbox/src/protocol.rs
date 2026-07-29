@@ -1,21 +1,7 @@
 ﻿use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct FileRule {
-    pub path: String,
-    pub access: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FilesystemPolicyV1 {
-    pub default: String,
-    pub rules: Vec<FileRule>,
-    pub protected_names: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FilesystemPolicyV2 {
+pub struct FilesystemPolicy {
     pub default_access: String,
     pub allowed_read_roots: Vec<String>,
     pub allowed_write_roots: Vec<String>,
@@ -24,16 +10,7 @@ pub struct FilesystemPolicyV2 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkPolicyV1 {
-    pub ip: String,
-    pub inbound: bool,
-    pub allow_loopback: bool,
-    #[serde(default)]
-    pub unix_sockets: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkPolicyV2 {
+pub struct NetworkPolicy {
     pub mode: String,
     pub allow_loopback: bool,
     #[serde(default)]
@@ -48,54 +25,27 @@ pub struct ProcessPolicy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SandboxPolicyV1 {
+pub struct SandboxPolicy {
     pub version: u32,
     pub role: String,
     pub cwd: String,
     pub runtime_root: String,
-    pub filesystem: FilesystemPolicyV1,
-    pub network: NetworkPolicyV1,
+    pub filesystem: FilesystemPolicy,
+    pub network: NetworkPolicy,
     pub process: ProcessPolicy,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SandboxPolicyV2 {
-    pub version: u32,
-    pub role: String,
-    pub cwd: String,
-    pub runtime_root: String,
-    pub filesystem: FilesystemPolicyV2,
-    pub network: NetworkPolicyV2,
-    pub process: ProcessPolicy,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SandboxPolicy {
-    V1(SandboxPolicyV1),
-    V2(SandboxPolicyV2),
 }
 
 impl SandboxPolicy {
     pub fn version(&self) -> u32 {
-        match self {
-            SandboxPolicy::V1(p) => p.version,
-            SandboxPolicy::V2(p) => p.version,
-        }
+        self.version
     }
 
     pub fn cwd(&self) -> &str {
-        match self {
-            SandboxPolicy::V1(p) => &p.cwd,
-            SandboxPolicy::V2(p) => &p.cwd,
-        }
+        &self.cwd
     }
 
     pub fn runtime_root(&self) -> &str {
-        match self {
-            SandboxPolicy::V1(p) => &p.runtime_root,
-            SandboxPolicy::V2(p) => &p.runtime_root,
-        }
+        &self.runtime_root
     }
 }
 
@@ -126,11 +76,10 @@ pub fn parse_policy_json(json: &str) -> anyhow::Result<SandboxPolicy> {
         .get("version")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| anyhow::anyhow!("policy missing version"))?;
-    match version {
-        1 => Ok(SandboxPolicy::V1(serde_json::from_value(value)?)),
-        2 => Ok(SandboxPolicy::V2(serde_json::from_value(value)?)),
-        other => anyhow::bail!("unsupported policy version {other}"),
+    if version != 2 {
+        anyhow::bail!("unsupported policy version {version}");
     }
+    Ok(serde_json::from_value(value)?)
 }
 
 #[cfg(unix)]
@@ -166,6 +115,51 @@ pub fn write_evidence_line(fd: i32, evidence: &SandboxEvidence) -> anyhow::Resul
     writeln!(file, "{line}")?;
     file.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_policy_json;
+    use serde_json::json;
+
+    fn policy_json(version: u32) -> String {
+        json!({
+            "version": version,
+            "role": "planner",
+            "cwd": "/tmp/workspace",
+            "runtime_root": "/tmp/runtime",
+            "filesystem": {
+                "default_access": "none",
+                "allowed_read_roots": ["/tmp/workspace", "/tmp/runtime"],
+                "allowed_write_roots": ["/tmp/runtime"],
+                "protected_names": [".git"],
+                "allow_system_runtime": true
+            },
+            "network": {
+                "mode": "full",
+                "allow_loopback": true,
+                "allow_unix_sockets": []
+            },
+            "process": {
+                "isolate_from_host": true,
+                "allow_own_descendant_signals": true,
+                "deny_ptrace": true
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn accepts_current_policy_protocol() {
+        let policy = parse_policy_json(&policy_json(2)).expect("current policy should parse");
+        assert_eq!(policy.version(), 2);
+    }
+
+    #[test]
+    fn rejects_removed_v1_policy_protocol() {
+        let error = parse_policy_json(&policy_json(1)).expect_err("V1 must be rejected");
+        assert!(error.to_string().contains("unsupported policy version 1"));
+    }
 }
 
 #[cfg(windows)]

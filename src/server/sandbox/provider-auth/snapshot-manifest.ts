@@ -46,8 +46,8 @@ function manifestPath(runtimeRoot: string): string {
 }
 
 /**
- * Durably records exactly which files were copied from a host Provider profile. Startup cleanup
- * only trusts paths in this manifest and never searches workspaces by credential-like filenames.
+ * Durably records exactly which runtime auth references or sanitized projections were created.
+ * Startup cleanup trusts only these paths and never scans workspaces by credential-like names.
  */
 export function writeCredentialSnapshotManifest(
   runtimeRoot: string,
@@ -61,7 +61,8 @@ export function writeCredentialSnapshotManifest(
     const absolute = resolve(path)
     if (!existsSync(absolute) || !isPathInside(root, absolute)) continue
     try {
-      if (!lstatSync(absolute).isFile()) continue
+      const stat = lstatSync(absolute)
+      if (!stat.isFile() && !stat.isSymbolicLink()) continue
       files.push({
         path: relative(root, absolute).split(sep).join('/'),
         sha256: sha256File(absolute)
@@ -128,11 +129,13 @@ export function scrubCredentialSnapshotManifest(
       continue
     }
     try {
-      if (existsSync(target) && lstatSync(target).isFile()) {
+      const stat = lstatSync(target)
+      if (stat.isFile() || stat.isSymbolicLink()) {
         unlinkSync(target)
         result.files += 1
       }
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
       // Keep the manifest so the next startup can retry the scrub.
       return result
     }

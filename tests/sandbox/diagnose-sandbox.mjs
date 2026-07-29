@@ -19,23 +19,21 @@ function log(section, message, extra) {
 
 function serializeSandboxPolicy(policy) {
   return JSON.stringify({
-    version: policy.version,
+    version: 2,
     role: policy.role,
     cwd: policy.cwd,
     runtime_root: policy.runtimeRoot,
     filesystem: {
-      default: policy.filesystem.default,
-      rules: policy.filesystem.rules.map((rule) => ({
-        path: rule.path,
-        access: rule.access
-      })),
-      protected_names: policy.filesystem.protectedNames
+      default_access: policy.filesystem.defaultAccess,
+      allowed_read_roots: policy.filesystem.allowedReadRoots,
+      allowed_write_roots: policy.filesystem.allowedWriteRoots,
+      protected_names: policy.filesystem.protectedNames,
+      allow_system_runtime: policy.filesystem.allowSystemRuntime
     },
     network: {
-      ip: policy.network.ip,
-      inbound: policy.network.inbound,
+      mode: policy.network.mode,
       allow_loopback: policy.network.allowLoopback,
-      unix_sockets: policy.network.unixSockets
+      allow_unix_sockets: policy.network.allowUnixSockets
     },
     process: {
       isolate_from_host: policy.process.isolateFromHost,
@@ -45,22 +43,23 @@ function serializeSandboxPolicy(policy) {
   })
 }
 
-function policyForRole(role, workspaceRoot, runtimeRoot) {
-  const rules = [{ path: runtimeRoot, access: 'write' }]
-  if (role === 'task-worker') {
-    rules.push({ path: workspaceRoot, access: 'write' })
-  }
+function sandboxPolicyForRole(role, workspaceRoot, runtimeRoot) {
   return {
-    version: 1,
     role,
     cwd: workspaceRoot,
     runtimeRoot,
     filesystem: {
-      default: 'read',
-      rules,
-      protectedNames: ['.agents', '.codex', '.codeteam']
+      defaultAccess: 'none',
+      allowedReadRoots: [workspaceRoot, runtimeRoot],
+      allowedWriteRoots: role === 'task-worker' ? [runtimeRoot, workspaceRoot] : [runtimeRoot],
+      protectedNames: ['.agents', '.codex', '.codeteam', '.git'],
+      allowSystemRuntime: true
     },
-    network: { ip: 'full', inbound: false, allowLoopback: true, unixSockets: [] },
+    network: {
+      mode: 'full',
+      allowLoopback: true,
+      allowUnixSockets: []
+    },
     process: {
       isolateFromHost: true,
       allowOwnDescendantSignals: true,
@@ -308,7 +307,7 @@ async function main() {
   const runtime = join(base, 'runtime')
   ensureRuntimeDirs(runtime)
 
-  const plannerPolicy = policyForRole('planner', workspace, runtime)
+  const plannerPolicy = sandboxPolicyForRole('planner', workspace, runtime)
   const workerScript = join(process.cwd(), 'tests/sandbox/diagnose-worker.mjs')
   const claudeExe = resolveClaudeExe()
   log('host', `claudeExe=${claudeExe ?? 'NOT FOUND'}`)

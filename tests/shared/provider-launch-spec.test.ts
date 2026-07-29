@@ -72,7 +72,7 @@ test('LaunchSummary envVars include present flags', () => {
     const openAi = spec.redactedSummary.envVars.find((v) => v.name === 'OPENAI_API_KEY')
     const codexKey = spec.redactedSummary.envVars.find((v) => v.name === 'CODEX_API_KEY')
     assert.ok(openAi)
-    assert.equal(openAi.present, true)
+    assert.equal(openAi.present, false)
     assert.ok(codexKey)
     assert.equal(codexKey.present, false)
   })

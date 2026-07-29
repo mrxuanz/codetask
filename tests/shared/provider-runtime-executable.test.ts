@@ -41,7 +41,7 @@ function preparedAuth(
   authMaterialPresent: boolean
 ): ProviderAuthPrepared {
   return {
-    mode: 'runtime-copy',
+    mode: 'runtime-reference',
     runtimeRoot: '/runtime',
     envPatch: { HOME: '/runtime' },
     readRoots: [],
@@ -49,7 +49,7 @@ function preparedAuth(
     cleanupPlan: () => undefined,
     diagnostics: {
       provider,
-      mode: 'runtime-copy',
+      mode: 'runtime-reference',
       authMaterialPresent,
       warnings: []
     },
@@ -218,7 +218,10 @@ test('Codex config alone is not misclassified as authentication material', () =>
       hostEnvironment: Object.freeze({ HOME: home, PATH: process.env.PATH ?? '' })
     })
     assert.equal(prepared.diagnostics.authMaterialPresent, false)
-    assert.match(prepared.diagnostics.warnings.join('\n'), /config snapshotted.*no auth material/i)
+    assert.match(
+      prepared.diagnostics.warnings.join('\n'),
+      /config was generated.*no host login/i
+    )
     prepared.cleanupPlan()
   } finally {
     rmSync(home, { recursive: true, force: true })

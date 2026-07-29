@@ -507,6 +507,13 @@ export default {
       saving: 'Saving…',
       contractSaveFailed: 'Failed to save requirements contract',
       abilitiesCli: 'Abilities / CLI',
+      executionConfig: 'Run configuration',
+      executionConfigHint:
+        'Planner and verifier choices are captured in a separate run profile used by the Job.',
+      plannerCli: 'Planner CLI',
+      sliceVerifierCli: 'Slice verifier CLI',
+      milestoneVerifierCli: 'Milestone verifier CLI',
+      executionConfigSaveFailed: 'Failed to save run configuration',
       selectCli: 'Select CLI',
       cliUnavailable: 'unavailable',
       references: 'References',
@@ -570,6 +577,7 @@ export default {
         storage: 'Data Storage',
         sandbox: 'Sandbox',
         controlPlane: 'Control Plane',
+        skills: 'Business Skills',
         mcp: 'MCP',
         prompts: 'Prompts'
       },
@@ -629,6 +637,28 @@ export default {
         sliceVerifier: 'Slice Verifier',
         milestoneVerifier: 'Milestone Verifier',
         unavailable: 'unavailable'
+      },
+      skills: {
+        title: 'Business Skills',
+        description:
+          'Maintain reusable business instructions and assign them to conversation, draft, Planner, and verification workflows.',
+        hint: 'Add any Skill you need. Planner and verifier Skills are captured in the execution tree when planning starts.',
+        add: 'Add Skill',
+        newSkill: 'New business Skill',
+        enabled: 'Enabled',
+        id: 'Skill ID (lowercase, digits, hyphens)',
+        name: 'Name',
+        descriptionLabel: 'Description',
+        instructions: 'Business instructions',
+        workflows: 'Assigned workflows',
+        workflow: {
+          conversation: 'Conversation',
+          draft: 'Draft conversation',
+          planner: 'Planner',
+          taskWorker: 'Task worker',
+          sliceVerifier: 'Slice verifier',
+          milestoneVerifier: 'Milestone verifier'
+        }
       },
       prompts: {
         title: 'Prompt Policies',

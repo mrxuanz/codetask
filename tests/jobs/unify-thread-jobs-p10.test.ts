@@ -10,6 +10,7 @@ import type { ThreadJob } from '../../src/server/db/schema'
 import type { SavedJobPlan } from '../../src/shared/contracts/plan'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 import { AppError } from '../../src/server/error'
+import { TEST_JOB_EXECUTION_PROFILE_JSON } from '../helpers/execution-profile'
 
 test('isPlanningJobStatus only matches planning and plan_editing', () => {
   assert.equal(isPlanningJobStatus('planning'), true)
@@ -73,6 +74,7 @@ function sampleJob(overrides: Partial<ThreadJob> = {}): ThreadJob {
     taskCurrentTaskId: null,
     taskMessage: null,
     taskMetaJson: '{}',
+    executionProfileJson: TEST_JOB_EXECUTION_PROFILE_JSON,
     referenceManifestJson: null,
     manifestRevision: 1,
     corpusRevision: 1,

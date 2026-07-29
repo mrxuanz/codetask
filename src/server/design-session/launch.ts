@@ -6,12 +6,14 @@ import {
   type JobReferenceManifest
 } from '../../shared/job-references'
 import type { JobSnapshot } from '../../shared/contracts/job-snapshot'
+import type { JobExecutionProfile } from '../../shared/contracts/plan'
 import type { ThreadJobAbilityDto } from '../legacy-control-plane/types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import type { ThreadJob } from '../db/schema'
 import { AppError } from '../error'
 import { ReferenceFileMissingError } from '../legacy-control-plane/reference-paths'
 import { referenceManifestStaleReason } from '../reference-corpus/corpus-sync'
+import { parseJobExecutionProfileJson } from '../execution-profile'
 
 export function assertManifestResolvedPathsReadable(manifest: JobReferenceManifest): void {
   for (const ref of manifest.references) {
@@ -31,6 +33,7 @@ export function assertManifestResolvedPathsReadable(manifest: JobReferenceManife
 export function buildJobSnapshot(input: {
   session: ThreadJob
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   abilities: ThreadJobAbilityDto[]
   manifest: JobReferenceManifest
 }): JobSnapshot {
@@ -42,6 +45,7 @@ export function buildJobSnapshot(input: {
     workspaceRoot: input.session.workspacePath,
     referenceManifest: input.manifest,
     executionPlan: input.plan,
+    executionProfile: input.executionProfile,
     abilities: input.abilities
   }
 }
@@ -75,6 +79,12 @@ export function validateLaunchPreconditions(input: {
   if (!plan?.tasks?.length) {
     throw AppError.badRequest('Execution plan is empty', 'job.plan_empty')
   }
+  if (!parseSessionExecutionProfile(session)) {
+    throw AppError.badRequest(
+      'Execution profile is missing or invalid',
+      'job.execution_profile_invalid'
+    )
+  }
   const coverageErrors = validateReferenceCoverage(
     collectFlatPlanReferenceIds(plan.tasks),
     manifest
@@ -90,6 +100,10 @@ export function validateLaunchPreconditions(input: {
 
 export function parseSessionManifest(session: ThreadJob): JobReferenceManifest | null {
   return parseJobReferenceManifest(session.referenceManifestJson)
+}
+
+export function parseSessionExecutionProfile(session: ThreadJob): JobExecutionProfile | null {
+  return parseJobExecutionProfileJson(session.executionProfileJson)
 }
 
 export type ConfirmRevisionExpectations = {

@@ -4,10 +4,7 @@ import { AppError } from '../error'
 import { getDb } from '../db'
 import { loadJobAbilities, loadJobPlan } from '../db/job-plan'
 import { designRuns, threadJobs } from '../db/schema'
-import {
-  getDesignSessionRow,
-  loadDesignReferenceManifest
-} from '../design-session/service'
+import { getDesignSessionRow, loadDesignReferenceManifest } from '../design-session/service'
 import { scheduleDesignSessionPlanRegeneration } from '../design-session/planner'
 import { emitJobEvent, getThreadJob, updateJobRow } from '../legacy-control-plane/service'
 import type { PlannerRegisteredPlan } from '../planner/plan-types'
@@ -369,7 +366,10 @@ export async function requestPlanRegeneration(
     input.designSessionId,
     payload,
     project.workspaceRoot,
-    row.coreCode,
+    (await import('../conversation/draft/normalize')).resolveDraftExecutionConfig(
+      payload,
+      row.coreCode as import('../conversation/cores').SupportedCoreCode
+    ).plannerCoreCode,
     {
       instruction,
       planRevisionBefore: session.planRevision

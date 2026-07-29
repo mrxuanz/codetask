@@ -99,7 +99,7 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
         prompt: 'hello'
       },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )) {
     events.push(`consumer:${chunk.type}`)
@@ -131,7 +131,7 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
           prompt: 'blocked'
         },
         installation,
-        authMode: 'runtime-copy'
+        authMode: 'runtime-reference'
       })
     )) {
       // no-op

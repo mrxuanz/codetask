@@ -11,6 +11,7 @@ import type {
   ThreadJobDto
 } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
+import type { JobExecutionProfile } from '@shared/contracts/plan'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import {
   ensureJobRuntimeRoot,
@@ -77,6 +78,7 @@ import {
 } from './mcp/task-session'
 import { buildTaskWorkerMcpUrl } from './mcp/task-url'
 import { buildTaskWorkerUserMessage, TASK_EXECUTION_SYSTEM_PROMPT } from './prompts'
+import { appendBusinessSkillSnapshot } from '../settings/business-skills'
 import { emitJobEvent, getUserJob, updateJobRow, updateJobRowForSnapshot } from './service'
 import {
   isExecutionInfraNotReadyError,
@@ -1193,6 +1195,7 @@ async function runSliceVerificationResilient(input: {
   threadId: string
   workspacePath: string
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   slice: GateSliceState
   taskItems: TaskProgressItemDto[]
   taskProgress: TaskProgressDto
@@ -1209,6 +1212,7 @@ async function runSliceVerificationResilient(input: {
       threadId: input.threadId,
       workspacePath: input.workspacePath,
       plan: input.plan,
+      executionProfile: input.executionProfile,
       slice: input.slice,
       taskItems: input.taskItems,
       signal: input.signal
@@ -1265,6 +1269,7 @@ async function runMilestoneVerificationResilient(input: {
   threadId: string
   workspacePath: string
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   milestone: GateMilestoneState
   slices: GateSliceState[]
   taskItems: TaskProgressItemDto[]
@@ -1283,6 +1288,7 @@ async function runMilestoneVerificationResilient(input: {
       threadId: input.threadId,
       workspacePath: input.workspacePath,
       plan: input.plan,
+      executionProfile: input.executionProfile,
       milestone: input.milestone,
       slices: input.slices,
       taskItems: input.taskItems,
@@ -1520,7 +1526,10 @@ async function executeSingleTask(
         assignedReferencesMarkdown
       }),
       model,
-      systemPrompt: TASK_EXECUTION_SYSTEM_PROMPT,
+      systemPrompt: appendBusinessSkillSnapshot(
+        TASK_EXECUTION_SYSTEM_PROMPT,
+        job.executionProfile!.skills.taskWorker
+      ),
       mcpUrl,
       signal,
       workspaceAccess: 'exclusive-write',
@@ -1733,6 +1742,11 @@ async function initializeExecutionState(
 
   let job = await getUserJob(username, jobId)
   if (!job) return null
+  if (!job.executionProfile) {
+    throw createTurnError('turn.unknown', {
+      detail: 'Job execution profile is missing or invalid'
+    })
+  }
 
   if (job.status === 'paused' || job.status === 'cancelled') return null
 
@@ -1998,6 +2012,7 @@ async function processSliceVerificationStep(ctx: ExecutionLoopMutable): Promise<
     threadId: job.threadId,
     workspacePath: job.workspacePath ?? '',
     plan,
+    executionProfile: job.executionProfile!,
     slice: sliceToVerify,
     taskItems: items,
     taskProgress,
@@ -2298,6 +2313,7 @@ async function processMilestoneVerificationStep(
     threadId: job.threadId,
     workspacePath: job.workspacePath ?? '',
     plan,
+    executionProfile: job.executionProfile!,
     milestone: milestoneToVerify,
     slices: gate.slices,
     taskItems: items,
