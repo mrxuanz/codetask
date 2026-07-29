@@ -67,9 +67,6 @@ export async function startDedicatedServer(options: {
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    CODETASK_BOOTSTRAP_ROOT: bootstrapDir,
-    CODETASK_STATIC_DIR: resolve(options.repoRoot, 'out/renderer'),
-    CODETASK_APP_ROOT: options.repoRoot,
     CODETASK_SANDBOX_READY_MAX_ATTEMPTS: process.env.CODETASK_SANDBOX_READY_MAX_ATTEMPTS ?? '1'
   }
   delete env.DISPLAY
@@ -77,7 +74,17 @@ export async function startDedicatedServer(options: {
 
   const child = spawn(
     process.execPath,
-    [entry, '--host', host, '--port', String(port), '--data-dir', dataDir],
+    [
+      entry,
+      '--host',
+      host,
+      '--port',
+      String(port),
+      '--data-dir',
+      dataDir,
+      '--bootstrap-root',
+      bootstrapDir
+    ],
     {
       cwd: options.repoRoot,
       env,

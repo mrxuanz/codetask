@@ -6,6 +6,7 @@ export interface CliOptions {
   port: number
   smokeTest: boolean
   dataDir?: string
+  bootstrapRoot?: string
 }
 
 const DEFAULT_DESKTOP_PORT = 3000
@@ -41,15 +42,38 @@ export function parseCliArgs(argv: string[] = process.argv): CliOptions {
     throw new Error('Invalid data directory: expected a path after --data-dir')
   }
   const dataDirOption = dataDir ? { dataDir } : {}
+  const rawBootstrapRoot = readArgValue(argv, '--bootstrap-root')
+  const bootstrapRoot = rawBootstrapRoot?.trim()
+  if (argv.includes('--bootstrap-root') && !bootstrapRoot) {
+    throw new Error('Invalid bootstrap root: expected a path after --bootstrap-root')
+  }
+  if (bootstrapRoot?.startsWith('--')) {
+    throw new Error('Invalid bootstrap root: expected a path after --bootstrap-root')
+  }
+  const bootstrapRootOption = bootstrapRoot ? { bootstrapRoot } : {}
 
   if (serve) {
     const host = readArgValue(argv, '--host') ?? (argv.includes('--host') ? '0.0.0.0' : '127.0.0.1')
     const port = readPort(argv, DEFAULT_SERVER_PORT)
-    return { mode: 'server', host, port, smokeTest, ...dataDirOption }
+    return {
+      mode: 'server',
+      host,
+      port,
+      smokeTest,
+      ...dataDirOption,
+      ...bootstrapRootOption
+    }
   }
 
   const port = readPort(argv, DEFAULT_DESKTOP_PORT)
-  return { mode: 'desktop', host: '127.0.0.1', port, smokeTest, ...dataDirOption }
+  return {
+    mode: 'desktop',
+    host: '127.0.0.1',
+    port,
+    smokeTest,
+    ...dataDirOption,
+    ...bootstrapRootOption
+  }
 }
 
 /** Parse the dedicated Node entry point, which is always a server even without `--serve`. */

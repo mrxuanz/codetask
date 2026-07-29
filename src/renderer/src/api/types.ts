@@ -10,7 +10,6 @@ export interface BootstrapData {
 }
 
 export interface AuthData {
-  token: string
   username: string
   expires_at: number
 }

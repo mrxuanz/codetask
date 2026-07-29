@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -23,9 +23,10 @@ function fixture(t: test.TestContext): { root: string; bootstrapRoot: string; ca
   }
 }
 
-test('storage source priority is CLI > env > locator > candidate', (t) => {
+test('storage source priority is CLI > config > locator > candidate', (t) => {
   const f = fixture(t)
   const locatorData = join(f.root, 'locator-data')
+  const configuredData = join(f.root, 'configured-data')
   const marker = writeDataRootMarker(locatorData)
   new StorageLocatorRepository(bootstrapPaths(f.bootstrapRoot)).write(
     createStorageLocator({
@@ -37,20 +38,21 @@ test('storage source priority is CLI > env > locator > candidate', (t) => {
 
   const cli = resolveStorageLocation({
     explicitDataDir: join(f.root, 'cli-data'),
-    envDataDir: join(f.root, 'env-data'),
+    configuredDataDir: configuredData,
     mode: 'desktop',
     bootstrapRoot: f.bootstrapRoot,
     defaultDataDir: f.candidate
   })
   assert.equal(cli.source, 'cli')
 
-  const env = resolveStorageLocation({
-    envDataDir: join(f.root, 'env-data'),
+  const configured = resolveStorageLocation({
+    configuredDataDir: configuredData,
     mode: 'desktop',
     bootstrapRoot: f.bootstrapRoot,
     defaultDataDir: f.candidate
   })
-  assert.equal(env.source, 'env')
+  assert.equal(configured.source, 'config')
+  assert.equal(configured.dataDir, configuredData)
 
   const locator = resolveStorageLocation({
     mode: 'desktop',
@@ -158,7 +160,7 @@ test('headless server first run returns selection_required like desktop', (t) =>
   assert.equal(result.issue, undefined)
 })
 
-test('shared bootstrap adopts a valid legacy desktop locator and secrets', (t) => {
+test('shared bootstrap adopts a valid legacy desktop locator', (t) => {
   const f = fixture(t)
   const sharedBootstrapRoot = join(f.root, 'shared-bootstrap')
   const legacyBootstrapRoot = join(f.root, 'legacy-desktop-bootstrap')
@@ -172,10 +174,6 @@ test('shared bootstrap adopts a valid legacy desktop locator and secrets', (t) =
       installationId: marker.installationId
     })
   )
-  mkdirSync(legacyPaths.secretsDir, { recursive: true })
-  writeFileSync(legacyPaths.authSecretFile, 'legacy-auth-secret', { mode: 0o600 })
-  writeFileSync(legacyPaths.mcpSecretFile, '{"legacy":true}\n', { mode: 0o600 })
-
   const result = resolveStorageLocation({
     mode: 'server',
     bootstrapRoot: sharedBootstrapRoot,
@@ -185,15 +183,12 @@ test('shared bootstrap adopts a valid legacy desktop locator and secrets', (t) =
 
   assert.equal(result.phase, 'ready')
   assert.equal(result.dataDir, dataDir)
-  const sharedPaths = bootstrapPaths(sharedBootstrapRoot)
-  const locator = new StorageLocatorRepository(sharedPaths).read()
+  const locator = new StorageLocatorRepository(bootstrapPaths(sharedBootstrapRoot)).read()
   assert.equal(locator.status, 'valid')
   if (locator.status === 'valid') {
     assert.equal(locator.locator.source, 'migration')
     assert.equal(locator.locator.installationId, marker.installationId)
   }
-  assert.equal(readFileSync(sharedPaths.authSecretFile, 'utf8'), 'legacy-auth-secret')
-  assert.equal(readFileSync(sharedPaths.mcpSecretFile, 'utf8'), '{"legacy":true}\n')
 })
 
 test('conflicting legacy bootstrap locators require deliberate recovery', (t) => {

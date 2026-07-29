@@ -28,7 +28,7 @@ import { isStorageMigrationActive } from '../storage/migration'
 export function createApiRoutes(ctx: AppContext): Hono {
   const api = new Hono()
 
-  api.use('*', requireAuth())
+  api.use('*', requireAuth(ctx.security))
   api.use('*', requestGuard(ctx.security))
   api.use('*', requestTimeout(ctx.config.http.requestTimeoutMs))
   api.use('*', bodySizeLimit())

@@ -84,7 +84,7 @@ function writeSeaEntry(nccEntry, output) {
     throw new Error('server_sea.ncc_native_require_contract_missing')
   }
   const bundled = original.replace(nativeRequire, nativeRequireReplacement)
-  const bootstrap = `'use strict';\nconst { existsSync: __seaExistsSync } = require('node:fs');\nconst { createRequire: __seaCreateRequire } = require('node:module');\nconst { basename: __seaBasename, dirname: __seaDirname, join: __seaJoin, resolve: __seaResolve } = require('node:path');\nconst __seaPackageRoot = __seaDirname(__seaDirname(process.execPath));\nprocess.env.CODETASK_STATIC_DIR ||= __seaJoin(__seaPackageRoot, 'renderer');\nprocess.env.CODETASK_APP_ROOT ||= __seaPackageRoot;\nprocess.env.CODETEAM_SANDBOX_NATIVE ||= __seaJoin(__seaPackageRoot, 'native', 'codeteam-sandbox');\nconst __seaScriptIndex = process.argv.findIndex((value, index) => index > 0 && /\\.[cm]?js$/u.test(value));\nif (__seaScriptIndex > 1) process.argv.splice(1, __seaScriptIndex - 1);\nconst __seaScriptArg = __seaScriptIndex > 0 && process.argv[1] ? __seaResolve(process.argv[1]) : null;\nif (__seaScriptArg && __seaExistsSync(__seaScriptArg)) {\n  const __seaName = __seaBasename(__seaScriptArg);\n  const __seaWorkerNames = new Set(${JSON.stringify(WORKER_NAMES)});\n  const __seaTarget = __seaWorkerNames.has(__seaName)\n    ? __seaJoin(__seaPackageRoot, 'sandbox', 'worker-runtime.cjs')\n    : __seaScriptArg;\n  __seaCreateRequire(__seaTarget)(__seaTarget);\n} else {\n`
+  const bootstrap = `'use strict';\nconst { existsSync: __seaExistsSync } = require('node:fs');\nconst { createRequire: __seaCreateRequire } = require('node:module');\nconst { basename: __seaBasename, dirname: __seaDirname, join: __seaJoin, resolve: __seaResolve } = require('node:path');\nconst __seaPackageRoot = __seaDirname(__seaDirname(process.execPath));\nprocess.env.CODETEAM_SANDBOX_NATIVE ||= __seaJoin(__seaPackageRoot, 'native', 'codeteam-sandbox');\nconst __seaScriptIndex = process.argv.findIndex((value, index) => index > 0 && /\\.[cm]?js$/u.test(value));\nif (__seaScriptIndex > 1) process.argv.splice(1, __seaScriptIndex - 1);\nconst __seaScriptArg = __seaScriptIndex > 0 && process.argv[1] ? __seaResolve(process.argv[1]) : null;\nif (__seaScriptArg && __seaExistsSync(__seaScriptArg)) {\n  const __seaName = __seaBasename(__seaScriptArg);\n  const __seaWorkerNames = new Set(${JSON.stringify(WORKER_NAMES)});\n  const __seaTarget = __seaWorkerNames.has(__seaName)\n    ? __seaJoin(__seaPackageRoot, 'sandbox', 'worker-runtime.cjs')\n    : __seaScriptArg;\n  __seaCreateRequire(__seaTarget)(__seaTarget);\n} else {\n`
   writeFileSync(output, `${bootstrap}${bundled}\n}\n`)
 }
 
@@ -162,6 +162,7 @@ for (const entry of readdirSync(workerNcc, { withFileTypes: true })) {
 for (const name of WORKER_NAMES) writeFileSync(join(sandboxDir, name), `'use strict'\n`)
 
 cpSync(outRenderer, join(packageDir, 'renderer'), { recursive: true })
+copyFileSync(join(root, 'codetask-data.json'), join(binDir, 'codetask-data.json'))
 copyNativeRuntime(packageDir)
 
 const seaEntry = join(staging, 'sea-entry.cjs')

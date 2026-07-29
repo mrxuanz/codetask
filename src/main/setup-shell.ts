@@ -1,11 +1,13 @@
-import { mkdirSync, readFileSync } from 'fs'
-import { join, resolve } from 'path'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { proxy } from 'hono/proxy'
-import { browse, parentBrowsePath } from '../server/fs'
+import { createFolderBrowserRoutes } from '../server/routes/fs'
 import { shouldServeSpaIndex } from '../server/http/spa-fallback'
 import { fail, ok } from '../server/response'
+import { toErrorHttpResult } from '../server/error'
 import { StorageLocatorRepository, type DataDirResolution } from './storage-locator'
 import { initializeStorageRoot } from './storage-initializer'
 import {
@@ -32,6 +34,11 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   const recoveryNonces = new StorageValidationNonceRepository()
   const repository = new StorageLocatorRepository(options.storage.bootstrap)
 
+  app.onError((error, c) => {
+    const { body, status } = toErrorHttpResult(error)
+    return c.json(body, status as ContentfulStatusCode)
+  })
+
   app.get('/api/health', (c) => c.json(ok({ status: 'ok', phase: 'storage_setup' })))
   app.get('/api/bootstrap', (c) =>
     c.json(
@@ -55,40 +62,8 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     )
   })
 
-  // Same browse surface as create-project; unauthenticated during storage setup only.
-  app.post('/api/fs/browse', async (c) => {
-    try {
-      const body = await c.req.json<{ partialPath?: string }>()
-      return c.json(ok(browse(body.partialPath ?? '')))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return c.json(fail(400, message, { error: message }), 400)
-    }
-  })
-  app.get('/api/fs/parent', async (c) => {
-    try {
-      const path = c.req.query('path') ?? ''
-      return c.json(ok({ parentPath: parentBrowsePath(path) }))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return c.json(fail(400, message, { error: message }), 400)
-    }
-  })
-  app.post('/api/fs/mkdir', async (c) => {
-    try {
-      const body = await c.req.json<{ path?: string }>()
-      const target = body.path?.trim()
-      if (!target) {
-        return c.json(fail(400, 'folderPicker.folderNameRequired', {}), 400)
-      }
-      const absolute = resolve(target)
-      mkdirSync(absolute, { recursive: true })
-      return c.json(ok({ path: absolute }))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return c.json(fail(400, message, { error: message }), 400)
-    }
-  })
+  // Shared module; this setup host deliberately exposes it before authentication exists.
+  app.route('/api/fs', createFolderBrowserRoutes())
 
   app.post('/api/system/storage/validate', async (c) => {
     const body = await c.req.json<{ path?: string; allowLowSpace?: boolean }>()

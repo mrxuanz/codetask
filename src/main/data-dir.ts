@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'path'
 import { homedir } from 'os'
 import type { AppMode } from './cli'
 import { resolveStorageLocation, type DataDirResolution } from './storage-locator'
+import { readInitializationConfig, resolveInitializationConfigPath } from './initialization-config'
 
 /**
  * Resolve the project root that should own the development `data/` directory.
@@ -38,24 +39,29 @@ function isAppPackageJson(packageJsonPath: string): boolean {
 
 export type { DataDirResolution, DataDirSource } from './storage-locator'
 
+export function resolveDataInitializationConfigPath(): string {
+  return resolveInitializationConfigPath({
+    isPackaged: app.isPackaged,
+    executablePath: app.getPath('exe'),
+    developmentRoot: resolveDevAppRoot()
+  })
+}
+
 /**
  * Desktop and server mode are two entry points into the same installation, so they must share
  * bootstrap metadata (storage locator and secrets) instead of deriving it from the launch mode.
  */
 export function resolveBootstrapRoot(_mode: AppMode, override?: string): string {
-  const configured = override?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
+  const configured = override?.trim()
   if (configured) return resolve(configured)
   if (process.platform === 'win32') {
-    return join(process.env.APPDATA?.trim() || app.getPath('userData'), 'CodeTask')
+    return join(homedir(), 'AppData', 'Roaming', 'CodeTask')
   }
-  return join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), '.config'), 'codetask')
+  return join(homedir(), '.config', 'codetask')
 }
 
 export function resolveDefaultDataDir(): string {
-  // Packaged applications may live in read-only AppImage mounts, /opt, Program Files, or a signed
-  // macOS bundle. Electron userData is writable, stable across upgrades, and scoped per OS user.
-  if (app.isPackaged) return join(app.getPath('userData'), 'data')
-  return join(resolveDevAppRoot(), 'data')
+  return readInitializationConfig(resolveDataInitializationConfigPath()).dbPath
 }
 
 export function resolveDataDirSelection(input: {
@@ -64,25 +70,27 @@ export function resolveDataDirSelection(input: {
   bootstrapRoot?: string
   defaultDataDir?: string
 }): DataDirResolution {
-  const bootstrapOverridden = Boolean(
-    input.bootstrapRoot?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
-  )
+  const explicitDataDir = input.explicitDataDir?.trim()
+  const configuredDataDir = explicitDataDir
+    ? undefined
+    : (input.defaultDataDir ?? resolveDefaultDataDir())
+  const bootstrapOverridden = Boolean(input.bootstrapRoot?.trim())
   const bootstrapRoot = resolveBootstrapRoot(input.mode, input.bootstrapRoot)
   return resolveStorageLocation({
-    explicitDataDir: input.explicitDataDir,
-    envDataDir: process.env.CODETASK_DATA_DIR,
+    explicitDataDir,
+    configuredDataDir,
     mode: input.mode,
     bootstrapRoot,
     // Before bootstrap roots were unified, desktop mode stored these files under Electron's
     // userData directory. Adopt that valid legacy installation once, without overriding an
     // explicit operator-selected bootstrap root.
     legacyBootstrapRoots: bootstrapOverridden ? [] : [app.getPath('userData')],
-    defaultDataDir: input.defaultDataDir ?? resolveDefaultDataDir()
+    defaultDataDir: input.defaultDataDir ?? configuredDataDir ?? ''
   })
 }
 
 export function resolveDataDir(explicitDataDir?: string): string {
-  const configured = explicitDataDir?.trim() || process.env.CODETASK_DATA_DIR?.trim()
+  const configured = explicitDataDir?.trim()
   if (configured) return resolve(configured)
   return resolveDefaultDataDir()
 }

@@ -40,7 +40,7 @@ test('isAttachmentAssetTokenGet allows asset_token attachment reads under /api',
   assert.equal(isAttachmentAssetTokenGet('POST', '/api/threads/t1/attachments/a1', 'tok'), false)
 })
 
-test('resolveSessionTokenFromRequest prefers Authorization header', () => {
+test('resolveSessionTokenFromRequest accepts only Authorization headers', () => {
   assert.equal(
     resolveSessionTokenFromRequest({
       authHeader: 'Bearer header-token',
@@ -52,6 +52,6 @@ test('resolveSessionTokenFromRequest prefers Authorization header', () => {
     resolveSessionTokenFromRequest({
       accessToken: 'query-token'
     }),
-    'query-token'
+    undefined
   )
 })

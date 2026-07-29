@@ -45,7 +45,6 @@ test('storage migration checkpoints, copies, verifies, scrubs credentials, and s
 
   const ctx = bootstrapRuntime({
     dataDir: oldDataDir,
-    authSecretPath: bootstrap.authSecretFile,
     storage: { bootstrapRoot: bootstrap.root, source: 'locator', managed: false }
   })
   await seedMinimalJob(ctx.db, 'job-storage-migration', 'completed')

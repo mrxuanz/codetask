@@ -1,9 +1,9 @@
-import { randomBytes, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { JobEventBus, RuntimeRegistry, SettingsStore, type AppContext } from './context'
 import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
 import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } from './retention'
-import { getOrCreateAuthSecret } from './auth/secret'
+import { loadDatabaseAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
 import { SafeLoggerImpl } from './application/safe-logger'
 import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
@@ -40,6 +40,8 @@ import {
 } from '../shared/providers/settings'
 import { createProviderRegistry } from './providers/composition'
 import { ProviderRuntimeManager } from './providers/lifecycle'
+import { SecureAuthService } from './auth/service'
+import { configureRuntimeMode, resetRuntimeMode } from './runtime-mode'
 
 export type { AppContext } from './context'
 
@@ -49,8 +51,6 @@ export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
   config?: AppConfigOverrides
-  authSecretPath?: string
-  authSecret?: string
   mcpSecretPath?: string
   storage?: {
     bootstrapRoot: string
@@ -111,12 +111,9 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     }
 
     const mode = options.mode ?? 'desktop'
+    configureRuntimeMode(mode)
     const settings = new SettingsStore(options.dataDir, db)
-    const authSecret =
-      options.authSecret ??
-      (options.authSecretPath
-        ? getOrCreateAuthSecret(options.authSecretPath)
-        : randomBytes(32).toString('hex'))
+    const authSecret = loadDatabaseAuthSecret(db)
     const mcpSecrets = options.mcpSecretPath
       ? new EncryptedFileMcpSecretProvider(options.mcpSecretPath, authSecret)
       : new MemoryMcpSecretProvider()
@@ -148,6 +145,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       security: {
         mode,
         authSecret,
+        auth: new SecureAuthService(db, authSecret),
         mcpSecrets
       },
       eventBus: new JobEventBus(),
@@ -191,6 +189,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
     return appContext
   } catch (error) {
+    resetRuntimeMode()
     closeDatabaseForTests()
     throw error
   }
@@ -239,5 +238,6 @@ export async function resetAppContextForTests(): Promise<void> {
   }
 
   appContext = null
+  resetRuntimeMode()
   closeDatabaseForTests()
 }

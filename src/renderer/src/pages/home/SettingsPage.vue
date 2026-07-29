@@ -14,7 +14,6 @@ import {
   type McpSettingsConstraints,
   type UserMcpSettings
 } from '@renderer/api/settings'
-import { api } from '@renderer/api/client'
 import { fetchSandboxHealth, type SandboxHealthReport } from '@renderer/api/system'
 import ControlPlaneCoresCard from '@renderer/components/settings/ControlPlaneCoresCard.vue'
 import McpSettingsCard from '@renderer/components/settings/McpSettingsCard.vue'
@@ -78,7 +77,8 @@ const {
   currentDirectoryPath: storageCurrentDirectoryPath,
   openEntry: openStorageBrowseEntry,
   goParent: goStorageBrowseParent,
-  joinNewFolderPath: joinStorageNewFolderPath,
+  selectFolder: selectStorageFolder,
+  createFolder: createStorageFolder,
   start: startStorageBrowse
 } = useFolderBrowse({ active: storagePickerOpen })
 
@@ -144,37 +144,20 @@ function closeStoragePicker(): void {
   storagePickerOpen.value = false
 }
 
-function selectStorageTargetPath(path: string): void {
-  const target = path.trim()
-  if (!target) {
-    storageBrowseError.value = t('folderPicker.selectRequired')
-    return
-  }
-  storageTarget.value = target
+async function selectStorageTargetPath(path: string): Promise<void> {
+  const selected = await selectStorageFolder(path)
+  if (!selected) return
+  storageTarget.value = selected
   storagePickerOpen.value = false
 }
 
 async function createAndSelectStorageFolder(): Promise<void> {
-  const target = joinStorageNewFolderPath()
-  if (!target) {
-    storageBrowseError.value = t('folderPicker.folderNameRequired')
-    return
-  }
   creatingStorageFolder.value = true
-  storageBrowseError.value = null
   try {
-    const created = await api<{ path: string }>('/api/fs/mkdir', {
-      method: 'POST',
-      body: JSON.stringify({ path: target })
-    })
-    const path = created.data.path || target
+    const path = await createStorageFolder()
+    if (!path) return
     storageTarget.value = path
-    storageNewFolderName.value = ''
-    storageBrowseQuery.value = withTrailingSeparator(path)
-    await loadStorageBrowse(storageBrowseQuery.value)
     storagePickerOpen.value = false
-  } catch (err) {
-    storageBrowseError.value = err instanceof Error ? err.message : t('folderPicker.browseFailed')
   } finally {
     creatingStorageFolder.value = false
   }

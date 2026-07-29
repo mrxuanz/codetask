@@ -10,7 +10,6 @@ import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
 import { generateSetupToken } from '../server/auth/setup-token'
 import { clearPublishedRunningService, publishRunningService } from './service-discovery'
-import type { AppSecretProvider } from '../server/auth/secret'
 
 export interface ServerInfo {
   host: string
@@ -35,11 +34,8 @@ export interface AppServerPlatform {
   resolveDataDirSelection(input: {
     explicitDataDir?: string
     mode: CliOptions['mode']
+    bootstrapRoot?: string
   }): DataDirResolution
-  loadAuthSecret(input: {
-    mode: CliOptions['mode']
-    bootstrapSecretPath: string
-  }): Promise<{ value: string; provider: AppSecretProvider }>
 }
 
 let activeServer: ServerType | null = null
@@ -105,18 +101,10 @@ async function createReadyApp(
   http: { rendererDevUrl?: string; staticDir?: string }
 ): Promise<{ app: Hono; dataDir: string; usesLegacyComposition: boolean }> {
   const dataDir = ensureResolvedDataRoot(storage)
-  process.env.CODETASK_DATA_DIR = dataDir
-
-  const authSecret = await platform.loadAuthSecret({
-    mode: cli.mode,
-    bootstrapSecretPath: storage.bootstrap.authSecretFile
-  })
-  console.log(`[security] auth secret provider: ${authSecret.provider.describeStorage().kind}`)
 
   const ctx = bootstrapRuntime({
     dataDir,
     mode: cli.mode,
-    authSecret: authSecret.value,
     mcpSecretPath: storage.bootstrap.mcpSecretFile,
     storage: {
       bootstrapRoot: storage.bootstrap.root,
@@ -124,7 +112,6 @@ async function createReadyApp(
       managed: storage.managed
     }
   })
-  process.env.CODETASK_MODE = cli.mode
 
   const schemaRead = readSchemaGeneration(ctx.db)
   const usesLegacyComposition = schemaRead !== 'v3_authoritative'
@@ -132,8 +119,7 @@ async function createReadyApp(
   await ensureRuntimeReady(ctx)
 
   if (cli.mode === 'server') {
-    const { getBootstrap } = await import('../server/auth/service')
-    const state = await getBootstrap()
+    const state = await ctx.security.auth.bootstrap()
     if (!state.initialized) {
       announceSetupToken(ctx.security.authSecret)
     }
@@ -182,7 +168,8 @@ export async function startAppServer(
 
   const storage = platform.resolveDataDirSelection({
     explicitDataDir: cli.dataDir,
-    mode: cli.mode
+    mode: cli.mode,
+    bootstrapRoot: cli.bootstrapRoot
   })
   let activeApp: Hono
   let boundPort = cli.port
@@ -199,15 +186,6 @@ export async function startAppServer(
       }
     }
 
-    const setupTokenRequired = cli.mode === 'server'
-    if (setupTokenRequired) {
-      const earlySecret = await platform.loadAuthSecret({
-        mode: cli.mode,
-        bootstrapSecretPath: storage.bootstrap.authSecretFile
-      })
-      announceSetupToken(earlySecret.value)
-    }
-
     let promoteInflight: Promise<void> | null = null
     let publishedInfo: ServerInfo | null = null
     const setupApp = createSetupShell({
@@ -216,14 +194,17 @@ export async function startAppServer(
       rendererDevUrl,
       staticDir: http.staticDir,
       forbiddenRoots: [platform.appRoot, process.cwd()],
-      setupTokenRequired,
+      setupTokenRequired: false,
       activateStorage: async () => {
         if (promoteInflight) {
           await promoteInflight
           return
         }
         promoteInflight = (async () => {
-          const resolved = platform.resolveDataDirSelection({ mode: cli.mode })
+          const resolved = platform.resolveDataDirSelection({
+            mode: cli.mode,
+            bootstrapRoot: cli.bootstrapRoot
+          })
           if (resolved.phase !== 'ready') {
             throw new Error(resolved.issue ?? 'Storage locator is not ready after initialization')
           }

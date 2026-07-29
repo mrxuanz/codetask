@@ -3,8 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { setup } from '@renderer/api/auth'
-import { api } from '@renderer/api/client'
-import { setToken } from '@renderer/auth/token'
 import CredentialsForm from '@renderer/components/auth/CredentialsForm.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
@@ -53,7 +51,8 @@ const {
   currentDirectoryPath,
   openEntry,
   goParent,
-  joinNewFolderPath,
+  selectFolder,
+  createFolder,
   start: startBrowse
 } = useFolderBrowse({ active: pickerOpen })
 
@@ -66,9 +65,7 @@ onMounted(async () => {
   try {
     const response = await fetchStorageBootstrap()
     storagePath.value = response.data.defaultCandidate
-    storageIssue.value = response.data.issue
-      ? translateApiError(response.data.issue, t)
-      : null
+    storageIssue.value = response.data.issue ? translateApiError(response.data.issue, t) : null
   } catch (error) {
     storageIssue.value = storageErrorMessage(error)
   }
@@ -88,37 +85,20 @@ function closeStoragePicker(): void {
   pickerOpen.value = false
 }
 
-function selectStoragePath(path: string): void {
-  const target = path.trim()
-  if (!target) {
-    browseError.value = t('folderPicker.selectRequired')
-    return
-  }
-  storagePath.value = target
+async function selectStoragePath(path: string): Promise<void> {
+  const selected = await selectFolder(path)
+  if (!selected) return
+  storagePath.value = selected
   pickerOpen.value = false
 }
 
 async function createAndSelectFolder(): Promise<void> {
-  const target = joinNewFolderPath()
-  if (!target) {
-    browseError.value = t('folderPicker.folderNameRequired')
-    return
-  }
   creatingFolder.value = true
-  browseError.value = null
   try {
-    const created = await api<{ path: string }>('/api/fs/mkdir', {
-      method: 'POST',
-      body: JSON.stringify({ path: target })
-    })
-    const path = created.data.path || target
+    const path = await createFolder()
+    if (!path) return
     storagePath.value = path
-    newFolderName.value = ''
-    query.value = withTrailingSeparator(path)
-    await loadBrowse(query.value)
     pickerOpen.value = false
-  } catch (error) {
-    browseError.value = error instanceof Error ? error.message : t('folderPicker.browseFailed')
   } finally {
     creatingFolder.value = false
   }
@@ -128,8 +108,7 @@ async function ensureStorageReady(): Promise<void> {
   storageIssue.value = null
   const response = await validateStorageTarget(storagePath.value)
   const action =
-    response.data.action ??
-    (storagePhase.value === 'recovery_required' ? 'recover' : 'initialize')
+    response.data.action ?? (storagePhase.value === 'recovery_required' ? 'recover' : 'initialize')
   if (action === 'recover') {
     await recoverStorageTarget(response.data.canonicalPath, response.data.nonce)
   } else {
@@ -161,10 +140,16 @@ async function onSubmit(payload: {
       await router.replace(bootstrapData.value.authenticated ? '/home' : '/login')
       return
     }
+
+    // The server setup token is derived from the newly created SQLite database secret. After
+    // storage activation the console prints it and the form reveals the token field; keep the
+    // entered credentials and let the user submit once more.
+    if (bootstrapData.value?.setupTokenRequired && !payload.setupToken) {
+      return
+    }
   }
 
-  const res = await setup(payload.username, payload.password, payload.setupToken)
-  setToken(res.data.token, res.data.expires_at)
+  await setup(payload.username, payload.password, payload.setupToken)
   await refresh()
   await router.replace('/home')
 }

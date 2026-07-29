@@ -1,35 +1,29 @@
-const TOKEN_KEY = 'task_token'
-const EXPIRES_KEY = 'task_token_expires'
-const DEFAULT_TTL_SEC = 12 * 60 * 60
+const LEGACY_TOKEN_KEY = 'task_token'
+const LEGACY_EXPIRES_KEY = 'task_token_expires'
+const CSRF_COOKIE = 'codetask_csrf'
+const CSRF_HEADER = 'x-codetask-csrf'
 
-export function setToken(token: string, expiresAtSec?: number): void {
-  const expires = expiresAtSec ?? Math.floor(Date.now() / 1000) + DEFAULT_TTL_SEC
-  localStorage.setItem(TOKEN_KEY, token)
-  localStorage.setItem(EXPIRES_KEY, String(expires))
-}
-
-export function getToken(): string | null {
-  const token = localStorage.getItem(TOKEN_KEY)
-  const expiresRaw = localStorage.getItem(EXPIRES_KEY)
-  if (!token || !expiresRaw) return null
-
-  const expiresAt = Number(expiresRaw)
-  if (Number.isNaN(expiresAt) || Math.floor(Date.now() / 1000) >= expiresAt) {
-    clearToken()
-    return null
+function readCookie(name: string): string | null {
+  const prefix = `${encodeURIComponent(name)}=`
+  for (const part of document.cookie.split(';')) {
+    const value = part.trim()
+    if (value.startsWith(prefix)) {
+      return decodeURIComponent(value.slice(prefix.length))
+    }
   }
-  return token
+  return null
 }
 
+/** Remove only deprecated renderer credentials; the session itself is HttpOnly. */
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(EXPIRES_KEY)
+  localStorage.removeItem(LEGACY_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_EXPIRES_KEY)
+  document.cookie = `${CSRF_COOKIE}=; Max-Age=0; Path=/; SameSite=Strict`
 }
 
 export function authHeaders(): HeadersInit {
-  const token = getToken()
-  if (!token) return {}
-  return { Authorization: `Bearer ${token}` }
+  const csrf = readCookie(CSRF_COOKIE)
+  return csrf ? { [CSRF_HEADER]: csrf } : {}
 }
 
 export function assetUrlWithAuth(assetUrl: string): string {

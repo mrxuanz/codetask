@@ -30,9 +30,7 @@ async function main(): Promise<void> {
   const cli = parseServerCliArgs()
   const platform = createNodeServerPlatform()
   if (!platform.isDev && !platform.staticDir) {
-    throw new Error(
-      'Renderer assets not found. Set CODETASK_STATIC_DIR or run the standalone entry from a complete build.'
-    )
+    throw new Error('Renderer assets not found. Run the standalone entry from a complete build.')
   }
 
   const server = await startAppServer(cli, platform)
