@@ -398,7 +398,7 @@ async function runStaticForRole(
       noProxyEntries.has(entry)
     ),
     runtimeIsolated: outerSandbox
-      ? prepared!.diagnostics.mode === 'runtime-copy' &&
+      ? prepared!.diagnostics.mode === 'runtime-reference' &&
         prepared!.envPatch.HOME === runtimeRoot &&
         prepared!.envPatch.CODEX_HOME === runtimeCodexHome(runtimeRoot) &&
         (prepared!.writeRoots ?? []).length === 0
@@ -408,7 +408,7 @@ async function runStaticForRole(
   log('static', role, report)
 
   if (outerSandbox && !report.runtimeIsolated) {
-    throw new Error(`[${role}] runtime-copy isolation check failed`)
+    throw new Error(`[${role}] runtime-reference isolation check failed`)
   }
   if (!outerSandbox && plan.outerSandbox) {
     throw new Error(`[${role}] conversation must not use outer sandbox`)

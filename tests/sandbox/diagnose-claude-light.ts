@@ -96,7 +96,7 @@ async function runStatic(runtimeRoot: string): Promise<{
       'CLAUDE_CODE_OAUTH_TOKEN'
     ].filter((key) => Boolean(env[key])),
     runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-copy' &&
+      prepared.diagnostics.mode === 'runtime-reference' &&
       env.HOME === runtimeRoot &&
       claudeDir.startsWith(runtimeRoot) &&
       (prepared.writeRoots ?? []).length === 0 &&
@@ -105,7 +105,7 @@ async function runStatic(runtimeRoot: string): Promise<{
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('Claude runtime-copy isolation check failed')
+  if (!report.runtimeIsolated) throw new Error('Claude runtime-reference isolation check failed')
   if (report.settingSourcesOuterSandbox.length !== 0) {
     throw new Error('outer sandbox must use empty settingSources')
   }

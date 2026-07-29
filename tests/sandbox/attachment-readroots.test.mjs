@@ -12,13 +12,13 @@ import { tmpdir } from 'node:os'
 import {
   assertFails,
   loadNative,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   runInSandbox,
-  sandboxTestsEnabled
+  sandboxRuntimeTestsEnabled
 } from './sandbox-test-utils.mjs'
 
 function policyWithAttachmentReadRoots(role, workspaceRoot, runtimeRoot, attachmentReadRoots) {
-  const policy = policyForRoleV2(role, workspaceRoot, runtimeRoot)
+  const policy = sandboxPolicyForRole(role, workspaceRoot, runtimeRoot)
   const seen = new Set(policy.filesystem.allowedReadRoots.map((root) => root.toLowerCase()))
   for (const root of attachmentReadRoots) {
     const resolved = realpathSync(root)
@@ -32,7 +32,7 @@ function policyWithAttachmentReadRoots(role, workspaceRoot, runtimeRoot, attachm
 }
 
 async function main() {
-  const gate = sandboxTestsEnabled()
+  const gate = sandboxRuntimeTestsEnabled()
   if (!gate.enabled) {
     console.log(`skip: ${gate.reason}`)
     return

@@ -345,7 +345,7 @@ export class SecureAuthService {
       eventType: 'session.logout',
       ...(principal ? { userId: principal.userId } : {}),
       success: principal !== null,
-      reasonCode: principal ? undefined : 'session_missing',
+      ...(!principal ? { reasonCode: 'session_missing' } : {}),
       nowMs
     })
   }

@@ -10,7 +10,7 @@ export const PROVIDER_CAPABILITY_PROFILES = [
 export type ProviderCapabilityProfile = (typeof PROVIDER_CAPABILITY_PROFILES)[number]
 
 export type ProviderProtocol = 'sdk' | 'acp' | 'local-server'
-export type ProviderAuthMode = 'runtime-copy' | 'host-identity'
+export type ProviderAuthMode = 'runtime-reference' | 'host-identity'
 export type ProviderReusePolicy = 'one-shot' | 'conversation-scoped'
 
 /**

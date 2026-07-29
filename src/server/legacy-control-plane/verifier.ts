@@ -1,17 +1,16 @@
 import { randomUUID } from 'crypto'
 import type { SliceVerificationRecordDto } from '@shared/contracts/evidence'
-import type { SavedJobPlan } from '../planner/plan-types'
+import type { JobExecutionProfile, SavedJobPlan } from '../planner/plan-types'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import { ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
 import {
-  resolveSliceVerifierCoreCode,
-  resolveMilestoneVerifierCoreCode
-} from '../settings/control-plane'
+  resolveMilestoneVerifierPromptBody,
+  resolveSliceVerifierPromptBody
+} from '../settings/prompts'
 import {
-  buildMilestoneVerifierSystemPrompt,
-  buildSliceVerifierSystemPrompt
-} from '../verification/prompts'
+  appendBusinessSkillSnapshot
+} from '../settings/business-skills'
 import type { GateMilestoneState, GateSliceState } from './execution-gate'
 import type { TaskProgressItemDto, TaskProgressSliceDto } from './types'
 import type { MilestoneVerificationVerdict, SliceVerificationVerdict } from './verification/types'
@@ -144,6 +143,7 @@ export async function runSliceVerification(input: {
   threadId: string
   workspacePath: string
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   slice: GateSliceState
   taskItems: TaskProgressItemDto[]
   signal: AbortSignal
@@ -153,7 +153,7 @@ export async function runSliceVerification(input: {
   verdict?: SliceVerificationVerdict
   infraMiss?: boolean
 }> {
-  const coreCode = await resolveSliceVerifierCoreCode()
+  const coreCode = input.executionProfile.sliceVerifierCoreCode
   const core = await ensureCoreAvailable(coreCode)
   const runtimeRoot = ensureJobTaskRuntimeRoot(
     getAppContext().dataDir,
@@ -201,7 +201,10 @@ export async function runSliceVerification(input: {
       runtimeRoot,
       prompt,
       model,
-      systemPrompt: buildSliceVerifierSystemPrompt(),
+      systemPrompt: appendBusinessSkillSnapshot(
+        resolveSliceVerifierPromptBody(),
+        input.executionProfile.skills.sliceVerifier
+      ),
       mcpUrl,
       signal: input.signal
     })) {
@@ -238,6 +241,7 @@ export async function runMilestoneVerification(input: {
   threadId: string
   workspacePath: string
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   milestone: GateMilestoneState
   slices: GateSliceState[]
   taskItems: TaskProgressItemDto[]
@@ -249,7 +253,7 @@ export async function runMilestoneVerification(input: {
   verdict?: MilestoneVerificationVerdict | undefined
   infraMiss?: boolean | undefined
 }> {
-  const coreCode = await resolveMilestoneVerifierCoreCode()
+  const coreCode = input.executionProfile.milestoneVerifierCoreCode
   const core = await ensureCoreAvailable(coreCode)
   const runtimeRoot = ensureJobTaskRuntimeRoot(
     getAppContext().dataDir,
@@ -299,7 +303,10 @@ export async function runMilestoneVerification(input: {
       runtimeRoot,
       prompt,
       model,
-      systemPrompt: buildMilestoneVerifierSystemPrompt(),
+      systemPrompt: appendBusinessSkillSnapshot(
+        resolveMilestoneVerifierPromptBody(),
+        input.executionProfile.skills.milestoneVerifier
+      ),
       mcpUrl,
       signal: input.signal
     })) {

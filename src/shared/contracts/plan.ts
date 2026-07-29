@@ -1,3 +1,5 @@
+import type { SupportedCoreCode } from '../providers/codes'
+
 export interface PlannerRegisteredTask {
   title?: string | undefined
   description?: string | undefined
@@ -46,6 +48,23 @@ export interface FlatTaskPlan {
   dependsOnTaskRefs?: string[] | undefined
   canRunInParallel?: boolean | undefined
   confirmed?: boolean | undefined
+}
+
+export interface BusinessSkillSnapshot {
+  skillIds: string[]
+  instructions: string
+}
+
+export interface JobExecutionProfile {
+  plannerCoreCode: SupportedCoreCode
+  sliceVerifierCoreCode: SupportedCoreCode
+  milestoneVerifierCoreCode: SupportedCoreCode
+  skills: {
+    planner: BusinessSkillSnapshot
+    taskWorker: BusinessSkillSnapshot
+    sliceVerifier: BusinessSkillSnapshot
+    milestoneVerifier: BusinessSkillSnapshot
+  }
 }
 
 export interface SavedJobPlan {

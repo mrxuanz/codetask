@@ -3,6 +3,8 @@ import { join } from 'path'
 import { resolveCursorWorkspaceProjectSlug } from './cursor-acp/cursor-workspace'
 import { augmentPathWithHostNode } from '../sandbox/toolchain-path'
 import { processHostEnvironmentSource } from '../host-environment'
+import { stripProviderHostConfiguration } from '../providers/environment'
+import { SERIALIZED_SHELL_CHILD_ENV } from '../shell-child-environment'
 
 const BLOCKED_ENV = [
   'SSH_AUTH_SOCK',
@@ -12,7 +14,8 @@ const BLOCKED_ENV = [
   'DBUS_SESSION_BUS_ADDRESS',
   'WAYLAND_DISPLAY',
   'DISPLAY',
-  'GIT_ASKPASS'
+  'GIT_ASKPASS',
+  SERIALIZED_SHELL_CHILD_ENV
 ] as const
 
 const HOST_PROFILE_ENV_KEYS = new Set([
@@ -30,21 +33,6 @@ const HOST_PROFILE_ENV_KEYS = new Set([
   'XDG_DATA_HOME',
   'XDG_STATE_HOME'
 ])
-
-const PROVIDER_AUTH_ENV_KEYS = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_MODEL',
-  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  'ANTHROPIC_SMALL_FAST_MODEL',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'CODEX_API_KEY',
-  'CURSOR_API_KEY'
-] as const
 
 export const WINDOWS_CRASH_REPORTER_ENV: Record<string, string> = {
   ELECTRON_DISABLE_CRASH_REPORTER: '1',
@@ -98,8 +86,6 @@ export interface ProviderChildEnvOptions {
   preserveHostIdentity?: boolean
 }
 
-const TASK_IDEMPOTENCY_ENV_KEY = 'CODETASK_TASK_IDEMPOTENCY_KEY'
-const TASK_IDEMPOTENCY_SCOPE_ENV_KEY = 'CODETASK_TASK_IDEMPOTENCY_SCOPE'
 const LOOPBACK_NO_PROXY_ENTRIES = ['127.0.0.1', 'localhost', '::1'] as const
 
 /**
@@ -134,28 +120,6 @@ export function applyLoopbackNoProxyEnv(env: Record<string, string>): Record<str
   const merged = entries.join(',')
   env.NO_PROXY = merged
   env.no_proxy = merged
-  return env
-}
-
-/**
- * Add the durable logical-task identity to the environment consumed by the
- * Provider process.  This is deliberately applied at the last possible
- * boundary (the actual SDK/ACP child environment), rather than only keeping
- * the value in the in-process runner input where a provider cannot use it.
- */
-export function applyTaskIdempotencyEnv(
-  env: Record<string, string>,
-  idempotencyKey?: string | null
-): Record<string, string> {
-  const key = idempotencyKey?.trim()
-  if (!key) {
-    delete env[TASK_IDEMPOTENCY_ENV_KEY]
-    delete env[TASK_IDEMPOTENCY_SCOPE_ENV_KEY]
-    return env
-  }
-
-  env[TASK_IDEMPOTENCY_ENV_KEY] = key
-  env[TASK_IDEMPOTENCY_SCOPE_ENV_KEY] = 'logical-task'
   return env
 }
 
@@ -208,20 +172,8 @@ function applyIsolatedWindowsProfile(runtimeRoot: string, env: Record<string, st
   applyWindowsCrashReporterEnv(env)
 }
 
-function copyHostAuthEnv(
-  env: Record<string, string>,
-  hostEnvironment = processHostEnvironmentSource.snapshot()
-): void {
-  for (const key of PROVIDER_AUTH_ENV_KEYS) {
-    const value = hostEnvironment[key]
-    if (typeof value === 'string' && value.trim()) {
-      env[key] = value
-    }
-  }
-}
-
 export function buildSandboxPreparedProviderEnv(): Record<string, string> {
-  const env: Record<string, string> = { ...processHostEnvironmentSource.snapshot() }
+  const env = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
   env.PATH = augmentPathWithHostNode(env.PATH)
 
   for (const name of BLOCKED_ENV) {
@@ -241,7 +193,7 @@ export function buildProviderChildEnv(
 ): Record<string, string> {
   const preserveHost = options?.preserveHostIdentity ?? true
   ensureIsolatedProviderDirs(runtimeRoot)
-  const hostEnvironment = processHostEnvironmentSource.snapshot()
+  const hostEnvironment = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
 
   const hostHome =
     hostEnvironment.HOME ?? hostEnvironment.USERPROFILE ?? hostEnvironment.HOMEPATH ?? runtimeRoot
@@ -276,8 +228,6 @@ export function buildProviderChildEnv(
     env[key] = value
   }
 
-  copyHostAuthEnv(env, hostEnvironment)
-
   for (const name of BLOCKED_ENV) {
     delete env[name]
   }
@@ -290,7 +240,5 @@ export function buildProviderChildEnv(
 }
 
 export function buildSandboxAuthPassthrough(): Record<string, string> {
-  const env: Record<string, string> = {}
-  copyHostAuthEnv(env)
-  return env
+  return {}
 }

@@ -25,7 +25,7 @@ test('buildProviderTurnContext carries controls without reading process.env', ()
   const previousAuth = process.env.CODETASK_PROVIDER_AUTH_MODE
   const previousRoot = process.env.CODETASK_RUNTIME_ROOT
   process.env.CODETASK_OUTER_SANDBOX = '1'
-  process.env.CODETASK_PROVIDER_AUTH_MODE = 'runtime-copy'
+  process.env.CODETASK_PROVIDER_AUTH_MODE = 'runtime-reference'
   process.env.CODETASK_RUNTIME_ROOT = '/should-not-win'
 
   try {
@@ -64,7 +64,7 @@ test('EnvironmentCompiler strips internal control keys from child env', () => {
     provider: 'codex',
     hostEnvironment: Object.freeze({
       PATH: '/usr/bin',
-      CODETASK_PROVIDER_AUTH_MODE: 'runtime-copy',
+      CODETASK_PROVIDER_AUTH_MODE: 'runtime-reference',
       CODETASK_OUTER_SANDBOX: '1',
       CODETASK_RUNTIME_ROOT: '/runtime'
     })

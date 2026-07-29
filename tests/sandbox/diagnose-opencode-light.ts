@@ -61,7 +61,7 @@ async function runStatic(runtimeRoot: string): Promise<{
   writeRoots: string[]
   layout: unknown
   materialized: {
-    configCopied: boolean
+    configMaterialized: boolean
     runtimeConfigDir: string
     runtimeDataDir: string
   }
@@ -84,7 +84,7 @@ async function runStatic(runtimeRoot: string): Promise<{
     writeRoots: prepared.writeRoots ?? [],
     layout,
     materialized: {
-      configCopied: materialized.configCopied,
+      configMaterialized: materialized.configMaterialized,
       runtimeConfigDir: materialized.runtimeConfigDir,
       runtimeDataDir: materialized.runtimeDataDir
     },
@@ -96,7 +96,7 @@ async function runStatic(runtimeRoot: string): Promise<{
       executableMode: executablePath ? 'path' : 'auto'
     },
     runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-copy' &&
+      prepared.diagnostics.mode === 'runtime-reference' &&
       env.HOME === runtimeRoot &&
       env.XDG_CONFIG_HOME === layout.configHome &&
       env.XDG_DATA_HOME === layout.dataHome &&
@@ -108,7 +108,7 @@ async function runStatic(runtimeRoot: string): Promise<{
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('OpenCode runtime-copy isolation check failed')
+  if (!report.runtimeIsolated) throw new Error('OpenCode runtime-reference isolation check failed')
 
   return report
 }
@@ -195,7 +195,7 @@ async function runServerProbe(runtimeRoot: string): Promise<unknown> {
       health: health.error ? { error: String(health.error) } : health.data,
       elapsedMs,
       configDir: join(env.XDG_CONFIG_HOME ?? '', 'opencode'),
-      authCopied: existsSync(join(env.XDG_CONFIG_HOME ?? '', 'opencode', 'auth.json'))
+      authReferenced: existsSync(join(env.XDG_CONFIG_HOME ?? '', 'opencode', 'auth.json'))
     }
   } finally {
     if (proc.pid && process.platform === 'win32') {

@@ -1,10 +1,9 @@
-import { spawnSync } from 'child_process'
 import {
-  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
-  rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync
 } from 'fs'
@@ -26,10 +25,6 @@ import {
   runtimeCursorConfigDir,
   runtimeCursorHome
 } from './paths'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../../host-environment'
 import {
   scrubCredentialSnapshotManifest,
   writeCredentialSnapshotManifest
@@ -87,10 +82,33 @@ function ensureParentDir(path: string): void {
   mkdirSync(dirname(path), { recursive: true })
 }
 
-export function copyAuthSnapshot(source: string, destination: string): void {
+export type CredentialMaterialization = 'reference'
+
+export function materializeCredentialFile(
+  source: string,
+  destination: string
+): CredentialMaterialization {
   ensureParentDir(destination)
-  copyFileSync(source, destination)
-  restrictFilePermissions(destination)
+  try {
+    const stat = lstatSync(destination)
+    if (!stat.isFile() && !stat.isSymbolicLink()) {
+      throw new Error(`credential destination is not a file: ${destination}`)
+    }
+    unlinkSync(destination)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') throw error
+  }
+
+  try {
+    symlinkSync(source, destination, process.platform === 'win32' ? 'file' : undefined)
+    return 'reference'
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `credential_reference_failed: cannot symlink host auth (${source} → ${destination}): ${detail}`
+    )
+  }
 }
 
 export function filterCodexConfigToml(raw: string): string {
@@ -136,8 +154,9 @@ export function filterCodexConfigToml(raw: string): string {
 }
 
 export interface MaterializeCodexResult {
-  authCopied: boolean
-  configCopied: boolean
+  authMaterialized: boolean
+  authMaterialization: CredentialMaterialization | null
+  configGenerated: boolean
   runtimeAuthPath: string
   hostAuthPath: string
   cleanup: () => void
@@ -157,12 +176,13 @@ export function materializeCodexAuth(
   mkdirSync(codexHome, { recursive: true })
 
   const cleanupPaths: string[] = []
-  let authCopied = false
-  let configCopied = false
+  let authMaterialized = false
+  let authMaterialization: CredentialMaterialization | null = null
+  let configGenerated = false
 
   if (existsSync(hostAuthPath)) {
-    copyAuthSnapshot(hostAuthPath, runtimeAuthPath)
-    authCopied = true
+    authMaterialization = materializeCredentialFile(hostAuthPath, runtimeAuthPath)
+    authMaterialized = true
     cleanupPaths.push(runtimeAuthPath)
   }
 
@@ -173,15 +193,16 @@ export function materializeCodexAuth(
     const filtered = filterCodexConfigToml(readFileSync(hostConfigPath, 'utf8'))
     writeFileSync(runtimeConfigPath, filtered, 'utf8')
     restrictFilePermissions(runtimeConfigPath)
-    configCopied = true
+    configGenerated = true
     cleanupPaths.push(runtimeConfigPath)
   }
 
   writeCredentialSnapshotManifest(runtimeRoot, 'codex', cleanupPaths)
 
   return {
-    authCopied,
-    configCopied,
+    authMaterialized,
+    authMaterialization,
+    configGenerated,
     runtimeAuthPath,
     hostAuthPath,
     cleanup: () => {
@@ -191,130 +212,26 @@ export function materializeCodexAuth(
 }
 
 export interface MaterializeCursorResult {
-  authCopied: boolean
+  authMaterialized: boolean
+  configMaterialized: boolean
+  materializations: CredentialMaterialization[]
   runtimeAuthPath: string
+  runtimeConfigDir: string
+  runtimeHome: string
   hostAuthPath: string
+  hostReferencePaths: string[]
   cleanup: () => void
 }
 
-/** Darwin agent CLI reads `$HOME/.cursor/auth.json` when AGENT_CLI_CREDENTIAL_STORE=file. */
+/** Cursor also checks `$HOME/.cursor/auth.json` on file-store installations. */
 export function runtimeCursorCliAuthPath(runtimeRoot: string): string {
   return join(runtimeCursorHome(runtimeRoot), 'auth.json')
-}
-
-function writeCursorRuntimeAuthPayload(
-  runtimeRoot: string,
-  payload: Record<string, unknown>
-): string[] {
-  const raw = `${JSON.stringify(payload)}\n`
-  const paths = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
-  const written: string[] = []
-  for (const path of paths) {
-    ensureParentDir(path)
-    writeFileSync(path, raw, { encoding: 'utf8', mode: 0o600 })
-    restrictFilePermissions(path)
-    written.push(path)
-  }
-  return written
-}
-
-function mirrorCursorAuthFiles(source: string, runtimeRoot: string): string[] {
-  const destinations = [runtimeCursorCliAuthPath(runtimeRoot), runtimeCursorAuthPath(runtimeRoot)]
-  const written: string[] = []
-  for (const destination of destinations) {
-    if (destination === source) continue
-    copyAuthSnapshot(source, destination)
-    written.push(destination)
-  }
-  return written
-}
-
-function readDarwinCursorKeychainPassword(
-  service: string,
-  profile: HostProfilePaths,
-  hostEnvironment: HostEnvironmentSnapshot
-): string | null {
-  const result = spawnSync(
-    'security',
-    ['find-generic-password', '-s', service, '-a', 'cursor-user', '-w'],
-    {
-      encoding: 'utf8',
-      timeout: 15_000,
-      env: {
-        ...hostEnvironment,
-        HOME: profile.home
-      }
-    }
-  )
-  if (result.status !== 0) return null
-  const value = (result.stdout ?? '').trim()
-  return value.length > 0 ? value : null
-}
-
-function readDarwinCursorKeychainTokens(
-  profile: HostProfilePaths,
-  hostEnvironment: HostEnvironmentSnapshot
-): {
-  accessToken: string
-  refreshToken: string
-} | null {
-  if (process.platform !== 'darwin') return null
-  const accessToken = readDarwinCursorKeychainPassword(
-    'cursor-access-token',
-    profile,
-    hostEnvironment
-  )
-  const refreshToken = readDarwinCursorKeychainPassword(
-    'cursor-refresh-token',
-    profile,
-    hostEnvironment
-  )
-  if (!accessToken || !refreshToken) return null
-  return { accessToken, refreshToken }
-}
-
-/**
- * Ensure runtime has a file-store auth.json the Cursor CLI can read under HOME=runtimeRoot.
- * Prefer host auth.json, then macOS Keychain export (host HOME), then existing runtime copies.
- */
-export function ensureCursorRuntimeAuth(
-  runtimeRoot: string,
-  profile: HostProfilePaths = resolveHostProfilePaths(),
-  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
-): boolean {
-  const cliAuthPath = runtimeCursorCliAuthPath(runtimeRoot)
-  const legacyAuthPath = runtimeCursorAuthPath(runtimeRoot)
-
-  if (existsSync(cliAuthPath)) {
-    if (!existsSync(legacyAuthPath)) copyAuthSnapshot(cliAuthPath, legacyAuthPath)
-    return true
-  }
-
-  if (existsSync(legacyAuthPath)) {
-    copyAuthSnapshot(legacyAuthPath, cliAuthPath)
-    return true
-  }
-
-  const hostAuthPath = resolveCursorHostAuthPath(profile)
-  if (existsSync(hostAuthPath)) {
-    mirrorCursorAuthFiles(hostAuthPath, runtimeRoot)
-    return true
-  }
-
-  const tokens = readDarwinCursorKeychainTokens(profile, hostEnvironment)
-  if (tokens) {
-    writeCursorRuntimeAuthPayload(runtimeRoot, tokens)
-    return true
-  }
-
-  return false
 }
 
 export function materializeCursorAuth(
   runtimeRoot: string,
   workspaceRoot: string,
-  profile: HostProfilePaths = resolveHostProfilePaths(),
-  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+  profile: HostProfilePaths = resolveHostProfilePaths()
 ): MaterializeCursorResult {
   const hostAuthPath = resolveCursorHostAuthPath(profile)
   const runtimeAuthPath = runtimeCursorAuthPath(runtimeRoot)
@@ -324,16 +241,6 @@ export function materializeCursorAuth(
   const cursorHome = runtimeCursorHome(runtimeRoot)
   const cursorConfig = runtimeCursorConfigDir(runtimeRoot)
   const projectDir = join(cursorHome, 'projects', cursorProjectSlug(workspaceRoot))
-
-  for (const stale of [cursorHome, cursorConfig, dirname(runtimeAuthPath)]) {
-    if (existsSync(stale)) {
-      try {
-        rmSync(stale, { recursive: true, force: true })
-      } catch {
-        // ignore
-      }
-    }
-  }
 
   mkdirSync(cursorHome, { recursive: true })
   mkdirSync(projectDir, { recursive: true })
@@ -350,58 +257,110 @@ export function materializeCursorAuth(
   mkdirSync(join(cursorConfig, 'acp-sessions'), { recursive: true })
   mkdirSync(dirname(runtimeAuthPath), { recursive: true })
 
-  const copiedPaths: string[] = []
+  const materializedPaths: string[] = []
+  const authMaterializedPaths: string[] = []
+  const configMaterializedPaths: string[] = []
+  const materializations: CredentialMaterialization[] = []
+  const hostReferencePaths: string[] = []
 
-  const optionalCopies: Array<{ host: string; runtime: string }> = [
-    { host: join(hostCursorHome, 'cli-config.json'), runtime: join(cursorHome, 'cli-config.json') },
+  const references: Array<{ host: string; runtime: string; kind: 'auth' | 'config' }> = [
+    {
+      host: join(hostCursorHome, 'cli-config.json'),
+      runtime: join(cursorHome, 'cli-config.json'),
+      kind: 'config'
+    },
     {
       host: join(hostCursorHome, 'agent-cli-state.json'),
-      runtime: join(cursorHome, 'agent-cli-state.json')
+      runtime: join(cursorHome, 'agent-cli-state.json'),
+      kind: 'config'
     },
     {
       host: join(hostConfigDir, 'cli-config.json'),
-      runtime: join(cursorConfig, 'cli-config.json')
+      runtime: join(cursorConfig, 'cli-config.json'),
+      kind: 'config'
     },
-    { host: join(hostConfigDir, 'acp-config.json'), runtime: join(cursorConfig, 'acp-config.json') }
+    {
+      host: join(hostConfigDir, 'acp-config.json'),
+      runtime: join(cursorConfig, 'acp-config.json'),
+      kind: 'config'
+    },
   ]
 
-  for (const { host, runtime } of optionalCopies) {
-    if (!existsSync(host)) continue
-    copyAuthSnapshot(host, runtime)
-    copiedPaths.push(runtime)
+  if (existsSync(hostAuthPath)) {
+    references.push(
+      { host: hostAuthPath, runtime: runtimeCursorCliAuthPath(runtimeRoot), kind: 'auth' },
+      { host: hostAuthPath, runtime: runtimeAuthPath, kind: 'auth' }
+    )
   }
 
-  const authCopied = ensureCursorRuntimeAuth(runtimeRoot, profile, hostEnvironment)
-  if (authCopied) {
-    for (const path of [runtimeCursorCliAuthPath(runtimeRoot), runtimeAuthPath]) {
-      if (existsSync(path)) copiedPaths.push(path)
-    }
+  for (const { host, runtime, kind } of references) {
+    if (!existsSync(host)) continue
+    materializations.push(materializeCredentialFile(host, runtime))
+    materializedPaths.push(runtime)
+    if (kind === 'auth') authMaterializedPaths.push(runtime)
+    else configMaterializedPaths.push(runtime)
+    hostReferencePaths.push(host)
   }
+
+  writeCredentialSnapshotManifest(runtimeRoot, 'cursorcli', materializedPaths)
 
   return {
-    authCopied,
-    runtimeAuthPath: existsSync(runtimeCursorCliAuthPath(runtimeRoot))
-      ? runtimeCursorCliAuthPath(runtimeRoot)
-      : runtimeAuthPath,
+    authMaterialized: authMaterializedPaths.length > 0,
+    configMaterialized: configMaterializedPaths.length > 0,
+    materializations,
+    runtimeAuthPath: authMaterializedPaths[0] ?? runtimeAuthPath,
+    runtimeConfigDir: cursorConfig,
+    runtimeHome: cursorHome,
     hostAuthPath,
+    hostReferencePaths,
     cleanup: () => {
-      for (const path of copiedPaths) {
-        try {
-          if (existsSync(path)) unlinkSync(path)
-        } catch {
-          // ignore
-        }
-      }
+      scrubCredentialSnapshotManifest(runtimeRoot)
     }
   }
 }
 
 export interface MaterializeOpencodeResult {
-  configCopied: boolean
+  authMaterialized: boolean
+  materializations: CredentialMaterialization[]
+  configMaterialized: boolean
+  configMaterializations: Array<CredentialMaterialization | 'projection'>
   runtimeConfigDir: string
   runtimeDataDir: string
   hostConfigDir: string
+  hostCredentialPaths: string[]
+  hostConfigPaths: string[]
   cleanup: () => void
+}
+
+const OPENCODE_HOST_CONFIG_KEYS = new Set([
+  '$schema',
+  'provider',
+  'model',
+  'small_model',
+  'enabled_providers',
+  'disabled_providers'
+])
+
+export function projectOpencodeHostConfig(raw: string): {
+  safeToReference: boolean
+  projected: string
+} | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+
+  const record = parsed as Record<string, unknown>
+  const projected = Object.fromEntries(
+    Object.entries(record).filter(([key]) => OPENCODE_HOST_CONFIG_KEYS.has(key))
+  )
+  return {
+    safeToReference: Object.keys(record).every((key) => OPENCODE_HOST_CONFIG_KEYS.has(key)),
+    projected: `${JSON.stringify(projected, null, 2)}\n`
+  }
 }
 
 export function opencodeRuntimeLayout(runtimeRoot: string): {
@@ -432,33 +391,61 @@ export function materializeOpencodeAuth(
   mkdirSync(runtimeConfigDir, { recursive: true })
   mkdirSync(runtimeDataDir, { recursive: true })
 
-  const copied: string[] = []
-  const configCandidates = ['opencode.json', 'auth.json', 'config.json', 'credentials.json']
+  const materialized: string[] = []
+  const materializations: CredentialMaterialization[] = []
+  const hostCredentialPaths: string[] = []
+  const configMaterializations: Array<CredentialMaterialization | 'projection'> = []
+  const hostConfigPaths: string[] = []
+  const configCandidates = ['auth.json', 'credentials.json']
   const dataCandidates = ['auth.json', 'credentials.json']
 
   for (const name of configCandidates) {
     const source = join(hostConfigDir, name)
     if (!existsSync(source)) continue
     const dest = join(runtimeConfigDir, name)
-    copyAuthSnapshot(source, dest)
-    copied.push(dest)
+    materializations.push(materializeCredentialFile(source, dest))
+    materialized.push(dest)
+    hostCredentialPaths.push(source)
   }
 
   for (const name of dataCandidates) {
     const source = join(hostDataDir, name)
     if (!existsSync(source)) continue
     const dest = join(runtimeDataDir, name)
-    copyAuthSnapshot(source, dest)
-    copied.push(dest)
+    materializations.push(materializeCredentialFile(source, dest))
+    materialized.push(dest)
+    hostCredentialPaths.push(source)
   }
 
-  writeCredentialSnapshotManifest(runtimeRoot, 'opencode', copied)
+  for (const name of ['opencode.json', 'config.json'] as const) {
+    const source = join(hostConfigDir, name)
+    if (!existsSync(source)) continue
+    const projection = projectOpencodeHostConfig(readFileSync(source, 'utf8'))
+    if (!projection) continue
+    const dest = join(runtimeConfigDir, name)
+    if (projection.safeToReference) {
+      configMaterializations.push(materializeCredentialFile(source, dest))
+      hostConfigPaths.push(source)
+    } else {
+      writeFileSync(dest, projection.projected, { encoding: 'utf8', mode: 0o600 })
+      restrictFilePermissions(dest)
+      configMaterializations.push('projection')
+    }
+    materialized.push(dest)
+  }
+
+  writeCredentialSnapshotManifest(runtimeRoot, 'opencode', materialized)
 
   return {
-    configCopied: copied.length > 0,
+    authMaterialized: materializations.length > 0,
+    materializations,
+    configMaterialized: configMaterializations.length > 0,
+    configMaterializations,
     runtimeConfigDir,
     runtimeDataDir,
     hostConfigDir,
+    hostCredentialPaths,
+    hostConfigPaths,
     cleanup: () => {
       scrubCredentialSnapshotManifest(runtimeRoot)
     }

@@ -351,8 +351,8 @@ export function createCodetaskAcpClient(
         params: {
           options: ctx.params.options,
           toolCall: {
-            title: ctx.params.toolCall?.title ?? undefined,
-            kind: ctx.params.toolCall?.kind ?? undefined
+            ...(ctx.params.toolCall?.title != null ? { title: ctx.params.toolCall.title } : {}),
+            ...(ctx.params.toolCall?.kind != null ? { kind: ctx.params.toolCall.kind } : {})
           }
         }
       })

@@ -58,7 +58,7 @@
     "build:sandbox:debug": "npm run build:native:debug && npm run copy-helpers && npm install --prefix native/codeteam-sandbox && npm run build:debug --prefix native/codeteam-sandbox",
     "test:sandbox": "node tests/sandbox/run-attack-matrix.mjs",
     "test:sandbox:tdd": "node --test tests/sandbox/native-addon.test.mjs tests/sandbox/escape-matrix.test.mjs",
-    "test:sandbox:v2": "node tests/sandbox/policy-v2-matrix.mjs",
+    "test:sandbox:policy": "node tests/sandbox/policy-matrix.mjs",
     "test:sandbox:attachments": "node tests/sandbox/attachment-readroots.test.mjs",
     "test:sandbox:diagnose": "electron tests/sandbox/diagnose-sandbox.mjs",
     "test:sandbox:diagnose-codex": "electron tests/sandbox/diagnose-codex-task-worker.mjs",
@@ -78,7 +78,7 @@
     "test:live": "npm run test:providers:light",
     "test:ci": "npm run typecheck && npm run test:fast",
     "release:test-gate": "npm run typecheck && npm run typecheck:control-plane:ci && npm run test:ci-scripts && npm run check:control-plane-types && npm run check:legacy-write-guard && npm run check:no-double-assertions && npm run lint:ci && npm run test:fast && npm run test:control-plane",
-    "test:sandbox:all": "npm run test:sandbox:tdd && npm run test:sandbox && npm run test:sandbox:v2 && npm run test:sandbox:attachments"
+    "test:sandbox:all": "npm run test:sandbox:tdd && npm run test:sandbox && npm run test:sandbox:policy && npm run test:sandbox:attachments"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",

@@ -70,7 +70,7 @@ test('CodexDriver prepareTurn delegates to stream factory without altering chunk
       input: baseInput(),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )
 
@@ -265,7 +265,7 @@ test('CodexDriver turn handle uses RuntimeManager cancel/close contract', async 
       input: baseInput({ role: 'task-worker', prompt: 'managed' }),
       options: { outerSandbox: true },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )
 
@@ -300,7 +300,7 @@ test('CodexDriver turn handle uses RuntimeManager cancel/close contract', async 
       input: baseInput({ prompt: 'ok' }),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-copy'
+      authMode: 'runtime-reference'
     })
   )) {
     chunks.push(chunk)

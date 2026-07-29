@@ -260,6 +260,24 @@ export function updateDraftAbilityCores(
   )
 }
 
+export function updateDraftExecutionConfig(
+  threadId: string,
+  messageId: string,
+  config: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  }
+): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+  return api<{ messageId: string; payload: Record<string, unknown> }>(
+    `/api/threads/${threadId}/messages/${messageId}/draft/execution-config`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(config)
+    }
+  )
+}
+
 export function unlockDraftForEdit(
   threadId: string,
   draftMessageId: string

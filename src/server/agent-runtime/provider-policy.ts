@@ -21,8 +21,8 @@ export function resolveProviderRunPolicy(input: {
     innerAccess: 'full-access',
     approvals: 'auto',
     stateRoot: input.runtimeRoot,
-    // Outer sandbox → runtime-copy; direct host turns → host-identity (shared enum).
-    authMode: input.outerSandbox ? 'runtime-copy' : 'host-identity'
+    // Outer sandbox → runtime references; direct host turns → host identity.
+    authMode: input.outerSandbox ? 'runtime-reference' : 'host-identity'
   }
 }
 

@@ -7,6 +7,11 @@ import {
   type SupervisorEvent
 } from '../../sandbox/supervisor-protocol'
 import { processHostEnvironmentSource } from '../host-environment'
+import {
+  getShellChildEnvironment,
+  serializeShellChildEnvironment,
+  SERIALIZED_SHELL_CHILD_ENV
+} from '../shell-child-environment'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { SandboxError } from './types'
 
@@ -67,7 +72,8 @@ export class SandboxSupervisorManager extends EventEmitter {
         execPath: process.execPath,
         env: {
           ...hostEnv,
-          ELECTRON_RUN_AS_NODE: '1',
+          ...getShellChildEnvironment(),
+          [SERIALIZED_SHELL_CHILD_ENV]: serializeShellChildEnvironment(),
           CODETASK_SANDBOX_SUPERVISOR_WORKER: '1'
         },
         stdio: ['pipe', 'pipe', 'pipe', 'ipc']

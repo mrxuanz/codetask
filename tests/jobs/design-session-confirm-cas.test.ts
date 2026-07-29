@@ -34,6 +34,7 @@ import { attachmentDir, threadAttachmentsDir } from '../../src/server/data-paths
 import { deleteUserDraft, listUserDrafts } from '../../src/server/legacy-control-plane/draft-plan'
 import { drainAndDeleteJob } from '../../src/server/legacy-control-plane/deletion-coordinator'
 import { resolveAssignedReferenceLocalPaths } from '../../src/server/legacy-control-plane/reference-manifest'
+import { TEST_JOB_EXECUTION_PROFILE_JSON } from '../helpers/execution-profile'
 
 const USER = 'user'
 const THREAD_ID = 'thread-1'
@@ -206,6 +207,7 @@ async function seedLaunchableSession(options: { withAttachment?: boolean } = {})
     manifestRevision: 1,
     corpusRevision: 1,
     frozenCorpusRevision: 1,
+    executionProfileJson: TEST_JOB_EXECUTION_PROFILE_JSON,
     referenceManifestJson: JSON.stringify(manifest),
     draftConfirmedAt: now,
     planPhase: 'plan_ready',

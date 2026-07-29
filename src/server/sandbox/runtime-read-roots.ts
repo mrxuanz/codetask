@@ -6,6 +6,7 @@ import {
   processHostEnvironmentSource,
   type HostEnvironmentSnapshot
 } from '../host-environment'
+import { getShellChildEnvironment } from '../shell-child-environment'
 
 function safeRealpath(path: string): string {
   try {
@@ -68,7 +69,7 @@ export function resolveRuntimeReadRoots(
     const npmRoot = execFileSync(process.execPath, ['-p', 'require.resolve.paths("module")'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...hostEnvironment, ELECTRON_RUN_AS_NODE: '1' }
+      env: { ...hostEnvironment, ...getShellChildEnvironment() }
     }).trim()
     if (npmRoot) addRoot(roots, npmRoot)
   } catch {

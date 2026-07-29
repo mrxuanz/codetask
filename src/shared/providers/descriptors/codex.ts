@@ -10,7 +10,7 @@ export const CODEX_DESCRIPTOR = Object.freeze({
   childEnvironmentKeys: ['CODEX_HOME'],
   mcpRootKey: 'mcp_servers',
   capabilities: {
-    authMode: 'runtime-copy',
+    authMode: 'runtime-reference',
     protocol: 'sdk',
     supportedProfiles: [
       'chat-write',

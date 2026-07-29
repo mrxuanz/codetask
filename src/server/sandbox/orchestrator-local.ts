@@ -12,7 +12,7 @@ import {
   readSandboxStdoutLines,
   reapSandboxChild
 } from './launcher'
-import { policyForRoleV2, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
+import { createSandboxPolicy, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { preflightSandbox } from './preflight'
 import { toProviderAuthLogDto } from './provider-auth/types'
@@ -255,7 +255,7 @@ export async function* streamSandboxedConversationTurnLocal(
   // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
   // Conversation/planner roles can read the project and write runtime/provider state only;
   // task-worker remains the sole role that may write the real workspace.
-  const policy = policyForRoleV2({
+  const policy = createSandboxPolicy({
     role: input.role,
     workspaceRoot: input.workspaceRoot,
     runtimeRoot: input.runtimeRoot,

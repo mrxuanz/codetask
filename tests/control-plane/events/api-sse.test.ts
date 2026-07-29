@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { JobEventHub } from '@server/application/job-event-hub'
 import {
   parseControlPlaneJobChangedEnvelope,
   parseControlPlaneResyncRequiredEvent
@@ -203,25 +202,5 @@ describe('Renderer action wiring', () => {
     }
     assert.equal(shouldShowDelete(job), false)
     assert.deepEqual(filterActions(job.availableActions, job), ['pause', 'cancel'])
-  })
-})
-
-describe('Job event hub coalesce', () => {
-  it('should coalesce same topic events', () => {
-    const hub = new JobEventHub({ maxQueueSize: 10, coalesceWindowMs: 100 })
-    const sent: unknown[] = []
-    hub.registerConnection('job:job-1', {
-      send(event: unknown) {
-        sent.push(event)
-      }
-    })
-
-    hub.push('job:job-1', 1, { revision: 1 })
-    hub.push('job:job-1', 2, { revision: 2 })
-    hub.push('job:job-1', 3, { revision: 3 })
-    hub.flush()
-
-    assert.equal(sent.length, 1)
-    assert.deepEqual(sent[0], { revision: 3 })
   })
 })

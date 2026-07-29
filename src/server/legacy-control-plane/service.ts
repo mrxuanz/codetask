@@ -6,6 +6,10 @@ import { threadJobs } from '../db/schema'
 import type { JobSseEvent, ThreadJobDto } from './types'
 import type { TaskLaunchDraftPayload, TaskLaunchDraftReference } from '../conversation/draft/types'
 import { draftPayloadToClientJson } from '../conversation/draft/normalize'
+import {
+  ensureDraftExecutionConfigAvailable,
+  parseDraftExecutionConfig
+} from '../conversation/draft/execution-config'
 import { isDraftEditable } from '../conversation/draft/status'
 import { saveThreadAttachment } from '../conversation/attachments'
 import { getMessage, listMessages, updateMessagePayload } from '../conversation/messages'
@@ -203,6 +207,40 @@ export async function updateDraftAbilityCores(
     throw AppError.internal('Failed to update draft', 'turn.unknown')
   }
 
+  return { messageId, payload: updated.payload as Record<string, unknown> }
+}
+
+export async function updateDraftExecutionConfig(
+  username: string,
+  threadId: string,
+  messageId: string,
+  input: unknown
+): Promise<{ messageId: string; payload: Record<string, unknown> }> {
+  const message = await getMessage(username, threadId, messageId, { signAssets: false })
+  if (!message || message.kind !== 'task-launch-draft') {
+    throw AppError.notFound('Draft message not found', 'draft.not_found')
+  }
+  const payload = message.payload as TaskLaunchDraftPayload | undefined
+  if (!payload?.draftId) {
+    throw AppError.badRequest('Draft payload invalid', 'draft.invalid_payload')
+  }
+  if (!isDraftEditable(payload)) {
+    throw AppError.badRequest('Draft is already confirmed', 'draft.locked', {
+      reason: 'confirmed'
+    })
+  }
+
+  const executionConfig = parseDraftExecutionConfig(input)
+  await ensureDraftExecutionConfigAvailable(executionConfig)
+  const updated = await updateMessagePayload(
+    username,
+    threadId,
+    messageId,
+    draftPayloadToClientJson({ ...payload, executionConfig })
+  )
+  if (!updated?.payload) {
+    throw AppError.internal('Failed to update draft execution config', 'turn.unknown')
+  }
   return { messageId, payload: updated.payload as Record<string, unknown> }
 }
 

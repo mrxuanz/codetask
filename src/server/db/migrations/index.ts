@@ -36,6 +36,7 @@ import { migration036ConversationTurns } from './036_conversation_turns'
 import { migration039PromoteRestartInterruptedPaused } from './039_promote_restart_interrupted_paused'
 import { migration040DestructiveAuthCurrent } from './040_destructive_auth_current'
 import { migration041AuthSecretSqlite } from './041_auth_secret_sqlite'
+import { migration042ExecutionProfile } from './042_execution_profile'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -77,7 +78,8 @@ export const allMigrations = [
   migration036ConversationTurns,
   migration039PromoteRestartInterruptedPaused,
   migration040DestructiveAuthCurrent,
-  migration041AuthSecretSqlite
+  migration041AuthSecretSqlite,
+  migration042ExecutionProfile
 ]
 
 export function applyMigrations(db: Database.Database): void {

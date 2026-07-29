@@ -147,8 +147,8 @@ test('LaunchSummary envVars never embed raw secret values', () => {
   }
 })
 
-// H7-01 — Codex and Claude launches assemble independent env snapshots
-test('buildLaunchEnv isolates concurrent provider overlays', () => {
+// H7-01 — Provider launches assemble independent env snapshots without env-token credentials.
+test('buildLaunchEnv isolates concurrent provider overlays and strips auth tokens', () => {
   const host = { PATH: '/usr/bin', SHARED: 'host' }
   const codex = buildLaunchEnv({
     provider: 'codex',
@@ -160,10 +160,12 @@ test('buildLaunchEnv isolates concurrent provider overlays', () => {
     hostEnv: host,
     providerOverlay: { ANTHROPIC_API_KEY: 'claude-key-b' }
   })
-  assert.equal(codex.OPENAI_API_KEY, 'codex-key-a')
+  assert.equal(codex.OPENAI_API_KEY, undefined)
   assert.equal('ANTHROPIC_API_KEY' in codex, false)
-  assert.equal(claude.ANTHROPIC_API_KEY, 'claude-key-b')
+  assert.equal(claude.ANTHROPIC_API_KEY, undefined)
   assert.equal('OPENAI_API_KEY' in claude, false)
+  assert.equal(codex.SHARED, 'host')
+  assert.equal(claude.SHARED, 'host')
 })
 
 // H7-02 — two Codex launches with different cwd/env stay independent

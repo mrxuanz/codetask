@@ -104,8 +104,8 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.equal(task.threadOptions.sandboxMode, 'danger-full-access')
   assert.equal(task.sdkConfig?.sandbox_mode, 'danger-full-access')
   assert.ok(task.mcpToolNames?.includes('report_task_result'))
-  assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
-  assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_SCOPE, 'logical-task')
+  assert.equal('CODETASK_TASK_IDEMPOTENCY_KEY' in task.env, false)
+  assert.equal('CODETASK_TASK_IDEMPOTENCY_SCOPE' in task.env, false)
 })
 
 test('applyLoopbackNoProxyEnv preserves inherited entries and synchronizes both casings', () => {

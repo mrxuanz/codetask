@@ -10,10 +10,11 @@ import {
 } from '../../src/server/conversation/prompts'
 import { buildWorkspaceSnapshot } from '../../src/server/conversation/workspace-snapshot'
 
-test('buildChatConversationBody is a lightweight coding assistant without task workflow', () => {
+test('buildChatConversationBody is a read-only assistant without task workflow', () => {
   const body = buildChatConversationBody('Test Agent')
   assert.match(body, /coding assistant/)
-  assert.match(body, /read and edit files/)
+  assert.match(body, /read-only/)
+  assert.match(body, /without editing files/)
   assert.doesNotMatch(body, /propose_task_draft/)
   assert.doesNotMatch(body, /Discussion Workflow/)
   assert.doesNotMatch(body, /coordination assistant/)
@@ -45,14 +46,11 @@ test('buildConversationSystemPrompt create_task mode includes MCP workflow', () 
   assert.match(prompt, /propose_task_draft/)
 })
 
-test('ordinary chat service injects no CodeTask system or permission prompt', () => {
+test('ordinary chat service always uses the read-only capability without a workspace lease', () => {
   const source = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
-  assert.doesNotMatch(source, /The project workspace is writable for this turn/)
-  assert.doesNotMatch(source, /The project workspace is read-only for this turn/)
-  assert.match(
-    source,
-    /const systemPrompt = createTaskMode[\s\S]*?: undefined[\s\S]*?streamAgentTurn/
-  )
+  assert.match(source, /const requiredCapability = createTaskMode[\s\S]*?'chat-read'/)
+  assert.doesNotMatch(source, /acquireWorkspaceLease/)
+  assert.doesNotMatch(source, /'chat-write'/)
 })
 
 test('draft and Planner required MCP setup fail explicitly', () => {

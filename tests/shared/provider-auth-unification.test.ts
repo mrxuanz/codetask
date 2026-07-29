@@ -23,10 +23,10 @@ test('ProviderRegistry driver is the only complete production runtime entry (PRU
   }
 })
 
-test('ProviderAuthMode is only runtime-copy | host-identity (PRU-05-01)', () => {
+test('ProviderAuthMode is only runtime-reference | host-identity (PRU-05-01)', () => {
   assert.equal(
     resolveProviderRunPolicy({ outerSandbox: true, runtimeRoot: '/r' }).authMode,
-    'runtime-copy'
+    'runtime-reference'
   )
   assert.equal(
     resolveProviderRunPolicy({ outerSandbox: false, runtimeRoot: '/r' }).authMode,
@@ -70,7 +70,7 @@ test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)'
   const forged = 'sk-forged-token-must-not-appear-in-logs'
   const dto = toProviderAuthLogDto({
     provider: 'codex',
-    mode: 'runtime-copy',
+    mode: 'runtime-reference',
     authMaterialPresent: true,
     hostAuthPath: `/Users/secret-home/.codex/auth.json`,
     runtimeAuthPath: `/tmp/runtime/.codex/auth.json`,
@@ -82,7 +82,7 @@ test('toProviderAuthLogDto never embeds forged tokens or host paths (PRU-05-06)'
   assert.ok(!json.includes('auth.json'))
   assert.deepEqual(dto, {
     provider: 'codex',
-    mode: 'runtime-copy',
+    mode: 'runtime-reference',
     authMaterialPresent: true,
     warningCount: 2
   })

@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 
 import {
   loadNative,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   sandboxTestsEnabled,
   wirePolicy
 } from './sandbox-test-utils.mjs'
@@ -169,8 +169,8 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
     root.toLowerCase().startsWith(host.toLowerCase())
   )
 
-  const policy = prod.policyForRoleV2
-    ? prod.policyForRoleV2({
+  const policy = prod.createSandboxPolicy
+    ? prod.createSandboxPolicy({
         role: 'task-worker',
         workspaceRoot,
         runtimeRoot,
@@ -178,7 +178,7 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
         providerWriteRoots: prepared.writeRoots,
         attachmentReadRoots: []
       })
-    : policyForRoleV2('task-worker', workspaceRoot, runtimeRoot)
+    : sandboxPolicyForRole('task-worker', workspaceRoot, runtimeRoot)
 
   const writeRoots =
     policy.filesystem?.allowedWriteRoots ?? policy.filesystem?.allowed_write_roots ?? []
@@ -201,7 +201,7 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
     ),
     runtimeIsolated:
       prepared.envPatch.HOME === runtimeRoot &&
-      prepared.diagnostics.mode === 'runtime-copy' &&
+      prepared.diagnostics.mode === 'runtime-reference' &&
       hostWrites.length === 0
   }
 }
@@ -225,8 +225,8 @@ function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, provider) {
 
 function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, provider) {
   const authPrepared = prod.prepareProviderAuth(provider, runtimeRoot, { workspaceRoot })
-  if (prod.policyForRoleV2) {
-    return prod.policyForRoleV2({
+  if (prod.createSandboxPolicy) {
+    return prod.createSandboxPolicy({
       role: 'task-worker',
       workspaceRoot,
       runtimeRoot,
@@ -235,7 +235,7 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, provider) {
       attachmentReadRoots: []
     })
   }
-  return policyForRoleV2('task-worker', workspaceRoot, runtimeRoot)
+  return sandboxPolicyForRole('task-worker', workspaceRoot, runtimeRoot)
 }
 
 function ensureWindowsSetup(native) {

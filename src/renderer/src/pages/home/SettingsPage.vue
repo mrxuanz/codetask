@@ -2,20 +2,20 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  fetchControlPlaneSettings,
+  fetchBusinessSkills,
   fetchMcpSettings,
   fetchPromptSettings,
-  updateControlPlanePolicies,
+  updateBusinessSkills,
   updateMcpSettings,
   updatePromptSettings,
-  type ControlPlanePolicies,
-  type ControlPlaneSettingsPayload,
   type PromptSettings,
   type McpSettingsConstraints,
   type UserMcpSettings
 } from '@renderer/api/settings'
+import { fetchConversationCores, type ConversationCore } from '@renderer/api/conversation'
+import type { BusinessSkillsSettings } from '@shared/contracts/business-skills'
 import { fetchSandboxHealth, type SandboxHealthReport } from '@renderer/api/system'
-import ControlPlaneCoresCard from '@renderer/components/settings/ControlPlaneCoresCard.vue'
+import BusinessSkillsEditor from '@renderer/components/settings/BusinessSkillsEditor.vue'
 import McpSettingsCard from '@renderer/components/settings/McpSettingsCard.vue'
 import SandboxHealthCard from '@renderer/components/settings/SandboxHealthCard.vue'
 import LanguageSwitcher from '@renderer/components/LanguageSwitcher.vue'
@@ -41,7 +41,7 @@ import {
   type StorageStatsData
 } from '@renderer/api/storage'
 
-type SettingsSection = 'language' | 'storage' | 'sandbox' | 'control-plane' | 'mcp' | 'prompts'
+type SettingsSection = 'language' | 'storage' | 'sandbox' | 'skills' | 'mcp' | 'prompts'
 
 const { t } = useI18n()
 
@@ -50,8 +50,8 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-const controlPlane = ref<ControlPlaneSettingsPayload | null>(null)
-const controlPlaneDraft = ref<ControlPlanePolicies | null>(null)
+const cores = ref<ConversationCore[]>([])
+const businessSkillsDraft = ref<BusinessSkillsSettings | null>(null)
 const promptDraft = ref<PromptSettings | null>(null)
 const promptDefaults = ref<PromptSettings | null>(null)
 const mcpDraft = ref<UserMcpSettings | null>(null)
@@ -86,7 +86,7 @@ const sections = [
   { key: 'language' as const, labelKey: 'workspace.settings.sections.language' },
   { key: 'storage' as const, labelKey: 'workspace.settings.sections.storage' },
   { key: 'sandbox' as const, labelKey: 'workspace.settings.sections.sandbox' },
-  { key: 'control-plane' as const, labelKey: 'workspace.settings.sections.controlPlane' },
+  { key: 'skills' as const, labelKey: 'workspace.settings.sections.skills' },
   { key: 'mcp' as const, labelKey: 'workspace.settings.sections.mcp' },
   { key: 'prompts' as const, labelKey: 'workspace.settings.sections.prompts' }
 ]
@@ -214,21 +214,22 @@ async function loadSettings(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const [controlRes, promptRes, mcpRes] = await Promise.all([
-      fetchControlPlaneSettings(),
+    const [coresRes, promptRes, mcpRes, skillsRes] = await Promise.all([
+      fetchConversationCores(),
       fetchPromptSettings(),
-      fetchMcpSettings()
+      fetchMcpSettings(),
+      fetchBusinessSkills()
     ])
-    controlPlane.value = controlRes.data
-    controlPlaneDraft.value = structuredClone(controlRes.data.policies)
+    cores.value = coresRes.data.cores
+    businessSkillsDraft.value = structuredClone(skillsRes.data.settings)
     promptDraft.value = structuredClone(promptRes.data.settings)
     promptDefaults.value = promptRes.data.defaults
     mcpDraft.value = structuredClone(mcpRes.data.settings)
     mcpConstraints.value = mcpRes.data.constraints
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('workspace.settings.loadFailed')
-    controlPlane.value = null
-    controlPlaneDraft.value = null
+    cores.value = []
+    businessSkillsDraft.value = null
     promptDraft.value = null
     promptDefaults.value = null
     mcpDraft.value = null
@@ -236,11 +237,6 @@ async function loadSettings(): Promise<void> {
   } finally {
     loading.value = false
   }
-}
-
-function updateControlPlaneDraft(patch: Partial<ControlPlanePolicies>): void {
-  if (!controlPlaneDraft.value) return
-  controlPlaneDraft.value = { ...controlPlaneDraft.value, ...patch }
 }
 
 function updatePromptEntry<K extends keyof PromptSettings>(
@@ -254,19 +250,12 @@ function updatePromptEntry<K extends keyof PromptSettings>(
   }
 }
 
-async function saveControlPlane(): Promise<void> {
-  if (!controlPlaneDraft.value) return
+async function saveBusinessSkills(): Promise<void> {
+  if (!businessSkillsDraft.value) return
   saving.value = true
   try {
-    const res = await updateControlPlanePolicies({
-      plannerCoreCode: controlPlaneDraft.value.plannerCoreCode,
-      sliceVerifierCoreCode: controlPlaneDraft.value.sliceVerifierCoreCode,
-      milestoneVerifierCoreCode: controlPlaneDraft.value.milestoneVerifierCoreCode
-    })
-    controlPlaneDraft.value = structuredClone(res.data.policies)
-    if (controlPlane.value) {
-      controlPlane.value = { ...controlPlane.value, policies: res.data.policies }
-    }
+    const res = await updateBusinessSkills(businessSkillsDraft.value)
+    businessSkillsDraft.value = structuredClone(res.data.settings)
     toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
     toastError(err, t('workspace.settings.saveFailed'))
@@ -304,8 +293,8 @@ async function saveMcp(): Promise<void> {
 }
 
 async function handleSave(): Promise<void> {
-  if (section.value === 'control-plane') {
-    await saveControlPlane()
+  if (section.value === 'skills') {
+    await saveBusinessSkills()
   } else if (section.value === 'mcp') {
     await saveMcp()
   } else if (section.value === 'prompts') {
@@ -516,15 +505,15 @@ onUnmounted(() => {
             </CardContent>
           </Card>
 
-          <Card v-if="!loading && section === 'control-plane' && controlPlaneDraft && controlPlane">
+          <Card v-if="!loading && section === 'skills' && businessSkillsDraft">
             <CardHeader class="pb-3">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle class="text-lg">
-                    {{ t('workspace.settings.controlPlane.title') }}
+                    {{ t('workspace.settings.skills.title') }}
                   </CardTitle>
                   <p class="mt-1 text-sm text-muted-foreground">
-                    {{ t('workspace.settings.controlPlane.description') }}
+                    {{ t('workspace.settings.skills.description') }}
                   </p>
                 </div>
                 <Button size="sm" :disabled="saving" @click="handleSave">
@@ -533,16 +522,15 @@ onUnmounted(() => {
               </div>
             </CardHeader>
             <CardContent>
-              <ControlPlaneCoresCard
-                :draft="controlPlaneDraft"
-                :cores="controlPlane.cores"
+              <BusinessSkillsEditor
+                :settings="businessSkillsDraft"
                 :disabled="saving"
-                @update="updateControlPlaneDraft"
+                @update="businessSkillsDraft = $event"
               />
             </CardContent>
           </Card>
 
-          <Card v-if="!loading && section === 'mcp' && mcpDraft && mcpConstraints && controlPlane">
+          <Card v-if="!loading && section === 'mcp' && mcpDraft && mcpConstraints">
             <CardHeader class="pb-3">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -559,7 +547,7 @@ onUnmounted(() => {
             <CardContent>
               <McpSettingsCard
                 :draft="mcpDraft"
-                :cores="controlPlane.cores"
+                :cores="cores"
                 :constraints="mcpConstraints"
                 :disabled="saving"
                 @update="mcpDraft = $event"

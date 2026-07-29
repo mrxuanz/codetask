@@ -201,6 +201,7 @@ export const threadJobs = sqliteTable(
     planContextsTotal: integer('plan_contexts_total').notNull().default(0),
     planMessage: text('plan_message'),
     planCountsJson: text('plan_counts_json').notNull().default('{}'),
+    executionProfileJson: text('execution_profile_json'),
     taskPhase: text('task_phase').notNull().default('idle'),
     taskStatus: text('task_status').notNull().default('pending'),
     taskCurrentIndex: integer('task_current_index').notNull().default(0),

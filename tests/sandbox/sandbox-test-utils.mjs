@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
+const SANDBOX_COMMAND_STARTED_MARKER = '__CODETASK_SANDBOX_COMMAND_STARTED__'
 
 export function sandboxTestsEnabled() {
   if (process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
@@ -26,6 +27,73 @@ export function sandboxTestsEnabled() {
     return { enabled: false, reason: 'native .node binary not built; run npm run build:sandbox' }
   }
   return { enabled: true }
+}
+
+let runtimeGate
+
+/**
+ * Detect hosts that explicitly deny nested OS sandboxes (for example, running
+ * this suite from inside another macOS seatbelt). A broken sandbox remains a
+ * hard failure; only a positively identified host restriction may skip.
+ */
+export function sandboxRuntimeTestsEnabled() {
+  if (runtimeGate) return runtimeGate
+  const buildGate = sandboxTestsEnabled()
+  if (!buildGate.enabled) return (runtimeGate = buildGate)
+
+  const native = loadNative()
+  const fixture = createSandboxFixture('codetask-sandbox-runtime-gate-')
+  let handle
+  try {
+    const policy = sandboxPolicyForRole('planner', fixture.workspace, fixture.runtime)
+    const shell = process.platform === 'win32' ? 'cmd.exe' : 'sh'
+    const args = process.platform === 'win32' ? ['/c', 'exit 0'] : ['-lc', 'exit 0']
+    handle = native.launchSandboxedWorker({
+      policyJson: wirePolicy(policy),
+      command: shell,
+      args,
+      cwd: policy.cwd,
+      env: [{ key: 'CODETASK_OUTER_SANDBOX', value: '1' }]
+    })
+    handle.endStdin()
+    if (handle.waitForAttestation(3_000)) {
+      return (runtimeGate = { enabled: true })
+    }
+    const stderr = drain(handle, 'stderr')
+    const nestedSandboxDenied =
+      /sandbox_apply:\s*Operation not permitted|nested sandbox|not permitted by host sandbox/i.test(
+        stderr
+      )
+    if (nestedSandboxDenied && process.env.CODETASK_REQUIRE_SANDBOX_TESTS !== '1') {
+      return (runtimeGate = {
+        enabled: false,
+        reason: `host denies nested OS sandbox: ${stderr.trim().slice(0, 300)}`
+      })
+    }
+    return (runtimeGate = { enabled: true })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (
+      /sandbox_apply:\s*Operation not permitted|nested sandbox|not permitted by host sandbox/i.test(
+        message
+      ) &&
+      process.env.CODETASK_REQUIRE_SANDBOX_TESTS !== '1'
+    ) {
+      return (runtimeGate = {
+        enabled: false,
+        reason: `host denies nested OS sandbox: ${message.slice(0, 300)}`
+      })
+    }
+    return (runtimeGate = { enabled: true })
+  } finally {
+    try {
+      handle?.kill()
+      handle?.close()
+    } catch {
+      // Gate cleanup is best effort.
+    }
+    fixture.cleanup()
+  }
 }
 
 export function loadNative() {
@@ -61,7 +129,7 @@ function uniqueRoots(roots) {
   return out
 }
 
-export function policyForRoleV2(role, workspaceRoot, runtimeRoot, options = {}) {
+export function sandboxPolicyForRole(role, workspaceRoot, runtimeRoot, options = {}) {
   const workspace = realpathSync(workspaceRoot)
   const runtime = realpathSync(runtimeRoot)
   const allowedReadRoots = uniqueRoots([
@@ -82,7 +150,6 @@ export function policyForRoleV2(role, workspaceRoot, runtimeRoot, options = {}) 
   }
 
   return {
-    version: 2,
     role,
     cwd: workspace,
     runtimeRoot: runtime,
@@ -107,32 +174,29 @@ export function policyForRoleV2(role, workspaceRoot, runtimeRoot, options = {}) 
 }
 
 export function wirePolicy(policy) {
-  if (policy.version === 2) {
-    return JSON.stringify({
-      version: policy.version,
-      role: policy.role,
-      cwd: policy.cwd,
-      runtime_root: policy.runtimeRoot,
-      filesystem: {
-        default_access: policy.filesystem.defaultAccess,
-        allowed_read_roots: policy.filesystem.allowedReadRoots,
-        allowed_write_roots: policy.filesystem.allowedWriteRoots,
-        protected_names: policy.filesystem.protectedNames,
-        allow_system_runtime: policy.filesystem.allowSystemRuntime
-      },
-      network: {
-        mode: policy.network.mode,
-        allow_loopback: policy.network.allowLoopback,
-        allow_unix_sockets: policy.network.allowUnixSockets
-      },
-      process: {
-        isolate_from_host: policy.process.isolateFromHost,
-        allow_own_descendant_signals: policy.process.allowOwnDescendantSignals,
-        deny_ptrace: policy.process.denyPtrace
-      }
-    })
-  }
-  return JSON.stringify(policy)
+  return JSON.stringify({
+    version: 2,
+    role: policy.role,
+    cwd: policy.cwd,
+    runtime_root: policy.runtimeRoot,
+    filesystem: {
+      default_access: policy.filesystem.defaultAccess,
+      allowed_read_roots: policy.filesystem.allowedReadRoots,
+      allowed_write_roots: policy.filesystem.allowedWriteRoots,
+      protected_names: policy.filesystem.protectedNames,
+      allow_system_runtime: policy.filesystem.allowSystemRuntime
+    },
+    network: {
+      mode: policy.network.mode,
+      allow_loopback: policy.network.allowLoopback,
+      allow_unix_sockets: policy.network.allowUnixSockets
+    },
+    process: {
+      isolate_from_host: policy.process.isolateFromHost,
+      allow_own_descendant_signals: policy.process.allowOwnDescendantSignals,
+      deny_ptrace: policy.process.denyPtrace
+    }
+  })
 }
 
 export function sha256Policy(policy) {
@@ -187,7 +251,11 @@ export function shellQuote(path) {
 
 export async function runInSandbox(native, policy, shellCommand, env = []) {
   const shell = process.platform === 'win32' ? 'cmd.exe' : 'sh'
-  const shellArgs = process.platform === 'win32' ? ['/c', shellCommand] : ['-lc', shellCommand]
+  const markedCommand =
+    process.platform === 'win32'
+      ? `echo ${SANDBOX_COMMAND_STARTED_MARKER} & ${shellCommand}`
+      : `printf '%s\\n' '${SANDBOX_COMMAND_STARTED_MARKER}'; ${shellCommand}`
+  const shellArgs = process.platform === 'win32' ? ['/c', markedCommand] : ['-lc', markedCommand]
 
   const handle = native.launchSandboxedWorker({
     policyJson: wirePolicy(policy),
@@ -200,9 +268,12 @@ export async function runInSandbox(native, policy, shellCommand, env = []) {
   handle.endStdin()
 
   if (!handle.waitForAttestation(15_000)) {
+    const stderr = drain(handle, 'stderr').trim()
     handle.kill()
     handle.close()
-    throw new Error('sandbox helper attestation timeout')
+    throw new Error(
+      `sandbox helper attestation timeout${stderr ? `; stderr: ${stderr.slice(0, 2_000)}` : ''}`
+    )
   }
 
   const evidence = handle.evidence
@@ -216,8 +287,10 @@ export async function runInSandbox(native, policy, shellCommand, env = []) {
   while (Date.now() < deadline) {
     const code = handle.pollExit()
     if (code !== null && code !== undefined) {
+      const stdout = drain(handle, 'stdout')
+      const stderr = drain(handle, 'stderr')
       handle.close()
-      return { code, stdout: drain(handle, 'stdout'), stderr: drain(handle, 'stderr'), evidence }
+      return { code, stdout, stderr, evidence }
     }
     await new Promise((r) => setTimeout(r, 50))
   }
@@ -243,20 +316,30 @@ function drain(handle, stream) {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+function assertCommandStarted(result, label) {
+  if (!result.evidence?.active) {
+    throw new Error(`${label}: sandbox command had no active attestation`)
+  }
+  if (!result.stdout.includes(SANDBOX_COMMAND_STARTED_MARKER)) {
+    throw new Error(
+      `${label}: sandbox helper started but the tested command did not; stdout=${result.stdout}; stderr=${result.stderr}`
+    )
+  }
+}
+
 export function assertFails(promise, label) {
-  return promise.then(
-    (result) => {
-      if (result.code === 0) {
-        throw new Error(`${label}: expected failure, got code 0; stderr=${result.stderr}`)
-      }
-      return result
-    },
-    () => ({ code: -1, stderr: '', stdout: '', evidence: null })
-  )
+  return promise.then((result) => {
+    assertCommandStarted(result, label)
+    if (result.code === 0) {
+      throw new Error(`${label}: expected failure, got code 0; stderr=${result.stderr}`)
+    }
+    return result
+  })
 }
 
 export function assertSucceeds(promise, label) {
   return promise.then((result) => {
+    assertCommandStarted(result, label)
     if (result.code !== 0) {
       throw new Error(`${label}: expected success, got code ${result.code}: ${result.stderr}`)
     }
@@ -266,6 +349,7 @@ export function assertSucceeds(promise, label) {
 
 export async function assertEscapeBlocked(promise, label, verifyUnchanged) {
   const result = await promise
+  assertCommandStarted(result, label)
   if (result.code !== 0) {
     verifyUnchanged()
     return result

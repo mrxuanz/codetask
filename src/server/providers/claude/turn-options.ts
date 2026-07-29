@@ -4,11 +4,7 @@ import {
   capabilityProfileIsReadOnly,
   resolveInputCapabilityProfile
 } from '../../agent-runtime/capabilities'
-import {
-  applyTaskIdempotencyEnv,
-  buildProviderChildEnv,
-  buildSandboxPreparedProviderEnv
-} from '../../agent-runtime/env'
+import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '../../agent-runtime/env'
 import { buildClaudeMcpServers } from '../../agent-runtime/mcp'
 import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '../../agent-runtime/roles'
 import type { AgentTurnInput } from '../../agent-runtime/types'
@@ -48,7 +44,7 @@ export function resolveClaudeSystemPrompt(systemPrompt?: string): ClaudeSystemPr
 }
 
 /**
- * Outer-sandbox turns isolate via runtime-copy auth and must not load host
+ * Outer-sandbox turns isolate via runtime auth references and must not load host
  * CLAUDE.md / skills / hooks. Direct conversation turns (including read-only)
  * load user/project/local settings so host `settings.json` env auth and model
  * defaults stay available; MCP and skills are overridden in streamClaudeTurn.
@@ -152,8 +148,6 @@ export function buildClaudeTurnOptions(
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
-  applyTaskIdempotencyEnv(env, input.idempotencyKey)
-
   const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
   const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
   const nativeWorkspaceSandbox = !outerSandbox && !readOnly

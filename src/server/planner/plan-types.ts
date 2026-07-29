@@ -2,6 +2,7 @@ import type { PlannerRegisteredMilestone } from '@shared/contracts/plan'
 
 export type {
   FlatTaskPlan,
+  JobExecutionProfile,
   PlannerRegisteredMilestone,
   PlannerRegisteredSlice,
   PlannerRegisteredTask,

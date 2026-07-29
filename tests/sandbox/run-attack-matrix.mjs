@@ -6,13 +6,15 @@ import {
   assertFails,
   assertSucceeds,
   loadNative,
-  policyForRoleV2,
-  runInSandbox
+  sandboxPolicyForRole,
+  runInSandbox,
+  sandboxRuntimeTestsEnabled
 } from './sandbox-test-utils.mjs'
 
 async function main() {
-  if (process.env.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
-    console.log('skip: CODETASK_DISABLE_OUTER_SANDBOX=1')
+  const gate = sandboxRuntimeTestsEnabled()
+  if (!gate.enabled) {
+    console.log(`skip: ${gate.reason}`)
     return
   }
 
@@ -26,8 +28,8 @@ async function main() {
   mkdirSync(runtime, { recursive: true })
   const srcFile = join(workspace, 'probe.txt')
 
-  const mainPolicy = policyForRoleV2('main-agent', workspace, runtime)
-  const taskPolicy = policyForRoleV2('task-worker', workspace, runtime)
+  const mainPolicy = sandboxPolicyForRole('main-agent', workspace, runtime)
+  const taskPolicy = sandboxPolicyForRole('task-worker', workspace, runtime)
 
   const outside =
     process.platform === 'win32'
