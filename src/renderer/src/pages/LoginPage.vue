@@ -2,7 +2,6 @@
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { login } from '@renderer/api/auth'
-import { setToken } from '@renderer/auth/token'
 import CredentialsForm from '@renderer/components/auth/CredentialsForm.vue'
 import PageShell from '@renderer/components/ui/PageShell.vue'
 import { useBootstrap } from '@renderer/composables/useBootstrap'
@@ -24,8 +23,7 @@ async function onSubmit(payload: {
     captchaId: payload.captchaId,
     captchaAnswer: payload.captchaAnswer
   }
-  const res = await login(loginPayload)
-  setToken(res.data.token, res.data.expires_at)
+  await login(loginPayload)
   await refresh()
   await router.replace('/home')
 }

@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { browseFilesystem, fetchBrowseParent } from '@renderer/api/fs'
+import { browseFilesystem, fetchBrowseParent, resolveFilesystemFolder } from '@renderer/api/fs'
 import type { BrowseEntry } from '@renderer/api/fs'
 import { translateApiError } from '@renderer/i18n/translateApiError'
 import { defaultBrowsePath, joinChildPath, withTrailingSeparator } from '@renderer/lib/workspace'
@@ -18,6 +18,8 @@ export interface FolderBrowseReturn {
   openEntry: (entry: BrowseEntry) => void
   goParent: () => Promise<void>
   joinNewFolderPath: () => string
+  selectFolder: (path?: string) => Promise<string | null>
+  createFolder: () => Promise<string | null>
   start: () => void
 }
 
@@ -91,6 +93,43 @@ export function useFolderBrowse(options?: { active?: Ref<boolean> }): FolderBrow
     return joinChildPath(currentDirectoryPath(), newFolderName.value)
   }
 
+  async function resolveSelection(
+    target: string,
+    createIfMissing: boolean
+  ): Promise<string | null> {
+    if (!target.trim()) {
+      error.value = t(
+        createIfMissing ? 'folderPicker.folderNameRequired' : 'folderPicker.selectRequired'
+      )
+      return null
+    }
+    loading.value = true
+    error.value = null
+    try {
+      const result = await resolveFilesystemFolder(target, createIfMissing)
+      return result.data.path
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('folderPicker.browseFailed')
+      error.value = translateApiError(message, t)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  function selectFolder(path = currentDirectoryPath()): Promise<string | null> {
+    return resolveSelection(path, false)
+  }
+
+  async function createFolder(): Promise<string | null> {
+    const path = await resolveSelection(joinNewFolderPath(), true)
+    if (!path) return null
+    newFolderName.value = ''
+    query.value = withTrailingSeparator(path)
+    await loadBrowse(query.value)
+    return path
+  }
+
   function start(): void {
     reset()
     query.value = defaultBrowsePath()
@@ -121,6 +160,8 @@ export function useFolderBrowse(options?: { active?: Ref<boolean> }): FolderBrow
     openEntry,
     goParent,
     joinNewFolderPath,
+    selectFolder,
+    createFolder,
     start
   }
 }

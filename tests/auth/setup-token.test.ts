@@ -1,87 +1,29 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
 import test from 'node:test'
-import {
-  EncryptedFileAppSecretProvider,
-  getOrCreateAuthSecret,
-  hmacAuthSecret,
-  inspectStoredAppSecret,
-  resolveAppSecretStorageKind
-} from '../../src/server/auth/secret'
+import { hmacAuthSecret, readSqliteAuthSecret } from '../../src/server/auth/secret'
 import { generateSetupToken, validateSetupToken } from '../../src/server/auth/setup-token'
+import { migration040DestructiveAuthCurrent } from '../../src/server/db/migrations/040_destructive_auth_current'
+import { migration041AuthSecretSqlite } from '../../src/server/db/migrations/041_auth_secret_sqlite'
+import { NodeSqliteAdapter } from '../helpers/node-sqlite-adapter'
 
-test('getOrCreateAuthSecret persists and returns the same secret', () => {
-  const root = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-'))
+test('SQLite owns one stable auth secret for both Hono hosts', () => {
+  const db = new NodeSqliteAdapter()
   try {
-    const secretPath = join(root, 'bootstrap', 'secrets', 'auth-secret')
-    const secret1 = getOrCreateAuthSecret(secretPath)
-    assert.ok(typeof secret1 === 'string')
-    assert.equal(secret1.length, 64)
-    assert.equal(existsSync(secretPath), true)
-    assert.equal(readFileSync(secretPath, 'utf8').trim(), secret1)
-    const secret2 = getOrCreateAuthSecret(secretPath)
-    assert.equal(secret1, secret2)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
+    migration040DestructiveAuthCurrent.up(db as never)
+    migration041AuthSecretSqlite.up(db as never)
+    const first = readSqliteAuthSecret(db as never)
+    migration041AuthSecretSqlite.up(db as never)
+    const second = readSqliteAuthSecret(db as never)
 
-test('getOrCreateAuthSecret fails closed if stored value is corrupt', () => {
-  const root = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-regen-'))
-  try {
-    const secretPath = join(root, 'bootstrap', 'secrets', 'auth-secret')
-    mkdirSync(dirname(secretPath), { recursive: true })
-    writeFileSync(secretPath, 'short', 'utf8')
-    assert.throws(() => getOrCreateAuthSecret(secretPath), /Auth secret is corrupt/)
-    assert.equal(readFileSync(secretPath, 'utf8').trim(), 'short')
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test('encrypted secret provider creates a sealed value and rejects plaintext files', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'codetask-auth-secret-encrypted-'))
-  const encryptedPath = join(root, 'bootstrap', 'secrets', 'auth-secret')
-  const plaintextPath = join(root, 'bootstrap', 'secrets', 'plaintext-auth-secret')
-  const cipher = {
-    encrypt: (plaintext: string): Uint8Array => Buffer.from(`sealed:${plaintext}`, 'utf8'),
-    decrypt: (ciphertext: Uint8Array): string => {
-      const value = Buffer.from(ciphertext).toString('utf8')
-      if (!value.startsWith('sealed:')) throw new Error('invalid cipher fixture')
-      return value.slice('sealed:'.length)
-    }
-  }
-  try {
-    const provider = new EncryptedFileAppSecretProvider(encryptedPath, cipher)
-    const secret = Buffer.from(await provider.loadOrCreateAuthSecret()).toString('hex')
-    assert.equal(secret.length, 64)
-    assert.equal(provider.describeStorage().kind, 'os_store')
-    assert.equal(inspectStoredAppSecret(encryptedPath), 'encrypted')
-    assert.doesNotMatch(readFileSync(encryptedPath, 'utf8'), new RegExp(secret))
-
-    const reloaded = new EncryptedFileAppSecretProvider(encryptedPath, cipher)
-    assert.equal(Buffer.from(await reloaded.loadOrCreateAuthSecret()).toString('hex'), secret)
-
-    mkdirSync(dirname(plaintextPath), { recursive: true })
-    writeFileSync(plaintextPath, 'b'.repeat(64), 'utf8')
-    await assert.rejects(
-      () => new EncryptedFileAppSecretProvider(plaintextPath, cipher).loadOrCreateAuthSecret(),
-      /Encrypted auth secret is corrupt/
+    assert.match(first, /^[a-f0-9]{64}$/u)
+    assert.equal(second, first)
+    assert.equal(
+      (db.prepare(`SELECT count(*) AS count FROM auth_secret`).get() as { count: number }).count,
+      1
     )
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    db.close()
   }
-})
-
-test('shared auth secret selects its existing format instead of the launch mode', () => {
-  assert.equal(resolveAppSecretStorageKind('missing', true), 'os_store')
-  assert.equal(resolveAppSecretStorageKind('missing', false), 'fallback_file')
-  assert.equal(resolveAppSecretStorageKind('plaintext', true), 'fallback_file')
-  assert.equal(resolveAppSecretStorageKind('encrypted', true), 'os_store')
-  assert.throws(() => resolveAppSecretStorageKind('encrypted', false), /requires OS secret storage/)
-  assert.throws(() => resolveAppSecretStorageKind('invalid', true), /format is invalid/)
 })
 
 test('generateSetupToken creates a valid 3-segment token', () => {

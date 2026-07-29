@@ -43,8 +43,12 @@ function sqlite(sql) {
 }
 
 async function api(path, init = {}) {
-  const token = sqlite('SELECT session_token FROM auth_state WHERE id = 1;')
-  if (!token) throw new Error('No session token in auth_state — log in to the app first')
+  const token = process.env.CODETASK_BEARER_TOKEN?.trim()
+  if (!token) {
+    throw new Error(
+      'CODETASK_BEARER_TOKEN is required; session tokens are no longer stored in plaintext'
+    )
+  }
 
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,

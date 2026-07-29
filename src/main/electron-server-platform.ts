@@ -1,7 +1,6 @@
 import { app } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { join } from 'path'
-import { loadMainProcessAuthSecret } from './app-secret'
 import { resolveDataDirSelection } from './data-dir'
 import type { AppServerPlatform } from './server'
 
@@ -12,7 +11,6 @@ export function createElectronServerPlatform(): AppServerPlatform {
     rendererDevUrl: process.env.ELECTRON_RENDERER_URL,
     staticDir: is.dev ? undefined : join(__dirname, '../renderer'),
     appRoot: app.getAppPath(),
-    resolveDataDirSelection,
-    loadAuthSecret: loadMainProcessAuthSecret
+    resolveDataDirSelection
   }
 }

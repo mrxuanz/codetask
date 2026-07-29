@@ -19,7 +19,7 @@ export const DATA_ROOT_FORMAT_VERSION = 1
 
 export type StorageLocationSource = 'desktop_setup' | 'default' | 'recovered' | 'migration'
 
-export type DataDirSource = 'cli' | 'env' | 'locator' | 'candidate'
+export type DataDirSource = 'cli' | 'config' | 'locator' | 'candidate'
 
 export interface DataDirResolution {
   phase: 'ready' | 'selection_required' | 'recovery_required'
@@ -38,7 +38,6 @@ export interface BootstrapPaths {
   serviceDiscoveryFile: string
   logsDir: string
   secretsDir: string
-  authSecretFile: string
   mcpSecretFile: string
 }
 
@@ -85,7 +84,6 @@ export function bootstrapPaths(root: string): BootstrapPaths {
     serviceDiscoveryFile: join(bootstrapDir, 'running-service.json'),
     logsDir: join(absolute, 'logs'),
     secretsDir,
-    authSecretFile: join(secretsDir, 'auth-secret'),
     mcpSecretFile: join(secretsDir, 'mcp-secrets.json')
   }
 }
@@ -303,7 +301,7 @@ export function createStorageLocator(input: {
 /** Storage resolver used by both Electron composition and Node integration tests. */
 export function resolveStorageLocation(input: {
   explicitDataDir?: string
-  envDataDir?: string
+  configuredDataDir?: string
   mode: 'desktop' | 'server'
   bootstrapRoot: string
   legacyBootstrapRoots?: readonly string[]
@@ -321,12 +319,12 @@ export function resolveStorageLocation(input: {
     }
   }
 
-  const envDir = input.envDataDir?.trim()
-  if (envDir) {
+  const configuredDir = input.configuredDataDir?.trim()
+  if (configuredDir) {
     return {
       phase: 'ready',
-      dataDir: resolve(envDir),
-      source: 'env',
+      dataDir: resolve(configuredDir),
+      source: 'config',
       managed: true,
       bootstrap
     }
@@ -361,8 +359,6 @@ export function resolveStorageLocation(input: {
       | undefined
     if (legacy) {
       try {
-        copyBootstrapSecretIfMissing(legacy.paths.authSecretFile, bootstrap.authSecretFile)
-        copyBootstrapSecretIfMissing(legacy.paths.mcpSecretFile, bootstrap.mcpSecretFile)
         repository.write(
           createStorageLocator({
             dataDir: legacy.locator.dataDir,
@@ -438,23 +434,6 @@ export function resolveStorageLocation(input: {
     source: 'candidate',
     managed: false,
     bootstrap
-  }
-}
-
-function copyBootstrapSecretIfMissing(source: string, target: string): void {
-  if (!existsSync(source) || existsSync(target)) return
-  mkdirSync(dirname(target), { recursive: true })
-  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`
-  let fd: number | null = null
-  try {
-    writeFileSync(tmp, readFileSync(source), { mode: 0o600 })
-    fd = openSync(tmp, 'r+')
-    fsyncSync(fd)
-    closeSync(fd)
-    fd = null
-    renameSync(tmp, target)
-  } finally {
-    if (fd !== null) closeSync(fd)
   }
 }
 

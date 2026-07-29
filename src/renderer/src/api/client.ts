@@ -40,13 +40,15 @@ function extractBusinessCode(data: unknown, message: string): string {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...authHeaders(),
-    ...init.headers
+  const headers = new Headers(init.headers)
+  for (const [name, value] of Object.entries(authHeaders() as Record<string, string>)) {
+    headers.set(name, value)
+  }
+  if (init.body !== undefined && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
   }
 
-  const res = await fetch(path, { ...init, headers })
+  const res = await fetch(path, { ...init, headers, credentials: 'same-origin' })
   const raw = await res.text()
   let body: ApiResponse<T>
   try {

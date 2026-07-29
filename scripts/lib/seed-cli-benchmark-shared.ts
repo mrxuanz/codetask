@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { eq, isNull, and, like } from 'drizzle-orm'
 import { getDb } from '../../src/server/db'
-import { authState, designSessions, threads } from '../../src/server/db/schema'
+import { authUsers, designSessions, threads } from '../../src/server/db/schema'
 import { createProject } from '../../src/server/projects/service'
 import { createThread } from '../../src/server/threads/service'
 import { THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
@@ -313,18 +313,22 @@ export function describeTaskCoreAssignment(plan: SavedJobPlan): string {
 
 export async function readAuth(): Promise<AuthInfo> {
   const db = getDb()
-  const rows = await db.select().from(authState).limit(1)
+  const rows = await db.select().from(authUsers).limit(1)
   const row = rows[0]
-  if (!row?.username || !row.sessionToken) {
-    throw new Error('No authenticated user in auth_state. Log in via the app first.')
+  if (!row?.username) {
+    throw new Error('No account in auth_users. Complete account setup in the app first.')
   }
-  return { username: row.username, sessionToken: row.sessionToken }
+  return {
+    username: row.username,
+    sessionToken: process.env.CODETASK_BEARER_TOKEN?.trim() ?? ''
+  }
 }
 
 const DEFAULT_SERVER_PORTS = [8080, 3000] as const
 
 /** Ask the running dev:serve process to reconcile orphans and advance the queue. */
 export async function kickServerJobQueue(auth: AuthInfo): Promise<boolean> {
+  if (!auth.sessionToken) return false
   for (const port of DEFAULT_SERVER_PORTS) {
     const url = `http://127.0.0.1:${port}/api/jobs/queue/resume`
     try {

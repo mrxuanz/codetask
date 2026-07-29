@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { browseFilesystem, fetchBrowseParent } from '@renderer/api/fs'
-import type { BrowseEntry } from '@renderer/api/fs'
 import { useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
+import { useFolderBrowse } from '@renderer/composables/useFolderBrowse'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Input from '@renderer/components/ui/Input.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
 import { translateApiError } from '@renderer/i18n/translateApiError'
-import { defaultBrowsePath, joinChildPath, withTrailingSeparator } from '@renderer/lib/workspace'
 
 const { t } = useI18n()
 const workspace = useHomeWorkspace()
@@ -20,81 +18,35 @@ const open = computed({
   set: (value: boolean) => workspace.setAddProjectOpen(value)
 })
 
-const query = ref(defaultBrowsePath())
-const parentPath = ref('')
-const entries = ref<BrowseEntry[]>([])
-const newFolderName = ref('')
-const loading = ref(false)
 const submitting = ref(false)
-const error = ref<string | null>(null)
+const {
+  query,
+  parentPath,
+  entries,
+  newFolderName,
+  loading,
+  error,
+  reset: resetBrowse,
+  currentDirectoryPath,
+  openEntry,
+  goParent,
+  selectFolder,
+  createFolder,
+  start
+} = useFolderBrowse({ active: open })
 
 function reset(): void {
-  query.value = defaultBrowsePath()
-  parentPath.value = ''
-  entries.value = []
-  newFolderName.value = ''
-  error.value = null
-  loading.value = false
+  resetBrowse()
   submitting.value = false
 }
 
-async function loadBrowse(partialPath: string): Promise<void> {
-  loading.value = true
-  error.value = null
-  try {
-    const res = await browseFilesystem(partialPath)
-    parentPath.value = res.data.parentPath
-    entries.value = res.data.entries
-    if (!partialPath.trim()) {
-      query.value = res.data.parentPath
-    }
-  } catch (err) {
-    parentPath.value = ''
-    entries.value = []
-    const message = err instanceof Error ? err.message : t('folderPicker.browseFailed')
-    error.value = translateApiError(message, t)
-  } finally {
-    loading.value = false
-  }
-}
-
-function currentDirectoryPath(): string {
-  return parentPath.value || query.value.trim()
-}
-
-function openEntry(entry: BrowseEntry): void {
-  query.value = withTrailingSeparator(entry.path)
-  newFolderName.value = ''
-}
-
-async function goParent(): Promise<void> {
-  const target = currentDirectoryPath()
-  if (!target) return
-  loading.value = true
-  error.value = null
-  try {
-    const res = await fetchBrowseParent(target)
-    query.value = withTrailingSeparator(res.data.parentPath)
-    newFolderName.value = ''
-    await loadBrowse(query.value)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : t('folderPicker.parentFailed')
-    error.value = translateApiError(message, t)
-  } finally {
-    loading.value = false
-  }
-}
-
 async function submit(targetPath?: string): Promise<void> {
-  const target = targetPath?.trim() || query.value.trim() || parentPath.value
-  if (!target) {
-    error.value = t('folderPicker.selectRequired')
-    return
-  }
   submitting.value = true
   error.value = null
   try {
-    await workspace.addLocalProject(target)
+    const path = await selectFolder(targetPath)
+    if (!path) return
+    await workspace.addLocalProject(path)
   } catch (err) {
     const message = err instanceof Error ? err.message : t('folderPicker.addFailed')
     error.value = translateApiError(message, t)
@@ -103,14 +55,19 @@ async function submit(targetPath?: string): Promise<void> {
   }
 }
 
-function createAndSubmitFolder(): void {
-  const base = currentDirectoryPath()
-  const target = joinChildPath(base, newFolderName.value)
-  if (!target) {
-    error.value = t('folderPicker.folderNameRequired')
-    return
+async function createAndSubmitFolder(): Promise<void> {
+  submitting.value = true
+  error.value = null
+  try {
+    const path = await createFolder()
+    if (!path) return
+    await workspace.addLocalProject(path)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : t('folderPicker.addFailed')
+    error.value = translateApiError(message, t)
+  } finally {
+    submitting.value = false
   }
-  void submit(target)
 }
 
 watch(open, (isOpen) => {
@@ -118,19 +75,7 @@ watch(open, (isOpen) => {
     reset()
     return
   }
-  query.value = defaultBrowsePath()
-  void loadBrowse(query.value)
-})
-
-let browseTimer: number | undefined
-watch(query, (value) => {
-  if (!open.value) return
-  if (browseTimer !== undefined) {
-    window.clearTimeout(browseTimer)
-  }
-  browseTimer = window.setTimeout(() => {
-    void loadBrowse(value)
-  }, 200)
+  start()
 })
 </script>
 

@@ -1,33 +1,52 @@
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import type { AppServerPlatform } from '../main/server'
-import { loadNodeAuthSecret } from './app-secret'
 import { resolveNodeDataDirSelection } from './data-dir'
 
 function firstExistingDirectory(candidates: string[]): string | undefined {
   return candidates.find((candidate) => existsSync(candidate))
 }
 
-export function resolveStandaloneStaticDir(): string | undefined {
-  const configured = process.env.CODETASK_STATIC_DIR?.trim()
-  if (configured) return resolve(configured)
+function isCodeTaskPackage(path: string): boolean {
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8')) as {
+      name?: unknown
+      main?: unknown
+    }
+    return value.name === 'task' || value.main === './out/main/index.js'
+  } catch {
+    return false
+  }
+}
 
-  const entryDir = process.argv[1] ? dirname(resolve(process.argv[1])) : process.cwd()
-  return firstExistingDirectory([
-    join(entryDir, '..', 'renderer'),
-    join(process.cwd(), 'out', 'renderer')
-  ])
+export function resolveStandaloneAppRoot(): string {
+  if (!process.argv[1] || resolve(process.argv[1]) === resolve(process.execPath)) {
+    return dirname(dirname(resolve(process.execPath)))
+  }
+
+  let current = dirname(resolve(process.argv[1]))
+  for (;;) {
+    const packageJson = join(current, 'package.json')
+    if (existsSync(packageJson) && isCodeTaskPackage(packageJson)) return current
+    const parent = dirname(current)
+    if (parent === current) return process.cwd()
+    current = parent
+  }
+}
+
+export function resolveStandaloneStaticDir(
+  appRoot = resolveStandaloneAppRoot()
+): string | undefined {
+  return firstExistingDirectory([join(appRoot, 'renderer'), join(appRoot, 'out', 'renderer')])
 }
 
 /** Pure Node adapter for the shared HTTP/runtime composition. */
 export function createNodeServerPlatform(): AppServerPlatform {
-  const rendererDevUrl = process.env.CODETASK_RENDERER_DEV_URL?.trim()
+  const appRoot = resolveStandaloneAppRoot()
   return {
-    isDev: Boolean(rendererDevUrl),
-    rendererDevUrl,
-    staticDir: rendererDevUrl ? undefined : resolveStandaloneStaticDir(),
-    appRoot: resolve(process.env.CODETASK_APP_ROOT?.trim() || process.cwd()),
-    resolveDataDirSelection: (input) => resolveNodeDataDirSelection(input),
-    loadAuthSecret: loadNodeAuthSecret
+    isDev: false,
+    staticDir: resolveStandaloneStaticDir(appRoot),
+    appRoot,
+    resolveDataDirSelection: (input) => resolveNodeDataDirSelection(input)
   }
 }

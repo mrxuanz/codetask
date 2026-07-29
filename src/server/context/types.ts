@@ -8,10 +8,12 @@ import type { McpSecretProvider } from '../settings/mcp-secret-provider'
 import type { AppConfig } from '../config/app-config'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderRuntimeManager } from '../providers/lifecycle'
+import type { SecureAuthService } from '../auth/service'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
   authSecret: string
+  auth: SecureAuthService
   mcpSecrets: McpSecretProvider
   setupToken?: string
 }
