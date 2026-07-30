@@ -18,7 +18,6 @@ import {
   ensureJobTaskRuntimeRoot,
   streamAgentTurn
 } from '../agent-runtime/runner'
-import { ensureCursorAcpRuntimeDirs } from '../agent-runtime/env'
 import { memoryDebug } from '../debug/memory'
 import { cleanupJobTaskRuntimeTree } from '../runtime/cleanup'
 import { parseSuspensionKind } from '../../shared/job-suspension.ts'
@@ -1374,9 +1373,6 @@ async function executeSingleTask(
     core.code === 'cursorcli'
       ? ensureJobRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, core.code)
       : ensureJobTaskRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, taskId, core.code)
-  if (core.code === 'cursorcli') {
-    ensureCursorAcpRuntimeDirs(runtimeRoot, job.workspacePath ?? '')
-  }
   const model = resolveCoreModel(core.code as SupportedCoreCode)
 
   const sessionId = `task-mcp-${randomUUID()}`

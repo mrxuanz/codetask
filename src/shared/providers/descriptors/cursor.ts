@@ -7,7 +7,7 @@ export const CURSOR_DESCRIPTOR = Object.freeze({
   description: 'Cursor Agent CLI',
   defaultCommands: ['agent', 'cursor-agent'],
   authEnvironmentKeys: ['CURSOR_API_KEY'],
-  childEnvironmentKeys: ['CURSOR_DATA_DIR'],
+  childEnvironmentKeys: ['CURSOR_CONFIG_DIR'],
   mcpRootKey: 'mcpServers',
   capabilities: {
     authMode: 'host-identity',

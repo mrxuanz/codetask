@@ -17,8 +17,9 @@ export function dataPaths(dataDir: string): {
     attachments: join(dataDir, 'assets', 'attachments'),
     artifactsMessages: join(dataDir, 'assets', 'artifacts', 'messages'),
     artifactsJobs: join(dataDir, 'assets', 'artifacts', 'jobs'),
-    runtimes: join(dataDir, 'assets', 'runtimes'),
-    sandboxHome: join(dataDir, 'assets', 'sandbox-home')
+    // Runtimes are CodeTask scratch/attestation trees — not attachment assets.
+    runtimes: join(dataDir, 'runtimes'),
+    sandboxHome: join(dataDir, 'sandbox-home')
   }
 }
 
