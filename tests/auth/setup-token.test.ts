@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { hmacAuthSecret, readSqliteAuthSecret } from '../../src/server/auth/secret'
-import { generateSetupToken, validateSetupToken } from '../../src/server/auth/setup-token'
+import {
+  clearProcessSetupGate,
+  createProcessSetupGateSecret,
+  generateSetupToken,
+  installProcessSetupGate,
+  validateSetupToken,
+  validateSetupTokenWithGate
+} from '../../src/server/auth/setup-token'
 import { migration040DestructiveAuthCurrent } from '../../src/server/db/migrations/040_destructive_auth_current'
 import { migration041AuthSecretSqlite } from '../../src/server/db/migrations/041_auth_secret_sqlite'
 import { NodeSqliteAdapter } from '../helpers/node-sqlite-adapter'
@@ -61,6 +68,25 @@ test('validateSetupToken rejects expired token', () => {
   const mac = hmacAuthSecret(secret, `${parts[0]}:${parts[1]}`)
   const expired = `${parts[0]}.${parts[1]}.${mac}`
   assert.equal(validateSetupToken(secret, expired), false)
+})
+
+test('validateSetupTokenWithGate accepts process gate before durable auth secret exists', () => {
+  const gate = createProcessSetupGateSecret()
+  installProcessSetupGate(gate)
+  try {
+    const { token } = generateSetupToken(gate)
+    assert.equal(validateSetupTokenWithGate('b'.repeat(64), token), true)
+    assert.equal(validateSetupToken('b'.repeat(64), token), false)
+  } finally {
+    clearProcessSetupGate()
+  }
+})
+
+test('validateSetupTokenWithGate falls back to durable auth secret', () => {
+  clearProcessSetupGate()
+  const secret = 'a'.repeat(64)
+  const { token } = generateSetupToken(secret)
+  assert.equal(validateSetupTokenWithGate(secret, token), true)
 })
 
 test('hmacAuthSecret produces consistent HMAC', () => {

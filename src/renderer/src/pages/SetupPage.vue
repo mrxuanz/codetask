@@ -136,13 +136,6 @@ async function onSubmit(payload: {
       await router.replace(bootstrapData.value.authenticated ? '/home' : '/login')
       return
     }
-
-    // The server setup token is derived from the newly created SQLite database secret. After
-    // storage activation the console prints it and the form reveals the token field; keep the
-    // entered credentials and let the user submit once more.
-    if (bootstrapData.value?.setupTokenRequired && !payload.setupToken) {
-      return
-    }
   }
 
   await setup(payload.username, payload.password, payload.setupToken)
