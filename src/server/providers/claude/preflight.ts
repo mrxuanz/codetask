@@ -8,7 +8,7 @@ const CLAUDE_LOGIN_HINT = 'Run `claude auth login` in a terminal and retry.'
 /**
  * Claude auth preflight owned by the Claude driver module.
  *
- * Outer-sandbox turns use settingSources=[] and an exact host-identity allowlist,
+ * Outer-sandbox turns use settingSources=['user'] plus a settings.env whitelist,
  * so prepared auth diagnostics describe the material available to the SDK runtime.
  * Probing an independently installed host CLI would validate the wrong binary
  * and can fail inside an isolated HOME when that CLI is a toolchain shim.

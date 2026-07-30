@@ -434,7 +434,7 @@ test('Claude turn options parity snapshots stay stable for settings/MCP/permissi
     assert.ok(planner.disallowedTools.includes('Bash'))
     assert.ok(planner.disallowedTools.includes('Edit'))
 
-    assert.deepEqual([...task.settingSources], [])
+    assert.deepEqual([...task.settingSources], ['user'])
     assert.equal(task.outerSandbox, true)
     assert.equal(task.readOnly, false)
     assert.equal(task.pinMcpConfig, true)

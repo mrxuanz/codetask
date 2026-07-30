@@ -8,7 +8,7 @@ export function requiresExclusiveWorkspaceLease(mode: WorkspaceAccessMode): bool
   return mode === 'exclusive-write'
 }
 
-/** Default/fallback conversation access; ordinary chat may upgrade after acquiring a write lease. */
+/** Default/fallback conversation access before chat policy upgrades to exclusive-write. */
 export function conversationWorkspaceAccess(
   needsProjectContext: boolean
 ): Extract<WorkspaceAccessMode, 'metadata' | 'live-read'> {

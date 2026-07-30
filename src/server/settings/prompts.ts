@@ -100,6 +100,11 @@ function resolveRolePromptBody(entry: PromptBodySettings, fallback: () => string
   return body.length > 0 ? body : fallback()
 }
 
+/**
+ * Resolve optional custom chat prompt body from settings.
+ * When useDefault is true (product default), returns null — ordinary chat injects no system prompt.
+ * Settings may disable useDefault and supply a custom body (and separately configure user MCP).
+ */
 export function resolveConversationPromptBody(): string | null {
   const settings = loadPromptSettings()
   if (settings.conversation.useDefault) return null

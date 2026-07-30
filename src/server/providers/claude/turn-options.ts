@@ -15,6 +15,7 @@ import {
   resolveProviderExecutableStrategy,
   type ProviderExecutableStrategy
 } from '../runtime-executable'
+import { resolveClaudeSettingsAuthEnv } from '../../sandbox/provider-auth/paths'
 import type {
   PermissionMode as ClaudePermissionMode,
   SandboxSettings as ClaudeSandboxSettings
@@ -44,16 +45,18 @@ export function resolveClaudeSystemPrompt(systemPrompt?: string): ClaudeSystemPr
 }
 
 /**
- * Outer-sandbox turns isolate via runtime auth references and must not load host
- * CLAUDE.md / skills / hooks. Direct conversation turns (including read-only)
- * load user/project/local settings so host `settings.json` env auth and model
- * defaults stay available; MCP and skills are overridden in streamClaudeTurn.
+ * Outer-sandbox turns load only the host `user` settings source so
+ * `~/.claude/settings.json` auth/env can resolve, while skipping project/local
+ * policy. Whitelisted settings.env keys are still injected as a belt-and-suspenders
+ * path when the shared env stripper removes ANTHROPIC_*.
+ * Direct conversation turns load user/project/local; MCP and skills are
+ * overridden in streamClaudeTurn.
  */
 export function resolveClaudeSettingSources(
   outerSandbox: boolean,
   _capabilityProfile?: AgentCapabilityProfile
 ): ClaudeSettingSource[] {
-  return outerSandbox ? [] : ['user', 'project', 'local']
+  return outerSandbox ? ['user'] : ['user', 'project', 'local']
 }
 
 /** Use the SDK-bundled native CLI unless the user explicitly selected a path. */
@@ -123,6 +126,18 @@ export interface ClaudeTurnOptionsPlan {
   readonly executableStrategy: ProviderExecutableStrategy
 }
 
+/**
+ * Outer-sandbox turns keep settingSources=['user'] (no project/local), and still
+ * re-inject the ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN whitelist after the shared
+ * env stripper removes them.
+ */
+export function applyClaudeSettingsAuthEnv(
+  env: Record<string, string>,
+  settingsAuthEnv: Readonly<Record<string, string>> = resolveClaudeSettingsAuthEnv()
+): Record<string, string> {
+  return { ...env, ...settingsAuthEnv }
+}
+
 /** ClaudeDriver-owned turn options builder (PRU-08-05). */
 export function buildClaudeTurnOptions(
   input: AgentTurnInput,
@@ -146,7 +161,7 @@ export function buildClaudeTurnOptions(
   const pathOverride = resolveClaudePathOverride(input)
 
   const env = outerSandbox
-    ? buildSandboxPreparedProviderEnv()
+    ? applyClaudeSettingsAuthEnv(buildSandboxPreparedProviderEnv())
     : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
   const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
   const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0

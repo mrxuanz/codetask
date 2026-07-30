@@ -110,8 +110,12 @@ async function runStatic(runtimeRoot: string): Promise<{
   log('static', 'report', report)
 
   if (!report.runtimeIsolated) throw new Error('Claude host-identity isolation check failed')
-  if (report.settingSourcesOuterSandbox.length !== 0) {
-    throw new Error('outer sandbox must use empty settingSources')
+  if (
+    !Array.isArray(report.settingSourcesOuterSandbox) ||
+    report.settingSourcesOuterSandbox.length !== 1 ||
+    report.settingSourcesOuterSandbox[0] !== 'user'
+  ) {
+    throw new Error("outer sandbox must use settingSources=['user']")
   }
 
   return report

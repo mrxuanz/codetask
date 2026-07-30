@@ -36,6 +36,7 @@ import {
   resetWorkspaceLeaseStateForTests
 } from '../../src/server/legacy-control-plane/workspace-lease-store'
 import { prepareConversationTurn } from '../../src/server/conversation/service'
+import { releaseChatWorkspaceLease } from '../../src/server/conversation/turn-policy'
 import { getProjectWorkspaceAccess } from '../../src/server/projects/service'
 import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
 
@@ -237,7 +238,7 @@ test('owner-only release on failed acquire path would drop a concurrent winner l
   }
 })
 
-test('ordinary chat dynamically follows the project task lease while draft chat stays read-only', async () => {
+test('ordinary chat takes a write lease when free and downgrades while tasks hold the directory', async () => {
   await setup()
   try {
     await seedPendingJob('job-active', workspaceRoot)
@@ -289,20 +290,26 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
       turnId: 'turn-blocked'
     })
     assert.equal(blocked.workspaceAccess, 'live-read')
+    assert.equal(blocked.capabilityProfile, 'chat-read')
+    assert.equal(blocked.workspaceLease, null)
     getAppContext().runtimeRegistry.removeInflightThread('chat-blocked')
 
     releaseWorkspaceLease(taskLease.leaseId)
 
-    const readable = await prepareConversationTurn({
+    const writable = await prepareConversationTurn({
       username: 'user',
       threadId: 'chat-writable',
       requestedCreateTaskMode: false,
       requestedDraft: false,
       turnId: 'turn-writable'
     })
-    assert.equal(readable.workspaceAccess, 'live-read')
-    const accessWhileConversationReads = await getProjectWorkspaceAccess('user', projectId)
-    assert.equal(accessWhileConversationReads.mode, 'read_write')
+    assert.equal(writable.workspaceAccess, 'exclusive-write')
+    assert.equal(writable.capabilityProfile, 'chat-write')
+    assert.ok(writable.workspaceLease)
+    const accessWhileConversationWrites = await getProjectWorkspaceAccess('user', projectId)
+    assert.equal(accessWhileConversationWrites.mode, 'read_only')
+    assert.equal(accessWhileConversationWrites.blocker?.kind, 'conversation')
+    releaseChatWorkspaceLease(writable.workspaceLease)
     getAppContext().runtimeRegistry.removeInflightThread('chat-writable')
 
     const draft = await prepareConversationTurn({
@@ -313,6 +320,8 @@ test('ordinary chat dynamically follows the project task lease while draft chat 
       turnId: 'turn-draft'
     })
     assert.equal(draft.workspaceAccess, 'live-read')
+    assert.equal(draft.capabilityProfile, 'create-task-read')
+    assert.equal(draft.workspaceLease, null)
     getAppContext().runtimeRegistry.removeInflightThread('draft-readonly')
   } finally {
     await teardown()
@@ -345,18 +354,24 @@ test('queue-coordinator releases lease by leaseId on slot failure', () => {
   assert.doesNotMatch(source, /releaseWorkspaceLeaseForOwner/)
 })
 
-test('conversation is lease-free and snapshots resolved read access', () => {
-  const conversationSource = readFileSync(
-    join(process.cwd(), 'src/server/conversation/service.ts'),
+test('chat turn-policy acquires leases; create-task stays lease-free and read-only', () => {
+  const chatPolicy = readFileSync(
+    join(process.cwd(), 'src/server/conversation/turn-policy/chat.ts'),
     'utf8'
   )
+  const createTaskPolicy = readFileSync(
+    join(process.cwd(), 'src/server/conversation/turn-policy/create-task.ts'),
+    'utf8'
+  )
+  const service = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
   const turnQueueSource = readFileSync(
     join(process.cwd(), 'src/server/conversation/turn-queue.ts'),
     'utf8'
   )
-  assert.doesNotMatch(conversationSource, /acquireWorkspaceLease/)
-  assert.doesNotMatch(conversationSource, /releaseWorkspaceLease\(\{ leaseId:/)
-  assert.match(conversationSource, /workspacePath \? 'live-read' : 'metadata'/)
+  assert.match(chatPolicy, /acquireWorkspaceLease/)
+  assert.match(chatPolicy, /releaseWorkspaceLease/)
+  assert.doesNotMatch(createTaskPolicy, /acquireWorkspaceLease/)
+  assert.match(service, /releaseChatWorkspaceLease/)
   assert.match(turnQueueSource, /onWorkspaceAccessResolved/)
   assert.match(turnQueueSource, /event: 'turn_snapshot'/)
 })

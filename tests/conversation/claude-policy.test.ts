@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-test('resolveClaudeSettingSources clears only for outer sandbox', () => {
-  assert.deepEqual(resolveClaudeSettingSources(true), [])
+test('resolveClaudeSettingSources keeps user-only for outer sandbox', () => {
+  assert.deepEqual(resolveClaudeSettingSources(true), ['user'])
   assert.deepEqual(resolveClaudeSettingSources(false), ['user', 'project', 'local'])
   // Read-only conversation still loads host settings (auth/model); MCP/skills overridden elsewhere.
   assert.deepEqual(resolveClaudeSettingSources(false, 'chat-read'), ['user', 'project', 'local'])
