@@ -7,6 +7,58 @@ import { resolveAvailablePort } from '../../src/main/port'
 import { startAppServer, stopAppServer, type AppServerPlatform } from '../../src/main/server'
 import type { DataDirResolution } from '../../src/main/storage-selection'
 
+test('server mode storage setup prints setup token and requires it on bootstrap', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-storage-setup-server-token-'))
+  const candidate = join(root, 'data')
+  const storage: DataDirResolution = {
+    phase: 'selection_required',
+    dataDir: candidate,
+    source: 'candidate'
+  }
+  const platform: AppServerPlatform = {
+    isDev: true,
+    appRoot: join(root, 'app'),
+    resolveDataDirSelection: () => storage,
+    persistDataDirSelection: () => undefined
+  }
+  const available = await resolveAvailablePort('127.0.0.1', 42_000 + (process.pid % 1_000))
+
+  const logs: string[] = []
+  const originalLog = console.log
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map(String).join(' '))
+    originalLog(...args)
+  }
+
+  try {
+    const server = await startAppServer(
+      {
+        mode: 'server',
+        host: '127.0.0.1',
+        port: available.port,
+        smokeTest: false
+      },
+      platform
+    )
+
+    const response = await fetch(`${server.url}/api/bootstrap`)
+    assert.equal(response.ok, true)
+    const body = (await response.json()) as {
+      data?: { setupTokenRequired?: boolean; storagePhase?: string }
+    }
+    assert.equal(body.data?.setupTokenRequired, true)
+    assert.equal(body.data?.storagePhase, 'selection_required')
+    assert.ok(
+      logs.some((line) => line.includes('Setup token (valid 15 min):')),
+      'server mode must print setup token at storage-setup start'
+    )
+  } finally {
+    console.log = originalLog
+    await stopAppServer()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('storage setup startup exposes a missing default candidate without creating it', async () => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-storage-setup-server-'))
   const candidate = join(root, 'data')

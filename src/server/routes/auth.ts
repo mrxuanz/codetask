@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import type { AppContext } from '../context'
 import { ok } from '../response'
 import type { AuthData, LoginOptions } from '../auth/service'
-import { validateSetupToken } from '../auth/setup-token'
+import { validateSetupTokenWithGate, clearProcessSetupGate } from '../auth/setup-token'
 import { getClientIp } from '../auth/client-ip'
 import {
   clearSessionCookies,
@@ -63,7 +63,7 @@ export function createAuthRoutes(ctx: AppContext): Hono {
         )
       }
       const setupToken = body.setupToken?.trim()
-      if (!setupToken || !validateSetupToken(ctx.security.authSecret, setupToken)) {
+      if (!setupToken || !validateSetupTokenWithGate(ctx.security.authSecret, setupToken)) {
         return c.json(
           {
             data: null,
@@ -77,6 +77,7 @@ export function createAuthRoutes(ctx: AppContext): Hono {
       }
     }
     const data = await auth.setup(body.username ?? '', body.password ?? '')
+    clearProcessSetupGate()
     issue(c, ctx, data)
     return c.json(ok(responseData(c, data)))
   })

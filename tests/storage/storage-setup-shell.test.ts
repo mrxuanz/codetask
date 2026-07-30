@@ -14,6 +14,26 @@ function selection(dataDir: string): {
   return { phase: 'selection_required', dataDir, source: 'candidate' }
 }
 
+test('setup shell bootstrap requires setup token when configured for server mode', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-setup-token-flag-'))
+  const candidate = join(root, 'selected-data')
+  const app = createSetupShell({
+    storage: selection(candidate),
+    isDev: false,
+    setupTokenRequired: true
+  })
+
+  const response = await app.request('/api/bootstrap')
+  assert.equal(response.status, 200)
+  const body = (await response.json()) as {
+    data?: { setupTokenRequired?: boolean; storagePhase?: string; initialized?: boolean }
+  }
+  assert.equal(body.data?.initialized, false)
+  assert.equal(body.data?.setupTokenRequired, true)
+  assert.equal(body.data?.storagePhase, 'selection_required')
+  rmSync(root, { recursive: true, force: true })
+})
+
 test('setup shell initializes only db and assets after validation', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-setup-shell-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))

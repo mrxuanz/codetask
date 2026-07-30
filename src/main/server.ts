@@ -7,7 +7,12 @@ import type { DataDirResolution } from './storage-selection'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
-import { generateSetupToken } from '../server/auth/setup-token'
+import {
+  generateSetupToken,
+  createProcessSetupGateSecret,
+  installProcessSetupGate,
+  clearProcessSetupGate
+} from '../server/auth/setup-token'
 
 export interface ServerInfo {
   host: string
@@ -167,13 +172,20 @@ export async function startAppServer(
 
   if (storage.phase !== 'ready') {
     let promoteInflight: Promise<void> | null = null
+    // Server mode: print the setup token immediately (process gate), before SQLite exists.
+    // The same token remains valid after storage activation via validateSetupTokenWithGate.
+    if (cli.mode === 'server') {
+      const gate = createProcessSetupGateSecret()
+      installProcessSetupGate(gate)
+      announceSetupToken(gate)
+    }
     const setupApp = createSetupShell({
       storage,
       isDev: platform.isDev,
       rendererDevUrl,
       staticDir: http.staticDir,
       forbiddenRoots: [platform.appRoot, process.cwd()],
-      setupTokenRequired: false,
+      setupTokenRequired: cli.mode === 'server',
       persistDataDir: platform.persistDataDirSelection,
       activateStorage: async () => {
         if (promoteInflight) {
@@ -306,6 +318,8 @@ export async function startAppServer(
 }
 
 export async function stopAppServer(): Promise<void> {
+  setupTokenAnnounced = false
+  clearProcessSetupGate()
   if (activeServer) {
     activeServer.close()
     activeServer = null
