@@ -1,31 +1,21 @@
 export {
-  prepareClaudeAuth,
-  prepareCodexAuth,
-  prepareCursorAuth,
-  prepareOpenCodeAuth,
-  type ProviderAuthPreparationOptions
+  prepareClaudeRuntimeProfile,
+  prepareCodexRuntimeProfile,
+  prepareCursorRuntimeProfile,
+  prepareOpenCodeRuntimeProfile,
+  prepareProviderRuntimeProfile,
+  type ProviderRuntimePreparationOptions
 } from './bridge'
 export { ProviderAuthError } from './errors'
 export {
-  filterCodexConfigToml,
-  materializeCodexAuth,
-  materializeCursorAuth,
-  materializeOpencodeAuth,
-  runtimeCursorCliAuthPath,
-  opencodeRuntimeLayout
-} from './materialize'
-export {
-  CREDENTIAL_SNAPSHOT_MANIFEST,
-  credentialSnapshotManifestPath,
-  scrubCredentialSnapshotManifest,
-  scrubCredentialSnapshotsInTree,
-  writeCredentialSnapshotManifest
-} from './snapshot-manifest'
-export {
   resolveCodexHostAuthPath,
+  resolveCodexHostHome,
   resolveCodexInstallDirs,
   resolveClaudeInstallDirs,
   resolveCursorHostAuthPath,
+  resolveCursorHostConfigDir,
+  resolveOpencodeHostConfigDir,
+  resolveOpencodeHostDataDir,
   resolveOpencodeInstallDirs,
   resolveOpencodeExecutable,
   resolveClaudeConfigReadRoots,
@@ -37,12 +27,19 @@ export {
   resolveCursorAgentInstallDirs
 } from './paths'
 export type {
-  ProviderAuthDiagnostics,
-  ProviderAuthLogDto,
+  ProviderRuntimeDiagnostics,
+  ProviderRuntimeLogDto,
   ProviderAuthMode,
-  ProviderAuthPrepared,
-  ProviderFilesystemProfile,
-  CredentialSnapshotSpec,
+  ProviderPathGrant,
+  ProviderPathGrantAccess,
+  ProviderPathGrantKind,
+  ProviderRuntimePlatform,
+  ProviderRuntimeProfile,
   ProviderAuthPreflightResult
 } from './types'
-export { toProviderAuthLogDto } from './types'
+export {
+  PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION,
+  providerRuntimeReadRoots,
+  providerRuntimeWriteRoots,
+  toProviderRuntimeLogDto
+} from './types'

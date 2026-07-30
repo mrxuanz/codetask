@@ -15,7 +15,7 @@ import {
 import { createSandboxPolicy, collectPolicyReadRoots, collectPolicyWriteRoots } from './policy'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { preflightSandbox } from './preflight'
-import { toProviderAuthLogDto } from './provider-auth/types'
+import { toProviderRuntimeLogDto } from './provider-auth/types'
 import { mergeProviderReadRoots, resolveHostToolchainReadRoots } from './provider-read-roots'
 import { resolveRuntimeReadRoots } from './runtime-read-roots'
 import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from './session-state'
@@ -211,7 +211,7 @@ export async function* streamSandboxedConversationTurnLocal(
   const { getProviderRegistry } = await import('../providers/access')
   const driver = getProviderRegistry().get(input.coreCode)
   const hostEnvironment = processHostEnvironmentSource.snapshot()
-  const authPrepared = driver.prepareAuth({
+  const runtimeProfile = driver.prepareRuntimeProfile({
     runtimeRoot: input.runtimeRoot,
     workspaceRoot: input.workspaceRoot,
     hostEnvironment
@@ -226,14 +226,14 @@ export async function* streamSandboxedConversationTurnLocal(
       'sandbox.sdk.error'
     )
   }
-  await driver.preflight({ installation, preparedAuth: authPrepared })
+  await driver.preflight({ installation, runtimeProfile })
   throwIfSandboxTurnAborted(input.signal)
 
   try {
     const launchSpec = buildLaunchSpec(input.coreCode, {
       cwd: input.workspaceRoot,
-      env: authPrepared.envPatch,
-      providerOverlay: authPrepared.envPatch,
+      env: { ...runtimeProfile.environment },
+      providerOverlay: { ...runtimeProfile.environment },
       installation,
       providerSettings: input.providerSettings
     })
@@ -244,7 +244,7 @@ export async function* streamSandboxedConversationTurnLocal(
 
   const contribution = driver.contributeSandboxPolicy({
     installation,
-    preparedAuth: authPrepared,
+    runtimeProfile,
     hostEnvironment
   })
   const providerReadRoots = mergeProviderReadRoots(
@@ -268,8 +268,8 @@ export async function* streamSandboxedConversationTurnLocal(
   })
 
   sandboxTurnDebug(
-    'sandbox orchestrator: provider auth prepared',
-    toProviderAuthLogDto(authPrepared.diagnostics)
+    'sandbox orchestrator: provider runtime profile prepared',
+    toProviderRuntimeLogDto(runtimeProfile)
   )
 
   const env = buildSandboxEnv({
@@ -280,27 +280,23 @@ export async function* streamSandboxedConversationTurnLocal(
   const readRoots = collectPolicyReadRoots(policy)
   const writeRoots = collectPolicyWriteRoots(policy)
 
-  try {
-    // Every provider turn, including Cursor task work, owns a fresh sandbox worker.
-    // Keeping Cursor ACP alive across tasks allowed a wedged permission service to poison the
-    // remainder of the job. Verification already uses this one-shot lifecycle.
-    const spawned = await launchSandboxedWorker({
-      policy,
-      command: process.execPath,
-      args: [workerPath],
-      env,
-      readRoots,
-      writeRoots,
-      signal: input.signal
-    })
+  // Every provider turn, including Cursor task work, owns a fresh sandbox worker.
+  // Keeping Cursor ACP alive across tasks allowed a wedged permission service to poison the
+  // remainder of the job. Verification already uses this one-shot lifecycle.
+  const spawned = await launchSandboxedWorker({
+    policy,
+    command: process.execPath,
+    args: [workerPath],
+    env,
+    readRoots,
+    writeRoots,
+    signal: input.signal
+  })
 
-    const handle = spawned.handle
-    handle.writeStdin(Buffer.from(JSON.stringify(workerInput), 'utf8'))
-    handle.endStdin()
-    awaitSandboxWorkerAttestation(spawned)
+  const handle = spawned.handle
+  handle.writeStdin(Buffer.from(JSON.stringify(workerInput), 'utf8'))
+  handle.endStdin()
+  awaitSandboxWorkerAttestation(spawned)
 
-    yield* readWorkerJsonl(handle, input.signal)
-  } finally {
-    authPrepared.cleanupPlan()
-  }
+  yield* readWorkerJsonl(handle, input.signal)
 }

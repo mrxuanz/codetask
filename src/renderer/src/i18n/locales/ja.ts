@@ -57,29 +57,12 @@ export default {
     storageInitializing: '初期化中…',
     storageValidatedPath: '検証済みパス：{path}',
     storageRestarting: 'ストレージを初期化しました',
-    storageRecoveryTitle: 'ストレージの復旧が必要です',
-    storageRecoveryDescription:
-      '保存先が破損しているか見つかりません。既存の CodeTask データディレクトリを復旧するか、空のフォルダを選んで再初期化できます。',
-    storageRecover: 'このディレクトリを使用',
-    storageRecovering: '復旧中…',
-    storageRecovered: '保存先を復旧しました',
     errors: {
       pathNotAbsolute: '絶対パスを入力してください',
       pathNotWritable: '書き込みできません。別の場所を選んでください',
-      pathNotEmpty:
-        '空でないディレクトリで、CodeTask データルートでもありません。空のフォルダを選んでください',
+      pathNotEmpty: '空でないディレクトリです。空のフォルダを選んでください',
       pathForbiddenRoot: 'システムルートやホームディレクトリは使用できません',
-      pathOwnedByOther: 'このディレクトリは別の CodeTask インストールに属しています',
-      markerMissing:
-        '有効な CodeTask データマーカーがありません。初回は空フォルダを、復旧時は元のデータディレクトリを選んでください',
       databaseMissing: 'このディレクトリにデータベースがありません',
-      locatorUnreadable: '保存された保存先設定が壊れています。再度選択してください',
-      locatorInvalid: '保存された保存先設定が無効です。再度選択してください',
-      legacyLocatorConflict:
-        '異なる保存先設定が複数見つかりました。使用する元のデータディレクトリを選択してください',
-      legacyLocatorMigrationFailed:
-        '元の保存先設定を移行できませんでした。元のデータディレクトリを再度選択してください',
-      installationMismatch: 'データディレクトリがこのインストールと一致しません',
       validationExpired: 'ディレクトリ検証の期限が切れました。再試行してください',
       insufficientSpace: 'ディスク容量が不足しています'
     }
@@ -545,29 +528,13 @@ export default {
       },
       storage: {
         title: 'データストレージ',
-        description:
-          '使用量を確認し、検証・移行・再起動を通じてデータルート全体を安全に移動します。',
+        description: '現在のデータディレクトリと使用量を確認します。',
         loading: 'ストレージ情報を読み込み中…',
         loadFailed: 'ストレージ情報の読み込みに失敗しました',
         currentPath: '現在のデータルート',
         source: 'ソース：{source}',
         total: '合計',
-        reclaimable: 'DB 回収可能',
-        changeTitle: 'データルートを移動',
-        browse: '参照',
-        browseTitle: '新しいデータディレクトリを選択',
-        browseHint: 'ローカルフォルダを参照するか、新しいサブフォルダを作成して選択できます。',
-        selectDirectory: 'このディレクトリを使用',
-        createFolder: '作成して選択',
-        migrate: '検証して移行',
-        managed: 'このパスは CLI または環境設定で管理されているため、ここでは変更できません。',
-        phase: '移行フェーズ：{phase}',
-        restart: '新しいデータルートで再起動',
-        restartServerRequired:
-          '新しいデータルートへ切り替えるには、管理者が codetask-server サービスを再起動してください。',
-        deleteOld: '古いデータルートを削除',
-        migrationFailed: 'ストレージ移行に失敗しました',
-        deleteOldFailed: '古いストレージの削除に失敗しました'
+        reclaimable: 'DB 回収可能'
       },
       languageSection: {
         title: '言語',

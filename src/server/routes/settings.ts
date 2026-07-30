@@ -17,12 +17,6 @@ import {
 } from '../settings/mcp'
 import { ok } from '../response'
 import { readStorageStats } from '../storage/stats'
-import {
-  confirmOldStorageDelete,
-  getStorageMigration,
-  startStorageMigration
-} from '../storage/migration'
-import { validateStorageTarget } from '../../main/storage-validation'
 import { SettingsRevisionConflictError } from '../context/settings-store'
 import { loadProviderSettings, saveProviderSettings } from '../settings/providers'
 import { loadBusinessSkillsSettings, saveBusinessSkillsSettings } from '../settings/business-skills'
@@ -183,46 +177,6 @@ export function createSettingsRoutes(ctx: AppContext): Hono {
   routes.get('/storage', async (c) => {
     await requireUsername(c.req.header('Authorization'))
     return c.json(ok(await readStorageStats(ctx)))
-  })
-
-  routes.post('/storage/validate-target', async (c) => {
-    await requireUsername(c.req.header('Authorization'))
-    if (!ctx.storage?.bootstrapRoot || ctx.storage.managed) {
-      throw AppError.conflict('Storage location is managed by CLI or environment')
-    }
-    const body = await c.req.json<{ path?: string }>()
-    const result = validateStorageTarget({
-      path: body.path ?? '',
-      forbiddenRoots: [ctx.storage.bootstrapRoot, ctx.dataDir]
-    })
-    if (!result.ok) throw AppError.badRequest(result.issue ?? 'Storage target is invalid')
-    return c.json(ok(result))
-  })
-
-  routes.post('/storage/migrations', async (c) => {
-    await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{ targetPath?: string }>()
-    try {
-      return c.json(ok(startStorageMigration(ctx, body.targetPath ?? '')))
-    } catch (error) {
-      throw AppError.conflict(
-        error instanceof Error ? error.message : 'Storage migration could not start'
-      )
-    }
-  })
-
-  routes.get('/storage/migrations/:id', async (c) => {
-    await requireUsername(c.req.header('Authorization'))
-    const migration = getStorageMigration(ctx, c.req.param('id'))
-    if (!migration) throw AppError.notFound('Storage migration not found')
-    return c.json(ok(migration))
-  })
-
-  routes.post('/storage/migrations/:id/confirm-old-delete', async (c) => {
-    await requireUsername(c.req.header('Authorization'))
-    const deleted = await confirmOldStorageDelete(ctx, c.req.param('id'))
-    if (!deleted) throw AppError.conflict('Old storage cannot be deleted yet')
-    return c.json(ok({ deleted: true }))
   })
 
   return routes

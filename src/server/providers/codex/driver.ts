@@ -2,7 +2,7 @@ import type { ProviderSettings } from '../../../shared/providers/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { CODEX_DESCRIPTOR } from './descriptor'
 import { runCodexAuthPreflight } from './preflight'
-import { prepareCodexAuth } from '../../sandbox/provider-auth/bridge'
+import { prepareCodexRuntimeProfile } from '../../sandbox/provider-auth/bridge'
 import { resolveCodexInstallDirs } from '../../sandbox/provider-auth/paths'
 
 export {
@@ -33,8 +33,8 @@ export class CodexDriver extends DelegatingProviderDriver {
     streamFactory: ProviderStreamFactory = createCodexStreamFactory()
   ) {
     super(CODEX_DESCRIPTOR, settings, streamFactory, {
-      prepareAuth: prepareCodexAuth,
-      preflight: (context) => runCodexAuthPreflight(context.preparedAuth, context.installation),
+      prepareRuntimeProfile: prepareCodexRuntimeProfile,
+      preflight: (context) => runCodexAuthPreflight(context.runtimeProfile, context.installation),
       installDirs: () => resolveCodexInstallDirs()
     })
   }

@@ -1,42 +1,34 @@
 import { existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { dirname, isAbsolute, join, normalize, parse, relative, sep } from 'path'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
+import type { SupportedCoreCode } from '../../conversation/cores'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
 import {
+  resolveClaudeHostConfigDir,
   resolveClaudeInstallDirs,
-  resolveCodexHostAuthPath,
   resolveCodexInstallDirs,
   resolveCursorAgentInstallDirs,
   resolveCursorAgentMarkerWriteDirs,
   resolveCursorCompileCacheDirs,
+  resolveCursorHostConfigDir,
   resolveDarwinKeychainReadRoots,
   resolveHostProfilePaths,
   resolveOpencodeInstallDirs,
-  runtimeCodexHome,
-  runtimeCursorConfigDir,
-  runtimeCursorHome,
   snapshotCodexHostAuth,
+  snapshotCursorHostAuth,
   snapshotOpencodeHostAuth
 } from './paths'
 import {
-  materializeCodexAuth,
-  materializeCursorAuth,
-  materializeOpencodeAuth,
-  opencodeRuntimeLayout
-} from './materialize'
-import type { ProviderAuthDiagnostics, ProviderAuthPrepared } from './types'
-import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../../host-environment'
+  PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION,
+  type ProviderPathGrant,
+  type ProviderPathGrantAccess,
+  type ProviderPathGrantKind,
+  type ProviderRuntimeDiagnostics,
+  type ProviderRuntimePlatform,
+  type ProviderRuntimeProfile
+} from './types'
 
-function uniqueRoots(roots: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const root of roots) {
-    const key = root.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(root)
-  }
-  return out
-}
+const SUPPORTED_RUNTIME_PLATFORMS = new Set<NodeJS.Platform>(['darwin', 'linux', 'win32'])
 
 const HOST_EXECUTION_ENV_KEYS = [
   'PATH',
@@ -63,25 +55,58 @@ const HOST_EXECUTION_ENV_KEYS = [
   'no_proxy'
 ] as const
 
+export interface ProviderRuntimePreparationOptions {
+  readonly runtimeRoot: string
+  readonly workspaceRoot?: string | undefined
+  readonly hostEnvironment?: HostEnvironmentSnapshot | undefined
+  readonly platform?: NodeJS.Platform | undefined
+}
+
+interface RuntimePreparationContext {
+  runtimeRoot: string
+  workspaceRoot: string
+  hostEnvironment: HostEnvironmentSnapshot
+  platform: ProviderRuntimePlatform
+}
+
+function runtimePreparationContext(
+  input: ProviderRuntimePreparationOptions
+): RuntimePreparationContext {
+  const platform = input.platform ?? process.platform
+  if (!SUPPORTED_RUNTIME_PLATFORMS.has(platform)) {
+    throw new Error(`provider_runtime.unsupported_platform: ${platform}`)
+  }
+  return {
+    runtimeRoot: input.runtimeRoot,
+    workspaceRoot: input.workspaceRoot ?? input.runtimeRoot,
+    hostEnvironment: input.hostEnvironment ?? processHostEnvironmentSource.snapshot(),
+    platform: platform as ProviderRuntimePlatform
+  }
+}
+
 function copySelectedHostEnv(
   env: Record<string, string>,
-  hostEnvironment: HostEnvironmentSnapshot,
-  keys: readonly string[]
+  hostEnvironment: HostEnvironmentSnapshot
 ): void {
-  for (const key of keys) {
+  for (const key of HOST_EXECUTION_ENV_KEYS) {
     const value = hostEnvironment[key]
-    if (typeof value === 'string' && value.trim()) {
-      env[key] = value
-    }
+    if (typeof value === 'string' && value.trim()) env[key] = value
   }
 }
 
 function buildRuntimeBaseEnv(
   runtimeRoot: string,
-  hostEnvironment: HostEnvironmentSnapshot
+  hostEnvironment: HostEnvironmentSnapshot,
+  platform: ProviderRuntimePlatform
 ): Record<string, string> {
   const tmp = join(runtimeRoot, 'tmp')
-  mkdirSync(tmp, { recursive: true })
+  const config = join(runtimeRoot, 'config')
+  const cache = join(runtimeRoot, 'cache')
+  const data = join(runtimeRoot, 'data')
+  const state = join(runtimeRoot, 'state')
+  for (const path of [tmp, config, cache, data, state]) {
+    mkdirSync(path, { recursive: true })
+  }
 
   const env: Record<string, string> = {
     HOME: runtimeRoot,
@@ -89,310 +114,338 @@ function buildRuntimeBaseEnv(
     TEMP: tmp,
     TMP: tmp
   }
-  copySelectedHostEnv(env, hostEnvironment, HOST_EXECUTION_ENV_KEYS)
+  copySelectedHostEnv(env, hostEnvironment)
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     env.USERPROFILE = runtimeRoot
     env.APPDATA = join(runtimeRoot, 'AppData', 'Roaming')
     env.LOCALAPPDATA = join(runtimeRoot, 'AppData', 'Local')
+    mkdirSync(env.APPDATA, { recursive: true })
+    mkdirSync(env.LOCALAPPDATA, { recursive: true })
     if (/^[A-Za-z]:/.test(runtimeRoot)) {
       env.HOMEDRIVE = runtimeRoot.slice(0, 2)
       env.HOMEPATH = runtimeRoot.slice(2) || '\\'
     }
     applyWindowsCrashReporterEnv(env)
   } else {
-    env.XDG_CONFIG_HOME = join(runtimeRoot, 'config')
-    env.XDG_CACHE_HOME = join(runtimeRoot, 'cache')
-    env.XDG_DATA_HOME = join(runtimeRoot, 'data')
-    env.XDG_STATE_HOME = join(runtimeRoot, 'state')
+    env.XDG_CONFIG_HOME = config
+    env.XDG_CACHE_HOME = cache
+    env.XDG_DATA_HOME = data
+    env.XDG_STATE_HOME = state
   }
-
   return env
 }
 
-function buildHostIdentityEnv(
-  runtimeRoot: string,
-  profile = resolveHostProfilePaths(),
-  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
-): Record<string, string> {
-  const tmp = join(runtimeRoot, 'tmp')
-  mkdirSync(tmp, { recursive: true })
-
-  const env: Record<string, string> = {
-    HOME: profile.home,
-    TMPDIR: tmp,
-    TEMP: tmp,
-    TMP: tmp
+function grant(
+  path: string,
+  access: ProviderPathGrantAccess,
+  kind: ProviderPathGrantKind,
+  reason: string
+): ProviderPathGrant | null {
+  if (!path.trim() || !existsSync(path)) return null
+  const normalized = normalize(path)
+  if (normalized === parse(normalized).root) {
+    throw new Error(`provider_runtime.unsafe_host_grant: ${normalized}`)
   }
-  copySelectedHostEnv(env, hostEnvironment, HOST_EXECUTION_ENV_KEYS)
+  return { path: normalized, access, kind, reason }
+}
 
-  if (process.platform === 'win32') {
-    env.USERPROFILE = profile.home
-    env.APPDATA = profile.appData
-    env.LOCALAPPDATA = profile.localAppData
-    if (/^[A-Za-z]:/.test(profile.home)) {
-      env.HOMEDRIVE = profile.home.slice(0, 2)
-      env.HOMEPATH = profile.home.slice(2) || '\\'
+function uniqueGrants(grants: Array<ProviderPathGrant | null>): ProviderPathGrant[] {
+  const byPath = new Map<string, ProviderPathGrant>()
+  for (const candidate of grants) {
+    if (!candidate) continue
+    const key = candidate.path.toLowerCase()
+    const previous = byPath.get(key)
+    if (!previous || candidate.access === 'read-write') byPath.set(key, candidate)
+  }
+  const ordered = [...byPath.values()].sort((left, right) => left.path.length - right.path.length)
+  return ordered.filter((candidate, index) => {
+    return !ordered.slice(0, index).some((parent) => {
+      const child = relative(parent.path, candidate.path)
+      const contains =
+        child !== '' && child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child)
+      if (!contains) return false
+      return parent.access === 'read-write' || candidate.access === 'read'
+    })
+  })
+}
+
+function executableGrants(
+  paths: readonly string[],
+  provider: string
+): Array<ProviderPathGrant | null> {
+  return paths.map((path) => grant(path, 'read', 'executable', `${provider} SDK/CLI installation`))
+}
+
+function makeProfile(input: {
+  provider: ProviderRuntimeProfile['provider']
+  context: RuntimePreparationContext
+  environment: Record<string, string>
+  hostPathGrants: Array<ProviderPathGrant | null>
+  diagnostics: ProviderRuntimeDiagnostics
+}): ProviderRuntimeProfile {
+  const profile = resolveHostProfilePaths(input.context.hostEnvironment, input.context.platform)
+  const hostPathGrants = uniqueGrants(input.hostPathGrants)
+  for (const item of hostPathGrants) {
+    if (normalize(item.path).toLowerCase() === normalize(profile.home).toLowerCase()) {
+      throw new Error(`provider_runtime.full_home_grant_forbidden: ${input.provider}`)
     }
-    applyWindowsCrashReporterEnv(env)
-  } else {
-    env.XDG_CONFIG_HOME = join(profile.home, '.config')
-    env.XDG_CACHE_HOME = join(profile.home, '.cache')
-    env.XDG_DATA_HOME = join(profile.home, '.local', 'share')
   }
-
-  return env
-}
-
-export interface ProviderAuthPreparationOptions {
-  readonly runtimeRoot: string
-  readonly workspaceRoot?: string | undefined
-  readonly hostEnvironment?: HostEnvironmentSnapshot | undefined
-}
-
-function authPreparationContext(input: ProviderAuthPreparationOptions): {
-  runtimeRoot: string
-  workspaceRoot: string
-  hostEnvironment: HostEnvironmentSnapshot
-} {
   return {
-    runtimeRoot: input.runtimeRoot,
-    workspaceRoot: input.workspaceRoot ?? input.runtimeRoot,
-    hostEnvironment: input.hostEnvironment ?? processHostEnvironmentSource.snapshot()
+    schemaVersion: PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION,
+    provider: input.provider,
+    platform: input.context.platform,
+    mode: 'host-identity',
+    runtimeRoot: input.context.runtimeRoot,
+    stateRoot: input.context.runtimeRoot,
+    environment: input.environment,
+    hostPathGrants,
+    diagnostics: input.diagnostics
   }
 }
 
-export function prepareCodexAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
-  const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
-  const profile = resolveHostProfilePaths(hostEnvironment)
-  const hostAuth = snapshotCodexHostAuth(profile)
-  const hostAuthPath = resolveCodexHostAuthPath(profile)
-  const materialized = materializeCodexAuth(runtimeRoot, profile)
-  const codexHome = runtimeCodexHome(runtimeRoot)
-
-  const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
-    CODEX_HOME: codexHome
+export function prepareCodexRuntimeProfile(
+  input: ProviderRuntimePreparationOptions
+): ProviderRuntimeProfile {
+  const context = runtimePreparationContext(input)
+  const hostProfile = resolveHostProfilePaths(context.hostEnvironment, context.platform)
+  const hostIdentity = snapshotCodexHostAuth(hostProfile)
+  const environment: Record<string, string> = {
+    ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    CODEX_HOME: hostIdentity.codexHome
   }
-  const authMaterialPresent = materialized.authMaterialized || hostAuth.present
-
-  const diagnostics: ProviderAuthDiagnostics = {
+  const diagnostics: ProviderRuntimeDiagnostics = {
     provider: 'codex',
-    mode: 'runtime-reference',
-    authMaterialPresent,
-    hostAuthPath,
-    runtimeAuthPath: materialized.runtimeAuthPath,
-    warnings: authMaterialPresent
+    mode: 'host-identity',
+    authMaterialPresent: hostIdentity.present,
+    primaryIdentityPath: join(hostIdentity.codexHome, 'auth.json'),
+    warnings: hostIdentity.present
       ? [
-          'Codex uses a read-only reference to the exact host auth file; a sanitized runtime config projection keeps the host CLI model/provider while dropping MCP, plugins, projects, hooks, and trust settings.'
+          'Codex uses its native host identity namespace directly. The sandbox grants only .codex, never the full host HOME; no credential copy, symlink, projection, or cleanup artifact is created.'
         ]
-      : [
-          materialized.configGenerated
-            ? `Codex runtime model/provider config was generated, but no host login was found: ${hostAuthPath} (run codex login)`
-            : `Host Codex login file not found: ${hostAuthPath} (run codex login)`
-        ]
+      : [`Host Codex login file not found; run codex login.`]
   }
 
-  const readRoots = uniqueRoots([
-    ...(existsSync(hostAuthPath) ? [hostAuthPath] : []),
-    ...resolveCodexInstallDirs()
-  ])
-  return {
-    mode: 'runtime-reference',
-    runtimeRoot,
-    envPatch,
-    readRoots,
-    writeRoots: [],
-    cleanupPlan: () => materialized.cleanup(),
-    diagnostics,
-    filesystemProfile: {
-      provider: 'codex',
-      hostReadRoots: readRoots,
-      hostWriteRoots: [],
-      runtimeEnv: envPatch,
-      credentialSnapshots: [
-        { relativePath: '.codex/auth.json', required: false },
-        { relativePath: '.codex/config.toml', required: false }
-      ],
-      scrubPatterns: ['.codex/auth.json', '.codex/config.toml']
-    }
-  }
+  return makeProfile({
+    provider: 'codex',
+    context,
+    environment,
+    hostPathGrants: [
+      grant(
+        hostIdentity.codexHome,
+        hostIdentity.present ? 'read-write' : 'read',
+        'identity',
+        'Codex login refresh and native session continuity'
+      ),
+      ...executableGrants(resolveCodexInstallDirs(), 'Codex')
+    ],
+    diagnostics
+  })
 }
 
-export function prepareCursorAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
-  const { runtimeRoot, workspaceRoot, hostEnvironment } = authPreparationContext(input)
-  const profile = resolveHostProfilePaths(hostEnvironment)
-  const materialized = materializeCursorAuth(runtimeRoot, workspaceRoot, profile)
-  const runtimeEnv = buildRuntimeBaseEnv(runtimeRoot, hostEnvironment)
-  const envPatch = {
-    ...runtimeEnv,
-    HOME: profile.home,
-    CURSOR_CONFIG_DIR: runtimeCursorConfigDir(runtimeRoot),
-    CURSOR_DATA_DIR: runtimeCursorHome(runtimeRoot)
+export function prepareCursorRuntimeProfile(
+  input: ProviderRuntimePreparationOptions
+): ProviderRuntimeProfile {
+  const context = runtimePreparationContext(input)
+  const hostProfile = resolveHostProfilePaths(context.hostEnvironment, context.platform)
+  const hostIdentity = snapshotCursorHostAuth(hostProfile, context.platform)
+  const configDir = resolveCursorHostConfigDir(hostProfile, context.platform)
+  const environment: Record<string, string> = {
+    ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    HOME: hostProfile.home,
+    CURSOR_CONFIG_DIR: configDir,
+    CURSOR_DATA_DIR: join(context.runtimeRoot, '.cursor')
+  }
+  if (context.platform === 'win32') {
+    environment.USERPROFILE = hostProfile.home
+    environment.APPDATA = hostProfile.appData
   }
 
-  const diagnostics: ProviderAuthDiagnostics = {
+  const keychainRoots = resolveDarwinKeychainReadRoots(hostProfile, context.platform)
+  const authMaterialPresent =
+    hostIdentity.present || (context.platform === 'darwin' && keychainRoots.length > 0)
+  const sourceGrants = hostIdentity.sources.map((path) =>
+    grant(
+      path,
+      path.startsWith(configDir) || path === hostIdentity.authPath ? 'read-write' : 'read',
+      path === hostIdentity.authPath ? 'identity' : 'configuration',
+      path === hostIdentity.authPath
+        ? 'Cursor login refresh'
+        : 'Cursor native CLI/ACP configuration'
+    )
+  )
+
+  return makeProfile({
     provider: 'cursorcli',
-    mode: 'host-identity',
-    authMaterialPresent: materialized.authMaterialized,
-    hostAuthPath: materialized.hostAuthPath,
-    runtimeAuthPath: materialized.runtimeAuthPath,
-    warnings: [
-      materialized.authMaterialized
-        ? 'Cursor keeps the host HOME only for macOS Keychain identity; exact host config files are read-only references, credentials are not copied, and Cursor/XDG state writes are redirected under runtime.'
-        : 'Cursor host login was not detected from files (macOS may use Keychain); run `agent login`.',
-      'ACP uses --force --sandbox disabled --approve-mcps --trust; temp files written to runtime.'
-    ]
-  }
-
-  const readRoots = uniqueRoots([
-    ...materialized.hostReferencePaths,
-    ...resolveCursorCompileCacheDirs(profile),
-    ...resolveDarwinKeychainReadRoots(profile),
-    ...resolveCursorAgentInstallDirs()
-  ])
-  const writeRoots = uniqueRoots([...resolveCursorAgentMarkerWriteDirs(profile)])
-  return {
-    mode: 'host-identity',
-    runtimeRoot,
-    envPatch,
-    readRoots,
-    writeRoots,
-    cleanupPlan: () => materialized.cleanup(),
+    context,
+    environment,
+    hostPathGrants: [
+      grant(configDir, 'read-write', 'identity', 'Cursor configuration identity and token refresh'),
+      ...sourceGrants,
+      ...resolveCursorCompileCacheDirs(hostProfile, context.platform).map((path) =>
+        grant(path, 'read', 'runtime-compatibility', 'Cursor compiler cache')
+      ),
+      ...keychainRoots.map((path) =>
+        grant(path, 'read', 'platform-credential-store', 'macOS Keychain-backed Cursor identity')
+      ),
+      ...resolveCursorAgentMarkerWriteDirs(hostProfile, context.platform).map((path) =>
+        grant(path, 'read-write', 'runtime-compatibility', 'Cursor agent running marker')
+      ),
+      ...executableGrants(resolveCursorAgentInstallDirs(hostProfile, context.platform), 'Cursor')
+    ],
     diagnostics: {
-      ...diagnostics,
-      warnings: [
-        ...diagnostics.warnings,
-        'P5: workspace .cursor is not writable; Cursor project metadata uses runtimeRoot CURSOR_DATA_DIR.'
-      ]
-    },
-    filesystemProfile: {
       provider: 'cursorcli',
-      hostReadRoots: readRoots,
-      hostWriteRoots: writeRoots,
-      runtimeEnv: envPatch,
-      credentialSnapshots: [],
-      scrubPatterns: [
-        '.cursor/cli-config.json',
-        '.cursor/agent-cli-state.json',
-        'config/cursor/cli-config.json',
-        'config/cursor/acp-config.json',
-        '.cursor/auth.json',
-        'config/cursor/auth.json'
+      mode: 'host-identity',
+      authMaterialPresent,
+      primaryIdentityPath: hostIdentity.authPath,
+      warnings: [
+        authMaterialPresent
+          ? 'Cursor reads its native host identity paths while CURSOR_DATA_DIR keeps project metadata and MCP approvals inside the private runtime.'
+          : 'Cursor host login was not detected; run `agent login`.',
+        'ACP uses --force --sandbox disabled --approve-mcps --trust; the outer OS sandbox remains authoritative.'
       ]
     }
-  }
+  })
 }
 
-export function prepareClaudeAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
-  const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
-  const profile = resolveHostProfilePaths(hostEnvironment)
-  const claudeDir = join(profile.home, '.claude')
-  const claudeCredentials = join(claudeDir, '.credentials.json')
-  const claudeJson = join(profile.home, '.claude.json')
-  const envPatch = buildHostIdentityEnv(runtimeRoot, profile, hostEnvironment)
-  const identityPaths = [claudeCredentials, claudeJson].filter((path) => existsSync(path))
-  const authMaterialPresent = identityPaths.length > 0
+export function prepareClaudeRuntimeProfile(
+  input: ProviderRuntimePreparationOptions
+): ProviderRuntimeProfile {
+  const context = runtimePreparationContext(input)
+  const hostProfile = resolveHostProfilePaths(context.hostEnvironment, context.platform)
+  const claudeDir = resolveClaudeHostConfigDir(hostProfile)
+  const identityCandidates = [
+    join(claudeDir, '.credentials.json'),
+    join(claudeDir, '.claude.json'),
+    join(hostProfile.home, '.claude.json')
+  ]
+  const identityPaths = identityCandidates.filter((path) => existsSync(path))
+  const keychainRoots = resolveDarwinKeychainReadRoots(hostProfile, context.platform)
+  const authMaterialPresent =
+    identityPaths.length > 0 || (context.platform === 'darwin' && keychainRoots.length > 0)
+  const environment: Record<string, string> = {
+    ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    HOME: hostProfile.home,
+    CLAUDE_CONFIG_DIR: claudeDir
+  }
+  if (context.platform === 'win32') {
+    environment.USERPROFILE = hostProfile.home
+    environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = claudeDir
+  }
 
-  const diagnostics: ProviderAuthDiagnostics = {
+  return makeProfile({
     provider: 'claude-code',
-    mode: 'host-identity',
-    authMaterialPresent,
-    hostAuthPath: claudeCredentials,
-    runtimeAuthPath: claudeCredentials,
-    warnings: [
-      authMaterialPresent
-        ? 'Claude uses exact read-only host identity files (plus macOS Keychain when present); environment-token credentials remain disabled.'
-        : 'Claude host login identity was not detected; run `claude auth login`.',
-      'The outer sandbox does not expose the full host Claude settings/session directory and never grants a task permission to mutate host credentials.',
-      'Claude inner bypassPermissions + sandbox disabled; settingSources=[]; outer sandbox is the only boundary.'
-    ]
-  }
-
-  const readRoots = uniqueRoots([
-    ...identityPaths,
-    ...resolveDarwinKeychainReadRoots(profile),
-    ...resolveClaudeInstallDirs()
-  ])
-  const writeRoots: string[] = []
-  return {
-    mode: 'host-identity',
-    runtimeRoot,
-    envPatch,
-    readRoots,
-    writeRoots,
-    cleanupPlan: () => undefined,
-    diagnostics,
-    filesystemProfile: {
+    context,
+    environment,
+    hostPathGrants: [
+      grant(
+        claudeDir,
+        'read-write',
+        'identity',
+        'Claude native login refresh and resumable session storage'
+      ),
+      ...identityPaths
+        .filter((path) => !path.startsWith(claudeDir))
+        .map((path) =>
+          grant(path, 'read-write', 'identity', 'Claude legacy host identity metadata')
+        ),
+      ...keychainRoots.map((path) =>
+        grant(path, 'read', 'platform-credential-store', 'macOS Keychain-backed Claude identity')
+      ),
+      ...executableGrants(resolveClaudeInstallDirs(), 'Claude Code')
+    ],
+    diagnostics: {
       provider: 'claude-code',
-      hostReadRoots: readRoots,
-      hostWriteRoots: writeRoots,
-      runtimeEnv: envPatch,
-      credentialSnapshots: [],
-      scrubPatterns: ['.claude/.credentials.json', '.claude.json']
-    }
-  }
-}
-
-export function prepareOpenCodeAuth(input: ProviderAuthPreparationOptions): ProviderAuthPrepared {
-  const { runtimeRoot, hostEnvironment } = authPreparationContext(input)
-  const profile = resolveHostProfilePaths(hostEnvironment)
-  const hostAuth = snapshotOpencodeHostAuth(profile)
-  const materialized = materializeOpencodeAuth(runtimeRoot, profile)
-  const layout = opencodeRuntimeLayout(runtimeRoot)
-
-  const envPatch = {
-    ...buildRuntimeBaseEnv(runtimeRoot, hostEnvironment),
-    XDG_CONFIG_HOME: layout.configHome,
-    XDG_DATA_HOME: layout.dataHome,
-    XDG_STATE_HOME: layout.stateHome
-  }
-
-  const diagnostics: ProviderAuthDiagnostics = {
-    provider: 'opencode',
-    mode: 'runtime-reference',
-    authMaterialPresent: materialized.authMaterialized || hostAuth.present,
-    hostAuthPath: materialized.hostConfigDir,
-    runtimeAuthPath: materialized.runtimeConfigDir,
-    warnings: materialized.authMaterialized || materialized.configMaterialized
-      ? [
-          [...materialized.materializations, ...materialized.configMaterializations].every(
-            (method) => method === 'reference' || method === 'projection'
-          )
-            ? 'OpenCode uses read-only references (or a sanitized provider/model projection) for host files. Host MCP, plugins, commands, Skills, prompts, and environment config are dropped.'
-            : 'OpenCode host materialization mixed unexpected methods; credential file copies are forbidden.'
-        ]
-      : ['OpenCode host login files were not found; environment-token authentication is disabled.']
-  }
-
-  const readRoots = uniqueRoots([
-    ...materialized.hostCredentialPaths,
-    ...materialized.hostConfigPaths,
-    ...resolveOpencodeInstallDirs()
-  ])
-  return {
-    mode: 'runtime-reference',
-    runtimeRoot,
-    envPatch,
-    readRoots,
-    writeRoots: [],
-    cleanupPlan: () => materialized.cleanup(),
-    diagnostics,
-    filesystemProfile: {
-      provider: 'opencode',
-      hostReadRoots: readRoots,
-      hostWriteRoots: [],
-      runtimeEnv: envPatch,
-      credentialSnapshots: [
-        { relativePath: '.config/opencode/auth.json', required: false },
-        { relativePath: '.local/share/opencode/auth.json', required: false }
-      ],
-      scrubPatterns: [
-        '.config/opencode/auth.json',
-        '.config/opencode/credentials.json',
-        '.local/share/opencode/auth.json',
-        '.local/share/opencode/credentials.json'
+      mode: 'host-identity',
+      authMaterialPresent,
+      primaryIdentityPath: identityPaths[0] ?? claudeDir,
+      warnings: [
+        authMaterialPresent
+          ? 'Claude uses its native host identity namespace directly; no credential is copied into runtime.'
+          : 'Claude host login identity was not detected; run `claude auth login`.',
+        'settingSources=[] still blocks host settings, hooks, Skills, and project policy from being loaded by the SDK.'
       ]
     }
+  })
+}
+
+export function prepareOpenCodeRuntimeProfile(
+  input: ProviderRuntimePreparationOptions
+): ProviderRuntimeProfile {
+  const context = runtimePreparationContext(input)
+  const hostProfile = resolveHostProfilePaths(context.hostEnvironment, context.platform)
+  const hostIdentity = snapshotOpencodeHostAuth(hostProfile, context.platform)
+  const environment = buildRuntimeBaseEnv(
+    context.runtimeRoot,
+    context.hostEnvironment,
+    context.platform
+  )
+  environment.XDG_CONFIG_HOME = dirname(hostIdentity.configDir)
+  environment.XDG_DATA_HOME = dirname(hostIdentity.dataDir)
+  if (context.platform === 'win32') {
+    environment.APPDATA = dirname(hostIdentity.configDir)
+    environment.LOCALAPPDATA = dirname(hostIdentity.dataDir)
+  }
+
+  const configContainsIdentity = hostIdentity.sources.some(
+    (path) =>
+      path.startsWith(hostIdentity.configDir) &&
+      (path.endsWith('auth.json') || path.endsWith('credentials.json'))
+  )
+
+  return makeProfile({
+    provider: 'opencode',
+    context,
+    environment,
+    hostPathGrants: [
+      grant(
+        hostIdentity.configDir,
+        configContainsIdentity ? 'read-write' : 'read',
+        configContainsIdentity ? 'identity' : 'configuration',
+        configContainsIdentity
+          ? 'OpenCode legacy config identity refresh'
+          : 'OpenCode provider/model configuration'
+      ),
+      grant(
+        hostIdentity.dataDir,
+        'read-write',
+        'identity',
+        'OpenCode login refresh and native durable session database'
+      ),
+      ...executableGrants(resolveOpencodeInstallDirs(), 'OpenCode')
+    ],
+    diagnostics: {
+      provider: 'opencode',
+      mode: 'host-identity',
+      authMaterialPresent: hostIdentity.present,
+      primaryIdentityPath: hostIdentity.sources.find(
+        (path) => path.endsWith('auth.json') || path.endsWith('credentials.json')
+      ),
+      warnings: hostIdentity.present
+        ? [
+            'OpenCode uses its native config/data namespaces directly. Cache, state, and temp remain private to this runtime; no credential or configuration projection is written.'
+          ]
+        : [
+            'OpenCode host login files were not found; environment-token authentication is disabled.'
+          ]
+    }
+  })
+}
+
+export function prepareProviderRuntimeProfile(
+  provider: SupportedCoreCode,
+  runtimeRoot: string,
+  options: Omit<ProviderRuntimePreparationOptions, 'runtimeRoot'> = {}
+): ProviderRuntimeProfile {
+  const input = { ...options, runtimeRoot }
+  switch (provider) {
+    case 'codex':
+      return prepareCodexRuntimeProfile(input)
+    case 'cursorcli':
+      return prepareCursorRuntimeProfile(input)
+    case 'claude-code':
+      return prepareClaudeRuntimeProfile(input)
+    case 'opencode':
+      return prepareOpenCodeRuntimeProfile(input)
   }
 }

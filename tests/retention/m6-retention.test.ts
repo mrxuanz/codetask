@@ -182,7 +182,7 @@ test('purgeJobFilesystem removes job artifacts and runtime tree', async () => {
       settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 16 }
     })
 
-    const runtimeDir = join(dataDir, 'runtimes', threadId, 'jobs', jobId)
+    const runtimeDir = join(dataDir, 'assets', 'runtimes', threadId, 'jobs', jobId)
     mkdirSync(runtimeDir, { recursive: true })
     writeFileSync(join(runtimeDir, 'state.json'), '{}')
 
@@ -274,6 +274,7 @@ test('janitor removes only completed task runtimes from a running job', async ()
     mkdirSync(join(runningRuntime, 'opencode', 'cache'), { recursive: true })
     const outsideTaskRoot = join(
       dataDir,
+      'assets',
       'runtimes',
       'thread-1',
       'jobs',
@@ -375,7 +376,7 @@ test('deleting job row cascades artifact metadata; purgeJobFilesystem clears run
       settings: { ...DEFAULT_RETENTION_SETTINGS, artifactInlineMaxBytes: 16 }
     })
 
-    const runtimeDir = join(dataDir, 'runtimes', 'thread-1', 'jobs', 'job-cascade')
+    const runtimeDir = join(dataDir, 'assets', 'runtimes', 'thread-1', 'jobs', 'job-cascade')
     mkdirSync(runtimeDir, { recursive: true })
     writeFileSync(join(runtimeDir, 'state.json'), '{}')
 

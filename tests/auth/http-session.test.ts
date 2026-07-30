@@ -30,8 +30,7 @@ function security(): SecurityContext {
             }
           : null
       }
-    },
-    mcpSecrets: {}
+    }
   } as unknown as SecurityContext
 }
 

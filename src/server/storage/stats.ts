@@ -26,7 +26,6 @@ function sqliteClient(ctx: AppContext): Database.Database | null {
 export async function readStorageStats(ctx: AppContext): Promise<{
   dataDir: string
   source: string
-  managed: boolean
   bytes: {
     total: number
     database: number
@@ -53,7 +52,6 @@ export async function readStorageStats(ctx: AppContext): Promise<{
   return {
     dataDir: ctx.dataDir,
     source: ctx.storage?.source ?? 'unknown',
-    managed: ctx.storage?.managed ?? true,
     bytes: {
       total,
       database: dbBytes,

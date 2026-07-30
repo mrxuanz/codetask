@@ -5,8 +5,6 @@ export interface CliOptions {
   host: string
   port: number
   smokeTest: boolean
-  dataDir?: string
-  bootstrapRoot?: string
 }
 
 const DEFAULT_DESKTOP_PORT = 3000
@@ -33,25 +31,6 @@ function readPort(argv: string[], fallback: number): number {
 export function parseCliArgs(argv: string[] = process.argv): CliOptions {
   const smokeTest = argv.includes('--smoke-test')
   const serve = argv.includes('--serve') || smokeTest
-  const rawDataDir = readArgValue(argv, '--data-dir')
-  const dataDir = rawDataDir?.trim()
-  if (argv.includes('--data-dir') && !dataDir) {
-    throw new Error('Invalid data directory: expected a path after --data-dir')
-  }
-  if (dataDir?.startsWith('--')) {
-    throw new Error('Invalid data directory: expected a path after --data-dir')
-  }
-  const dataDirOption = dataDir ? { dataDir } : {}
-  const rawBootstrapRoot = readArgValue(argv, '--bootstrap-root')
-  const bootstrapRoot = rawBootstrapRoot?.trim()
-  if (argv.includes('--bootstrap-root') && !bootstrapRoot) {
-    throw new Error('Invalid bootstrap root: expected a path after --bootstrap-root')
-  }
-  if (bootstrapRoot?.startsWith('--')) {
-    throw new Error('Invalid bootstrap root: expected a path after --bootstrap-root')
-  }
-  const bootstrapRootOption = bootstrapRoot ? { bootstrapRoot } : {}
-
   if (serve) {
     const host = readArgValue(argv, '--host') ?? (argv.includes('--host') ? '0.0.0.0' : '127.0.0.1')
     const port = readPort(argv, DEFAULT_SERVER_PORT)
@@ -59,9 +38,7 @@ export function parseCliArgs(argv: string[] = process.argv): CliOptions {
       mode: 'server',
       host,
       port,
-      smokeTest,
-      ...dataDirOption,
-      ...bootstrapRootOption
+      smokeTest
     }
   }
 
@@ -70,9 +47,7 @@ export function parseCliArgs(argv: string[] = process.argv): CliOptions {
     mode: 'desktop',
     host: '127.0.0.1',
     port,
-    smokeTest,
-    ...dataDirOption,
-    ...bootstrapRootOption
+    smokeTest
   }
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   fetchBusinessSkills,
@@ -20,26 +20,15 @@ import McpSettingsCard from '@renderer/components/settings/McpSettingsCard.vue'
 import SandboxHealthCard from '@renderer/components/settings/SandboxHealthCard.vue'
 import LanguageSwitcher from '@renderer/components/LanguageSwitcher.vue'
 import PromptEditor from '@renderer/components/settings/PromptEditor.vue'
-import FolderBrowsePanel from '@renderer/components/shared/FolderBrowsePanel.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Card from '@renderer/components/ui/Card.vue'
 import CardContent from '@renderer/components/ui/CardContent.vue'
 import CardHeader from '@renderer/components/ui/CardHeader.vue'
 import CardTitle from '@renderer/components/ui/CardTitle.vue'
-import Dialog from '@renderer/components/ui/Dialog.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
-import { useFolderBrowse } from '@renderer/composables/useFolderBrowse'
-import { withTrailingSeparator } from '@renderer/lib/workspace'
 import { toast, toastError } from '@renderer/lib/toast'
-import {
-  confirmOldStorageDelete,
-  fetchStorageMigration,
-  fetchStorageStats,
-  startStorageMigration,
-  type StorageMigrationData,
-  type StorageStatsData
-} from '@renderer/api/storage'
+import { fetchStorageStats, type StorageStatsData } from '@renderer/api/storage'
 
 type SettingsSection = 'language' | 'storage' | 'sandbox' | 'skills' | 'mcp' | 'prompts'
 
@@ -59,28 +48,7 @@ const mcpConstraints = ref<McpSettingsConstraints | null>(null)
 const sandboxHealth = ref<SandboxHealthReport | null>(null)
 const sandboxHealthLoading = ref(false)
 const storageStats = ref<StorageStatsData | null>(null)
-const storageTarget = ref('')
-const storageMigration = ref<StorageMigrationData | null>(null)
 const storageLoading = ref(false)
-const storagePickerOpen = ref(false)
-const creatingStorageFolder = ref(false)
-let migrationPoll: ReturnType<typeof setTimeout> | null = null
-
-const {
-  query: storageBrowseQuery,
-  parentPath: storageBrowseParentPath,
-  entries: storageBrowseEntries,
-  newFolderName: storageNewFolderName,
-  loading: storageBrowsing,
-  error: storageBrowseError,
-  loadBrowse: loadStorageBrowse,
-  currentDirectoryPath: storageCurrentDirectoryPath,
-  openEntry: openStorageBrowseEntry,
-  goParent: goStorageBrowseParent,
-  selectFolder: selectStorageFolder,
-  createFolder: createStorageFolder,
-  start: startStorageBrowse
-} = useFolderBrowse({ active: storagePickerOpen })
 
 const sections = [
   { key: 'language' as const, labelKey: 'workspace.settings.sections.language' },
@@ -103,99 +71,15 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`
 }
 
-async function pollStorageMigration(migrationId: string): Promise<void> {
-  if (migrationPoll) clearTimeout(migrationPoll)
-  try {
-    const response = await fetchStorageMigration(migrationId)
-    storageMigration.value = response.data
-    if (!['restart_required', 'failed'].includes(response.data.phase)) {
-      migrationPoll = setTimeout(() => void pollStorageMigration(migrationId), 750)
-    }
-  } catch (err) {
-    toastError(err, t('workspace.settings.storage.loadFailed'))
-  }
-}
-
 async function loadStorage(): Promise<void> {
   storageLoading.value = true
   try {
     storageStats.value = (await fetchStorageStats()).data
-    const migrationId = localStorage.getItem('codetask.storageMigrationId')
-    if (migrationId) await pollStorageMigration(migrationId)
   } catch (err) {
     toastError(err, t('workspace.settings.storage.loadFailed'))
   } finally {
     storageLoading.value = false
   }
-}
-
-async function chooseStorageTarget(): Promise<void> {
-  // Always use the in-app picker so "create folder" works in desktop and server modes.
-  storagePickerOpen.value = true
-  startStorageBrowse()
-  const initial = storageTarget.value.trim() || storageStats.value?.dataDir || ''
-  if (initial) {
-    storageBrowseQuery.value = withTrailingSeparator(initial)
-    void loadStorageBrowse(storageBrowseQuery.value)
-  }
-}
-
-function closeStoragePicker(): void {
-  storagePickerOpen.value = false
-}
-
-async function selectStorageTargetPath(path: string): Promise<void> {
-  const selected = await selectStorageFolder(path)
-  if (!selected) return
-  storageTarget.value = selected
-  storagePickerOpen.value = false
-}
-
-async function createAndSelectStorageFolder(): Promise<void> {
-  creatingStorageFolder.value = true
-  try {
-    const path = await createStorageFolder()
-    if (!path) return
-    storageTarget.value = path
-    storagePickerOpen.value = false
-  } finally {
-    creatingStorageFolder.value = false
-  }
-}
-
-async function migrateStorage(): Promise<void> {
-  if (!storageTarget.value.trim()) return
-  storageLoading.value = true
-  try {
-    const response = await startStorageMigration(storageTarget.value.trim())
-    storageMigration.value = response.data
-    localStorage.setItem('codetask.storageMigrationId', response.data.migrationId)
-    await pollStorageMigration(response.data.migrationId)
-  } catch (err) {
-    toastError(err, t('workspace.settings.storage.migrationFailed'))
-  } finally {
-    storageLoading.value = false
-  }
-}
-
-async function deleteOldStorage(): Promise<void> {
-  if (!storageMigration.value) return
-  try {
-    await confirmOldStorageDelete(storageMigration.value.migrationId)
-    localStorage.removeItem('codetask.storageMigrationId')
-    storageMigration.value = null
-    await loadStorage()
-  } catch (err) {
-    toastError(err, t('workspace.settings.storage.deleteOldFailed'))
-  }
-}
-
-async function restartApp(): Promise<void> {
-  if (!window.api?.relaunchApp) {
-    toast.info(t('workspace.settings.storage.restartServerRequired'))
-    return
-  }
-  await window.api.relaunchApp()
 }
 
 async function loadSandboxHealth(): Promise<void> {
@@ -306,10 +190,6 @@ onMounted(() => {
   void loadSettings()
   void loadSandboxHealth()
   void loadStorage()
-})
-
-onUnmounted(() => {
-  if (migrationPoll) clearTimeout(migrationPoll)
 })
 </script>
 
@@ -430,65 +310,6 @@ onUnmounted(() => {
                     </p>
                   </div>
                 </div>
-
-                <div v-if="!storageStats.managed" class="border-t pt-5">
-                  <p class="text-sm font-medium">
-                    {{ t('workspace.settings.storage.changeTitle') }}
-                  </p>
-                  <div class="mt-2 flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
-                    <input
-                      v-model="storageTarget"
-                      class="min-w-0 w-full flex-1 rounded-md border bg-background px-3 py-2 text-base font-mono sm:text-sm"
-                      :disabled="storageLoading || !!storageMigration"
-                    />
-                    <div class="flex min-w-0 gap-2">
-                      <Button
-                        variant="outline"
-                        class="min-w-0 flex-1 md:flex-none"
-                        :disabled="storageLoading || !!storageMigration"
-                        @click="chooseStorageTarget"
-                      >
-                        {{ t('workspace.settings.storage.browse') }}
-                      </Button>
-                      <Button
-                        class="min-w-0 flex-1 md:flex-none"
-                        :disabled="storageLoading || !!storageMigration || !storageTarget.trim()"
-                        @click="migrateStorage"
-                      >
-                        {{ t('workspace.settings.storage.migrate') }}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-                <p v-else class="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-                  {{ t('workspace.settings.storage.managed') }}
-                </p>
-
-                <div v-if="storageMigration" class="rounded-md border p-4 text-sm">
-                  <p class="font-medium">
-                    {{ t('workspace.settings.storage.phase', { phase: storageMigration.phase }) }}
-                  </p>
-                  <p class="mt-1 text-muted-foreground">
-                    {{ formatBytes(storageMigration.copiedBytes) }} ·
-                    {{ storageMigration.copiedFiles }} files
-                  </p>
-                  <p v-if="storageMigration.error" class="mt-2 text-destructive">
-                    {{ storageMigration.error }}
-                  </p>
-                  <div v-if="storageMigration.phase === 'restart_required'" class="mt-3">
-                    <Button
-                      v-if="storageStats.dataDir !== storageMigration.targetDataDir"
-                      @click="restartApp"
-                      >{{ t('workspace.settings.storage.restart') }}</Button
-                    >
-                    <Button
-                      v-else
-                      class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      @click="deleteOldStorage"
-                      >{{ t('workspace.settings.storage.deleteOld') }}</Button
-                    >
-                  </div>
-                </div>
               </template>
             </CardContent>
           </Card>
@@ -604,39 +425,5 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-
-    <Dialog
-      :open="storagePickerOpen"
-      class="flex h-[min(92dvh,720px)] min-h-0 max-h-[min(92dvh,720px)] w-full max-w-2xl flex-col sm:h-[min(90dvh,720px)] sm:max-h-[min(90dvh,720px)]"
-      @close="closeStoragePicker"
-    >
-      <div class="shrink-0 border-b border-border px-3 py-3 sm:px-4 sm:py-4">
-        <h2 class="text-base font-semibold">
-          {{ t('workspace.settings.storage.browseTitle') }}
-        </h2>
-        <p class="mt-1 text-sm text-muted-foreground break-words">
-          {{ t('workspace.settings.storage.browseHint') }}
-        </p>
-      </div>
-      <FolderBrowsePanel
-        fill-height
-        :query="storageBrowseQuery"
-        :parent-path="storageBrowseParentPath"
-        :current-path="storageCurrentDirectoryPath()"
-        :entries="storageBrowseEntries"
-        :new-folder-name="storageNewFolderName"
-        :loading="storageBrowsing"
-        :submitting="creatingStorageFolder"
-        :error="storageBrowseError"
-        :select-current-label="t('workspace.settings.storage.selectDirectory')"
-        :create-folder-label="t('workspace.settings.storage.createFolder')"
-        @update:query="storageBrowseQuery = $event"
-        @update:new-folder-name="storageNewFolderName = $event"
-        @go-parent="goStorageBrowseParent"
-        @open-entry="openStorageBrowseEntry"
-        @select="selectStorageTargetPath"
-        @create-folder="createAndSelectStorageFolder"
-      />
-    </Dialog>
   </div>
 </template>

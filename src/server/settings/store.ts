@@ -1,6 +1,5 @@
 import { getAppContext } from '../bootstrap'
 import { SettingsStore } from '../context/settings-store'
-import type { McpSecretProvider } from './mcp-secret-provider'
 
 export function initSettingsStore(): void {
   getAppContext()
@@ -20,8 +19,4 @@ export function writeSettingsFile(value: Record<string, unknown>): void {
 
 export function patchSettingsFile(mutator: (file: Record<string, unknown>) => void): void {
   resolveSettingsStore().patch(mutator)
-}
-
-export function resolveMcpSecretProvider(): McpSecretProvider {
-  return getAppContext().security.mcpSecrets
 }

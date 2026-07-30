@@ -1,5 +1,5 @@
 import { ProviderAuthError } from '../../sandbox/provider-auth/errors'
-import type { ProviderAuthPrepared } from '../../sandbox/provider-auth/types'
+import type { ProviderRuntimeProfile } from '../../sandbox/provider-auth/types'
 import type { ProviderInstallation } from '../../../shared/providers/installation'
 
 const CLAUDE_LABEL = 'Claude Code'
@@ -14,10 +14,10 @@ const CLAUDE_LOGIN_HINT = 'Run `claude auth login` in a terminal and retry.'
  * and can fail inside an isolated HOME when that CLI is a toolchain shim.
  */
 export function runClaudeAuthPreflight(
-  prepared: ProviderAuthPrepared,
+  profile: ProviderRuntimeProfile,
   _installation: ProviderInstallation
 ): void {
-  if (prepared.diagnostics.authMaterialPresent) return
+  if (profile.diagnostics.authMaterialPresent) return
 
   throw new ProviderAuthError(
     `${CLAUDE_LABEL} is not authenticated. ${CLAUDE_LOGIN_HINT}`,

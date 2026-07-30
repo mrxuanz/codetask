@@ -5,21 +5,21 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { buildSandboxEnv } from '../../src/server/sandbox/env'
 
-test('sandbox worker environment never inherits the application data root', () => {
+test('sandbox worker environment never inherits private manager state', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-sandbox-runtime-'))
-  const previous = process.env.CODETASK_DATA_DIR
-  process.env.CODETASK_DATA_DIR = join(runtimeRoot, '..', 'private-app-data')
+  const previous = process.env.CODETASK_PRIVATE_STATE
+  process.env.CODETASK_PRIVATE_STATE = join(runtimeRoot, '..', 'private-manager-state')
 
   try {
     const env = buildSandboxEnv({ runtimeRoot })
-    assert.equal(env.CODETASK_DATA_DIR, undefined)
+    assert.equal(env.CODETASK_PRIVATE_STATE, undefined)
     assert.equal(
-      Object.values(env).some((value) => value === process.env.CODETASK_DATA_DIR),
+      Object.values(env).some((value) => value === process.env.CODETASK_PRIVATE_STATE),
       false
     )
   } finally {
-    if (previous === undefined) delete process.env.CODETASK_DATA_DIR
-    else process.env.CODETASK_DATA_DIR = previous
+    if (previous === undefined) delete process.env.CODETASK_PRIVATE_STATE
+    else process.env.CODETASK_PRIVATE_STATE = previous
     rmSync(runtimeRoot, { recursive: true, force: true })
   }
 })

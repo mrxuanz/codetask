@@ -1,24 +1,24 @@
 import type { SupportedCoreCode } from '../../src/shared/providers/codes.ts'
-import type { ProviderAuthPrepared } from '../../src/server/sandbox/provider-auth/types.ts'
+import type { ProviderRuntimeProfile } from '../../src/server/sandbox/provider-auth/types.ts'
 import { createProviderRegistry } from '../../src/server/providers/composition.ts'
 import type { ProviderDriver } from '../../src/server/providers/driver.ts'
 import { processHostEnvironmentSource } from '../../src/server/host-environment.ts'
 
 const registry = createProviderRegistry()
 
-export function prepareProviderAuthForTest(
+export function prepareProviderRuntimeForTest(
   provider: SupportedCoreCode,
   runtimeRoot: string,
   options: {
     workspaceRoot?: string | undefined
     hostEnvironment?: Readonly<Record<string, string | undefined>> | undefined
   } = {}
-): ProviderAuthPrepared {
+): ProviderRuntimeProfile {
   const hostEnvironment = Object.freeze({
     ...processHostEnvironmentSource.snapshot(),
     ...options.hostEnvironment
   })
-  return registry.get(provider).prepareAuth({
+  return registry.get(provider).prepareRuntimeProfile({
     runtimeRoot,
     workspaceRoot: options.workspaceRoot,
     hostEnvironment

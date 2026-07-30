@@ -59,29 +59,12 @@ export default {
     storageInitializing: 'Initializing…',
     storageValidatedPath: 'Validated path: {path}',
     storageRestarting: 'Storage initialized',
-    storageRecoveryTitle: 'Storage recovery required',
-    storageRecoveryDescription:
-      'The saved storage location is damaged or missing. Recover an existing CodeTask data directory, or choose an empty folder to initialize again.',
-    storageRecover: 'Use this directory',
-    storageRecovering: 'Recovering…',
-    storageRecovered: 'Storage location recovered',
     errors: {
       pathNotAbsolute: 'Enter an absolute path',
       pathNotWritable: 'Directory is not writable; choose another location',
-      pathNotEmpty:
-        'Directory is not empty and is not a CodeTask data root; choose an empty folder',
+      pathNotEmpty: 'Directory is not empty; choose an empty folder',
       pathForbiddenRoot: 'Cannot use the system root or home directory',
-      pathOwnedByOther: 'This directory belongs to another CodeTask installation',
-      markerMissing:
-        'Missing a valid CodeTask data marker. For first setup pick an empty folder; for recovery pick the original data directory',
       databaseMissing: 'Database file not found in this directory',
-      locatorUnreadable: 'Saved storage location is corrupt; choose a data directory again',
-      locatorInvalid: 'Saved storage location is invalid; choose a data directory again',
-      legacyLocatorConflict:
-        'Multiple different storage locations were found; choose the original data directory to use',
-      legacyLocatorMigrationFailed:
-        'Could not migrate the original storage location; choose the original data directory again',
-      installationMismatch: 'Data directory does not match this installation',
       validationExpired: 'Directory validation expired; try again',
       insufficientSpace: 'Not enough disk space'
     }
@@ -600,30 +583,13 @@ export default {
       },
       storage: {
         title: 'Data Storage',
-        description:
-          'Inspect storage usage and move the complete data root through a checked, restart-based migration.',
+        description: 'Inspect the current data directory and storage usage.',
         loading: 'Loading storage information…',
         loadFailed: 'Failed to load storage information',
         currentPath: 'Current data root',
         source: 'Source: {source}',
         total: 'Total',
-        reclaimable: 'DB reclaimable',
-        changeTitle: 'Move data root',
-        browse: 'Browse',
-        browseTitle: 'Choose a new data directory',
-        browseHint: 'Browse local folders, or create a new subfolder and select it.',
-        selectDirectory: 'Use this directory',
-        createFolder: 'Create and use',
-        migrate: 'Validate and migrate',
-        managed:
-          'This path is managed by CLI or environment configuration and cannot be changed here.',
-        phase: 'Migration phase: {phase}',
-        restart: 'Restart into new data root',
-        restartServerRequired:
-          'Ask an administrator to restart the codetask-server service to use the new data root.',
-        deleteOld: 'Delete old data root',
-        migrationFailed: 'Storage migration failed',
-        deleteOldFailed: 'Failed to delete old storage'
+        reclaimable: 'DB reclaimable'
       },
       languageSection: {
         title: 'Language',

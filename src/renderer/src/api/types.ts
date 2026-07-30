@@ -5,7 +5,7 @@ export interface BootstrapData {
   authenticated: boolean
   username?: string
   setupTokenRequired?: boolean
-  storagePhase?: 'selection_required' | 'ready' | 'recovery_required'
+  storagePhase?: 'selection_required' | 'ready'
   controlPlaneGeneration?: 'preparing' | 'copied' | 'v3_authoritative' | null
 }
 

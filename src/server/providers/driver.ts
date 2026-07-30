@@ -8,7 +8,7 @@ import type {
 } from '../../shared/providers/capabilities'
 import type { ProviderSettings } from '../../shared/providers/settings'
 import type { AgentTurnChunk, AgentTurnInput, AgentTurnOptions } from '../agent-runtime/types'
-import type { ProviderAuthPrepared } from '../sandbox/provider-auth/types'
+import type { ProviderRuntimeProfile } from '../sandbox/provider-auth/types'
 import type { HostEnvironmentSnapshot } from '../host-environment'
 
 export interface ProviderDiscoveryContext {
@@ -20,14 +20,15 @@ export interface ProviderDiscoveryContext {
 
 export interface ProviderPreflightContext {
   readonly installation: ProviderInstallation
-  readonly preparedAuth: ProviderAuthPrepared
+  readonly runtimeProfile: ProviderRuntimeProfile
   readonly skipAuthProbe?: boolean | undefined
 }
 
-export interface ProviderAuthPreparationContext {
+export interface ProviderRuntimePreparationContext {
   readonly runtimeRoot: string
   readonly workspaceRoot?: string | undefined
   readonly hostEnvironment: HostEnvironmentSnapshot
+  readonly platform?: NodeJS.Platform | undefined
 }
 
 /**
@@ -70,7 +71,7 @@ export function buildProviderTurnContext(input: {
 
 export interface SandboxPolicyContext {
   readonly installation: ProviderInstallation
-  readonly preparedAuth: ProviderAuthPrepared
+  readonly runtimeProfile: ProviderRuntimeProfile
   readonly hostEnvironment?: HostEnvironmentSnapshot | undefined
 }
 
@@ -78,10 +79,6 @@ export interface ProviderSandboxContribution {
   readonly readRoots: readonly string[]
   readonly writeRoots: readonly string[]
   readonly environment: Readonly<Record<string, string>>
-  readonly credentialSnapshots: readonly {
-    readonly relativePath: string
-    readonly required: boolean
-  }[]
 }
 
 export interface PreparedProviderTurn {
@@ -99,7 +96,7 @@ export interface ProviderDriver {
 
   discover(context?: ProviderDiscoveryContext): Promise<ProviderInstallation | null>
   installDirs(hostEnvironment?: HostEnvironmentSnapshot): readonly string[]
-  prepareAuth(context: ProviderAuthPreparationContext): ProviderAuthPrepared
+  prepareRuntimeProfile(context: ProviderRuntimePreparationContext): ProviderRuntimeProfile
   preflight(context: ProviderPreflightContext): void
   supports(profile: ProviderCapabilityProfile): boolean
   prepareTurn(context: ProviderTurnContext): Promise<PreparedProviderTurn>

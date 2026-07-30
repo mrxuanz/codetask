@@ -11,10 +11,10 @@ import type {
 } from '../agent-runtime/types'
 import type {
   PreparedProviderTurn,
-  ProviderAuthPreparationContext,
   ProviderDiscoveryContext,
   ProviderDriver,
   ProviderPreflightContext,
+  ProviderRuntimePreparationContext,
   ProviderSandboxContribution,
   ProviderTurnContext,
   SandboxPolicyContext
@@ -23,7 +23,11 @@ import { providerInstallationResolver, type ProviderInstallationResolver } from 
 import { processHostEnvironmentSource, type HostEnvironmentSource } from '../host-environment'
 import { resolveProviderReusePolicy } from './lifecycle'
 import type { HostEnvironmentSnapshot } from '../host-environment'
-import type { ProviderAuthPrepared } from '../sandbox/provider-auth/types'
+import {
+  providerRuntimeReadRoots,
+  providerRuntimeWriteRoots,
+  type ProviderRuntimeProfile
+} from '../sandbox/provider-auth/types'
 import {
   resolveExecutableEnvironmentAffinity,
   resolveProviderExecutableStrategy
@@ -35,7 +39,9 @@ export type ProviderStreamFactory = (
 ) => AsyncGenerator<AgentTurnChunk>
 
 export interface ProviderDriverHooks {
-  readonly prepareAuth: (context: ProviderAuthPreparationContext) => ProviderAuthPrepared
+  readonly prepareRuntimeProfile: (
+    context: ProviderRuntimePreparationContext
+  ) => ProviderRuntimeProfile
   readonly preflight: (context: ProviderPreflightContext) => void
   readonly installDirs: (hostEnvironment: HostEnvironmentSnapshot) => readonly string[]
 }
@@ -137,8 +143,8 @@ export class DelegatingProviderDriver implements ProviderDriver {
     return this.hooks.installDirs(hostEnvironment)
   }
 
-  prepareAuth(context: ProviderAuthPreparationContext): ProviderAuthPrepared {
-    return this.hooks.prepareAuth(context)
+  prepareRuntimeProfile(context: ProviderRuntimePreparationContext): ProviderRuntimeProfile {
+    return this.hooks.prepareRuntimeProfile(context)
   }
 
   preflight(context: ProviderPreflightContext): void {
@@ -183,13 +189,12 @@ export class DelegatingProviderDriver implements ProviderDriver {
         : []
 
     return {
-      readRoots: [...installationRoots, ...context.preparedAuth.readRoots],
-      writeRoots: context.preparedAuth.writeRoots ?? [],
+      readRoots: [...installationRoots, ...providerRuntimeReadRoots(context.runtimeProfile)],
+      writeRoots: providerRuntimeWriteRoots(context.runtimeProfile),
       environment: {
         ...executableAffinity.environment,
-        ...context.preparedAuth.envPatch
-      },
-      credentialSnapshots: context.preparedAuth.filesystemProfile.credentialSnapshots
+        ...context.runtimeProfile.environment
+      }
     }
   }
 
@@ -209,7 +214,7 @@ export function createTestOverrideDriver(
     discover: (context) => base.discover(context),
     preflight: (context) => base.preflight(context),
     installDirs: (hostEnvironment) => base.installDirs(hostEnvironment),
-    prepareAuth: (context) => base.prepareAuth(context),
+    prepareRuntimeProfile: (context) => base.prepareRuntimeProfile(context),
     supports: (profile) => base.supports(profile),
     contributeSandboxPolicy: (context) => base.contributeSandboxPolicy(context),
     shutdown: () => base.shutdown?.() ?? Promise.resolve(),

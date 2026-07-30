@@ -2,7 +2,7 @@ import type { ProviderSettings } from '../../../shared/providers/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { OPENCODE_DESCRIPTOR } from './descriptor'
 import { runOpenCodeAuthPreflight } from './preflight'
-import { prepareOpenCodeAuth } from '../../sandbox/provider-auth/bridge'
+import { prepareOpenCodeRuntimeProfile } from '../../sandbox/provider-auth/bridge'
 import { resolveOpencodeInstallDirs } from '../../sandbox/provider-auth/paths'
 
 export {
@@ -30,8 +30,9 @@ export class OpenCodeDriver extends DelegatingProviderDriver {
     streamFactory: ProviderStreamFactory = createOpenCodeStreamFactory()
   ) {
     super(OPENCODE_DESCRIPTOR, settings, streamFactory, {
-      prepareAuth: prepareOpenCodeAuth,
-      preflight: (context) => runOpenCodeAuthPreflight(context.preparedAuth, context.installation),
+      prepareRuntimeProfile: prepareOpenCodeRuntimeProfile,
+      preflight: (context) =>
+        runOpenCodeAuthPreflight(context.runtimeProfile, context.installation),
       installDirs: () => resolveOpencodeInstallDirs()
     })
   }

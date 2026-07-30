@@ -3,13 +3,11 @@ import type { ExecutionContext, Hono } from 'hono'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { readSchemaGeneration } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
-import { mkdirSync } from 'fs'
-import { ensureResolvedDataRoot, type DataDirResolution } from './storage-locator'
+import type { DataDirResolution } from './storage-selection'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
 import { generateSetupToken } from '../server/auth/setup-token'
-import { clearPublishedRunningService, publishRunningService } from './service-discovery'
 
 export interface ServerInfo {
   host: string
@@ -32,11 +30,8 @@ export interface AppServerPlatform {
   staticDir?: string
   appRoot: string
   shellChildEnvironment?: Record<string, string>
-  resolveDataDirSelection(input: {
-    explicitDataDir?: string
-    mode: CliOptions['mode']
-    bootstrapRoot?: string
-  }): DataDirResolution
+  resolveDataDirSelection(): DataDirResolution
+  persistDataDirSelection(dataDir: string): void | Promise<void>
 }
 
 let activeServer: ServerType | null = null
@@ -101,17 +96,14 @@ async function createReadyApp(
   platform: AppServerPlatform,
   http: { rendererDevUrl?: string; staticDir?: string }
 ): Promise<{ app: Hono; dataDir: string; usesLegacyComposition: boolean }> {
-  const dataDir = ensureResolvedDataRoot(storage)
+  const dataDir = storage.dataDir
 
   const ctx = bootstrapRuntime({
     dataDir,
     mode: cli.mode,
-    mcpSecretPath: storage.bootstrap.mcpSecretFile,
     shellChildEnvironment: platform.shellChildEnvironment,
     storage: {
-      bootstrapRoot: storage.bootstrap.root,
-      source: storage.source,
-      managed: storage.managed
+      source: storage.source
     }
   })
 
@@ -168,28 +160,13 @@ export async function startAppServer(
     staticDir: platform.isDev ? undefined : platform.staticDir
   }
 
-  const storage = platform.resolveDataDirSelection({
-    explicitDataDir: cli.dataDir,
-    mode: cli.mode,
-    bootstrapRoot: cli.bootstrapRoot
-  })
+  const storage = platform.resolveDataDirSelection()
   let activeApp: Hono
   let boundPort = cli.port
   let bindChanged = false
 
   if (storage.phase !== 'ready') {
-    // Ensure the default candidate exists so browse/select works out of the box.
-    if (storage.phase === 'selection_required' && storage.dataDir) {
-      try {
-        mkdirSync(storage.dataDir, { recursive: true })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.warn(`[storage] failed to create default candidate ${storage.dataDir}: ${message}`)
-      }
-    }
-
     let promoteInflight: Promise<void> | null = null
-    let publishedInfo: ServerInfo | null = null
     const setupApp = createSetupShell({
       storage,
       isDev: platform.isDev,
@@ -197,18 +174,16 @@ export async function startAppServer(
       staticDir: http.staticDir,
       forbiddenRoots: [platform.appRoot, process.cwd()],
       setupTokenRequired: false,
+      persistDataDir: platform.persistDataDirSelection,
       activateStorage: async () => {
         if (promoteInflight) {
           await promoteInflight
           return
         }
         promoteInflight = (async () => {
-          const resolved = platform.resolveDataDirSelection({
-            mode: cli.mode,
-            bootstrapRoot: cli.bootstrapRoot
-          })
+          const resolved = platform.resolveDataDirSelection()
           if (resolved.phase !== 'ready') {
-            throw new Error(resolved.issue ?? 'Storage locator is not ready after initialization')
+            throw new Error(resolved.issue ?? 'Storage is not ready after initialization')
           }
           const { app, dataDir, usesLegacyComposition } = await createReadyApp(
             cli,
@@ -218,9 +193,6 @@ export async function startAppServer(
           )
           activeApp = app
           initConversationMcpBackend(boundPort)
-          if (cli.mode === 'server' && publishedInfo) {
-            publishRunningService(resolved.bootstrap, { ...publishedInfo, mode: 'server' }, dataDir)
-          }
           console.log(
             `[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`
           )
@@ -269,12 +241,7 @@ export async function startAppServer(
       portChanged: bindChanged,
       mode: cli.mode
     }
-    if (cli.mode === 'server') {
-      publishedInfo = info
-      publishRunningService(storage.bootstrap, { ...info, mode: 'server' })
-    }
     console.log(`[server] ${cli.mode} storage setup listening on ${info.url}`)
-    console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
     console.log(`[storage] default candidate: ${storage.dataDir}`)
     if (cli.mode === 'server') {
       console.log(`[server] open in browser to choose data directory: ${info.url}`)
@@ -327,12 +294,7 @@ export async function startAppServer(
     mode: cli.mode
   }
 
-  if (cli.mode === 'server') {
-    publishRunningService(storage.bootstrap, { ...info, mode: 'server' }, dataDir)
-  }
-
   console.log(`[server] ${cli.mode} mode listening on ${info.url}`)
-  console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
   console.log(`[storage] data root: ${dataDir} (source=${storage.source})`)
   if (cli.mode === 'server' && cli.host === '0.0.0.0') {
     console.log(`[server] External access: http://<your-ip>:${boundPort}`)
@@ -348,8 +310,6 @@ export async function stopAppServer(): Promise<void> {
     activeServer.close()
     activeServer = null
   }
-  clearPublishedRunningService()
-
   try {
     const { stopRetentionJanitor } = await import('../server/retention/lifecycle')
     stopRetentionJanitor()

@@ -72,7 +72,7 @@ test('Codex registry production driver matches descriptor and settings slot', ()
   assert.equal(driver.descriptor, CODEX_DESCRIPTOR)
   assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG.codex)
   assert.equal(driver.descriptor.capabilities.protocol, 'sdk')
-  assert.equal(driver.descriptor.capabilities.authMode, 'runtime-reference')
+  assert.equal(driver.descriptor.capabilities.authMode, 'host-identity')
 })
 
 test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', () => {

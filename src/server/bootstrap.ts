@@ -21,14 +21,6 @@ import {
   stopArtifactExpiryScheduler
 } from './retention/expiry-scheduler'
 import {
-  EncryptedFileMcpSecretProvider,
-  MemoryMcpSecretProvider
-} from './settings/mcp-secret-provider'
-import {
-  collectMcpSecretReferenceIds,
-  resolveProtectedMcpSensitiveValues
-} from './settings/mcp-secrets'
-import {
   createAppConfig,
   DEFAULT_APP_CONFIG,
   type AppConfig,
@@ -55,12 +47,9 @@ export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
   config?: AppConfigOverrides
-  mcpSecretPath?: string
   shellChildEnvironment?: Record<string, string>
   storage?: {
-    bootstrapRoot: string
     source: string
-    managed: boolean
   }
 }
 
@@ -120,16 +109,6 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     configureShellChildEnvironment(options.shellChildEnvironment)
     const settings = new SettingsStore(options.dataDir, db)
     const authSecret = loadDatabaseAuthSecret(db)
-    const mcpSecrets = options.mcpSecretPath
-      ? new EncryptedFileMcpSecretProvider(options.mcpSecretPath, authSecret)
-      : new MemoryMcpSecretProvider()
-    const persistedMcp = settings.readNamespace('user_mcp')
-    if (persistedMcp.value) {
-      resolveProtectedMcpSensitiveValues(persistedMcp.value, mcpSecrets)
-      mcpSecrets.pruneExcept(collectMcpSecretReferenceIds(persistedMcp.value))
-    } else {
-      mcpSecrets.pruneExcept(new Set())
-    }
     const bootId = randomUUID()
     const persistedProviderValue = settings.readNamespace('provider_runtime').value
     const persistedProviderOverrides = parseProvidersConfigOverrides(
@@ -151,8 +130,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       security: {
         mode,
         authSecret,
-        auth: new SecureAuthService(db, authSecret),
-        mcpSecrets
+        auth: new SecureAuthService(db, authSecret)
       },
       eventBus: new JobEventBus(),
       runtimeRegistry: new RuntimeRegistry(),

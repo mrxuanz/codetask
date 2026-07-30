@@ -703,16 +703,12 @@ async function runSupervisorCase(ctx: {
     }
     case 'G0-003': {
       const dataOk = server.dataDir.startsWith(runRoot)
-      const bootOk = server.bootstrapDir.startsWith(runRoot)
-      oracleResults.push(
-        { name: 'data_dir_isolated', passed: dataOk, detail: { dataDir: server.dataDir } },
-        {
-          name: 'bootstrap_isolated',
-          passed: bootOk,
-          detail: { bootstrapDir: server.bootstrapDir }
-        }
-      )
-      if (!dataOk || !bootOk) classification = 'assertion_failed'
+      oracleResults.push({
+        name: 'data_dir_isolated',
+        passed: dataOk,
+        detail: { dataDir: server.dataDir }
+      })
+      if (!dataOk) classification = 'assertion_failed'
       break
     }
     case 'G0-004': {

@@ -2,7 +2,7 @@ import type { ProviderSettings } from '../../../shared/providers/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { CLAUDE_DESCRIPTOR } from './descriptor'
 import { runClaudeAuthPreflight } from './preflight'
-import { prepareClaudeAuth } from '../../sandbox/provider-auth/bridge'
+import { prepareClaudeRuntimeProfile } from '../../sandbox/provider-auth/bridge'
 import { resolveClaudeInstallDirs } from '../../sandbox/provider-auth/paths'
 
 export {
@@ -33,8 +33,8 @@ export class ClaudeDriver extends DelegatingProviderDriver {
     streamFactory: ProviderStreamFactory = createClaudeStreamFactory()
   ) {
     super(CLAUDE_DESCRIPTOR, settings, streamFactory, {
-      prepareAuth: prepareClaudeAuth,
-      preflight: (context) => runClaudeAuthPreflight(context.preparedAuth, context.installation),
+      prepareRuntimeProfile: prepareClaudeRuntimeProfile,
+      preflight: (context) => runClaudeAuthPreflight(context.runtimeProfile, context.installation),
       installDirs: () => resolveClaudeInstallDirs()
     })
   }

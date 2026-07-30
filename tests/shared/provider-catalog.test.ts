@@ -26,7 +26,7 @@ test('ProviderRegistry is the single server runtime catalog', () => {
 
   for (const provider of providers) {
     assert.equal(typeof provider.discover, 'function')
-    assert.equal(typeof provider.prepareAuth, 'function')
+    assert.equal(typeof provider.prepareRuntimeProfile, 'function')
     assert.equal(typeof provider.preflight, 'function')
     assert.equal(typeof provider.prepareTurn, 'function')
     assert.equal(typeof provider.contributeSandboxPolicy, 'function')

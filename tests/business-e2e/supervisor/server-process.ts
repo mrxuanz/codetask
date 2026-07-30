@@ -1,6 +1,7 @@
 import { createServer } from 'node:net'
+import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { TIMEOUTS } from '../config/timeouts'
 import { PublicApiClient } from '../api/client'
@@ -11,7 +12,6 @@ export type ServerHandle = {
   port: number
   baseUrl: string
   dataDir: string
-  bootstrapDir: string
   startedAt: number
   setupToken: string | undefined
   stop: () => Promise<void>
@@ -57,9 +57,29 @@ export async function startDedicatedServer(options: {
   }
 
   const dataDir = join(options.runRoot, 'data')
-  const bootstrapDir = join(options.runRoot, 'bootstrap')
   mkdirSync(dataDir, { recursive: true })
-  mkdirSync(bootstrapDir, { recursive: true })
+  const configPath = join(options.repoRoot, 'codetask-data.json')
+  const previousConfig = existsSync(configPath) ? readFileSync(configPath) : null
+  let configRestored = false
+  const restoreConfig = (): void => {
+    if (configRestored) return
+    configRestored = true
+    if (previousConfig) writeFileSync(configPath, previousConfig)
+    else rmSync(configPath, { force: true })
+  }
+  writeFileSync(
+    configPath,
+    `${JSON.stringify(
+      {
+        formatVersion: 1,
+        installationId: randomUUID(),
+        createdAt: new Date().toISOString(),
+        dbPath: join(dataDir, 'db', 'app.db')
+      },
+      null,
+      2
+    )}\n`
+  )
 
   const port = await pickPort()
   const host = '127.0.0.1'
@@ -72,28 +92,18 @@ export async function startDedicatedServer(options: {
   delete env.DISPLAY
   delete env.WAYLAND_DISPLAY
 
-  const child = spawn(
-    process.execPath,
-    [
-      entry,
-      '--host',
-      host,
-      '--port',
-      String(port),
-      '--data-dir',
-      dataDir,
-      '--bootstrap-root',
-      bootstrapDir
-    ],
-    {
-      cwd: options.repoRoot,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32'
-    }
-  ) as ChildProcessWithoutNullStreams
+  const child = spawn(process.execPath, [entry, '--host', host, '--port', String(port)], {
+    cwd: options.repoRoot,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32'
+  }) as ChildProcessWithoutNullStreams
 
-  if (!child.pid) throw new Error('server_spawn_failed')
+  child.once('exit', restoreConfig)
+  if (!child.pid) {
+    restoreConfig()
+    throw new Error('server_spawn_failed')
+  }
 
   let output = ''
   let setupToken: string | undefined
@@ -156,12 +166,12 @@ export async function startDedicatedServer(options: {
     port,
     baseUrl,
     dataDir,
-    bootstrapDir,
     startedAt,
     setupToken,
     async stop() {
       await stopChild(child)
       if (child.pid) options.registry.untrack(child.pid)
+      restoreConfig()
     }
   }
 }

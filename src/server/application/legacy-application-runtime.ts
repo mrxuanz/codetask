@@ -20,18 +20,6 @@ export function createLegacyApplicationRuntime(
     logger,
     stages: [
       {
-        name: 'scrub-runtime-credentials',
-        execute: async () => {
-          const { dataPaths } = await import('../data-paths')
-          const { scrubCredentialSnapshotsInTree } =
-            await import('../sandbox/provider-auth/snapshot-manifest')
-          const scrubbed = scrubCredentialSnapshotsInTree(dataPaths(ctx.dataDir).runtimes)
-          if (scrubbed.manifests > 0 || scrubbed.rejectedPaths > 0) {
-            logger.info('scrubbed provider credential snapshots on startup', { ...scrubbed })
-          }
-        }
-      },
-      {
         // FIX-PLAN F3-B (§8.5): fence stale task attempts from a dead process to `interrupted`
         // before any Job is resumed, so resume creates a fresh attempt under the same identity.
         name: 'interrupt-orphan-task-attempts',

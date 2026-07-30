@@ -3,6 +3,7 @@ productName: codetask
 directories:
   buildResources: build
 files:
+  - '!codetask-data.json'
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
@@ -14,9 +15,6 @@ asarUnpack:
   - native/codeteam-sandbox/**
 win:
   executableName: codetask
-  extraFiles:
-    - from: codetask-data.json
-      to: codetask-data.json
   target:
     - nsis
     - zip
@@ -30,9 +28,6 @@ nsis:
 portable:
   artifactName: ${productName}-${version}-windows-${arch}-portable.${ext}
 mac:
-  extraFiles:
-    - from: codetask-data.json
-      to: MacOS/codetask-data.json
   artifactName: ${productName}-${version}-macos-${arch}.${ext}
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
@@ -42,9 +37,6 @@ mac:
 dmg:
   artifactName: ${productName}-${version}-macos-${arch}.${ext}
 linux:
-  extraFiles:
-    - from: codetask-data.json
-      to: codetask-data.json
   target:
     - AppImage
     - deb

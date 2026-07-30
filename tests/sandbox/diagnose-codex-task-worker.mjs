@@ -237,7 +237,7 @@ function loadProductionSandboxModule() {
     try {
       const mod = require(join(chunksDir, file))
       if (
-        typeof mod.prepareProviderAuth === 'function' &&
+        typeof mod.prepareProviderRuntimeProfile === 'function' &&
         typeof mod.buildSandboxEnv === 'function'
       ) {
         return mod
@@ -250,9 +250,11 @@ function loadProductionSandboxModule() {
 }
 
 function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, coreCode = 'codex') {
-  const authPrepared = prod.prepareProviderAuth(coreCode, runtimeRoot, { workspaceRoot })
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(coreCode, runtimeRoot, {
+    workspaceRoot
+  })
   if (typeof prod.runProviderAuthPreflight === 'function') {
-    prod.runProviderAuthPreflight(coreCode, authPrepared)
+    prod.runProviderAuthPreflight(coreCode, runtimeProfile)
   }
   const dataDir =
     typeof prod.resolveSandboxDataDir === 'function'
@@ -261,13 +263,15 @@ function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, coreCode = 
   const envRecord = prod.buildSandboxEnv({
     runtimeRoot,
     dataDir,
-    providerEnv: authPrepared.envPatch
+    providerEnv: runtimeProfile.environment
   })
-  return { envRecord, authPrepared, dataDir }
+  return { envRecord, runtimeProfile, dataDir }
 }
 
 function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = []) {
-  const authPrepared = prod.prepareProviderAuth('codex', runtimeRoot, { workspaceRoot })
+  const runtimeProfile = prod.prepareProviderRuntimeProfile('codex', runtimeRoot, {
+    workspaceRoot
+  })
   const dataDir =
     typeof prod.resolveSandboxDataDir === 'function'
       ? prod.resolveSandboxDataDir()
@@ -276,7 +280,7 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = [])
     typeof prod.mergeProviderReadRoots === 'function' &&
     typeof prod.resolveProviderReadRoots === 'function'
       ? prod.mergeProviderReadRoots(prod.resolveProviderReadRoots('codex'), [
-          ...authPrepared.readRoots,
+          ...runtimeProfile.hostPathGrants.map((grant) => grant.path),
           dataDir
         ])
       : []
@@ -286,7 +290,9 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = [])
       workspaceRoot,
       runtimeRoot,
       providerReadRoots,
-      providerWriteRoots: authPrepared.writeRoots,
+      providerWriteRoots: runtimeProfile.hostPathGrants
+        .filter((grant) => grant.access === 'read-write')
+        .map((grant) => grant.path),
       attachmentReadRoots: readRoots
     })
   }
@@ -553,7 +559,7 @@ async function runSandboxCodexCase(
     : sandboxPolicyForRole('task-worker', workspace, runtimeRoot)
   const envBundle = prod
     ? buildProductionSandboxEnv(prod, runtimeRoot, workspace)
-    : { envRecord: buildMinimalSandboxEnv(runtimeRoot), authPrepared: null }
+    : { envRecord: buildMinimalSandboxEnv(runtimeRoot), runtimeProfile: null }
 
   const workerInput = {
     provider: 'codex',
@@ -567,17 +573,13 @@ async function runSandboxCodexCase(
     ...(mcpToolNames ? { mcpToolNames } : {})
   }
 
-  try {
-    return await runSandboxRoleWorker(native, {
-      name: mcpUrl ? 'codex-sandbox-mcp' : 'codex-sandbox-hello',
-      policy,
-      workerInput,
-      envRecord: envBundle.envRecord,
-      timeoutMs: 600_000
-    })
-  } finally {
-    envBundle.authPrepared?.cleanupPlan?.()
-  }
+  return runSandboxRoleWorker(native, {
+    name: mcpUrl ? 'codex-sandbox-mcp' : 'codex-sandbox-hello',
+    policy,
+    workerInput,
+    envRecord: envBundle.envRecord,
+    timeoutMs: 600_000
+  })
 }
 
 function summarizeCodexChunks(result) {

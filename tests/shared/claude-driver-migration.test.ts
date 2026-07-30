@@ -80,7 +80,7 @@ test('ClaudeDriver prepareTurn delegates to stream factory without altering chun
       input: baseInput(),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-reference'
+      authMode: 'host-identity'
     })
   )
 
@@ -304,7 +304,7 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
       input: baseInput({ role: 'task-worker', prompt: 'managed' }),
       options: { outerSandbox: true },
       installation,
-      authMode: 'runtime-reference'
+      authMode: 'host-identity'
     })
   )
 
@@ -341,7 +341,7 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
       input: baseInput({ prompt: 'ok' }),
       options: { outerSandbox: false },
       installation,
-      authMode: 'runtime-reference'
+      authMode: 'host-identity'
     })
   )) {
     chunks.push(chunk)
