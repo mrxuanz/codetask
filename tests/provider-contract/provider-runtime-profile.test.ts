@@ -39,7 +39,8 @@ function createHostIdentityFixture(hostRoot: string): {
     HOME: hostRoot,
     USERPROFILE: hostRoot,
     APPDATA: join(hostRoot, 'AppData', 'Roaming'),
-    LOCALAPPDATA: join(hostRoot, 'AppData', 'Local')
+    LOCALAPPDATA: join(hostRoot, 'AppData', 'Local'),
+    TMPDIR: join(hostRoot, 'tmp')
   })
   const host = resolveHostProfilePaths(hostEnvironment)
   const credentialFiles = [
@@ -92,7 +93,10 @@ test('all Providers compile a versioned native-host runtime profile without cred
       assert.equal(profile.mode, 'host-identity')
       assert.equal(profile.runtimeRoot, runtimeRoot)
       assert.equal(profile.stateRoot, runtimeRoot)
-      assert.equal(profile.environment.TMPDIR, join(runtimeRoot, 'tmp'))
+      // Host defaults — TMPDIR is not redirected into the per-turn runtime tree.
+      assert.equal(profile.environment.TMPDIR, fixture.hostEnvironment.TMPDIR)
+      assert.equal(profile.environment.HOME, hostRoot)
+      assert.equal('CURSOR_DATA_DIR' in profile.environment, false)
       assert.equal(profile.diagnostics.authMaterialPresent, true)
       assert.ok(profile.hostPathGrants.length > 0)
       assert.deepEqual(
@@ -139,7 +143,7 @@ test('Provider-native identity paths and private instance state are wired per SD
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(cursor.environment.CURSOR_CONFIG_DIR, resolveCursorHostConfigDir(host))
-    assert.equal(cursor.environment.CURSOR_DATA_DIR, join(runtimeTree, 'cursor', '.cursor'))
+    assert.equal('CURSOR_DATA_DIR' in cursor.environment, false)
     assert.ok(!providerRuntimeWriteRoots(cursor).includes(join(hostRoot, '.cursor')))
 
     const claude = prepareProviderRuntimeForTest('claude-code', join(runtimeTree, 'claude'), {
@@ -156,8 +160,9 @@ test('Provider-native identity paths and private instance state are wired per SD
       join(resolveOpencodeHostConfigDir(host), '..')
     )
     assert.equal(opencode.environment.XDG_DATA_HOME, join(resolveOpencodeHostDataDir(host), '..'))
-    assert.equal(opencode.environment.XDG_CACHE_HOME, join(runtimeTree, 'opencode', 'cache'))
-    assert.equal(opencode.environment.XDG_STATE_HOME, join(runtimeTree, 'opencode', 'state'))
+    // Cache/state stay on host defaults — not redirected into the runtime tree.
+    assert.equal('XDG_CACHE_HOME' in opencode.environment, false)
+    assert.equal('XDG_STATE_HOME' in opencode.environment, false)
     assert.ok(providerRuntimeWriteRoots(opencode).includes(resolveOpencodeHostDataDir(host)))
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
@@ -165,7 +170,7 @@ test('Provider-native identity paths and private instance state are wired per SD
   }
 })
 
-test('two runtime profiles share only explicit host identity grants, never instance state', () => {
+test('two runtime profiles share host identity defaults, never instance-local SDK redirects', () => {
   const hostRoot = mkdtempSync(join(tmpdir(), 'codetask-profile-host-'))
   const runtimeTree = mkdtempSync(join(tmpdir(), 'codetask-profile-runtime-'))
   const fixture = createHostIdentityFixture(hostRoot)
@@ -182,17 +187,13 @@ test('two runtime profiles share only explicit host identity grants, never insta
       })
 
       assert.notEqual(first.runtimeRoot, second.runtimeRoot)
-      assert.notEqual(first.environment.TMPDIR, second.environment.TMPDIR)
+      assert.equal(first.environment.HOME, second.environment.HOME)
+      assert.equal(first.environment.TMPDIR, second.environment.TMPDIR)
+      assert.equal(first.environment.TMPDIR, fixture.hostEnvironment.TMPDIR)
       assert.deepEqual(first.hostPathGrants, second.hostPathGrants)
-      for (const value of [
-        first.environment.TMPDIR,
-        first.environment.XDG_CACHE_HOME,
-        first.environment.XDG_STATE_HOME,
-        first.environment.CURSOR_DATA_DIR
-      ].filter((item): item is string => typeof item === 'string')) {
-        assert.ok(value.startsWith(firstRoot), `${provider} leaked first runtime state: ${value}`)
-        assert.ok(!value.startsWith(secondRoot))
-      }
+      assert.equal('CURSOR_DATA_DIR' in first.environment, false)
+      assert.equal('XDG_CACHE_HOME' in first.environment, false)
+      assert.equal('XDG_STATE_HOME' in first.environment, false)
     }
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })

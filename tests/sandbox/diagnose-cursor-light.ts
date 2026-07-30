@@ -419,7 +419,6 @@ async function runStatic(
   env: {
     HOME: string | undefined
     CURSOR_CONFIG_DIR: string | undefined
-    CURSOR_DATA_DIR: string | undefined
   }
   cliArgs: string[]
   executable: string
@@ -442,8 +441,7 @@ async function runStatic(
     writeRoots: providerRuntimeWriteRoots(prepared),
     env: {
       HOME: prepared.environment.HOME,
-      CURSOR_CONFIG_DIR: prepared.environment.CURSOR_CONFIG_DIR,
-      CURSOR_DATA_DIR: prepared.environment.CURSOR_DATA_DIR
+      CURSOR_CONFIG_DIR: prepared.environment.CURSOR_CONFIG_DIR
     },
     cliArgs,
     executable,
@@ -451,7 +449,7 @@ async function runStatic(
     runtimeIsolated:
       prepared.diagnostics.mode === 'host-identity' &&
       prepared.environment.HOME !== runtimeRoot &&
-      prepared.environment.CURSOR_DATA_DIR === join(runtimeRoot, '.cursor') &&
+      !('CURSOR_DATA_DIR' in prepared.environment) &&
       providerRuntimeWriteRoots(prepared).length > 0
   }
 

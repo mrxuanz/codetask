@@ -74,14 +74,11 @@ async function runStatic(runtimeRoot: string): Promise<{
   runtimeIsolated: boolean
 }> {
   const prepared = prepareProviderRuntimeForTest('opencode', runtimeRoot)
-  const env = buildMergedEnv(prepared.environment)
   const hostConfigDir = resolveOpencodeHostConfigDir()
   const hostDataDir = resolveOpencodeHostDataDir()
   const layout = {
     configHome: dirname(hostConfigDir),
-    dataHome: dirname(hostDataDir),
-    stateHome: join(runtimeRoot, 'state'),
-    cacheHome: join(runtimeRoot, 'cache')
+    dataHome: dirname(hostDataDir)
   }
 
   const report = {
@@ -89,19 +86,19 @@ async function runStatic(runtimeRoot: string): Promise<{
     writeRoots: providerRuntimeWriteRoots(prepared),
     layout,
     env: {
-      HOME: env.HOME,
-      XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
-      XDG_DATA_HOME: env.XDG_DATA_HOME,
-      XDG_STATE_HOME: env.XDG_STATE_HOME,
+      HOME: prepared.environment.HOME,
+      XDG_CONFIG_HOME: prepared.environment.XDG_CONFIG_HOME,
+      XDG_DATA_HOME: prepared.environment.XDG_DATA_HOME,
+      XDG_STATE_HOME: prepared.environment.XDG_STATE_HOME,
       executableMode: executablePath ? 'path' : 'auto'
     },
     runtimeIsolated:
       prepared.diagnostics.mode === 'host-identity' &&
-      env.HOME === runtimeRoot &&
-      env.XDG_CONFIG_HOME === layout.configHome &&
-      env.XDG_DATA_HOME === layout.dataHome &&
-      env.XDG_STATE_HOME === layout.stateHome &&
-      env.XDG_CACHE_HOME === layout.cacheHome &&
+      prepared.environment.HOME !== runtimeRoot &&
+      prepared.environment.XDG_CONFIG_HOME === layout.configHome &&
+      prepared.environment.XDG_DATA_HOME === layout.dataHome &&
+      !('XDG_STATE_HOME' in prepared.environment) &&
+      !('XDG_CACHE_HOME' in prepared.environment) &&
       providerRuntimeWriteRoots(prepared).includes(hostDataDir) &&
       listRuntimeFiles(runtimeRoot).length === 0
   }

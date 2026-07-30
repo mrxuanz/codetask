@@ -3,7 +3,6 @@ import { SandboxError } from '../sandbox/types'
 import { isOuterSandboxEnabled } from '../sandbox/outer-sandbox-flag'
 import type { SupportedCoreCode } from '../conversation/cores'
 import { dataPaths, jobTaskRuntimeDirPath } from '../data-paths'
-import { ensureIsolatedProviderDirs } from './env'
 import { getAgentTurnProvider } from './providers'
 import { getProviderRegistry } from '../providers/access'
 import { isTestFakeProvider } from './providers/test-overrides'
@@ -30,14 +29,13 @@ import {
 import { appendWorkspaceAuthorityPrompt, resolveWorkspaceBinding } from './workspace-binding'
 
 export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
-  const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, coreCode)
-  ensureIsolatedProviderDirs(runtimeRoot)
-  return runtimeRoot
+  return join(dataPaths(dataDir).runtimes, threadId, coreCode)
 }
 
 /**
  * Conversation Cursor (and other providers) isolate chat vs create-task state.
- * Path: assets/runtimes/<threadId>/<kind>/<coreCode>
+ * Path: runtimes/<threadId>/<kind>/<coreCode>
+ * Directory is created lazily only when an outer-sandbox turn needs scratch.
  */
 export function ensureConversationRuntimeRoot(
   dataDir: string,
@@ -45,9 +43,7 @@ export function ensureConversationRuntimeRoot(
   kind: 'chat' | 'create_task',
   coreCode: string
 ): string {
-  const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, kind, coreCode)
-  ensureIsolatedProviderDirs(runtimeRoot)
-  return runtimeRoot
+  return join(dataPaths(dataDir).runtimes, threadId, kind, coreCode)
 }
 
 export function ensureJobRuntimeRoot(
@@ -56,9 +52,7 @@ export function ensureJobRuntimeRoot(
   jobId: string,
   coreCode: string
 ): string {
-  const runtimeRoot = join(dataPaths(dataDir).runtimes, threadId, 'jobs', jobId, coreCode)
-  ensureIsolatedProviderDirs(runtimeRoot)
-  return runtimeRoot
+  return join(dataPaths(dataDir).runtimes, threadId, 'jobs', jobId, coreCode)
 }
 
 export function ensureJobTaskRuntimeRoot(
@@ -68,9 +62,7 @@ export function ensureJobTaskRuntimeRoot(
   taskId: string,
   coreCode: string
 ): string {
-  const runtimeRoot = join(jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId), coreCode)
-  ensureIsolatedProviderDirs(runtimeRoot)
-  return runtimeRoot
+  return join(jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId), coreCode)
 }
 
 async function* withSandboxLeaseRefresh<T>(

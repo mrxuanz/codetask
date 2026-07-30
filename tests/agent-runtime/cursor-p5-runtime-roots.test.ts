@@ -23,11 +23,12 @@ test('ensureConversationRuntimeRoot isolates chat vs create_task directories', (
   const chatRoot = ensureConversationRuntimeRoot(dataDir, threadId, 'chat', core)
   const createRoot = ensureConversationRuntimeRoot(dataDir, threadId, 'create_task', core)
 
-  assert.equal(chatRoot, join(dataDir, 'assets', 'runtimes', threadId, 'chat', core))
-  assert.equal(createRoot, join(dataDir, 'assets', 'runtimes', threadId, 'create_task', core))
+  assert.equal(chatRoot, join(dataDir, 'runtimes', threadId, 'chat', core))
+  assert.equal(createRoot, join(dataDir, 'runtimes', threadId, 'create_task', core))
   assert.notEqual(chatRoot, createRoot)
-  assert.equal(existsSync(join(chatRoot, 'tmp')), true)
-  assert.equal(existsSync(join(createRoot, 'tmp')), true)
+  // Paths are resolved only — no eager mkdir of empty provider trees.
+  assert.equal(existsSync(chatRoot), false)
+  assert.equal(existsSync(createRoot), false)
 })
 
 test('ensureJobRuntimeRoot is stable across tasks (not task-scoped)', () => {
@@ -41,9 +42,10 @@ test('ensureJobRuntimeRoot is stable across tasks (not task-scoped)', () => {
   const taskRoot = ensureJobTaskRuntimeRoot(dataDir, threadId, jobId, 'task-a', core)
 
   assert.equal(rootA, rootB)
-  assert.equal(rootA, join(dataDir, 'assets', 'runtimes', threadId, 'jobs', jobId, core))
+  assert.equal(rootA, join(dataDir, 'runtimes', threadId, 'jobs', jobId, core))
   assert.notEqual(rootA, taskRoot)
   assert.match(taskRoot, /tasks[/\\]task-a/)
+  assert.equal(existsSync(rootA), false)
 })
 
 test('removeInvalidCursorCliConfig never deletes project .cursor/cli.json', () => {

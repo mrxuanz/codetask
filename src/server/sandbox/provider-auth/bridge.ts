@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync } from 'fs'
+import { existsSync, lstatSync } from 'fs'
 import { dirname, isAbsolute, join, normalize, parse, relative, sep } from 'path'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
 import type { SupportedCoreCode } from '../../conversation/cores'
@@ -96,44 +96,37 @@ function copySelectedHostEnv(
 }
 
 function buildRuntimeBaseEnv(
-  runtimeRoot: string,
+  _runtimeRoot: string,
   hostEnvironment: HostEnvironmentSnapshot,
   platform: ProviderRuntimePlatform
 ): Record<string, string> {
-  const tmp = join(runtimeRoot, 'tmp')
-  const config = join(runtimeRoot, 'config')
-  const cache = join(runtimeRoot, 'cache')
-  const data = join(runtimeRoot, 'data')
-  const state = join(runtimeRoot, 'state')
-  for (const path of [tmp, config, cache, data, state]) {
-    mkdirSync(path, { recursive: true })
-  }
-
+  // Provider identity and SDK/ACP durable data stay on host defaults.
+  // Do not mkdir runtime trees here — outer sandbox creates scratch only when launching.
+  const host = resolveHostProfilePaths(hostEnvironment, platform)
   const env: Record<string, string> = {
-    HOME: runtimeRoot,
-    TMPDIR: tmp,
-    TEMP: tmp,
-    TMP: tmp
+    HOME: host.home
   }
   copySelectedHostEnv(env, hostEnvironment)
 
+  const hostTmp =
+    hostEnvironment.TMPDIR?.trim() || hostEnvironment.TEMP?.trim() || hostEnvironment.TMP?.trim()
+  if (hostTmp) {
+    env.TMPDIR = hostTmp
+    env.TEMP = hostTmp
+    env.TMP = hostTmp
+  }
+
   if (platform === 'win32') {
-    env.USERPROFILE = runtimeRoot
-    env.APPDATA = join(runtimeRoot, 'AppData', 'Roaming')
-    env.LOCALAPPDATA = join(runtimeRoot, 'AppData', 'Local')
-    mkdirSync(env.APPDATA, { recursive: true })
-    mkdirSync(env.LOCALAPPDATA, { recursive: true })
-    if (/^[A-Za-z]:/.test(runtimeRoot)) {
-      env.HOMEDRIVE = runtimeRoot.slice(0, 2)
-      env.HOMEPATH = runtimeRoot.slice(2) || '\\'
+    env.USERPROFILE = host.home
+    env.APPDATA = host.appData
+    env.LOCALAPPDATA = host.localAppData
+    if (/^[A-Za-z]:/.test(host.home)) {
+      env.HOMEDRIVE = host.home.slice(0, 2)
+      env.HOMEPATH = host.home.slice(2) || '\\'
     }
     applyWindowsCrashReporterEnv(env)
-  } else {
-    env.XDG_CONFIG_HOME = config
-    env.XDG_CACHE_HOME = cache
-    env.XDG_DATA_HOME = data
-    env.XDG_STATE_HOME = state
   }
+
   return env
 }
 
@@ -213,7 +206,11 @@ export function prepareCodexRuntimeProfile(
   const hostIdentity = snapshotCodexHostAuth(hostProfile)
   const environment: Record<string, string> = {
     ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    HOME: hostProfile.home,
     CODEX_HOME: hostIdentity.codexHome
+  }
+  if (context.platform === 'win32') {
+    environment.USERPROFILE = hostProfile.home
   }
   const diagnostics: ProviderRuntimeDiagnostics = {
     provider: 'codex',
@@ -222,7 +219,7 @@ export function prepareCodexRuntimeProfile(
     primaryIdentityPath: join(hostIdentity.codexHome, 'auth.json'),
     warnings: hostIdentity.present
       ? [
-          'Codex uses its native host identity namespace directly. The sandbox grants only .codex, never the full host HOME; no credential copy, symlink, projection, or cleanup artifact is created.'
+          'Codex uses its native host identity namespace directly (CODEX_HOME). No credential copy and no SDK data redirect into runtime.'
         ]
       : [`Host Codex login file not found; run codex login.`]
   }
@@ -254,8 +251,7 @@ export function prepareCursorRuntimeProfile(
   const environment: Record<string, string> = {
     ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
     HOME: hostProfile.home,
-    CURSOR_CONFIG_DIR: configDir,
-    CURSOR_DATA_DIR: join(context.runtimeRoot, '.cursor')
+    CURSOR_CONFIG_DIR: configDir
   }
   if (context.platform === 'win32') {
     environment.USERPROFILE = hostProfile.home
@@ -301,7 +297,7 @@ export function prepareCursorRuntimeProfile(
       primaryIdentityPath: hostIdentity.authPath,
       warnings: [
         authMaterialPresent
-          ? 'Cursor reads its native host identity paths while CURSOR_DATA_DIR keeps project metadata and MCP approvals inside the private runtime.'
+          ? 'Cursor uses native host identity/config paths; CURSOR_DATA_DIR is not redirected into runtime.'
           : 'Cursor host login was not detected; run `agent login`.',
         'ACP uses --force --sandbox disabled --approve-mcps --trust; the outer OS sandbox remains authoritative.'
       ]
@@ -388,7 +384,7 @@ export function prepareClaudeRuntimeProfile(
         hasSettingsAuthEnv
           ? 'Claude host settings.json env (ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN whitelist) is injected for outer-sandbox turns.'
           : authMaterialPresent
-            ? 'Claude uses its native host identity namespace directly; no credential is copied into runtime.'
+            ? 'Claude uses its native host identity namespace directly; no credential copy and no SDK data redirect into runtime.'
             : 'Claude host login identity was not detected; run `claude auth login` or set ANTHROPIC_* in ~/.claude/settings.json env.',
         "Outer-sandbox turns use settingSources=['user'] (not project/local) so host settings auth can load; project policy stays out."
       ]
@@ -407,9 +403,11 @@ export function prepareOpenCodeRuntimeProfile(
     context.hostEnvironment,
     context.platform
   )
+  environment.HOME = hostProfile.home
   environment.XDG_CONFIG_HOME = dirname(hostIdentity.configDir)
   environment.XDG_DATA_HOME = dirname(hostIdentity.dataDir)
   if (context.platform === 'win32') {
+    environment.USERPROFILE = hostProfile.home
     environment.APPDATA = dirname(hostIdentity.configDir)
     environment.LOCALAPPDATA = dirname(hostIdentity.dataDir)
   }
@@ -450,7 +448,7 @@ export function prepareOpenCodeRuntimeProfile(
       ),
       warnings: hostIdentity.present
         ? [
-            'OpenCode uses its native config/data namespaces directly. Cache, state, and temp remain private to this runtime; no credential or configuration projection is written.'
+            'OpenCode uses native host config/data namespaces; SDK durable data is not redirected into runtime.'
           ]
         : [
             'OpenCode host login files were not found; environment-token authentication is disabled.'

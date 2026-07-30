@@ -1,6 +1,5 @@
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import { resolveCursorWorkspaceProjectSlug } from './cursor-acp/cursor-workspace'
 import { augmentPathWithHostNode } from '../sandbox/toolchain-path'
 import { processHostEnvironmentSource } from '../host-environment'
 import { stripProviderHostConfiguration } from '../providers/environment'
@@ -123,27 +122,12 @@ export function applyLoopbackNoProxyEnv(env: Record<string, string>): Record<str
   return env
 }
 
-export function ensureCursorAcpRuntimeDirs(runtimeRoot: string, workspaceCwd?: string): void {
-  ensureIsolatedProviderDirs(runtimeRoot)
-  const cwd = workspaceCwd?.trim()
-  if (!cwd) return
-  mkdirSync(join(runtimeRoot, '.cursor', 'projects', resolveCursorWorkspaceProjectSlug(cwd)), {
-    recursive: true
-  })
-}
-
+/**
+ * CodeTask scratch for outer OS-sandbox turns (attestation / CA materialization).
+ * Host-identity SDK/ACP data stays on host defaults — do not pre-create provider trees.
+ */
 export function ensureIsolatedProviderDirs(runtimeRoot: string): void {
   mkdirSync(join(runtimeRoot, 'tmp'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'config'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'cache'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'data'), { recursive: true })
-  if (process.platform !== 'win32') return
-  mkdirSync(join(runtimeRoot, 'AppData', 'Roaming'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'AppData', 'Local'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'AppData', 'Local', 'CrashDumps'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'tmp', 'crashpad'), { recursive: true })
-  mkdirSync(join(runtimeRoot, '.claude'), { recursive: true })
-  mkdirSync(join(runtimeRoot, '.codex'), { recursive: true })
 }
 
 function applyIsolatedWindowsProfile(runtimeRoot: string, env: Record<string, string>): void {
@@ -151,7 +135,14 @@ function applyIsolatedWindowsProfile(runtimeRoot: string, env: Record<string, st
   const localAppData = join(runtimeRoot, 'AppData', 'Local')
   const tmp = join(runtimeRoot, 'tmp')
   const crashpad = join(tmp, 'crashpad')
+  mkdirSync(appData, { recursive: true })
+  mkdirSync(localAppData, { recursive: true })
+  mkdirSync(join(localAppData, 'CrashDumps'), { recursive: true })
   mkdirSync(crashpad, { recursive: true })
+  mkdirSync(join(runtimeRoot, 'config'), { recursive: true })
+  mkdirSync(join(runtimeRoot, 'cache'), { recursive: true })
+  mkdirSync(join(runtimeRoot, 'data'), { recursive: true })
+  mkdirSync(join(runtimeRoot, '.claude'), { recursive: true })
 
   env.HOME = runtimeRoot
   env.USERPROFILE = runtimeRoot
@@ -192,7 +183,9 @@ export function buildProviderChildEnv(
   options?: ProviderChildEnvOptions
 ): Record<string, string> {
   const preserveHost = options?.preserveHostIdentity ?? true
-  ensureIsolatedProviderDirs(runtimeRoot)
+  if (!preserveHost) {
+    ensureIsolatedProviderDirs(runtimeRoot)
+  }
   const hostEnvironment = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
 
   const hostHome =
@@ -210,10 +203,22 @@ export function buildProviderChildEnv(
     if (hostEnvironment.HOMEPATH) env.HOMEPATH = hostEnvironment.HOMEPATH
     if (hostEnvironment.APPDATA) env.APPDATA = hostEnvironment.APPDATA
     if (hostEnvironment.LOCALAPPDATA) env.LOCALAPPDATA = hostEnvironment.LOCALAPPDATA
-    env.TMPDIR = hostEnvironment.TMPDIR ?? hostEnvironment.TEMP ?? join(runtimeRoot, 'tmp')
+    // Host TMP/XDG defaults — do not redirect SDK/ACP durable or temp data into runtimeRoot.
+    const hostTmp =
+      hostEnvironment.TMPDIR?.trim() ||
+      hostEnvironment.TEMP?.trim() ||
+      hostEnvironment.TMP?.trim()
+    if (hostTmp) {
+      env.TMPDIR = hostTmp
+      env.TEMP = hostTmp
+      env.TMP = hostTmp
+    }
   } else if (process.platform === 'win32') {
     applyIsolatedWindowsProfile(runtimeRoot, env)
   } else {
+    mkdirSync(join(runtimeRoot, 'config'), { recursive: true })
+    mkdirSync(join(runtimeRoot, 'cache'), { recursive: true })
+    mkdirSync(join(runtimeRoot, 'data'), { recursive: true })
     env.HOME = runtimeRoot
     env.TMPDIR = join(runtimeRoot, 'tmp')
     env.XDG_CONFIG_HOME = join(runtimeRoot, 'config')
