@@ -10,8 +10,9 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
-import { runtimeCodexHome } from '../../src/server/sandbox/provider-auth/paths'
+import { prepareProviderRuntimeForTest } from '../helpers/provider-runtime'
+import { resolveCodexHostHome } from '../../src/server/sandbox/provider-auth/paths'
+import { providerRuntimeWriteRoots } from '../../src/server/sandbox/provider-auth/types'
 import { buildOuterSandboxCodexConfigOverrides } from '../../src/server/agent-runtime/mcp'
 import { buildCodexTurnPlan } from '../../src/server/providers/codex/turn-plan'
 import type { ConversationRole } from '../../src/server/agent-runtime/roles'
@@ -361,9 +362,9 @@ async function runStaticForRole(
     { outerSandbox }
   )
 
-  const prepared = outerSandbox ? prepareProviderAuthForTest('codex', runtimeRoot) : null
+  const prepared = outerSandbox ? prepareProviderRuntimeForTest('codex', runtimeRoot) : null
   const codexHome = outerSandbox
-    ? (prepared!.envPatch.CODEX_HOME ?? runtimeCodexHome(runtimeRoot))
+    ? (prepared!.environment.CODEX_HOME ?? resolveCodexHostHome())
     : join(process.env.CODEX_HOME ?? join(process.env.HOME ?? runtimeRoot, '.codex'))
 
   const systemMcp = plan.sdkConfig?.mcp_servers
@@ -387,7 +388,7 @@ async function runStaticForRole(
       : codexAuthPresent(codexHome),
     codexHome,
     configTomlPresent: existsSync(join(codexHome, 'config.toml')),
-    writeRoots: prepared?.writeRoots ?? [],
+    writeRoots: prepared ? providerRuntimeWriteRoots(prepared) : [],
     sdkOverrides: outerSandbox ? buildOuterSandboxCodexConfigOverrides() : null,
     sdkConfigKeys: plan.sdkConfig ? Object.keys(plan.sdkConfig) : [],
     mcpViaSdkOnly: true,
@@ -398,17 +399,17 @@ async function runStaticForRole(
       noProxyEntries.has(entry)
     ),
     runtimeIsolated: outerSandbox
-      ? prepared!.diagnostics.mode === 'runtime-reference' &&
-        prepared!.envPatch.HOME === runtimeRoot &&
-        prepared!.envPatch.CODEX_HOME === runtimeCodexHome(runtimeRoot) &&
-        (prepared!.writeRoots ?? []).length === 0
+      ? prepared!.diagnostics.mode === 'host-identity' &&
+        prepared!.environment.HOME === runtimeRoot &&
+        prepared!.environment.CODEX_HOME === resolveCodexHostHome() &&
+        providerRuntimeWriteRoots(prepared!).every((path) => path !== prepared!.environment.HOME)
       : plan.threadOptions.sandboxMode === 'workspace-write' && !plan.outerSandbox
   }
 
   log('static', role, report)
 
   if (outerSandbox && !report.runtimeIsolated) {
-    throw new Error(`[${role}] runtime-reference isolation check failed`)
+    throw new Error(`[${role}] host-identity isolation check failed`)
   }
   if (!outerSandbox && plan.outerSandbox) {
     throw new Error(`[${role}] conversation must not use outer sandbox`)
@@ -464,7 +465,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuthForTest('codex', runtimeRoot)
+  const prepared = prepareProviderRuntimeForTest('codex', runtimeRoot)
 
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {
@@ -473,8 +474,8 @@ async function main(): Promise<void> {
 
     const shouldLive =
       !skipLive && (caseFilter === 'all' || caseFilter === 'hello' || caseFilter === 'mcp')
-    const env = buildMergedEnv(prepared.envPatch)
-    const codexHome = env.CODEX_HOME ?? runtimeCodexHome(runtimeRoot)
+    const env = buildMergedEnv(prepared.environment)
+    const codexHome = env.CODEX_HOME ?? resolveCodexHostHome()
 
     if (shouldLive) {
       if (!codexAuthPresent(codexHome)) {
@@ -552,8 +553,6 @@ async function main(): Promise<void> {
     }
     console.log(`\nReport: ${reportPath}`)
     console.log(`Runtime files: ${(report.runtimeJson as string[]).join(', ') || '(none)'}`)
-
-    prepared.cleanupPlan()
 
     if ((report.failures as string[]).length > 0) process.exit(1)
   } finally {

@@ -35,7 +35,7 @@ function createDriver(events: string[], seen: ProviderTurnContext[]): ProviderDr
     installDirs() {
       return []
     },
-    prepareAuth() {
+    prepareRuntimeProfile() {
       throw new Error('not used by lifecycle test')
     },
     preflight() {
@@ -64,7 +64,7 @@ function createDriver(events: string[], seen: ProviderTurnContext[]): ProviderDr
       }
     },
     contributeSandboxPolicy() {
-      return { readRoots: [], writeRoots: [], environment: {}, credentialSnapshots: [] }
+      return { readRoots: [], writeRoots: [], environment: {} }
     },
     async shutdown() {
       events.push('shutdown')
@@ -99,7 +99,7 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
         prompt: 'hello'
       },
       installation,
-      authMode: 'runtime-reference'
+      authMode: 'host-identity'
     })
   )) {
     events.push(`consumer:${chunk.type}`)
@@ -131,7 +131,7 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
           prompt: 'blocked'
         },
         installation,
-        authMode: 'runtime-reference'
+        authMode: 'host-identity'
       })
     )) {
       // no-op

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve, join } from 'node:path'
+import { dirname, resolve, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
@@ -26,7 +27,24 @@ export function runStandaloneSmoke(argv = process.argv) {
   if (!existsSync(entry)) throw new Error(`standalone_smoke.entry_missing:${entry}`)
 
   const root = mkdtempSync(join(tmpdir(), 'codetask-standalone-smoke-'))
+  const configPath = executableMode
+    ? join(dirname(entry), 'codetask-data.json')
+    : join(process.cwd(), 'codetask-data.json')
+  const previousConfig = existsSync(configPath) ? readFileSync(configPath) : null
   try {
+    writeFileSync(
+      configPath,
+      `${JSON.stringify(
+        {
+          formatVersion: 1,
+          installationId: randomUUID(),
+          createdAt: new Date().toISOString(),
+          dbPath: join(root, 'data', 'db', 'app.db')
+        },
+        null,
+        2
+      )}\n`
+    )
     const env = { ...process.env }
     delete env.DISPLAY
     delete env.WAYLAND_DISPLAY
@@ -34,22 +52,7 @@ export function runStandaloneSmoke(argv = process.argv) {
 
     const result = spawnSync(
       executableMode ? entry : process.execPath,
-      executableMode
-        ? [
-            '--smoke-test',
-            '--data-dir',
-            join(root, 'data'),
-            '--bootstrap-root',
-            join(root, 'bootstrap')
-          ]
-        : [
-            entry,
-            '--smoke-test',
-            '--data-dir',
-            join(root, 'data'),
-            '--bootstrap-root',
-            join(root, 'bootstrap')
-          ],
+      executableMode ? ['--smoke-test'] : [entry, '--smoke-test'],
       {
         cwd: executableMode ? resolve(entry, '..', '..') : undefined,
         encoding: 'utf8',
@@ -78,6 +81,8 @@ export function runStandaloneSmoke(argv = process.argv) {
       })
     )
   } finally {
+    if (previousConfig) writeFileSync(configPath, previousConfig)
+    else rmSync(configPath, { force: true })
     rmSync(root, { recursive: true, force: true })
   }
 }

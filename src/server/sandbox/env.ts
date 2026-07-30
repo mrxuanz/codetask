@@ -8,11 +8,7 @@ import {
 } from '../agent-runtime/env'
 import { snapshotHostEnv, stripCodeTaskTransientEnv } from '../providers/launch-env'
 import { augmentPathWithHostNode } from './toolchain-path'
-import type { ProviderAuthMode } from './provider-auth/types'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../host-environment'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
 import { getShellChildEnvironment } from '../shell-child-environment'
 
 const BLOCKED_ENV = [
@@ -77,7 +73,6 @@ function applyWindowsSandboxSystemEnv(
 export function buildSandboxEnv(input: {
   runtimeRoot: string
   providerEnv?: Record<string, string> | undefined
-  authMode?: ProviderAuthMode | undefined
   mcpToken?: string | undefined
 }): Record<string, string> {
   ensureIsolatedProviderDirs(input.runtimeRoot)
@@ -105,10 +100,6 @@ export function buildSandboxEnv(input: {
 
   if (process.platform === 'win32') {
     applyWindowsSandboxSystemEnv(env, input.runtimeRoot, processHostEnvironmentSource.snapshot())
-  }
-
-  if (input.authMode === 'host-identity') {
-    delete env.CLAUDE_CONFIG_DIR
   }
 
   if (input.mcpToken) {

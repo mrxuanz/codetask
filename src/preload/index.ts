@@ -11,9 +11,7 @@ export interface ServerInfo {
 }
 
 const api = {
-  getServerInfo: (): Promise<ServerInfo | null> => ipcRenderer.invoke('get-server-info'),
-  selectDataDirectory: (): Promise<string | null> => ipcRenderer.invoke('select-data-directory'),
-  relaunchApp: (): Promise<void> => ipcRenderer.invoke('relaunch-app')
+  getServerInfo: (): Promise<ServerInfo | null> => ipcRenderer.invoke('get-server-info')
 }
 
 if (process.contextIsolated) {

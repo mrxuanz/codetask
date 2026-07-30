@@ -162,7 +162,6 @@ for (const entry of readdirSync(workerNcc, { withFileTypes: true })) {
 for (const name of WORKER_NAMES) writeFileSync(join(sandboxDir, name), `'use strict'\n`)
 
 cpSync(outRenderer, join(packageDir, 'renderer'), { recursive: true })
-copyFileSync(join(root, 'codetask-data.json'), join(binDir, 'codetask-data.json'))
 copyNativeRuntime(packageDir)
 
 const seaEntry = join(staging, 'sea-entry.cjs')

@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
-import type { AppMode } from '../main/cli'
-import { resolveStorageLocation, type DataDirResolution } from '../main/storage-locator'
+import { dataDirFromDbPath, type DataDirResolution } from '../main/storage-selection'
 import {
-  readInitializationConfig,
-  resolveInitializationConfigPath
+  ensureInitializationConfig,
+  resolveInitializationConfigPath,
+  resolveInitializationDefaultDataDir,
+  writeInitializationConfig
 } from '../main/initialization-config'
 
 export interface NodeDataDirRuntime {
@@ -14,25 +14,6 @@ export interface NodeDataDirRuntime {
   isPackaged?: boolean
   executablePath?: string
   developmentRoot?: string
-}
-
-function runtimeValues(input: NodeDataDirRuntime): {
-  platform: NodeJS.Platform
-  homeDir: string
-} {
-  return {
-    platform: input.platform ?? process.platform,
-    homeDir: input.homeDir ?? homedir()
-  }
-}
-
-/** Shared installation metadata stays compatible with the Electron entry point. */
-export function resolveNodeBootstrapRoot(input: NodeDataDirRuntime = {}): string {
-  const runtime = runtimeValues(input)
-  if (runtime.platform === 'win32') {
-    return join(runtime.homeDir, 'AppData', 'Roaming', 'CodeTask')
-  }
-  return join(runtime.homeDir, '.config', 'codetask')
 }
 
 function isCodeTaskPackage(path: string): boolean {
@@ -73,25 +54,41 @@ export function resolveNodeInitializationConfigPath(input: NodeDataDirRuntime = 
 
 /** Both Electron and Node read dbPath from the same initialization-file contract. */
 export function resolveNodeDefaultDataDir(input: NodeDataDirRuntime = {}): string {
-  return readInitializationConfig(resolveNodeInitializationConfigPath(input)).dbPath
+  const configPath = resolveNodeInitializationConfigPath(input)
+  const configured = ensureInitializationConfig(configPath).dbPath
+  return configured
+    ? dataDirFromDbPath(configured)
+    : resolveInitializationDefaultDataDir(configPath)
+}
+
+export function writeNodeDataInitializationConfig(
+  dataDir: string,
+  input: NodeDataDirRuntime = {}
+): string {
+  const dbPath = join(resolve(dataDir), 'db', 'app.db')
+  return writeInitializationConfig(resolveNodeInitializationConfigPath(input), dbPath).dbPath
 }
 
 export function resolveNodeDataDirSelection(
   input: {
-    explicitDataDir?: string
-    mode: AppMode
-    bootstrapRoot?: string
     defaultDataDir?: string
-  },
+  } = {},
   runtime: NodeDataDirRuntime = {}
 ): DataDirResolution {
+  const configPath = resolveNodeInitializationConfigPath(runtime)
+  const initializationConfig =
+    input.defaultDataDir === undefined ? ensureInitializationConfig(configPath) : { dbPath: '' }
   const defaultDataDir =
-    input.defaultDataDir ?? (input.explicitDataDir ? '' : resolveNodeDefaultDataDir(runtime))
-  return resolveStorageLocation({
-    explicitDataDir: input.explicitDataDir,
-    configuredDataDir: input.explicitDataDir ? undefined : defaultDataDir,
-    mode: input.mode,
-    bootstrapRoot: input.bootstrapRoot ?? resolveNodeBootstrapRoot(runtime),
-    defaultDataDir
-  })
+    input.defaultDataDir ??
+    (initializationConfig.dbPath
+      ? dataDirFromDbPath(initializationConfig.dbPath)
+      : resolveInitializationDefaultDataDir(configPath))
+  if (initializationConfig.dbPath) {
+    return {
+      phase: 'ready',
+      dataDir: dataDirFromDbPath(initializationConfig.dbPath),
+      source: 'config'
+    }
+  }
+  return { phase: 'selection_required', dataDir: defaultDataDir, source: 'candidate' }
 }

@@ -1,13 +1,16 @@
-import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { app } from 'electron'
 import { dirname, join, resolve } from 'path'
-import { homedir } from 'os'
-import type { AppMode } from './cli'
-import { resolveStorageLocation, type DataDirResolution } from './storage-locator'
-import { readInitializationConfig, resolveInitializationConfigPath } from './initialization-config'
+import { dataDirFromDbPath, type DataDirResolution } from './storage-selection'
+import {
+  ensureInitializationConfig,
+  resolveInitializationConfigPath,
+  resolveInitializationDefaultDataDir,
+  writeInitializationConfig
+} from './initialization-config'
 
 /**
- * Resolve the project root that should own the development `data/` directory.
+ * Resolve the project root that owns the development initialization config and default candidate.
  */
 function resolveDevAppRoot(): string {
   // electron-vite may place the main entry under out/main/ or out/main/chunks/.
@@ -37,7 +40,7 @@ function isAppPackageJson(packageJsonPath: string): boolean {
   }
 }
 
-export type { DataDirResolution, DataDirSource } from './storage-locator'
+export type { DataDirResolution, DataDirSource } from './storage-selection'
 
 export function resolveDataInitializationConfigPath(): string {
   return resolveInitializationConfigPath({
@@ -47,56 +50,30 @@ export function resolveDataInitializationConfigPath(): string {
   })
 }
 
-/**
- * Desktop and server mode are two entry points into the same installation, so they must share
- * bootstrap metadata (storage locator and secrets) instead of deriving it from the launch mode.
- */
-export function resolveBootstrapRoot(_mode: AppMode, override?: string): string {
-  const configured = override?.trim()
-  if (configured) return resolve(configured)
-  if (process.platform === 'win32') {
-    return join(homedir(), 'AppData', 'Roaming', 'CodeTask')
+export function writeDataInitializationConfig(dataDir: string): string {
+  const dbPath = join(resolve(dataDir), 'db', 'app.db')
+  return writeInitializationConfig(resolveDataInitializationConfigPath(), dbPath).dbPath
+}
+
+export function resolveDataDirSelection(
+  input: {
+    defaultDataDir?: string
+  } = {}
+): DataDirResolution {
+  const configPath = resolveDataInitializationConfigPath()
+  const initializationConfig =
+    input.defaultDataDir === undefined ? ensureInitializationConfig(configPath) : { dbPath: '' }
+  const defaultDataDir =
+    input.defaultDataDir ??
+    (initializationConfig.dbPath
+      ? dataDirFromDbPath(initializationConfig.dbPath)
+      : resolveInitializationDefaultDataDir(configPath))
+  if (initializationConfig.dbPath) {
+    return {
+      phase: 'ready',
+      dataDir: dataDirFromDbPath(initializationConfig.dbPath),
+      source: 'config'
+    }
   }
-  return join(homedir(), '.config', 'codetask')
-}
-
-export function resolveDefaultDataDir(): string {
-  return readInitializationConfig(resolveDataInitializationConfigPath()).dbPath
-}
-
-export function resolveDataDirSelection(input: {
-  explicitDataDir?: string
-  mode: AppMode
-  bootstrapRoot?: string
-  defaultDataDir?: string
-}): DataDirResolution {
-  const explicitDataDir = input.explicitDataDir?.trim()
-  const configuredDataDir = explicitDataDir
-    ? undefined
-    : (input.defaultDataDir ?? resolveDefaultDataDir())
-  const bootstrapOverridden = Boolean(input.bootstrapRoot?.trim())
-  const bootstrapRoot = resolveBootstrapRoot(input.mode, input.bootstrapRoot)
-  return resolveStorageLocation({
-    explicitDataDir,
-    configuredDataDir,
-    mode: input.mode,
-    bootstrapRoot,
-    // Before bootstrap roots were unified, desktop mode stored these files under Electron's
-    // userData directory. Adopt that valid legacy installation once, without overriding an
-    // explicit operator-selected bootstrap root.
-    legacyBootstrapRoots: bootstrapOverridden ? [] : [app.getPath('userData')],
-    defaultDataDir: input.defaultDataDir ?? configuredDataDir ?? ''
-  })
-}
-
-export function resolveDataDir(explicitDataDir?: string): string {
-  const configured = explicitDataDir?.trim()
-  if (configured) return resolve(configured)
-  return resolveDefaultDataDir()
-}
-
-export function ensureDataDir(explicitDataDir?: string): string {
-  const dir = resolveDataDir(explicitDataDir)
-  mkdirSync(dir, { recursive: true })
-  return dir
+  return { phase: 'selection_required', dataDir: defaultDataDir, source: 'candidate' }
 }

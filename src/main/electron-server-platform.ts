@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { join } from 'path'
-import { resolveDataDirSelection } from './data-dir'
+import { resolveDataDirSelection, writeDataInitializationConfig } from './data-dir'
 import type { AppServerPlatform } from './server'
 
 /** Electron-only adapter for the shared HTTP/runtime composition. */
@@ -14,6 +14,9 @@ export function createElectronServerPlatform(): AppServerPlatform {
     shellChildEnvironment: {
       ELECTRON_RUN_AS_NODE: '1'
     },
-    resolveDataDirSelection
+    resolveDataDirSelection,
+    persistDataDirSelection: (dataDir) => {
+      writeDataInitializationConfig(dataDir)
+    }
   }
 }

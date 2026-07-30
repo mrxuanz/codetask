@@ -8,7 +8,7 @@ import { createFolderBrowserRoutes } from '../server/routes/fs'
 import { shouldServeSpaIndex } from '../server/http/spa-fallback'
 import { fail, ok } from '../server/response'
 import { toErrorHttpResult } from '../server/error'
-import { StorageLocatorRepository, type DataDirResolution } from './storage-locator'
+import type { DataDirResolution } from './storage-selection'
 import { initializeStorageRoot } from './storage-initializer'
 import {
   StorageValidationNonceRepository,
@@ -24,6 +24,8 @@ export interface SetupShellOptions {
   forbiddenRoots?: readonly string[]
   /** Server mode requires a console setup token; desktop does not. */
   setupTokenRequired?: boolean
+  /** Persist the selected root to codetask-data.json before activating the full runtime. */
+  persistDataDir?: (dataDir: string) => void | Promise<void>
   /** Boot the full runtime in-process after storage is ready (no process restart). */
   activateStorage?: (dataDir: string) => void | Promise<void>
 }
@@ -32,7 +34,6 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   const app = new Hono()
   const initializationNonces = new StorageValidationNonceRepository()
   const recoveryNonces = new StorageValidationNonceRepository()
-  const repository = new StorageLocatorRepository(options.storage.bootstrap)
 
   app.onError((error, c) => {
     const { body, status } = toErrorHttpResult(error)
@@ -56,7 +57,6 @@ export function createSetupShell(options: SetupShellOptions): Hono {
         phase: options.storage.phase,
         defaultCandidate: options.storage.dataDir,
         source: options.storage.source === 'candidate' ? 'none' : options.storage.source,
-        managed: options.storage.managed,
         issue: options.storage.issue
       })
     )
@@ -67,7 +67,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
 
   app.post('/api/system/storage/validate', async (c) => {
     const body = await c.req.json<{ path?: string; allowLowSpace?: boolean }>()
-    const forbiddenRoots = [options.storage.bootstrap.root, ...(options.forbiddenRoots ?? [])]
+    const forbiddenRoots = options.forbiddenRoots ?? []
     const path = body.path ?? ''
     const allowLowSpace = body.allowLowSpace === true
 
@@ -98,10 +98,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   })
 
   app.post('/api/system/storage/initialize', async (c) => {
-    if (
-      options.storage.phase !== 'selection_required' &&
-      options.storage.phase !== 'recovery_required'
-    ) {
+    if (options.storage.phase !== 'selection_required') {
       return c.json(fail(409, 'storage_initialization_not_allowed', {}), 409)
     }
     const body = await c.req.json<{
@@ -111,7 +108,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     }>()
     const validation = validateStorageTarget({
       path: body.path ?? '',
-      forbiddenRoots: [options.storage.bootstrap.root, ...(options.forbiddenRoots ?? [])],
+      forbiddenRoots: options.forbiddenRoots,
       allowLowSpace: body.allowLowSpace === true
     })
     if (!validation.ok) {
@@ -129,10 +126,11 @@ export function createSetupShell(options: SetupShellOptions): Hono {
 
     try {
       const initialized = initializeStorageRoot({
-        dataDir: validation.canonicalPath,
-        locatorRepository: repository,
-        source: 'desktop_setup'
+        dataDir: validation.canonicalPath
       })
+      if (options.persistDataDir) {
+        await options.persistDataDir(initialized.dataDir)
+      }
       if (options.activateStorage) {
         await options.activateStorage(initialized.dataDir)
       }
@@ -144,18 +142,15 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   })
 
   app.post('/api/system/storage/recover', async (c) => {
-    if (
-      options.storage.phase !== 'selection_required' &&
-      options.storage.phase !== 'recovery_required'
-    ) {
+    if (options.storage.phase !== 'selection_required') {
       return c.json(fail(409, 'storage_recovery_not_allowed', {}), 409)
     }
     const body = await c.req.json<{ path?: string; validationNonce?: string }>()
     const validation = validateExistingStorageRoot({
       path: body.path ?? '',
-      forbiddenRoots: [options.storage.bootstrap.root, ...(options.forbiddenRoots ?? [])]
+      forbiddenRoots: options.forbiddenRoots
     })
-    if (!validation.ok || !validation.installationId) {
+    if (!validation.ok) {
       return c.json(fail(400, validation.issue ?? 'storage_target_invalid', validation), 400)
     }
     if (
@@ -169,13 +164,9 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     }
 
     try {
-      repository.write({
-        schemaVersion: 1,
-        dataDir: validation.canonicalPath,
-        selectedAt: new Date().toISOString(),
-        source: 'recovered',
-        installationId: validation.installationId
-      })
+      if (options.persistDataDir) {
+        await options.persistDataDir(validation.canonicalPath)
+      }
       if (options.activateStorage) {
         await options.activateStorage(validation.canonicalPath)
       }

@@ -1,9 +1,13 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
+import { prepareProviderRuntimeForTest } from '../helpers/provider-runtime'
 import { resolveClaudeSettingSources } from '../../src/server/providers/claude/turn-options'
 import { resolveClaudeHostConfigDir } from '../../src/server/sandbox/provider-auth/paths'
+import {
+  providerRuntimeReadRoots,
+  providerRuntimeWriteRoots
+} from '../../src/server/sandbox/provider-auth/types'
 
 const TURN_TIMEOUT_MS = 3 * 60_000
 const args = process.argv.slice(2)
@@ -72,12 +76,12 @@ async function runStatic(runtimeRoot: string): Promise<{
   injectedAuthKeys: string[]
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
-  const env = buildMergedEnv(prepared.envPatch)
+  const prepared = prepareProviderRuntimeForTest('claude-code', runtimeRoot)
+  const env = buildMergedEnv(prepared.environment)
   const claudeDir = env.CLAUDE_CONFIG_DIR ?? join(runtimeRoot, '.claude')
   const hostConfigDir = resolveClaudeHostConfigDir().toLowerCase()
 
-  const hostReadRoots = (prepared.readRoots ?? []).filter((root) =>
+  const hostReadRoots = providerRuntimeReadRoots(prepared).filter((root) =>
     root.toLowerCase().startsWith(hostConfigDir)
   )
 
@@ -86,7 +90,7 @@ async function runStatic(runtimeRoot: string): Promise<{
     authPresent: claudeAuthPresent(env) || prepared.diagnostics.authMaterialPresent,
     claudeConfigDir: claudeDir,
     home: env.HOME,
-    writeRoots: prepared.writeRoots ?? [],
+    writeRoots: providerRuntimeWriteRoots(prepared),
     settingSourcesOuterSandbox: resolveClaudeSettingSources(true),
     settingSourcesConversation: resolveClaudeSettingSources(false),
     hostClaudeInReadRoots: hostReadRoots,
@@ -96,16 +100,16 @@ async function runStatic(runtimeRoot: string): Promise<{
       'CLAUDE_CODE_OAUTH_TOKEN'
     ].filter((key) => Boolean(env[key])),
     runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-reference' &&
-      env.HOME === runtimeRoot &&
-      claudeDir.startsWith(runtimeRoot) &&
-      (prepared.writeRoots ?? []).length === 0 &&
-      hostReadRoots.length === 0
+      prepared.diagnostics.mode === 'host-identity' &&
+      env.HOME !== runtimeRoot &&
+      claudeDir === resolveClaudeHostConfigDir() &&
+      providerRuntimeWriteRoots(prepared).includes(resolveClaudeHostConfigDir()) &&
+      hostReadRoots.length > 0
   }
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('Claude runtime-reference isolation check failed')
+  if (!report.runtimeIsolated) throw new Error('Claude host-identity isolation check failed')
   if (report.settingSourcesOuterSandbox.length !== 0) {
     throw new Error('outer sandbox must use empty settingSources')
   }
@@ -114,8 +118,8 @@ async function runStatic(runtimeRoot: string): Promise<{
 }
 
 async function runHello(runtimeRoot: string, workspace: string): Promise<unknown> {
-  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
-  const env = buildMergedEnv(prepared.envPatch)
+  const prepared = prepareProviderRuntimeForTest('claude-code', runtimeRoot)
+  const env = buildMergedEnv(prepared.environment)
   if (!claudeAuthPresent(env)) {
     return { skipped: true, reason: 'no ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN' }
   }
@@ -172,8 +176,6 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuthForTest('claude-code', runtimeRoot)
-
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {
       report.static = await runStatic(runtimeRoot)
@@ -215,8 +217,6 @@ async function main(): Promise<void> {
     }
     console.log(`\nReport: ${reportPath}`)
     console.log(`Runtime files: ${(report.runtimeJson as string[]).join(', ') || '(none)'}`)
-
-    prepared.cleanupPlan()
 
     if ((report.failures as string[]).length > 0) process.exit(1)
   } finally {

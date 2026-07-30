@@ -1,6 +1,6 @@
 import { spawnProviderCommandSync } from '../spawn'
 import { ProviderAuthError } from '../../sandbox/provider-auth/errors'
-import type { ProviderAuthPrepared } from '../../sandbox/provider-auth/types'
+import type { ProviderRuntimeProfile } from '../../sandbox/provider-auth/types'
 import type { ProviderInstallation } from '../../../shared/providers/installation'
 
 const PREFLIGHT_TIMEOUT_MS = 15_000
@@ -43,14 +43,14 @@ function isLoggedInFromText(text: string): boolean {
  * Probe-only: never logs in, never writes host credential files.
  */
 export function runCursorAuthPreflight(
-  prepared: ProviderAuthPrepared,
+  profile: ProviderRuntimeProfile,
   installation: ProviderInstallation
 ): void {
-  const probe = runProbe(installation, ['status'], prepared.envPatch)
+  const probe = runProbe(installation, ['status'], { ...profile.environment })
   const combined = `${probe.stdout}\n${probe.stderr}`
   if (probe.ok && isLoggedInFromText(combined)) return
 
-  if (prepared.diagnostics.authMaterialPresent) return
+  if (profile.diagnostics.authMaterialPresent) return
 
   throw new ProviderAuthError(
     `${CURSOR_LABEL} is not authenticated. ${CURSOR_LOGIN_HINT}`,

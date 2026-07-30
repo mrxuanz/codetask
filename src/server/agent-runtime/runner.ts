@@ -37,7 +37,7 @@ export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: s
 
 /**
  * Conversation Cursor (and other providers) isolate chat vs create-task state.
- * Path: runtimes/<threadId>/<kind>/<coreCode>
+ * Path: assets/runtimes/<threadId>/<kind>/<coreCode>
  */
 export function ensureConversationRuntimeRoot(
   dataDir: string,

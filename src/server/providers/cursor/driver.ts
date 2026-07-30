@@ -2,7 +2,7 @@ import type { ProviderSettings } from '../../../shared/providers/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { CURSOR_DESCRIPTOR } from './descriptor'
 import { runCursorAuthPreflight } from './preflight'
-import { prepareCursorAuth } from '../../sandbox/provider-auth/bridge'
+import { prepareCursorRuntimeProfile } from '../../sandbox/provider-auth/bridge'
 import {
   resolveCursorAgentInstallDirs,
   resolveHostProfilePaths
@@ -46,8 +46,8 @@ export class CursorDriver extends DelegatingProviderDriver {
     streamFactory: ProviderStreamFactory = createCursorStreamFactory(settings)
   ) {
     super(CURSOR_DESCRIPTOR, settings, streamFactory, {
-      prepareAuth: prepareCursorAuth,
-      preflight: (context) => runCursorAuthPreflight(context.preparedAuth, context.installation),
+      prepareRuntimeProfile: prepareCursorRuntimeProfile,
+      preflight: (context) => runCursorAuthPreflight(context.runtimeProfile, context.installation),
       installDirs: (hostEnvironment) =>
         resolveCursorAgentInstallDirs(resolveHostProfilePaths(hostEnvironment))
     })

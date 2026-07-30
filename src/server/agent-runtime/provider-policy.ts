@@ -21,8 +21,9 @@ export function resolveProviderRunPolicy(input: {
     innerAccess: 'full-access',
     approvals: 'auto',
     stateRoot: input.runtimeRoot,
-    // Outer sandbox → runtime references; direct host turns → host identity.
-    authMode: input.outerSandbox ? 'runtime-reference' : 'host-identity'
+    // Authentication always uses native host identity paths. The outer sandbox
+    // decides which exact Provider paths are visible; it never copies them.
+    authMode: 'host-identity'
   }
 }
 

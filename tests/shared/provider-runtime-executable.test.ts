@@ -12,13 +12,13 @@ import {
   resolveProviderExecutableStrategy
 } from '../../src/server/providers/runtime-executable.ts'
 import { spawnProviderCommandSync } from '../../src/server/providers/spawn.ts'
-import { prepareCodexAuth } from '../../src/server/sandbox/provider-auth/bridge.ts'
+import { prepareCodexRuntimeProfile } from '../../src/server/sandbox/provider-auth/bridge.ts'
 import { ProviderAuthError } from '../../src/server/sandbox/provider-auth/errors.ts'
 import {
   resolveClaudeInstallDirs,
   resolveCodexInstallDirs
 } from '../../src/server/sandbox/provider-auth/paths.ts'
-import type { ProviderAuthPrepared } from '../../src/server/sandbox/provider-auth/types.ts'
+import type { ProviderRuntimeProfile } from '../../src/server/sandbox/provider-auth/types.ts'
 
 function installation(
   provider: SupportedCoreCode,
@@ -36,30 +36,24 @@ function installation(
   }
 }
 
-function preparedAuth(
+function runtimeProfile(
   provider: 'claude-code' | 'codex',
   authMaterialPresent: boolean
-): ProviderAuthPrepared {
+): ProviderRuntimeProfile {
   return {
-    mode: 'runtime-reference',
+    schemaVersion: 1,
+    provider,
+    platform: process.platform as ProviderRuntimeProfile['platform'],
+    mode: 'host-identity',
     runtimeRoot: '/runtime',
-    envPatch: { HOME: '/runtime' },
-    readRoots: [],
-    writeRoots: [],
-    cleanupPlan: () => undefined,
+    stateRoot: '/runtime',
+    environment: { HOME: '/runtime' },
+    hostPathGrants: [],
     diagnostics: {
       provider,
-      mode: 'runtime-reference',
+      mode: 'host-identity',
       authMaterialPresent,
       warnings: []
-    },
-    filesystemProfile: {
-      provider,
-      hostReadRoots: [],
-      hostWriteRoots: [],
-      runtimeEnv: { HOME: '/runtime' },
-      credentialSnapshots: [],
-      scrubPatterns: []
     }
   }
 }
@@ -178,7 +172,7 @@ test('SDK-bundled automatic providers do not inherit external executable affinit
   assert.deepEqual(affinity.readRoots, [])
 })
 
-test('Claude and Codex preflight trust the isolated auth snapshot, not a host shim', () => {
+test('Claude and Codex preflight trust the compiled runtime profile, not a host shim', () => {
   const failingHostShim = process.execPath
   const claudeInstallation = {
     ...installation('claude-code', failingHostShim),
@@ -190,17 +184,17 @@ test('Claude and Codex preflight trust the isolated auth snapshot, not a host sh
   }
 
   assert.doesNotThrow(() =>
-    runClaudeAuthPreflight(preparedAuth('claude-code', true), claudeInstallation)
+    runClaudeAuthPreflight(runtimeProfile('claude-code', true), claudeInstallation)
   )
-  assert.doesNotThrow(() => runCodexAuthPreflight(preparedAuth('codex', true), codexInstallation))
+  assert.doesNotThrow(() => runCodexAuthPreflight(runtimeProfile('codex', true), codexInstallation))
 
   assert.throws(
-    () => runClaudeAuthPreflight(preparedAuth('claude-code', false), claudeInstallation),
+    () => runClaudeAuthPreflight(runtimeProfile('claude-code', false), claudeInstallation),
     (error) =>
       error instanceof ProviderAuthError && error.code === 'provider.claude.not_authenticated'
   )
   assert.throws(
-    () => runCodexAuthPreflight(preparedAuth('codex', false), codexInstallation),
+    () => runCodexAuthPreflight(runtimeProfile('codex', false), codexInstallation),
     (error) =>
       error instanceof ProviderAuthError && error.code === 'provider.codex.not_authenticated'
   )
@@ -213,16 +207,12 @@ test('Codex config alone is not misclassified as authentication material', () =>
   writeFileSync(join(home, '.codex', 'config.toml'), 'model = "test-model"\n')
 
   try {
-    const prepared = prepareCodexAuth({
+    const profile = prepareCodexRuntimeProfile({
       runtimeRoot,
       hostEnvironment: Object.freeze({ HOME: home, PATH: process.env.PATH ?? '' })
     })
-    assert.equal(prepared.diagnostics.authMaterialPresent, false)
-    assert.match(
-      prepared.diagnostics.warnings.join('\n'),
-      /config was generated.*no host login/i
-    )
-    prepared.cleanupPlan()
+    assert.equal(profile.diagnostics.authMaterialPresent, false)
+    assert.match(profile.diagnostics.warnings.join('\n'), /Host Codex login file not found/i)
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

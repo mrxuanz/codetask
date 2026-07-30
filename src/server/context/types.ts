@@ -4,7 +4,6 @@ import type { JobExecutionRuntimeRegistry } from './job-execution-runtime'
 import type { RuntimeRegistry } from './runtime-registry'
 import type { SettingsStore } from './settings-store'
 import type { ApplicationRuntime } from '../application/application-runtime'
-import type { McpSecretProvider } from '../settings/mcp-secret-provider'
 import type { AppConfig } from '../config/app-config'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderRuntimeManager } from '../providers/lifecycle'
@@ -14,7 +13,6 @@ export interface SecurityContext {
   mode: 'desktop' | 'server'
   authSecret: string
   auth: SecureAuthService
-  mcpSecrets: McpSecretProvider
   setupToken?: string
 }
 
@@ -32,8 +30,6 @@ export interface AppContext {
   bootId: string
   applicationRuntime: ApplicationRuntime | null
   storage?: {
-    bootstrapRoot: string
     source: string
-    managed: boolean
   }
 }

@@ -15,17 +15,18 @@ export interface HostProfilePaths {
 }
 
 export function resolveHostProfilePaths(
-  env: HostEnvironment = processHostEnvironmentSource.snapshot()
+  env: HostEnvironment = processHostEnvironmentSource.snapshot(),
+  platform: NodeJS.Platform = process.platform
 ): HostProfilePaths {
   const home = env.HOME?.trim() || env.USERPROFILE?.trim() || homedir()
 
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     const appData = env.APPDATA?.trim() || join(home, 'AppData', 'Roaming')
     const localAppData = env.LOCALAPPDATA?.trim() || join(home, 'AppData', 'Local')
     return { home, appData, localAppData }
   }
 
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     return {
       home,
       appData: join(home, 'Library', 'Application Support'),
@@ -52,23 +53,29 @@ export function resolveCodexHostConfigPath(profile = resolveHostProfilePaths()):
   return join(resolveCodexHostHome(profile), 'config.toml')
 }
 
-export function resolveCursorHostAuthPathCandidates(profile = resolveHostProfilePaths()): string[] {
-  if (process.platform === 'win32') {
+export function resolveCursorHostAuthPathCandidates(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  if (platform === 'win32') {
     return [join(profile.appData, 'Cursor', 'auth.json')]
   }
 
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     return [
       join(profile.appData, 'Cursor', 'auth.json'),
-      join(resolveCursorHostConfigDir(profile), 'auth.json')
+      join(resolveCursorHostConfigDir(profile, platform), 'auth.json')
     ]
   }
 
-  return [join(resolveCursorHostConfigDir(profile), 'auth.json')]
+  return [join(resolveCursorHostConfigDir(profile, platform), 'auth.json')]
 }
 
-export function resolveCursorHostAuthPath(profile = resolveHostProfilePaths()): string {
-  const candidates = resolveCursorHostAuthPathCandidates(profile)
+export function resolveCursorHostAuthPath(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  const candidates = resolveCursorHostAuthPathCandidates(profile, platform)
   return candidates.find((path) => existsSync(path)) ?? candidates[0] ?? ''
 }
 
@@ -103,13 +110,14 @@ export interface CursorHostAuthSnapshot {
 }
 
 export function snapshotCursorHostAuth(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
 ): CursorHostAuthSnapshot {
-  const authCandidates = resolveCursorHostAuthPathCandidates(profile)
+  const authCandidates = resolveCursorHostAuthPathCandidates(profile, platform)
   const authPath =
     authCandidates.find((candidate) => existsSync(candidate)) ?? authCandidates[0] ?? ''
   const cursorHome = resolveCursorHostCursorHome(profile)
-  const configDir = resolveCursorHostConfigDir(profile)
+  const configDir = resolveCursorHostConfigDir(profile, platform)
   const sources: string[] = []
 
   for (const candidate of authCandidates) {
@@ -198,11 +206,19 @@ export function resolveClaudeConfigReadRoots(
   return roots
 }
 
-export function resolveOpencodeHostConfigDir(profile = resolveHostProfilePaths()): string {
+export function resolveOpencodeHostConfigDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') return join(profile.appData, 'opencode')
   return join(profile.home, '.config', 'opencode')
 }
 
-export function resolveOpencodeHostDataDir(profile = resolveHostProfilePaths()): string {
+export function resolveOpencodeHostDataDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') return join(profile.localAppData, 'opencode')
   return join(profile.home, '.local', 'share', 'opencode')
 }
 
@@ -214,10 +230,11 @@ export interface OpencodeHostAuthSnapshot {
 }
 
 export function snapshotOpencodeHostAuth(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
 ): OpencodeHostAuthSnapshot {
-  const configDir = resolveOpencodeHostConfigDir(profile)
-  const dataDir = resolveOpencodeHostDataDir(profile)
+  const configDir = resolveOpencodeHostConfigDir(profile, platform)
+  const dataDir = resolveOpencodeHostDataDir(profile, platform)
   const sources: string[] = []
 
   for (const name of ['opencode.json', 'auth.json', 'config.json', 'credentials.json'] as const) {
@@ -241,12 +258,15 @@ export function snapshotOpencodeHostAuth(
   }
 }
 
-export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths()): string[] {
+export function resolveCursorAgentInstallDirs(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
   const dirs: string[] = []
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     dirs.push(join(profile.localAppData, 'cursor-agent'))
     dirs.push(join(profile.localAppData, 'Programs', 'cursor-agent'))
-  } else if (process.platform === 'darwin') {
+  } else if (platform === 'darwin') {
     dirs.push(join(profile.appData, 'Cursor'))
     dirs.push(join(profile.home, '.local', 'share', 'cursor-agent'))
     dirs.push(join(profile.home, '.cursor-agent'))
@@ -260,31 +280,34 @@ export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths(
 }
 
 export function resolveCursorCompileCacheDirs(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
 ): string[] {
   const candidates =
-    process.platform === 'darwin'
+    platform === 'darwin'
       ? [join(profile.localAppData, 'cursor-compile-cache')]
-      : process.platform === 'win32'
+      : platform === 'win32'
         ? [join(profile.localAppData, 'cursor-compile-cache')]
         : [join(profile.home, '.cache', 'cursor-compile-cache')]
   return candidates.filter((path) => existsSync(path))
 }
 
 export function resolveDarwinKeychainReadRoots(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
 ): string[] {
-  if (process.platform !== 'darwin') return []
+  if (platform !== 'darwin') return []
   return [join(profile.home, 'Library', 'Keychains'), join('/Library', 'Keychains')].filter(
     (path) => existsSync(path)
   )
 }
 
 export function resolveCursorAgentMarkerWriteDirs(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
 ): string[] {
   const dirs: string[] = []
-  for (const installRoot of resolveCursorAgentInstallDirs(profile)) {
+  for (const installRoot of resolveCursorAgentInstallDirs(profile, platform)) {
     const versionsRoot = join(installRoot, 'versions')
     let versions: Dirent[]
     try {
@@ -518,45 +541,16 @@ export function resolveOpencodeExecutable(
   return exeNames[0] ?? 'opencode'
 }
 
-export const RUNTIME_CODEX_HOME_DIR = join('provider', 'codex')
-
-export function runtimeCodexHome(runtimeRoot: string): string {
-  return join(runtimeRoot, RUNTIME_CODEX_HOME_DIR)
-}
-
-export function runtimeCursorHome(runtimeRoot: string): string {
-  return join(runtimeRoot, '.cursor')
-}
-
-export function runtimeCursorConfigDir(runtimeRoot: string): string {
-  return join(runtimeRoot, 'config', 'cursor')
-}
-
-export function cursorProjectSlug(workspaceRoot: string): string {
-  return (
-    workspaceRoot
-      .replace(/^[\\/]+/, '')
-      .replace(/:/g, '')
-      .replace(/[\\/]+/g, '-')
-      .replace(/[^A-Za-z0-9._-]/g, '-')
-      .replace(/^-+|-+$/g, '') || 'workspace'
-  )
-}
-
 export function resolveCursorHostCursorHome(profile = resolveHostProfilePaths()): string {
   return join(profile.home, '.cursor')
 }
 
-export function resolveCursorHostConfigDir(profile = resolveHostProfilePaths()): string {
-  if (process.platform === 'win32') {
+export function resolveCursorHostConfigDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') {
     return join(profile.appData, 'cursor')
   }
   return join(profile.home, '.config', 'cursor')
-}
-
-export function runtimeCursorAuthPath(runtimeRoot: string): string {
-  if (process.platform === 'win32') {
-    return join(runtimeRoot, 'AppData', 'Roaming', 'Cursor', 'auth.json')
-  }
-  return join(runtimeRoot, 'config', 'cursor', 'auth.json')
 }

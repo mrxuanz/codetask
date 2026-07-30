@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runAcpBootstrapProbe, type AcpBootstrapProbeResult } from './acp-bootstrap-probe'
-import { getProviderDriverForTest, prepareProviderAuthForTest } from '../helpers/provider-runtime'
+import {
+  getProviderDriverForTest,
+  prepareProviderRuntimeForTest
+} from '../helpers/provider-runtime'
 import { buildSandboxEnv } from '../../src/server/sandbox/env'
 import {
   applyProviderReadRoots,
@@ -16,6 +19,10 @@ import {
 } from '../../src/server/sandbox/policy'
 import { resolveProviderReadRoots } from '../../src/server/sandbox/provider-read-roots'
 import { probeCursorAgentAuth } from '../../src/server/agent-runtime/cursor-acp/errors'
+import {
+  providerRuntimeReadRoots,
+  providerRuntimeWriteRoots
+} from '../../src/server/sandbox/provider-auth/types'
 import {
   resolveCursorAgentCommand,
   resolveCursorAgentExecutable
@@ -209,8 +216,8 @@ async function runSandboxProbe(input: {
     ...input.envRecord,
     CODETASK_PROBE_CWD: input.cwd,
     CODETASK_RUNTIME_ROOT: input.runtimeRoot,
-    CODETASK_PROBE_HOME: input.envPatch.HOME ?? input.runtimeRoot,
-    CODETASK_PROBE_CURSOR_CONFIG_DIR: input.envPatch.CURSOR_CONFIG_DIR ?? ''
+    CODETASK_PROBE_HOME: input.environment.HOME ?? input.runtimeRoot,
+    CODETASK_PROBE_CURSOR_CONFIG_DIR: input.environment.CURSOR_CONFIG_DIR ?? ''
   })
     .filter(([, value]) => value !== undefined && value !== '')
     .map(([key, value]) => ({ key, value }))
@@ -398,7 +405,7 @@ async function main(): Promise<void> {
   log('setup', 'fixture', { workspace, runtimeRoot, projectRoot: process.cwd() })
 
   const cursorDriver = getProviderDriverForTest('cursorcli')
-  const authPrepared = prepareProviderAuthForTest('cursorcli', runtimeRoot, {
+  const runtimeProfile = prepareProviderRuntimeForTest('cursorcli', runtimeRoot, {
     workspaceRoot: workspace
   })
   let providerPreflightOk = true
@@ -406,7 +413,7 @@ async function main(): Promise<void> {
   try {
     const installation = await cursorDriver.discover()
     if (!installation) throw new Error('Cursor CLI installation was not discovered')
-    cursorDriver.preflight({ preparedAuth: authPrepared, installation })
+    cursorDriver.preflight({ runtimeProfile: runtimeProfile, installation })
     log('setup', 'CursorDriver.preflight OK')
   } catch (error) {
     providerPreflightOk = false
@@ -414,12 +421,12 @@ async function main(): Promise<void> {
     log('setup', 'CursorDriver.preflight FAIL', providerPreflightError)
   }
 
-  const dataDir = process.env.CODETASK_DATA_DIR?.trim() || join(process.cwd(), 'data')
+  const dataDir = join(base, 'data')
   const sandboxRunner = resolveSandboxRunner()
   const sandboxEnv = buildSandboxEnv({
     runtimeRoot,
     dataDir,
-    providerEnv: authPrepared.envPatch
+    providerEnv: runtimeProfile.environment
   })
 
   let policy = createSandboxPolicy({
@@ -427,10 +434,10 @@ async function main(): Promise<void> {
     workspaceRoot: workspace,
     runtimeRoot
   })
-  policy = applyProviderWriteRoots(policy, authPrepared.writeRoots)
+  policy = applyProviderWriteRoots(policy, providerRuntimeWriteRoots(runtimeProfile))
   policy = applyProviderReadRoots(policy, [
     ...resolveProviderReadRoots('cursorcli'),
-    ...authPrepared.readRoots,
+    ...providerRuntimeReadRoots(runtimeProfile),
     dataDir,
     process.cwd(),
     join(process.cwd(), 'node_modules'),
@@ -441,7 +448,7 @@ async function main(): Promise<void> {
     platform: process.platform,
     workspace,
     runtimeRoot,
-    authDiagnostics: authPrepared.diagnostics,
+    authDiagnostics: runtimeProfile.diagnostics,
     providerPreflightOk,
     providerPreflightError,
     hostPreflight: null as CliPreflightResult | null,
@@ -451,31 +458,27 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  try {
-    report.hostPreflight = runCliPreflight('host-preflight', authPrepared.envPatch, workspace)
-    report.hostAcp = await runAcpBootstrapProbe({
-      cwd: workspace,
-      envPatch: authPrepared.envPatch
-    })
+  report.hostPreflight = runCliPreflight('host-preflight', runtimeProfile.environment, workspace)
+  report.hostAcp = await runAcpBootstrapProbe({
+    cwd: workspace,
+    envPatch: runtimeProfile.environment
+  })
 
-    if (!skipSandbox) {
-      report.sandboxPreflight = runSandboxCliPreflight(
-        'sandbox-preflight',
-        policy,
-        sandboxEnv,
-        workspace
-      )
-      report.sandboxAcp = await runSandboxProbe({
-        label: 'sandbox-acp',
-        policy,
-        envRecord: sandboxEnv,
-        cwd: workspace,
-        runtimeRoot,
-        envPatch: authPrepared.envPatch
-      })
-    }
-  } finally {
-    authPrepared.cleanupPlan()
+  if (!skipSandbox) {
+    report.sandboxPreflight = runSandboxCliPreflight(
+      'sandbox-preflight',
+      policy,
+      sandboxEnv,
+      workspace
+    )
+    report.sandboxAcp = await runSandboxProbe({
+      label: 'sandbox-acp',
+      policy,
+      envRecord: sandboxEnv,
+      cwd: workspace,
+      runtimeRoot,
+      envPatch: runtimeProfile.environment
+    })
   }
 
   const failures = report.failures as string[]

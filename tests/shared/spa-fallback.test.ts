@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { createSetupShell } from '../../src/main/setup-shell'
-import { bootstrapPaths } from '../../src/main/storage-locator'
 import { shouldServeSpaIndex } from '../../src/server/http/spa-fallback'
 
 test('SPA fallback accepts page navigation but rejects asset and API-style requests', () => {
@@ -59,9 +58,7 @@ test('production setup shell serves deep links and leaves missing assets as 404'
     storage: {
       phase: 'selection_required',
       dataDir: join(root, 'data'),
-      source: 'candidate',
-      managed: false,
-      bootstrap: bootstrapPaths(join(root, 'bootstrap'))
+      source: 'candidate'
     },
     isDev: false,
     staticDir

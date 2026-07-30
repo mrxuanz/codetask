@@ -59,26 +59,12 @@ export default {
     storageInitializing: '正在初始化…',
     storageValidatedPath: '已校验路径：{path}',
     storageRestarting: '存储已初始化',
-    storageRecoveryTitle: '需要恢复数据存储',
-    storageRecoveryDescription:
-      '已保存的数据位置损坏或丢失。可选择原先的 CodeTask 数据目录恢复，也可选择空目录重新初始化。',
-    storageRecover: '使用此目录',
-    storageRecovering: '正在恢复…',
-    storageRecovered: '数据位置已恢复',
     errors: {
       pathNotAbsolute: '请填写绝对路径',
       pathNotWritable: '目录不可写，请换一个有写权限的位置',
-      pathNotEmpty: '目录非空且不是 CodeTask 数据目录，请选择空目录',
+      pathNotEmpty: '目录非空，请选择空目录',
       pathForbiddenRoot: '不能使用系统根目录或用户主目录',
-      pathOwnedByOther: '该目录已属于另一个 CodeTask 安装',
-      markerMissing:
-        '目录缺少有效的 CodeTask 数据标记。首次安装请选空目录；恢复时请选原先的数据目录',
       databaseMissing: '目录中找不到数据库文件',
-      locatorUnreadable: '已保存的数据位置配置损坏，请重新选择数据目录',
-      locatorInvalid: '已保存的数据位置配置无效，请重新选择数据目录',
-      legacyLocatorConflict: '检测到多份不同的数据位置配置，请选择要使用的原数据目录',
-      legacyLocatorMigrationFailed: '迁移原数据位置配置失败，请重新选择原数据目录',
-      installationMismatch: '数据目录与当前安装不匹配',
       validationExpired: '目录校验已过期，请重试',
       insufficientSpace: '磁盘空间不足'
     }
@@ -580,27 +566,13 @@ export default {
       },
       storage: {
         title: '数据存储',
-        description: '查看存储占用，并通过校验、迁移和重启安全搬移完整数据根目录。',
+        description: '查看当前数据目录与存储占用。',
         loading: '正在加载存储信息…',
         loadFailed: '加载存储信息失败',
         currentPath: '当前数据根目录',
         source: '来源：{source}',
         total: '总量',
-        reclaimable: 'DB 可回收',
-        changeTitle: '搬移数据根目录',
-        browse: '浏览',
-        browseTitle: '选择新的数据目录',
-        browseHint: '浏览本机文件夹，也可新建子目录后选择。',
-        selectDirectory: '选择此目录',
-        createFolder: '创建并选择',
-        migrate: '校验并迁移',
-        managed: '该路径由 CLI 或环境变量管理，不能在此处更改。',
-        phase: '迁移阶段：{phase}',
-        restart: '重启并切换到新目录',
-        restartServerRequired: '请由管理员重启 codetask-server 服务以切换到新目录。',
-        deleteOld: '删除旧数据目录',
-        migrationFailed: '数据存储迁移失败',
-        deleteOldFailed: '删除旧数据目录失败'
+        reclaimable: 'DB 可回收'
       },
       languageSection: {
         title: '语言',

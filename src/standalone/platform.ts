@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import type { AppServerPlatform } from '../main/server'
-import { resolveNodeDataDirSelection } from './data-dir'
+import { resolveNodeDataDirSelection, writeNodeDataInitializationConfig } from './data-dir'
 
 function firstExistingDirectory(candidates: string[]): string | undefined {
   return candidates.find((candidate) => existsSync(candidate))
@@ -47,6 +47,9 @@ export function createNodeServerPlatform(): AppServerPlatform {
     isDev: false,
     staticDir: resolveStandaloneStaticDir(appRoot),
     appRoot,
-    resolveDataDirSelection: (input) => resolveNodeDataDirSelection(input)
+    resolveDataDirSelection: () => resolveNodeDataDirSelection(),
+    persistDataDirSelection: (dataDir) => {
+      writeNodeDataInitializationConfig(dataDir)
+    }
   }
 }

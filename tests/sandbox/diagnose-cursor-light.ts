@@ -14,7 +14,8 @@ import {
   type McpServer,
   type StopReason
 } from '@agentclientprotocol/sdk'
-import { prepareProviderAuthForTest } from '../helpers/provider-runtime'
+import { prepareProviderRuntimeForTest } from '../helpers/provider-runtime'
+import { providerRuntimeWriteRoots } from '../../src/server/sandbox/provider-auth/types'
 import { buildCursorAcpCliArgs } from '../../src/server/providers/cursor/turn-plan'
 import {
   probeCursorAgentAuth,
@@ -425,11 +426,11 @@ async function runStatic(
   authIssue: string | null
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderAuthForTest('cursorcli', runtimeRoot, {
+  const prepared = prepareProviderRuntimeForTest('cursorcli', runtimeRoot, {
     workspaceRoot: workspace
   })
   const cliArgs = buildCursorAcpCliArgs({ outerSandbox: true, cwd: workspace })
-  const env = buildMergedEnv(prepared.envPatch)
+  const env = buildMergedEnv(prepared.environment)
   const command = resolveCursorAgentCommand()
   const executable = resolveCursorAgentExecutable(command, env)
   const authIssue = probeCursorAgentAuth(executable, env)
@@ -438,20 +439,20 @@ async function runStatic(
     mode: prepared.diagnostics.mode,
     authMaterialPresent: prepared.diagnostics.authMaterialPresent,
     warnings: prepared.diagnostics.warnings,
-    writeRoots: prepared.writeRoots ?? [],
+    writeRoots: providerRuntimeWriteRoots(prepared),
     env: {
-      HOME: prepared.envPatch.HOME,
-      CURSOR_CONFIG_DIR: prepared.envPatch.CURSOR_CONFIG_DIR,
-      CURSOR_DATA_DIR: prepared.envPatch.CURSOR_DATA_DIR
+      HOME: prepared.environment.HOME,
+      CURSOR_CONFIG_DIR: prepared.environment.CURSOR_CONFIG_DIR,
+      CURSOR_DATA_DIR: prepared.environment.CURSOR_DATA_DIR
     },
     cliArgs,
     executable,
     authIssue,
     runtimeIsolated:
       prepared.diagnostics.mode === 'host-identity' &&
-      prepared.envPatch.HOME !== runtimeRoot &&
-      prepared.envPatch.CURSOR_DATA_DIR === join(runtimeRoot, '.cursor') &&
-      (prepared.writeRoots ?? []).length > 0
+      prepared.environment.HOME !== runtimeRoot &&
+      prepared.environment.CURSOR_DATA_DIR === join(runtimeRoot, '.cursor') &&
+      providerRuntimeWriteRoots(prepared).length > 0
   }
 
   log('static', 'report', report)
@@ -486,7 +487,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuthForTest('cursorcli', runtimeRoot, {
+  const prepared = prepareProviderRuntimeForTest('cursorcli', runtimeRoot, {
     workspaceRoot: workspace
   })
 
@@ -499,7 +500,7 @@ async function main(): Promise<void> {
       !skipLive && (caseFilter === 'all' || caseFilter === 'hello' || caseFilter === 'mcp')
 
     if (shouldLive) {
-      const env = buildMergedEnv(prepared.envPatch)
+      const env = buildMergedEnv(prepared.environment)
       const authIssue = probeCursorAgentAuth(
         resolveCursorAgentExecutable(resolveCursorAgentCommand(), env),
         env
@@ -511,10 +512,10 @@ async function main(): Promise<void> {
       } else {
         if (caseFilter === 'all' || caseFilter === 'hello') {
           try {
-            const result = await withRuntimeEnv(prepared.envPatch, async () =>
+            const result = await withRuntimeEnv(prepared.environment, async () =>
               runCursorAcpTurn({
                 cwd: workspace,
-                env: buildMergedEnv(prepared.envPatch),
+                env: buildMergedEnv(prepared.environment),
                 prompt: 'Reply with exactly: pong'
               })
             )
@@ -544,10 +545,10 @@ async function main(): Promise<void> {
           const fake = await startFakeMcp()
           log('mcp', `fake server at ${fake.url}`)
           try {
-            const result = await withRuntimeEnv(prepared.envPatch, async () =>
+            const result = await withRuntimeEnv(prepared.environment, async () =>
               runCursorAcpTurn({
                 cwd: workspace,
-                env: buildMergedEnv(prepared.envPatch),
+                env: buildMergedEnv(prepared.environment),
                 mcpUrl: fake.url,
                 prompt:
                   'You must call codeteam-manager report_task_result now with status "completed". Then reply exactly: mcp-ok'
@@ -594,8 +595,6 @@ async function main(): Promise<void> {
     }
     console.log(`\nReport: ${reportPath}`)
     console.log(`Runtime JSON: ${(report.runtimeJson as string[]).join(', ') || '(none)'}`)
-
-    prepared.cleanupPlan()
 
     if ((report.failures as string[]).length > 0) process.exit(1)
   } finally {

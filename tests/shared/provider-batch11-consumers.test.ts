@@ -78,7 +78,7 @@ test('auth preflight and install dirs are owned directly by Registry drivers', (
   const composition = readSource('src/server/providers/composition.ts')
   const installation = readSource('src/server/providers/installation.ts')
   const readRoots = readSource('src/server/sandbox/provider-read-roots.ts')
-  assert.match(driver, /prepareAuth\(context:/)
+  assert.match(driver, /prepareRuntimeProfile\(context:/)
   assert.match(driver, /installDirs\(hostEnvironment/)
   assert.match(composition, /new CodexDriver/)
   assert.match(readRoots, /const driver = getProviderRegistry\(\)\.get\(provider\)/)

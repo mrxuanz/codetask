@@ -1,6 +1,6 @@
 import { spawnProviderCommandSync } from '../spawn'
 import { ProviderAuthError } from '../../sandbox/provider-auth/errors'
-import type { ProviderAuthPrepared } from '../../sandbox/provider-auth/types'
+import type { ProviderRuntimeProfile } from '../../sandbox/provider-auth/types'
 import type { ProviderInstallation } from '../../../shared/providers/installation'
 
 const PREFLIGHT_TIMEOUT_MS = 15_000
@@ -33,12 +33,12 @@ function runProbe(
  * Probe-only: never logs in, never creates accounts, never writes host credential files.
  */
 export function runOpenCodeAuthPreflight(
-  prepared: ProviderAuthPrepared,
+  profile: ProviderRuntimeProfile,
   installation: ProviderInstallation
 ): void {
-  if (prepared.diagnostics.authMaterialPresent) return
+  if (profile.diagnostics.authMaterialPresent) return
 
-  const probe = runProbe(installation, ['auth', 'list'], prepared.envPatch)
+  const probe = runProbe(installation, ['auth', 'list'], { ...profile.environment })
   const combined = `${probe.stdout}\n${probe.stderr}`
   if (probe.ok && /\bcredentials?\b/i.test(combined) && !/\b0\s+credentials?\b/i.test(combined)) {
     return

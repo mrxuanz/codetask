@@ -1,11 +1,15 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { getProviderDriverForTest, prepareProviderAuthForTest } from '../helpers/provider-runtime'
+import { dirname, join } from 'node:path'
 import {
-  materializeOpencodeAuth,
-  opencodeRuntimeLayout
-} from '../../src/server/sandbox/provider-auth/materialize'
+  getProviderDriverForTest,
+  prepareProviderRuntimeForTest
+} from '../helpers/provider-runtime'
+import {
+  resolveOpencodeHostConfigDir,
+  resolveOpencodeHostDataDir
+} from '../../src/server/sandbox/provider-auth/paths'
+import { providerRuntimeWriteRoots } from '../../src/server/sandbox/provider-auth/types'
 import { spawnProviderInvocation } from '../../src/server/providers/spawn'
 
 const SERVER_TIMEOUT_MS = 30_000
@@ -60,11 +64,6 @@ async function runStatic(runtimeRoot: string): Promise<{
   mode: string
   writeRoots: string[]
   layout: unknown
-  materialized: {
-    configMaterialized: boolean
-    runtimeConfigDir: string
-    runtimeDataDir: string
-  }
   env: {
     HOME: string | undefined
     XDG_CONFIG_HOME: string | undefined
@@ -74,20 +73,21 @@ async function runStatic(runtimeRoot: string): Promise<{
   }
   runtimeIsolated: boolean
 }> {
-  const layout = opencodeRuntimeLayout(runtimeRoot)
-  const materialized = materializeOpencodeAuth(runtimeRoot)
-  const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
-  const env = buildMergedEnv(prepared.envPatch)
+  const prepared = prepareProviderRuntimeForTest('opencode', runtimeRoot)
+  const env = buildMergedEnv(prepared.environment)
+  const hostConfigDir = resolveOpencodeHostConfigDir()
+  const hostDataDir = resolveOpencodeHostDataDir()
+  const layout = {
+    configHome: dirname(hostConfigDir),
+    dataHome: dirname(hostDataDir),
+    stateHome: join(runtimeRoot, 'state'),
+    cacheHome: join(runtimeRoot, 'cache')
+  }
 
   const report = {
     mode: prepared.diagnostics.mode,
-    writeRoots: prepared.writeRoots ?? [],
+    writeRoots: providerRuntimeWriteRoots(prepared),
     layout,
-    materialized: {
-      configMaterialized: materialized.configMaterialized,
-      runtimeConfigDir: materialized.runtimeConfigDir,
-      runtimeDataDir: materialized.runtimeDataDir
-    },
     env: {
       HOME: env.HOME,
       XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
@@ -96,26 +96,26 @@ async function runStatic(runtimeRoot: string): Promise<{
       executableMode: executablePath ? 'path' : 'auto'
     },
     runtimeIsolated:
-      prepared.diagnostics.mode === 'runtime-reference' &&
+      prepared.diagnostics.mode === 'host-identity' &&
       env.HOME === runtimeRoot &&
       env.XDG_CONFIG_HOME === layout.configHome &&
       env.XDG_DATA_HOME === layout.dataHome &&
       env.XDG_STATE_HOME === layout.stateHome &&
-      materialized.runtimeConfigDir === layout.configDir &&
-      materialized.runtimeDataDir === layout.dataDir &&
-      (prepared.writeRoots ?? []).length === 0
+      env.XDG_CACHE_HOME === layout.cacheHome &&
+      providerRuntimeWriteRoots(prepared).includes(hostDataDir) &&
+      listRuntimeFiles(runtimeRoot).length === 0
   }
 
   log('static', 'report', report)
 
-  if (!report.runtimeIsolated) throw new Error('OpenCode runtime-reference isolation check failed')
+  if (!report.runtimeIsolated) throw new Error('OpenCode host-identity isolation check failed')
 
   return report
 }
 
 async function runServerProbe(runtimeRoot: string): Promise<unknown> {
-  const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
-  const env = buildMergedEnv(prepared.envPatch)
+  const prepared = prepareProviderRuntimeForTest('opencode', runtimeRoot)
+  const env = buildMergedEnv(prepared.environment)
   const driver = getProviderDriverForTest('opencode')
   const installation = await driver.discover({
     settings: executablePath
@@ -221,8 +221,6 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderAuthForTest('opencode', runtimeRoot)
-
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {
       report.static = await runStatic(runtimeRoot)
@@ -264,8 +262,6 @@ async function main(): Promise<void> {
     }
     console.log(`\nReport: ${reportPath}`)
     console.log(`Runtime files: ${(report.runtimeJson as string[]).join(', ') || '(none)'}`)
-
-    prepared.cleanupPlan()
 
     const failures = report.failures as string[]
     const serverSkipped =
