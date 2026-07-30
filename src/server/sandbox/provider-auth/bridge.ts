@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, lstatSync, mkdirSync } from 'fs'
 import { dirname, isAbsolute, join, normalize, parse, relative, sep } from 'path'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
 import type { SupportedCoreCode } from '../../conversation/cores'
@@ -6,6 +6,7 @@ import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../.
 import {
   resolveClaudeHostConfigDir,
   resolveClaudeInstallDirs,
+  resolveClaudeSettingsAuthEnv,
   resolveCodexInstallDirs,
   resolveCursorAgentInstallDirs,
   resolveCursorAgentMarkerWriteDirs,
@@ -321,12 +322,24 @@ export function prepareClaudeRuntimeProfile(
   ]
   const identityPaths = identityCandidates.filter((path) => existsSync(path))
   const keychainRoots = resolveDarwinKeychainReadRoots(hostProfile, context.platform)
+  // Whitelisted settings.json env (ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN), plus
+  // settingSources=['user'] so the SDK can also load host settings auth itself.
+  const settingsAuthEnv = resolveClaudeSettingsAuthEnv(hostProfile)
+  const hasSettingsAuthEnv = Object.keys(settingsAuthEnv).some(
+    (key) =>
+      key === 'ANTHROPIC_API_KEY' ||
+      key === 'ANTHROPIC_AUTH_TOKEN' ||
+      key === 'CLAUDE_CODE_OAUTH_TOKEN'
+  )
   const authMaterialPresent =
-    identityPaths.length > 0 || (context.platform === 'darwin' && keychainRoots.length > 0)
+    hasSettingsAuthEnv ||
+    identityPaths.length > 0 ||
+    (context.platform === 'darwin' && keychainRoots.length > 0)
   const environment: Record<string, string> = {
     ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
     HOME: hostProfile.home,
-    CLAUDE_CONFIG_DIR: claudeDir
+    CLAUDE_CONFIG_DIR: claudeDir,
+    ...settingsAuthEnv
   }
   if (context.platform === 'win32') {
     environment.USERPROFILE = hostProfile.home
@@ -345,7 +358,17 @@ export function prepareClaudeRuntimeProfile(
         'Claude native login refresh and resumable session storage'
       ),
       ...identityPaths
-        .filter((path) => !path.startsWith(claudeDir))
+        .filter((path) => {
+          if (path === claudeDir) return false
+          if (path.startsWith(`${claudeDir}${sep}`)) return false
+          // Sandbox write roots must be directories; file identity (e.g. ~/.claude.json)
+          // is covered by settings.env injection + ~/.claude RW, not a file write root.
+          try {
+            return lstatSync(path).isDirectory()
+          } catch {
+            return false
+          }
+        })
         .map((path) =>
           grant(path, 'read-write', 'identity', 'Claude legacy host identity metadata')
         ),
@@ -358,12 +381,16 @@ export function prepareClaudeRuntimeProfile(
       provider: 'claude-code',
       mode: 'host-identity',
       authMaterialPresent,
-      primaryIdentityPath: identityPaths[0] ?? claudeDir,
+      primaryIdentityPath: hasSettingsAuthEnv
+        ? join(claudeDir, 'settings.json')
+        : (identityPaths[0] ?? claudeDir),
       warnings: [
-        authMaterialPresent
-          ? 'Claude uses its native host identity namespace directly; no credential is copied into runtime.'
-          : 'Claude host login identity was not detected; run `claude auth login`.',
-        'settingSources=[] still blocks host settings, hooks, Skills, and project policy from being loaded by the SDK.'
+        hasSettingsAuthEnv
+          ? 'Claude host settings.json env (ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN whitelist) is injected for outer-sandbox turns.'
+          : authMaterialPresent
+            ? 'Claude uses its native host identity namespace directly; no credential is copied into runtime.'
+            : 'Claude host login identity was not detected; run `claude auth login` or set ANTHROPIC_* in ~/.claude/settings.json env.',
+        "Outer-sandbox turns use settingSources=['user'] (not project/local) so host settings auth can load; project policy stays out."
       ]
     }
   })

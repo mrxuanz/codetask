@@ -153,17 +153,77 @@ export function resolveClaudeProjectConfigDir(workspaceRoot: string): string {
 
 const CLAUDE_SETTINGS_FILENAMES = ['settings.json', 'settings.local.json'] as const
 
+/** Profile / toolchain keys must never be overridden from Claude settings.env. */
+const CLAUDE_SETTINGS_BLOCKED_ENV_KEYS = new Set([
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'CURL_CA_BUNDLE',
+  'REQUESTS_CA_BUNDLE',
+  'CLAUDE_CONFIG_DIR'
+])
+
+const CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES = ['CODETASK_', 'ELECTRON_', 'CHROME_', 'CRASHPAD_'] as const
+
+/**
+ * Whitelist for Claude settings.json `env` injection into outer-sandbox turns.
+ * Only Anthropic auth / endpoint / model keys — never PATH/HOME or CodeTask controls.
+ */
+export function isAllowedClaudeSettingsEnvKey(key: string): boolean {
+  const upper = key.toUpperCase()
+  if (CLAUDE_SETTINGS_BLOCKED_ENV_KEYS.has(upper)) return false
+  if (CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))) return false
+  return upper.startsWith('ANTHROPIC_') || upper === 'CLAUDE_CODE_OAUTH_TOKEN'
+}
+
+export function readClaudeSettingsEnv(settingsPath: string): Record<string, string> {
+  if (!existsSync(settingsPath)) return {}
+  try {
+    const parsed = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
+      env?: Record<string, unknown>
+    }
+    const env = parsed.env
+    if (!env || typeof env !== 'object') return {}
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(env)) {
+      if (typeof value !== 'string' || !value.trim()) continue
+      if (!isAllowedClaudeSettingsEnvKey(key)) continue
+      out[key] = value.trim()
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 function snapshotClaudeSettingsInDir(configDir: string): {
   configDir: string
   sources: string[]
+  env: Record<string, string>
 } {
   const sources: string[] = []
+  const env: Record<string, string> = {}
   for (const name of CLAUDE_SETTINGS_FILENAMES) {
     const path = join(configDir, name)
     if (!existsSync(path)) continue
     sources.push(path)
+    Object.assign(env, readClaudeSettingsEnv(path))
   }
-  return { configDir, sources }
+  return { configDir, sources, env }
 }
 
 export interface ClaudeHostSettingsSnapshot {
@@ -171,6 +231,8 @@ export interface ClaudeHostSettingsSnapshot {
   configDir: string
   settingsPath: string
   sources: string[]
+  /** Whitelisted auth/model env extracted from settings.json (never secrets from Keychain). */
+  env: Record<string, string>
 }
 
 export function snapshotClaudeHostSettings(
@@ -182,13 +244,22 @@ export function snapshotClaudeHostSettings(
     present: snapshot.sources.length > 0,
     configDir,
     settingsPath: join(configDir, 'settings.json'),
-    sources: snapshot.sources
+    sources: snapshot.sources,
+    env: snapshot.env
   }
+}
+
+/** Merge host user settings.env whitelist for outer-sandbox Claude turns. */
+export function resolveClaudeSettingsAuthEnv(
+  profile = resolveHostProfilePaths()
+): Record<string, string> {
+  return { ...snapshotClaudeHostSettings(profile).env }
 }
 
 export function snapshotClaudeProjectSettings(workspaceRoot: string): {
   configDir: string
   sources: string[]
+  env: Record<string, string>
 } {
   return snapshotClaudeSettingsInDir(resolveClaudeProjectConfigDir(workspaceRoot))
 }

@@ -36,7 +36,6 @@ import {
 } from './history'
 import { insertMessage, listMessages, getMessage } from './messages'
 import { resolveCoreModel } from './models'
-import { buildConversationSystemPrompt, buildDraftTurnSystemPrompt } from './prompts'
 import { buildWizardContextSnapshot, buildWizardPhasePromptSection } from '../wizard/prompts'
 import { getDesignSessionRow } from '../design-session/service'
 import { getThreadPhaseRuntime, resolveWizardPhase } from '../wizard/phase'
@@ -62,12 +61,17 @@ import { getAppContext } from '../bootstrap'
 import { assertConcurrentTurnCapacity } from '../middleware/http-limits'
 import { maybeSeedThreadTitleFromFirstMessage } from './thread-title'
 import { createTurnError } from '../../shared/turn-errors.ts'
+import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
 import { providerSupportsCapability } from '../agent-runtime/capabilities'
-import { resolveConversationPromptBody } from '../settings/prompts'
 import {
-  appendBusinessSkillSnapshot,
-  resolveBusinessSkillSnapshot
-} from '../settings/business-skills'
+  releaseChatWorkspaceLease,
+  resolveChatAccess,
+  resolveChatSystemPrompt,
+  resolveCreateTaskAccess,
+  resolveCreateTaskSystemPrompt,
+  type ConversationWorkspaceLease
+} from './turn-policy'
+import { enterWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
 
 export function initConversationService(_options: { dataDir: string }): void {
   getAppContext()
@@ -130,6 +134,11 @@ export interface PreparedConversationTurn {
   conversationMode: ConversationMode
   wizardPhase: WizardPhase
   workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode
+  /** Resolved by chat vs create-task turn-policy — never hard-coded in the shared runner. */
+  capabilityProfile: AgentCapabilityProfile
+  workspaceLease: ConversationWorkspaceLease | null
+  /** Lease owner id for chat exclusive-write (usually the conversation turn id). */
+  turnId: string
 }
 
 export async function prepareConversationTurn(input: {
@@ -140,6 +149,7 @@ export async function prepareConversationTurn(input: {
   turnId?: string
 }): Promise<PreparedConversationTurn> {
   const { username, threadId, requestedCreateTaskMode, requestedDraft } = input
+  const turnId = input.turnId?.trim() || `chat-${threadId}`
 
   const resolved = await loadThreadProject(username, threadId)
   let thread = resolved.thread
@@ -163,21 +173,14 @@ export async function prepareConversationTurn(input: {
   const wizardPhase = resolveWizardPhase(threadRow)
   thread = await reconcileStaleThreadRuntime(username, thread, isThreadInflight)
   reserveThread(thread, username)
-  const workspaceAccess: import('../../shared/workspace-access.ts').WorkspaceAccessMode =
-    workspacePath ? 'live-read' : 'metadata'
 
+  let workspaceLease: ConversationWorkspaceLease | null = null
   try {
-    // Conversation, requirements collection, and draft generation are hard read-only.
-    // Only task execution and verification may enter a task sandbox or obtain write access.
-    const requiredCapability = createTaskMode
-      ? ('create-task-read' as const)
-      : ('chat-read' as const)
-    if (!providerSupportsCapability(thread.coreCode as SupportedCoreCode, requiredCapability)) {
-      throw AppError.badRequest(
-        `Selected CLI (${thread.coreCode}) cannot enforce ${requiredCapability}`,
-        'provider.capability_unsupported'
-      )
-    }
+    // Module policies own access: chat may take exclusive-write; create-task stays read-only.
+    const access = createTaskMode
+      ? resolveCreateTaskAccess({ workspacePath, coreCode: thread.coreCode })
+      : resolveChatAccess({ workspacePath, turnId, coreCode: thread.coreCode })
+    workspaceLease = access.workspaceLease
 
     return {
       username,
@@ -189,11 +192,19 @@ export async function prepareConversationTurn(input: {
       createTaskMode,
       conversationMode,
       wizardPhase,
-      workspaceAccess
+      workspaceAccess: access.workspaceAccess,
+      capabilityProfile: access.capabilityProfile,
+      workspaceLease,
+      turnId
     }
   } catch (error) {
+    releaseChatWorkspaceLease(workspaceLease)
     releaseThread(threadId)
-    throw error
+    if (error instanceof AppError) throw error
+    throw AppError.badRequest(
+      error instanceof Error ? error.message : String(error),
+      'provider.capability_unsupported'
+    )
   }
 }
 
@@ -360,18 +371,34 @@ export async function* executePreparedTurn(
     signal?: AbortSignal
   }
 ): AsyncGenerator<ChatSseEvent> {
-  const trimmed = message.trim()
-  if (!trimmed) {
-    throw AppError.badRequest('Message cannot be empty', 'message.empty')
-  }
-
-  const { username, threadId, workspacePath, threadKind, createTaskMode, conversationMode } =
-    prepared
+  const {
+    username,
+    threadId,
+    workspacePath,
+    threadKind,
+    createTaskMode,
+    conversationMode,
+    capabilityProfile,
+    workspaceLease
+  } = prepared
   let thread = prepared.thread
   const threadRow = prepared.threadRow
   const wizardPhase = prepared.wizardPhase
 
+  if (workspaceLease) {
+    enterWorkspaceLeaseContext({
+      leaseId: workspaceLease.leaseId,
+      ownerKind: workspaceLease.ownerKind,
+      ownerId: workspaceLease.ownerId
+    })
+  }
+
   try {
+    const trimmed = message.trim()
+    if (!trimmed) {
+      throw AppError.badRequest('Message cannot be empty', 'message.empty')
+    }
+
     const core = await ensureCoreAvailable(thread.coreCode).catch((error: Error) => {
       throw AppError.badRequest(error.message)
     })
@@ -440,9 +467,6 @@ export async function* executePreparedTurn(
     )
 
     const conversationKind = createTaskMode ? 'create_task' : 'chat'
-    const capabilityProfile = createTaskMode
-      ? ('create-task-read' as const)
-      : ('chat-read' as const)
     const runtimeRoot = ensureConversationRuntimeRoot(
       getAppContext().dataDir,
       thread.id,
@@ -499,23 +523,14 @@ export async function* executePreparedTurn(
       }
     }
 
-    const basePrompt = buildConversationSystemPrompt('CodeTask Conversation', {
-      mode: createTaskMode ? 'create_task' : 'chat',
-      mcpToolsAvailable: Boolean(mcpUrl),
-      customBody: createTaskMode ? null : resolveConversationPromptBody()
-    })
-    const phasePrompt = wizardStage ? buildWizardPhasePromptSection(wizardStage) : ''
-    const systemPromptBase =
-      turnRole === 'draft' ? buildDraftTurnSystemPrompt(basePrompt) : basePrompt
-    const workflowPrompt = createTaskMode
-      ? phasePrompt
-        ? `${systemPromptBase}\n\n${phasePrompt}`
-        : systemPromptBase
-      : systemPromptBase
-    const systemPrompt = appendBusinessSkillSnapshot(
-      workflowPrompt,
-      resolveBusinessSkillSnapshot(turnRole === 'draft' ? 'draft' : 'conversation')
-    )
+    // Prompt policy is module-owned: chat defaults empty; create-task keeps wizard + skills.
+    const systemPrompt = createTaskMode
+      ? resolveCreateTaskSystemPrompt({
+          turnRole,
+          mcpToolsAvailable: Boolean(mcpUrl),
+          phasePromptSection: wizardStage ? buildWizardPhasePromptSection(wizardStage) : ''
+        })
+      : resolveChatSystemPrompt()
 
     let draftRevision: number | null = null
     let planRevision: number | null = null
@@ -626,7 +641,16 @@ export async function* executePreparedTurn(
         readRoots: attachmentReadRoots.length > 0 ? attachmentReadRoots : undefined,
         providerRuntimeScopeId,
         signal: options?.signal,
-        workspaceAccess: prepared.workspaceAccess
+        workspaceAccess: prepared.workspaceAccess,
+        ...(workspaceLease
+          ? {
+              workspaceLease: {
+                leaseId: workspaceLease.leaseId,
+                ownerKind: workspaceLease.ownerKind,
+                ownerId: workspaceLease.ownerId
+              }
+            }
+          : {})
       })) {
         while (draftEvents.length > 0) {
           const draftEvent = draftEvents.shift()
@@ -748,6 +772,7 @@ export async function* executePreparedTurn(
     }
     yield { event: 'error', data: { message: errMessage, error: turnError } }
   } finally {
+    releaseChatWorkspaceLease(workspaceLease)
     releaseThread(threadId)
   }
 }
