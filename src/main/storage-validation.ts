@@ -17,7 +17,6 @@ import {
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'path'
 import { homedir } from 'os'
 import Database from 'better-sqlite3'
-import { readDataRootMarker } from './storage-locator'
 import { dataPaths } from '../server/data-paths'
 
 const DEFAULT_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
@@ -113,7 +112,7 @@ function testAtomicWrites(target: string): void {
 export function validateStorageTarget(input: {
   path: string
   forbiddenRoots?: readonly string[]
-  expectedInstallationId?: string
+  allowExistingData?: boolean
   minFreeBytes?: number
   allowLowSpace?: boolean
   nonceRepository?: StorageValidationNonceRepository
@@ -195,18 +194,7 @@ export function validateStorageTarget(input: {
         issue: 'path_not_directory'
       }
     }
-    const marker = readDataRootMarker(canonicalPath)
-    if (marker) {
-      if (!input.expectedInstallationId || marker.installationId !== input.expectedInstallationId) {
-        return {
-          ok: false,
-          canonicalPath,
-          availableBytes: null,
-          warnings: [],
-          issue: 'path_owned_by_other_installation'
-        }
-      }
-    } else if (!directoryIsEmpty(canonicalPath)) {
+    if (!input.allowExistingData && !directoryIsEmpty(canonicalPath)) {
       return {
         ok: false,
         canonicalPath,
@@ -252,22 +240,11 @@ export function validateExistingStorageRoot(input: {
   path: string
   forbiddenRoots?: readonly string[]
   nonceRepository?: StorageValidationNonceRepository
-}): StorageTargetValidation & { installationId?: string } {
-  const marker = readDataRootMarker(input.path)
-  if (!marker) {
-    return {
-      ok: false,
-      canonicalPath: resolve(input.path),
-      availableBytes: null,
-      warnings: [],
-      issue: 'storage_data_root_marker_missing_or_invalid'
-    }
-  }
-
+}): StorageTargetValidation {
   const validation = validateStorageTarget({
     path: input.path,
     forbiddenRoots: input.forbiddenRoots,
-    expectedInstallationId: marker.installationId,
+    allowExistingData: true,
     minFreeBytes: 0
   })
   if (!validation.ok) return validation
@@ -293,7 +270,6 @@ export function validateExistingStorageRoot(input: {
   const nonce = input.nonceRepository?.issue(validation.canonicalPath)
   return {
     ...validation,
-    installationId: marker.installationId,
     ...(nonce ? { nonce } : {})
   }
 }

@@ -3,14 +3,16 @@ import type { ExecutionContext, Hono } from 'hono'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { readSchemaGeneration } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
-import { mkdirSync } from 'fs'
-import { ensureResolvedDataRoot, type DataDirResolution } from './storage-locator'
+import type { DataDirResolution } from './storage-selection'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
 import type { CliOptions } from './cli'
-import { generateSetupToken } from '../server/auth/setup-token'
-import { clearPublishedRunningService, publishRunningService } from './service-discovery'
-import type { AppSecretProvider } from '../server/auth/secret'
+import {
+  generateSetupToken,
+  createProcessSetupGateSecret,
+  installProcessSetupGate,
+  clearProcessSetupGate
+} from '../server/auth/setup-token'
 
 export interface ServerInfo {
   host: string
@@ -32,14 +34,9 @@ export interface AppServerPlatform {
   rendererDevUrl?: string
   staticDir?: string
   appRoot: string
-  resolveDataDirSelection(input: {
-    explicitDataDir?: string
-    mode: CliOptions['mode']
-  }): DataDirResolution
-  loadAuthSecret(input: {
-    mode: CliOptions['mode']
-    bootstrapSecretPath: string
-  }): Promise<{ value: string; provider: AppSecretProvider }>
+  shellChildEnvironment?: Record<string, string>
+  resolveDataDirSelection(): DataDirResolution
+  persistDataDirSelection(dataDir: string): void | Promise<void>
 }
 
 let activeServer: ServerType | null = null
@@ -104,27 +101,16 @@ async function createReadyApp(
   platform: AppServerPlatform,
   http: { rendererDevUrl?: string; staticDir?: string }
 ): Promise<{ app: Hono; dataDir: string; usesLegacyComposition: boolean }> {
-  const dataDir = ensureResolvedDataRoot(storage)
-  process.env.CODETASK_DATA_DIR = dataDir
-
-  const authSecret = await platform.loadAuthSecret({
-    mode: cli.mode,
-    bootstrapSecretPath: storage.bootstrap.authSecretFile
-  })
-  console.log(`[security] auth secret provider: ${authSecret.provider.describeStorage().kind}`)
+  const dataDir = storage.dataDir
 
   const ctx = bootstrapRuntime({
     dataDir,
     mode: cli.mode,
-    authSecret: authSecret.value,
-    mcpSecretPath: storage.bootstrap.mcpSecretFile,
+    shellChildEnvironment: platform.shellChildEnvironment,
     storage: {
-      bootstrapRoot: storage.bootstrap.root,
-      source: storage.source,
-      managed: storage.managed
+      source: storage.source
     }
   })
-  process.env.CODETASK_MODE = cli.mode
 
   const schemaRead = readSchemaGeneration(ctx.db)
   const usesLegacyComposition = schemaRead !== 'v3_authoritative'
@@ -132,8 +118,7 @@ async function createReadyApp(
   await ensureRuntimeReady(ctx)
 
   if (cli.mode === 'server') {
-    const { getBootstrap } = await import('../server/auth/service')
-    const state = await getBootstrap()
+    const state = await ctx.security.auth.bootstrap()
     if (!state.initialized) {
       announceSetupToken(ctx.security.authSecret)
     }
@@ -180,52 +165,37 @@ export async function startAppServer(
     staticDir: platform.isDev ? undefined : platform.staticDir
   }
 
-  const storage = platform.resolveDataDirSelection({
-    explicitDataDir: cli.dataDir,
-    mode: cli.mode
-  })
+  const storage = platform.resolveDataDirSelection()
   let activeApp: Hono
   let boundPort = cli.port
   let bindChanged = false
 
   if (storage.phase !== 'ready') {
-    // Ensure the default candidate exists so browse/select works out of the box.
-    if (storage.phase === 'selection_required' && storage.dataDir) {
-      try {
-        mkdirSync(storage.dataDir, { recursive: true })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.warn(`[storage] failed to create default candidate ${storage.dataDir}: ${message}`)
-      }
-    }
-
-    const setupTokenRequired = cli.mode === 'server'
-    if (setupTokenRequired) {
-      const earlySecret = await platform.loadAuthSecret({
-        mode: cli.mode,
-        bootstrapSecretPath: storage.bootstrap.authSecretFile
-      })
-      announceSetupToken(earlySecret.value)
-    }
-
     let promoteInflight: Promise<void> | null = null
-    let publishedInfo: ServerInfo | null = null
+    // Server mode: print the setup token immediately (process gate), before SQLite exists.
+    // The same token remains valid after storage activation via validateSetupTokenWithGate.
+    if (cli.mode === 'server') {
+      const gate = createProcessSetupGateSecret()
+      installProcessSetupGate(gate)
+      announceSetupToken(gate)
+    }
     const setupApp = createSetupShell({
       storage,
       isDev: platform.isDev,
       rendererDevUrl,
       staticDir: http.staticDir,
       forbiddenRoots: [platform.appRoot, process.cwd()],
-      setupTokenRequired,
+      setupTokenRequired: cli.mode === 'server',
+      persistDataDir: platform.persistDataDirSelection,
       activateStorage: async () => {
         if (promoteInflight) {
           await promoteInflight
           return
         }
         promoteInflight = (async () => {
-          const resolved = platform.resolveDataDirSelection({ mode: cli.mode })
+          const resolved = platform.resolveDataDirSelection()
           if (resolved.phase !== 'ready') {
-            throw new Error(resolved.issue ?? 'Storage locator is not ready after initialization')
+            throw new Error(resolved.issue ?? 'Storage is not ready after initialization')
           }
           const { app, dataDir, usesLegacyComposition } = await createReadyApp(
             cli,
@@ -235,9 +205,6 @@ export async function startAppServer(
           )
           activeApp = app
           initConversationMcpBackend(boundPort)
-          if (cli.mode === 'server' && publishedInfo) {
-            publishRunningService(resolved.bootstrap, { ...publishedInfo, mode: 'server' }, dataDir)
-          }
           console.log(
             `[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`
           )
@@ -286,12 +253,7 @@ export async function startAppServer(
       portChanged: bindChanged,
       mode: cli.mode
     }
-    if (cli.mode === 'server') {
-      publishedInfo = info
-      publishRunningService(storage.bootstrap, { ...info, mode: 'server' })
-    }
     console.log(`[server] ${cli.mode} storage setup listening on ${info.url}`)
-    console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
     console.log(`[storage] default candidate: ${storage.dataDir}`)
     if (cli.mode === 'server') {
       console.log(`[server] open in browser to choose data directory: ${info.url}`)
@@ -344,12 +306,7 @@ export async function startAppServer(
     mode: cli.mode
   }
 
-  if (cli.mode === 'server') {
-    publishRunningService(storage.bootstrap, { ...info, mode: 'server' }, dataDir)
-  }
-
   console.log(`[server] ${cli.mode} mode listening on ${info.url}`)
-  console.log(`[storage] bootstrap root: ${storage.bootstrap.root}`)
   console.log(`[storage] data root: ${dataDir} (source=${storage.source})`)
   if (cli.mode === 'server' && cli.host === '0.0.0.0') {
     console.log(`[server] External access: http://<your-ip>:${boundPort}`)
@@ -361,12 +318,12 @@ export async function startAppServer(
 }
 
 export async function stopAppServer(): Promise<void> {
+  setupTokenAnnounced = false
+  clearProcessSetupGate()
   if (activeServer) {
     activeServer.close()
     activeServer = null
   }
-  clearPublishedRunningService()
-
   try {
     const { stopRetentionJanitor } = await import('../server/retention/lifecycle')
     stopRetentionJanitor()

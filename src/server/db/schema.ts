@@ -16,43 +16,88 @@ export const appSettings = sqliteTable('app_settings', {
   updatedAt: integer('updated_at').notNull()
 })
 
-export const authState = sqliteTable('auth_state', {
-  id: integer('id').primaryKey(),
-  username: text('username').notNull(),
-  passwordHash: text('password_hash').notNull(),
-  sessionToken: text('session_token'),
-  sessionExpiresAt: integer('session_expires_at'),
-  createdAt: integer('created_at').notNull()
+export const authSecret = sqliteTable('auth_secret', {
+  singletonKey: integer('singleton_key').primaryKey(),
+  secretHex: text('secret_hex').notNull(),
+  createdAtMs: integer('created_at_ms').notNull()
 })
 
-export const authGuardState = sqliteTable('auth_guard_state', {
-  id: integer('id').primaryKey(),
-  failCount: integer('fail_count').notNull().default(0),
-  lastFailedAt: integer('last_failed_at'),
-  lockedUntil: integer('locked_until'),
-  captchaRequired: integer('captcha_required').notNull().default(0),
-  updatedAt: integer('updated_at').notNull()
-})
-
-export const authRateBucket = sqliteTable(
-  'auth_rate_bucket',
+export const authUsers = sqliteTable(
+  'auth_users',
   {
-    bucketKey: text('bucket_key').notNull(),
-    bucketStart: integer('bucket_start').notNull(),
-    failCount: integer('fail_count').notNull().default(0),
-    lastSeenAt: integer('last_seen_at').notNull()
+    id: text('id').primaryKey(),
+    singletonKey: integer('singleton_key').notNull(),
+    username: text('username').notNull(),
+    normalizedUsername: text('normalized_username').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    passwordVersion: integer('password_version').notNull().default(1),
+    createdAtMs: integer('created_at_ms').notNull(),
+    updatedAtMs: integer('updated_at_ms').notNull(),
+    disabledAtMs: integer('disabled_at_ms')
   },
-  (table) => [primaryKey({ columns: [table.bucketKey, table.bucketStart] })]
+  (table) => [
+    uniqueIndex('idx_auth_users_singleton').on(table.singletonKey),
+    uniqueIndex('idx_auth_users_normalized_username').on(table.normalizedUsername)
+  ]
 )
 
-export const captchaChallenge = sqliteTable('captcha_challenge', {
-  id: text('id').primaryKey(),
-  scopeKey: text('scope_key').notNull(),
-  answerHash: text('answer_hash').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-  attempts: integer('attempts').notNull().default(0),
-  usedAt: integer('used_at'),
-  createdAt: integer('created_at').notNull()
+export const authSessions = sqliteTable(
+  'auth_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    tokenDigest: text('token_digest').notNull(),
+    createdAtMs: integer('created_at_ms').notNull(),
+    lastSeenAtMs: integer('last_seen_at_ms').notNull(),
+    expiresAtMs: integer('expires_at_ms').notNull(),
+    revokedAtMs: integer('revoked_at_ms'),
+    revokeReason: text('revoke_reason')
+  },
+  (table) => [
+    uniqueIndex('idx_auth_sessions_token_digest').on(table.tokenDigest),
+    index('idx_auth_sessions_user_active').on(table.userId, table.revokedAtMs, table.expiresAtMs)
+  ]
+)
+
+export const authChallenges = sqliteTable(
+  'auth_challenges',
+  {
+    id: text('id').primaryKey(),
+    scopeKey: text('scope_key').notNull(),
+    answerDigest: text('answer_digest').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull(),
+    expiresAtMs: integer('expires_at_ms').notNull(),
+    consumedAtMs: integer('consumed_at_ms'),
+    createdAtMs: integer('created_at_ms').notNull()
+  },
+  (table) => [
+    index('idx_auth_challenges_scope').on(table.scopeKey),
+    index('idx_auth_challenges_expiry').on(table.expiresAtMs)
+  ]
+)
+
+export const authThrottles = sqliteTable('auth_throttles', {
+  key: text('key').primaryKey(),
+  windowStartedAtMs: integer('window_started_at_ms').notNull(),
+  requestCount: integer('request_count').notNull().default(0),
+  failureCount: integer('failure_count').notNull().default(0),
+  captchaRequired: integer('captcha_required').notNull().default(0),
+  lockedUntilMs: integer('locked_until_ms'),
+  updatedAtMs: integer('updated_at_ms').notNull()
+})
+
+export const authAudit = sqliteTable('auth_audit', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  eventType: text('event_type').notNull(),
+  userId: text('user_id'),
+  subjectDigest: text('subject_digest'),
+  scopeDigest: text('scope_digest'),
+  success: integer('success').notNull(),
+  reasonCode: text('reason_code'),
+  createdAtMs: integer('created_at_ms').notNull()
 })
 
 export const projects = sqliteTable(
@@ -156,6 +201,7 @@ export const threadJobs = sqliteTable(
     planContextsTotal: integer('plan_contexts_total').notNull().default(0),
     planMessage: text('plan_message'),
     planCountsJson: text('plan_counts_json').notNull().default('{}'),
+    executionProfileJson: text('execution_profile_json'),
     taskPhase: text('task_phase').notNull().default('idle'),
     taskStatus: text('task_status').notNull().default('pending'),
     taskCurrentIndex: integer('task_current_index').notNull().default(0),
@@ -507,7 +553,8 @@ export const deletionRequests = sqliteTable('deletion_requests', {
   updatedAt: integer('updated_at').notNull()
 })
 
-export type AuthState = typeof authState.$inferSelect
+export type AuthUser = typeof authUsers.$inferSelect
+export type AuthSession = typeof authSessions.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Thread = typeof threads.$inferSelect
 export type ThreadMessage = typeof threadMessages.$inferSelect

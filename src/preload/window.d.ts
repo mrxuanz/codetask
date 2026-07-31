@@ -14,8 +14,6 @@ declare global {
     electron: ElectronAPI
     api?: {
       getServerInfo: () => Promise<ServerInfo | null>
-      selectDataDirectory: () => Promise<string | null>
-      relaunchApp: () => Promise<void>
     }
   }
 }

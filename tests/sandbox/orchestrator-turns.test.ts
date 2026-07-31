@@ -15,6 +15,11 @@ import {
   SandboxSupervisorManager
 } from '../../src/server/sandbox/supervisor-manager'
 import { SandboxError } from '../../src/server/sandbox/types'
+import {
+  configureRuntimeFeatures,
+  getRuntimeFeatures,
+  resetRuntimeFeatures
+} from '../../src/server/config/runtime-features'
 
 test('already-aborted supervisor turn fails before starting a provider session', async () => {
   const controller = new AbortController()
@@ -26,7 +31,6 @@ test('already-aborted supervisor turn fails before starting a provider session',
         role: 'planner',
         coreCode: 'cursor',
         workspaceRoot: '/tmp',
-        runtimeRoot: '/tmp',
         prompt: 'x',
         signal: controller.signal,
         capabilityProfile: 'planner-read'
@@ -62,7 +66,6 @@ test('supervisor client publishes completed only after worker cleanup exits succ
       role: 'planner',
       coreCode: 'cursor',
       workspaceRoot: '/tmp',
-      runtimeRoot: '/tmp',
       prompt: 'x',
       capabilityProfile: 'planner-read'
     })
@@ -95,8 +98,11 @@ test('supervisor client publishes completed only after worker cleanup exits succ
 })
 
 test('aborted sandbox turn unregisters active job turn in finally', async () => {
-  const previous = process.env.CODETASK_SANDBOX_SUPERVISOR
-  process.env.CODETASK_SANDBOX_SUPERVISOR = '0'
+  const previous = getRuntimeFeatures()
+  configureRuntimeFeatures({
+    sandbox: { ...previous.sandbox, supervisorEnabled: false },
+    debug: previous.debug
+  })
   resetActiveJobTurnsForTests()
   const jobId = 'job-abort-unregister'
   const controller = new AbortController()
@@ -108,7 +114,6 @@ test('aborted sandbox turn unregisters active job turn in finally', async () => 
         role: 'planner',
         coreCode: 'cursor',
         workspaceRoot: '/tmp',
-        runtimeRoot: '/tmp',
         prompt: 'x',
         jobId,
         signal: controller.signal,
@@ -119,9 +124,9 @@ test('aborted sandbox turn unregisters active job turn in finally', async () => 
     })
     assert.equal(hasActiveJobSandboxTurns(jobId), false)
   } finally {
+    resetRuntimeFeatures()
+    configureRuntimeFeatures(previous)
     resetActiveJobTurnsForTests()
-    if (previous === undefined) delete process.env.CODETASK_SANDBOX_SUPERVISOR
-    else process.env.CODETASK_SANDBOX_SUPERVISOR = previous
   }
 })
 

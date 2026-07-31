@@ -1,7 +1,9 @@
+import { getRuntimeFeatures } from '../config/runtime-features'
+
 let seq = 0
 
 export function isMemoryDebugEnabled(): boolean {
-  return process.env.CODETASK_DEBUG_MEMORY === '1'
+  return getRuntimeFeatures().debug.memory
 }
 
 export function memoryDebug(step: string, detail?: Record<string, unknown>): void {

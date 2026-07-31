@@ -1,12 +1,16 @@
-import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { app } from 'electron'
 import { dirname, join, resolve } from 'path'
-import { homedir } from 'os'
-import type { AppMode } from './cli'
-import { resolveStorageLocation, type DataDirResolution } from './storage-locator'
+import { dataDirFromDbPath, type DataDirResolution } from './storage-selection'
+import {
+  ensureInitializationConfig,
+  resolveInitializationConfigPath,
+  resolveInitializationDefaultDataDir,
+  writeInitializationConfig
+} from './initialization-config'
 
 /**
- * Resolve the project root that should own the development `data/` directory.
+ * Resolve the project root that owns the development initialization config and default candidate.
  */
 function resolveDevAppRoot(): string {
   // electron-vite may place the main entry under out/main/ or out/main/chunks/.
@@ -36,59 +40,40 @@ function isAppPackageJson(packageJsonPath: string): boolean {
   }
 }
 
-export type { DataDirResolution, DataDirSource } from './storage-locator'
+export type { DataDirResolution, DataDirSource } from './storage-selection'
 
-/**
- * Desktop and server mode are two entry points into the same installation, so they must share
- * bootstrap metadata (storage locator and secrets) instead of deriving it from the launch mode.
- */
-export function resolveBootstrapRoot(_mode: AppMode, override?: string): string {
-  const configured = override?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
-  if (configured) return resolve(configured)
-  if (process.platform === 'win32') {
-    return join(process.env.APPDATA?.trim() || app.getPath('userData'), 'CodeTask')
-  }
-  return join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), '.config'), 'codetask')
-}
-
-export function resolveDefaultDataDir(): string {
-  // Packaged applications may live in read-only AppImage mounts, /opt, Program Files, or a signed
-  // macOS bundle. Electron userData is writable, stable across upgrades, and scoped per OS user.
-  if (app.isPackaged) return join(app.getPath('userData'), 'data')
-  return join(resolveDevAppRoot(), 'data')
-}
-
-export function resolveDataDirSelection(input: {
-  explicitDataDir?: string
-  mode: AppMode
-  bootstrapRoot?: string
-  defaultDataDir?: string
-}): DataDirResolution {
-  const bootstrapOverridden = Boolean(
-    input.bootstrapRoot?.trim() || process.env.CODETASK_BOOTSTRAP_ROOT?.trim()
-  )
-  const bootstrapRoot = resolveBootstrapRoot(input.mode, input.bootstrapRoot)
-  return resolveStorageLocation({
-    explicitDataDir: input.explicitDataDir,
-    envDataDir: process.env.CODETASK_DATA_DIR,
-    mode: input.mode,
-    bootstrapRoot,
-    // Before bootstrap roots were unified, desktop mode stored these files under Electron's
-    // userData directory. Adopt that valid legacy installation once, without overriding an
-    // explicit operator-selected bootstrap root.
-    legacyBootstrapRoots: bootstrapOverridden ? [] : [app.getPath('userData')],
-    defaultDataDir: input.defaultDataDir ?? resolveDefaultDataDir()
+export function resolveDataInitializationConfigPath(): string {
+  return resolveInitializationConfigPath({
+    isPackaged: app.isPackaged,
+    executablePath: app.getPath('exe'),
+    developmentRoot: resolveDevAppRoot()
   })
 }
 
-export function resolveDataDir(explicitDataDir?: string): string {
-  const configured = explicitDataDir?.trim() || process.env.CODETASK_DATA_DIR?.trim()
-  if (configured) return resolve(configured)
-  return resolveDefaultDataDir()
+export function writeDataInitializationConfig(dataDir: string): string {
+  const dbPath = join(resolve(dataDir), 'db', 'app.db')
+  return writeInitializationConfig(resolveDataInitializationConfigPath(), dbPath).dbPath
 }
 
-export function ensureDataDir(explicitDataDir?: string): string {
-  const dir = resolveDataDir(explicitDataDir)
-  mkdirSync(dir, { recursive: true })
-  return dir
+export function resolveDataDirSelection(
+  input: {
+    defaultDataDir?: string
+  } = {}
+): DataDirResolution {
+  const configPath = resolveDataInitializationConfigPath()
+  const initializationConfig =
+    input.defaultDataDir === undefined ? ensureInitializationConfig(configPath) : { dbPath: '' }
+  const defaultDataDir =
+    input.defaultDataDir ??
+    (initializationConfig.dbPath
+      ? dataDirFromDbPath(initializationConfig.dbPath)
+      : resolveInitializationDefaultDataDir(configPath))
+  if (initializationConfig.dbPath) {
+    return {
+      phase: 'ready',
+      dataDir: dataDirFromDbPath(initializationConfig.dbPath),
+      source: 'config'
+    }
+  }
+  return { phase: 'selection_required', dataDir: defaultDataDir, source: 'candidate' }
 }

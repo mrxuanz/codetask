@@ -1,3 +1,5 @@
+import { getRuntimeFeatures } from '../config/runtime-features'
+
 let seq = 0
 const t0 = Date.now()
 
@@ -16,7 +18,7 @@ function formatDetail(detail: unknown): string {
 }
 
 export function sandboxTurnDebug(step: string, detail?: unknown): void {
-  if (process.env.CODETASK_DEBUG_SANDBOX === '0') return
+  if (!getRuntimeFeatures().debug.sandboxTurn) return
   seq += 1
   const elapsedMs = Date.now() - t0
   const line = `[CODETASK_DEBUG:sandbox] #${seq} +${elapsedMs}ms ${step}${formatDetail(detail)}\n`

@@ -1,25 +1,24 @@
 import { SUPPORTED_CORE_CODES, type SupportedCoreCode } from '../conversation/cores'
+import { getProviderDescriptor } from '../../shared/providers'
 import type { ConversationRole } from '../agent-runtime/roles'
 import { createTurnError } from '../../shared/turn-errors.ts'
-import { patchSettingsFile, readSettingsFile, resolveMcpSecretProvider } from './store'
-import {
-  collectMcpSecretReferenceIds,
-  protectSubmittedMcpSensitiveValues,
-  redactMcpSensitiveValues,
-  resolveProtectedMcpSensitiveValues
-} from './mcp-secrets'
-
-export { MCP_SECRET_MASK } from './mcp-secrets'
+import { patchSettingsFile, readSettingsFile } from './store'
 
 export const USER_MCP_ROLES = ['conversation', 'task', 'verification'] as const
 export type UserMcpRoleKey = (typeof USER_MCP_ROLES)[number]
 
-export const CLI_MCP_ROOT_KEY: Record<SupportedCoreCode, string> = {
-  'claude-code': 'mcpServers',
-  codex: 'mcp_servers',
-  cursorcli: 'mcpServers',
-  opencode: 'mcp'
+/** MCP config root key for a provider — derived from shared descriptor (PRU-11-03). */
+export function cliMcpRootKey(coreCode: SupportedCoreCode): string {
+  return getProviderDescriptor(coreCode).mcpRootKey
 }
+
+/** @deprecated Prefer {@link cliMcpRootKey}; kept for settings DTO shape compatibility. */
+export const CLI_MCP_ROOT_KEY: Record<SupportedCoreCode, string> = Object.freeze(
+  Object.fromEntries(SUPPORTED_CORE_CODES.map((code) => [code, cliMcpRootKey(code)])) as Record<
+    SupportedCoreCode,
+    string
+  >
+)
 
 export const RESERVED_MCP_SERVER_NAMES = new Set([
   'codeteam-manager',
@@ -36,11 +35,11 @@ export type RoleCliMcpSettings = Record<SupportedCoreCode, CliMcpConfigFragment>
 export type UserMcpSettings = Record<UserMcpRoleKey, RoleCliMcpSettings>
 
 export function redactUserMcpSettings(settings: UserMcpSettings): UserMcpSettings {
-  return redactMcpSensitiveValues(settings) as UserMcpSettings
+  return structuredClone(settings)
 }
 
 function emptyCliFragment(coreCode: SupportedCoreCode): CliMcpConfigFragment {
-  return { [CLI_MCP_ROOT_KEY[coreCode]]: {} }
+  return { [cliMcpRootKey(coreCode)]: {} }
 }
 
 function defaultRoleCliSettings(): RoleCliMcpSettings {
@@ -69,7 +68,7 @@ export function isReservedMcpServerName(name: string): boolean {
 }
 
 function parseCliFragment(coreCode: SupportedCoreCode, value: unknown): CliMcpConfigFragment {
-  const rootKey = CLI_MCP_ROOT_KEY[coreCode]
+  const rootKey = cliMcpRootKey(coreCode)
   if (!value || typeof value !== 'object') return emptyCliFragment(coreCode)
 
   const object = value as Record<string, unknown>
@@ -121,7 +120,7 @@ function validateCliFragment(
   fragment: CliMcpConfigFragment,
   path: string
 ): CliMcpConfigFragment {
-  const rootKey = CLI_MCP_ROOT_KEY[coreCode]
+  const rootKey = cliMcpRootKey(coreCode)
   const keys = Object.keys(fragment)
   if (keys.length !== 1 || keys[0] !== rootKey) {
     throw createTurnError('settings.mcp.invalid_root_key', {
@@ -156,10 +155,10 @@ export function resolveUserMcpServersMap(
 ): Record<string, unknown> {
   const roleKey = conversationRoleToUserMcpRole(role)
   const fragment = loadUserMcpSettings()[roleKey][coreCode]
-  const rootKey = CLI_MCP_ROOT_KEY[coreCode]
+  const rootKey = cliMcpRootKey(coreCode)
   const map = fragment[rootKey]
   if (!map || typeof map !== 'object') return {}
-  return resolveProtectedMcpSensitiveValues({ ...map }, resolveMcpSecretProvider())
+  return { ...map }
 }
 
 export function listUserMcpServerNames(map: Record<string, unknown>): string[] {
@@ -167,7 +166,6 @@ export function listUserMcpServerNames(map: Record<string, unknown>): string[] {
 }
 
 export function saveUserMcpSettings(input: UserMcpSettings): UserMcpSettings {
-  const current = loadUserMcpSettings()
   const saved = defaultUserMcpSettings()
   for (const role of USER_MCP_ROLES) {
     for (const code of SUPPORTED_CORE_CODES) {
@@ -179,23 +177,15 @@ export function saveUserMcpSettings(input: UserMcpSettings): UserMcpSettings {
     }
   }
 
-  const provider = resolveMcpSecretProvider()
-  let protectedSettings: UserMcpSettings
-  try {
-    protectedSettings = protectSubmittedMcpSensitiveValues(saved, current, provider)
-    patchSettingsFile((file) => {
-      file.userMcp = protectedSettings
-    })
-  } catch (error) {
-    provider.pruneExcept(collectMcpSecretReferenceIds(current))
-    throw error
-  }
-  provider.pruneExcept(collectMcpSecretReferenceIds(protectedSettings))
-
-  return protectedSettings
+  patchSettingsFile((file) => {
+    file.userMcp = saved
+  })
+  return saved
 }
 
 export const MCP_SETTINGS_CONSTRAINTS = {
   reservedServerNames: [...RESERVED_MCP_SERVER_NAMES],
-  rootKeys: CLI_MCP_ROOT_KEY
+  rootKeys: Object.fromEntries(
+    SUPPORTED_CORE_CODES.map((code) => [code, cliMcpRootKey(code)])
+  ) as Record<SupportedCoreCode, string>
 } as const

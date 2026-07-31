@@ -15,17 +15,6 @@ export function putHubSubscriptions(
   })
 }
 
-/** @deprecated Prefer putHubSubscriptions */
-export function putJobHubSubscriptions(
-  connectionId: string,
-  jobIds: string[]
-): Promise<{ data: { connectionId: string; topics: HubTopic[] } }> {
-  return putHubSubscriptions(
-    connectionId,
-    jobIds.map((id) => `job:${id}` as HubTopic)
-  )
-}
-
 export async function connectHubStream(
   connectionId: string,
   onEnvelope: (envelope: HubEnvelope) => void,
@@ -74,16 +63,6 @@ export async function connectHubStream(
       onEnvelope(envelope)
     }
   }
-}
-
-/** @deprecated Prefer connectHubStream */
-export async function connectJobHubStream(
-  onEnvelope: (envelope: HubEnvelope) => void,
-  options?: { signal?: AbortSignal; connectionId?: string; lastEventId?: number | null }
-): Promise<void> {
-  const connectionId =
-    options?.connectionId ?? `conn-${Math.random().toString(36).slice(2, 10)}`
-  return connectHubStream(connectionId, onEnvelope, options)
 }
 
 export type { JobSseEvent, HubEnvelope, HubTopic }

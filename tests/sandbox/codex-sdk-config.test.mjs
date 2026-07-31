@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 
@@ -74,9 +75,7 @@ test('buildCodexSdkConfig skips overrides off outer sandbox path', () => {
 })
 
 test('Codex CLI accepts SDK sandbox_mode override over stale host config', (t) => {
-  const runtimesRoot = join(process.cwd(), 'data', 'runtimes')
-  mkdirSync(runtimesRoot, { recursive: true })
-  const codexHome = mkdtempSync(join(runtimesRoot, '_codex-sdk-config-'))
+  const codexHome = mkdtempSync(join(tmpdir(), 'codetask-codex-sdk-config-'))
   t.after(() => rmSync(codexHome, { recursive: true, force: true }))
 
   writeFileSync(join(codexHome, 'config.toml'), 'sandbox_mode = "external-sandbox"\n', 'utf8')

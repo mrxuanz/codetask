@@ -26,18 +26,6 @@ test('desktop and explicit server modes remain unchanged', () => {
   })
 })
 
-test('data directory can be selected explicitly for a Linux service deployment', () => {
-  assert.deepEqual(parseCliArgs(['codetask', '--serve', '--data-dir', '/var/lib/codetask']), {
-    mode: 'server',
-    host: '127.0.0.1',
-    port: 8080,
-    smokeTest: false,
-    dataDir: '/var/lib/codetask'
-  })
-  assert.throws(() => parseCliArgs(['codetask', '--data-dir']), /Invalid data directory/)
-  assert.throws(() => parseCliArgs(['codetask', '--data-dir', '--serve']), /Invalid data directory/)
-})
-
 test('dedicated Node entry is always server mode without requiring --serve', () => {
   assert.deepEqual(parseServerCliArgs(['codetask-server', '--port', '9091']), {
     mode: 'server',

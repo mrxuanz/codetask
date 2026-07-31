@@ -88,6 +88,16 @@ function submit(): void {
   }
   pending.value = []
 }
+
+function onComposerKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+    return
+  }
+  // IME candidate confirmation (Chinese/Japanese/Korean): do not send.
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  submit()
+}
 </script>
 
 <template>
@@ -137,7 +147,7 @@ function submit(): void {
           :disabled="disabled || sending"
           :placeholder="t('workspace.composer.placeholder')"
           class="min-h-20 w-full resize-none rounded-[20px] bg-transparent px-4 pt-4 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60 sm:min-h-24"
-          @keydown.enter.exact.prevent="submit()"
+          @keydown="onComposerKeydown"
         />
         <div class="flex items-center justify-between gap-2 px-3 pb-3">
           <div class="relative flex items-center gap-2">

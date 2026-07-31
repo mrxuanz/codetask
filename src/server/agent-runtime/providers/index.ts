@@ -1,57 +1,63 @@
 import type { SupportedCoreCode } from '../../conversation/cores'
 import type { AgentTurnChunk, AgentTurnInput, AgentTurnOptions, AgentTurnProvider } from '../types'
-import { getTestAgentTurnProviderOverride } from './test-overrides'
 import { createTurnError } from '../../../shared/turn-errors.ts'
+import { getTestProviderRegistryOverride } from './test-overrides'
+import { getProviderRegistry, getProviderRuntimeManager } from '../../providers/access'
+import { buildProviderTurnContext } from '../../providers/driver'
 
 export async function* streamCodexTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
-  const provider = await import('./codex-sdk')
-  yield* provider.streamCodexTurn(input, options)
+  // PRU-07-08: production Codex turns always go through Registry + RuntimeManager.
+  yield* getAgentTurnProvider('codex').streamTurn(input, options)
 }
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
-  const provider = await import('./claude-sdk')
-  yield* provider.streamClaudeTurn(input, options)
+  // PRU-08-08: production Claude turns always go through Registry + RuntimeManager.
+  yield* getAgentTurnProvider('claude-code').streamTurn(input, options)
 }
 
 export async function* streamOpencodeTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
-  const provider = await import('./opencode-sdk')
-  yield* provider.streamOpencodeTurn(input, options)
+  // PRU-09-08: production OpenCode turns always go through Registry + RuntimeManager.
+  yield* getAgentTurnProvider('opencode').streamTurn(input, options)
 }
 
 export async function* streamCursorAcpTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
-  const provider = await import('./cursor-acp')
-  yield* provider.streamCursorAcpTurn(input, options)
-}
-
-export const AGENT_TURN_PROVIDERS: Record<SupportedCoreCode, AgentTurnProvider> = {
-  codex: { code: 'codex', protocol: 'sdk', streamTurn: streamCodexTurn },
-  'claude-code': { code: 'claude-code', protocol: 'sdk', streamTurn: streamClaudeTurn },
-  opencode: { code: 'opencode', protocol: 'sdk', streamTurn: streamOpencodeTurn },
-  cursorcli: { code: 'cursorcli', protocol: 'acp', streamTurn: streamCursorAcpTurn }
+  // PRU-10-08: production Cursor turns always go through Registry + RuntimeManager.
+  yield* getAgentTurnProvider('cursorcli').streamTurn(input, options)
 }
 
 export function getAgentTurnProvider(code: SupportedCoreCode): AgentTurnProvider {
-  const override = getTestAgentTurnProviderOverride(code)
-  if (override) return override
-  const provider = AGENT_TURN_PROVIDERS[code]
-  if (!provider) {
+  const registry = getTestProviderRegistryOverride() ?? getProviderRegistry()
+  if (!registry.has(code)) {
     throw createTurnError('provider.cli_auth_failed', {
       detail: `Unsupported CLI: ${code}`
     })
   }
-  return provider
+  const driver = registry.get(code)
+  return {
+    code,
+    protocol: driver.kind === 'test-fake' ? 'fake' : driver.descriptor.capabilities.protocol,
+    streamTurn: (input, options) =>
+      getProviderRuntimeManager().stream(
+        driver,
+        buildProviderTurnContext({
+          input,
+          options,
+          authMode: driver.descriptor.capabilities.authMode
+        })
+      )
+  }
 }
 
 export const streamCursorTurn = streamCursorAcpTurn

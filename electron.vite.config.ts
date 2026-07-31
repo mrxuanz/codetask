@@ -8,7 +8,8 @@ const standaloneOnly = process.env.CODETASK_BUILD_TARGET === 'standalone'
 const sandboxInputs = {
   'sandbox/role-worker': resolve('src/sandbox/role-worker.ts'),
   'sandbox/role-worker-cursor-job': resolve('src/sandbox/role-worker-cursor-job.ts'),
-  'sandbox/supervisor-entry': resolve('src/sandbox/supervisor-entry.ts')
+  'sandbox/supervisor-entry': resolve('src/sandbox/supervisor-entry.ts'),
+  'sandbox/provider-runtime-diagnostics': resolve('src/sandbox/provider-runtime-diagnostics.ts')
 }
 
 function standaloneRendererAssetBasePlugin(): Plugin {

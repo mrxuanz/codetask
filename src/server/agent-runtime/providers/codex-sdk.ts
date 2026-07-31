@@ -1,6 +1,6 @@
 import { throwSdkTurnError } from '../errors'
 import { sandboxTurnDebug } from '../../debug/sandbox-turn'
-import { buildCodexTurnPlan } from './codex-policy'
+import { buildCodexTurnPlan } from '../../providers/codex/turn-plan'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot } from '../delta-emit'
@@ -60,6 +60,20 @@ function indicatesCodexMcpStartupFailure(error: unknown): boolean {
   )
 }
 
+export function resolveCodexConfigTurnError(
+  error: unknown
+): ReturnType<typeof createTurnError> | null {
+  const message = readErrorMessage(error)
+  if (
+    !/failed to load configuration|(?:config(?:uration)?|config\.toml).*(?:invalid|parse|syntax)/i.test(
+      message
+    )
+  ) {
+    return null
+  }
+  return createTurnError('provider.codex.config_invalid', { detail: message })
+}
+
 export function resolveCodexMcpStartupTurnError(
   input: Pick<AgentTurnInput, 'role' | 'mcpUrl'>,
   error: unknown
@@ -92,11 +106,15 @@ export async function* streamCodexTurn(
     role: plan.role,
     outerSandbox: plan.outerSandbox,
     sandboxMode: plan.threadOptions.sandboxMode,
-    mcpToolNames: plan.mcpToolNames
+    mcpToolNames: plan.mcpToolNames,
+    installationId: plan.installationId,
+    executableStrategy: plan.executableStrategy,
+    codexPathOverride: plan.codexPathOverride
   })
 
   const codex = new Codex({
     env: plan.env,
+    ...(plan.codexPathOverride ? { codexPathOverride: plan.codexPathOverride } : {}),
     ...(plan.sdkConfig
       ? {
           config: plan.sdkConfig as NonNullable<
@@ -230,6 +248,8 @@ export async function* streamCodexTurn(
       replyChars: reply.length,
       error: error instanceof Error ? error.message : String(error)
     })
+    const configError = resolveCodexConfigTurnError(error)
+    if (configError) throw configError
     const mcpStartupError = resolveCodexMcpStartupTurnError(input, error)
     if (mcpStartupError) throw mcpStartupError
     throwSdkTurnError(error)

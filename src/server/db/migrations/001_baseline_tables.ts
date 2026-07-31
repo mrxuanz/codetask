@@ -5,15 +5,6 @@ export const migration001BaselineTables: Migration = {
   name: 'baseline_tables',
   up(db) {
     db.exec(`
-      CREATE TABLE IF NOT EXISTS auth_state (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        username TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        session_token TEXT,
-        session_expires_at INTEGER,
-        created_at INTEGER NOT NULL
-      );
-
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL,

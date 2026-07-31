@@ -5,10 +5,7 @@ import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
 import {
   cleanupJobRuntimeTreeIfTerminal,
-  estimateJobRuntimeBytes,
-  extractRuntimeSummary,
-  isTerminalJobStatus as isTerminalRuntimeStatus,
-  pruneOrphanRuntimeTrees
+  isTerminalJobStatus as isTerminalRuntimeStatus
 } from '../runtime/cleanup'
 import { getAppContext } from '../bootstrap'
 import { deleteExpiredArtifacts, scheduleJobArtifactExpiry } from './artifacts'
@@ -16,12 +13,11 @@ import { deleteJobCounters } from './counters'
 import { readRetentionSettings, artifactExpirySec } from './settings'
 import { runSqliteMaintenanceIfDue } from './maintenance'
 import {
-  pruneCompletedTaskRuntimeTrees,
   pruneOrphanAttachments,
   pruneOrphanJobArtifactFiles,
   pruneOrphanMessageArtifactDirs,
-  pruneStalePausedRuntimeTrees,
-  pruneStaleThreadAttachmentDirs
+  pruneStaleThreadAttachmentDirs,
+  wipeLegacyProductRuntimes
 } from './janitor'
 import { pruneEmptyCreateTaskThreads } from '../threads/service'
 import {
@@ -132,34 +128,6 @@ export async function onJobReachedTerminal(
   }
 
   if (settings.runtimeTerminalImmediate && isTerminalRuntimeStatus(status)) {
-    try {
-      const bytes = await estimateJobRuntimeBytes(ctx.dataDir, threadId, jobId)
-      if (bytes > 0) {
-        await db.update(threadJobs).set({ runtimeBytes: bytes }).where(eq(threadJobs.id, jobId))
-      }
-    } catch (error) {
-      console.warn('[retention] runtime bytes estimate failed', jobId, error)
-    }
-
-    try {
-      const summary = await extractRuntimeSummary(ctx.dataDir, threadId, jobId)
-      if (summary && (summary.changedFiles.length > 0 || summary.logTail)) {
-        const summaryText = [
-          summary.changedFiles.length > 0
-            ? `Changed files:\n${summary.changedFiles.map((f) => `- ${f}`).join('\n')}`
-            : '',
-          summary.logTail ? `\nLog tail:\n${summary.logTail}` : ''
-        ]
-          .filter(Boolean)
-          .join('\n')
-        if (summaryText) {
-          await db.update(threadJobs).set({ summary: summaryText }).where(eq(threadJobs.id, jobId))
-        }
-      }
-    } catch (error) {
-      console.warn('[retention] runtime summary extraction failed', jobId, error)
-    }
-
     await cleanupJobRuntimeTreeIfTerminal(ctx.dataDir, threadId, jobId, status).then(
       (result) => {
         if (result === 'deferred_active' || result === 'deferred_slot') {
@@ -177,11 +145,9 @@ export async function onJobReachedTerminal(
 export async function runRetentionJanitorPass(): Promise<{
   expiredArtifacts: number
   orphanAttachments: number
-  staleRuntimes: number
-  completedTaskRuntimes: number
+  legacyRuntimesRemoved: number
   orphanMessageArtifacts: number
   staleAttachmentDirs: number
-  orphanRuntimeTrees: number
   emptyCreateTaskThreads: number
   sqliteMaintenance: { ran: boolean; vacuumedPages: number }
   expiredDesignRevisions: number
@@ -193,21 +159,17 @@ export async function runRetentionJanitorPass(): Promise<{
   const [
     artifacts,
     attachments,
-    runtimes,
-    completedTaskRuntimes,
+    legacyRuntimes,
     messageArtifacts,
     staleAttachmentDirs,
-    orphanRuntimeTrees,
     emptyCreateTaskThreads,
     orphanJobArtifactFiles
   ] = await Promise.all([
     deleteExpiredArtifacts(db, ctx.dataDir),
     pruneOrphanAttachments(ctx.dataDir, db),
-    pruneStalePausedRuntimeTrees(ctx.dataDir, db, settings.runtimePausedDays),
-    pruneCompletedTaskRuntimeTrees(ctx.dataDir, db),
+    wipeLegacyProductRuntimes(ctx.dataDir),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
-    pruneOrphanRuntimeTrees(ctx.dataDir, db),
     pruneEmptyCreateTaskThreads(),
     pruneOrphanJobArtifactFiles(ctx.dataDir, db)
   ])
@@ -223,11 +185,9 @@ export async function runRetentionJanitorPass(): Promise<{
   return {
     expiredArtifacts: artifacts.deleted,
     orphanAttachments: attachments.removed,
-    staleRuntimes: runtimes.removed,
-    completedTaskRuntimes: completedTaskRuntimes.removed,
+    legacyRuntimesRemoved: legacyRuntimes.removed,
     orphanMessageArtifacts: messageArtifacts.removed,
     staleAttachmentDirs: staleAttachmentDirs.removed,
-    orphanRuntimeTrees: orphanRuntimeTrees.removedPaths.length,
     emptyCreateTaskThreads: emptyCreateTaskThreads.removed,
     sqliteMaintenance: {
       ran: sqliteMaintenance.ran,

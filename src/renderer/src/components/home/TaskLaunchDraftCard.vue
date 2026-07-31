@@ -13,6 +13,7 @@ import {
   unlockRequirementsContract,
   updateDraftAbilityCores,
   updateDraftContent,
+  updateDraftExecutionConfig,
   updateDraftReferenceDescription,
   uploadDraftReferences
 } from '@renderer/api/jobs'
@@ -66,6 +67,12 @@ const linkedJobId = ref<string | null>(null)
 const savingReferenceId = ref<string | null>(null)
 const importDescriptions = ref<Record<string, string>>({})
 const abilitySelections = ref<Array<{ abilityCode: string; coreCode: string }>>([])
+type ExecutionCoreField = 'plannerCoreCode' | 'sliceVerifierCoreCode' | 'milestoneVerifierCoreCode'
+const executionConfig = ref<Record<ExecutionCoreField, string>>({
+  plannerCoreCode: '',
+  sliceVerifierCoreCode: '',
+  milestoneVerifierCoreCode: ''
+})
 const uploadInputRef = ref<HTMLInputElement | null>(null)
 const contractMarkdown = ref('')
 const savingContract = ref(false)
@@ -85,9 +92,20 @@ watch(
 )
 
 watch(
-  () => props.message.payload,
+  () => [props.message.payload, props.cores] as const,
   () => {
     abilitySelections.value = buildAbilitySelections(payload.value)
+    const fallback =
+      payload.value.abilities?.find((ability) => ability.recommendedCoreCode)
+        ?.recommendedCoreCode ??
+      props.cores.find((core) => core.available)?.code ??
+      ''
+    executionConfig.value = {
+      plannerCoreCode: payload.value.executionConfig?.plannerCoreCode || fallback,
+      sliceVerifierCoreCode: payload.value.executionConfig?.sliceVerifierCoreCode || fallback,
+      milestoneVerifierCoreCode:
+        payload.value.executionConfig?.milestoneVerifierCoreCode || fallback
+    }
   },
   { immediate: true }
 )
@@ -123,6 +141,7 @@ const canLaunch = computed(
     contractConfirmed.value &&
     !draftLocked.value &&
     referencesReady.value &&
+    Object.values(executionConfig.value).every(Boolean) &&
     abilitySelections.value.every((item) => Boolean(item.coreCode))
 )
 
@@ -309,6 +328,27 @@ async function handleAbilityChange(abilityCode: string, coreCode: string): Promi
     emit('updated', { ...props.message, payload: res.data.payload })
   } catch {
     // keep local selection even if persist fails
+  }
+}
+
+async function handleExecutionCoreChange(
+  field: ExecutionCoreField,
+  coreCode: string
+): Promise<void> {
+  if (draftLocked.value) return
+  const previous = { ...executionConfig.value }
+  executionConfig.value = { ...executionConfig.value, [field]: coreCode }
+  if (!Object.values(executionConfig.value).every(Boolean)) return
+  try {
+    const res = await updateDraftExecutionConfig(
+      props.threadId,
+      props.message.id,
+      executionConfig.value
+    )
+    emit('updated', { ...props.message, payload: res.data.payload })
+  } catch (err) {
+    executionConfig.value = previous
+    toastError(err, t('workspace.draft.executionConfigSaveFailed'))
   }
 }
 
@@ -541,37 +581,81 @@ async function handleUnlockDraft(): Promise<void> {
       </Button>
     </div>
 
-    <div
-      v-if="showStep(2) && payload.abilities?.length"
-      class="mb-4 rounded-lg border border-border/70 p-3"
-    >
+    <div v-if="showStep(2)" class="mb-4 rounded-lg border border-border/70 p-3">
       <div class="text-xs font-medium text-muted-foreground">
-        {{ t('workspace.draft.abilitiesCli') }}
+        {{ t('workspace.draft.executionConfig') }}
       </div>
-      <div class="mt-3 space-y-3">
-        <div
-          v-for="ability in payload.abilities"
-          :key="ability.abilityCode"
-          class="rounded-md bg-muted/30 p-3"
+      <p class="mt-1 text-xs text-muted-foreground">
+        {{ t('workspace.draft.executionConfigHint') }}
+      </p>
+      <div class="mt-3 grid gap-3 md:grid-cols-3">
+        <label
+          v-for="item in [
+            { field: 'plannerCoreCode', label: t('workspace.draft.plannerCli') },
+            { field: 'sliceVerifierCoreCode', label: t('workspace.draft.sliceVerifierCli') },
+            {
+              field: 'milestoneVerifierCoreCode',
+              label: t('workspace.draft.milestoneVerifierCli')
+            }
+          ]"
+          :key="item.field"
+          class="space-y-1.5"
         >
-          <div class="font-medium">{{ ability.label || ability.abilityCode }}</div>
-          <p class="mt-1 text-xs text-muted-foreground">
-            {{ ability.reason || ability.description }}
-          </p>
+          <span class="text-xs font-medium">{{ item.label }}</span>
           <select
-            class="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+            class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
             :disabled="draftLocked"
-            :value="selectionFor(ability.abilityCode)"
+            :value="executionConfig[item.field as ExecutionCoreField]"
             @change="
-              handleAbilityChange(ability.abilityCode, ($event.target as HTMLSelectElement).value)
+              handleExecutionCoreChange(
+                item.field as ExecutionCoreField,
+                ($event.target as HTMLSelectElement).value
+              )
             "
           >
             <option value="">{{ t('workspace.draft.selectCli') }}</option>
-            <option v-for="core in selectableCores" :key="core.code" :value="core.code">
+            <option
+              v-for="core in selectableCores"
+              :key="core.code"
+              :value="core.code"
+              :disabled="!core.available"
+            >
               {{ core.label
               }}{{ core.available ? '' : ` (${t('workspace.draft.cliUnavailable')})` }}
             </option>
           </select>
+        </label>
+      </div>
+
+      <div v-if="payload.abilities?.length" class="mt-5 border-t border-border/60 pt-4">
+        <div class="text-xs font-medium text-muted-foreground">
+          {{ t('workspace.draft.abilitiesCli') }}
+        </div>
+        <div class="mt-3 space-y-3">
+          <div
+            v-for="ability in payload.abilities"
+            :key="ability.abilityCode"
+            class="rounded-md bg-muted/30 p-3"
+          >
+            <div class="font-medium">{{ ability.label || ability.abilityCode }}</div>
+            <p class="mt-1 text-xs text-muted-foreground">
+              {{ ability.reason || ability.description }}
+            </p>
+            <select
+              class="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+              :disabled="draftLocked"
+              :value="selectionFor(ability.abilityCode)"
+              @change="
+                handleAbilityChange(ability.abilityCode, ($event.target as HTMLSelectElement).value)
+              "
+            >
+              <option value="">{{ t('workspace.draft.selectCli') }}</option>
+              <option v-for="core in selectableCores" :key="core.code" :value="core.code">
+                {{ core.label
+                }}{{ core.available ? '' : ` (${t('workspace.draft.cliUnavailable')})` }}
+              </option>
+            </select>
+          </div>
         </div>
       </div>
     </div>

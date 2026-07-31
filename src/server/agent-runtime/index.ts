@@ -1,8 +1,4 @@
 export {
-  ensureConversationRuntimeRoot,
-  ensureJobRuntimeRoot,
-  ensureJobTaskRuntimeRoot,
-  ensureRuntimeRoot,
   streamAgentTurn,
   streamConversationTurn
 } from './runner'
@@ -30,7 +26,6 @@ export {
 } from './errors'
 export {
   getAgentTurnProvider,
-  AGENT_TURN_PROVIDERS,
   streamCodexTurn,
   streamClaudeTurn,
   streamOpencodeTurn,

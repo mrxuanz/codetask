@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 
 import {
   loadNative,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   sandboxTestsEnabled,
   wirePolicy
 } from './sandbox-test-utils.mjs'
@@ -237,7 +237,7 @@ function loadProductionSandboxModule() {
     try {
       const mod = require(join(chunksDir, file))
       if (
-        typeof mod.prepareProviderAuth === 'function' &&
+        typeof mod.prepareProviderRuntimeProfile === 'function' &&
         typeof mod.buildSandboxEnv === 'function'
       ) {
         return mod
@@ -249,62 +249,52 @@ function loadProductionSandboxModule() {
   return null
 }
 
-function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, coreCode = 'codex') {
-  const authPrepared = prod.prepareProviderAuth(coreCode, runtimeRoot, { workspaceRoot })
-  if (typeof prod.runProviderAuthPreflight === 'function') {
-    prod.runProviderAuthPreflight(coreCode, authPrepared)
-  }
-  const dataDir =
-    typeof prod.resolveSandboxDataDir === 'function'
-      ? prod.resolveSandboxDataDir()
-      : join(process.cwd(), 'data')
-  const envRecord = prod.buildSandboxEnv({
-    runtimeRoot,
-    dataDir,
-    providerEnv: authPrepared.envPatch
+function buildProductionSandboxEnv(prod, scratchRoot, workspaceRoot, coreCode = 'codex') {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(coreCode, {
+    workspaceRoot
   })
-  return { envRecord, authPrepared, dataDir }
+  const envRecord = prod.buildSandboxEnv({
+    scratchRoot,
+    providerEnv: runtimeProfile.environment
+  })
+  return { envRecord, runtimeProfile }
 }
 
-function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = []) {
-  const authPrepared = prod.prepareProviderAuth('codex', runtimeRoot, { workspaceRoot })
-  const dataDir =
-    typeof prod.resolveSandboxDataDir === 'function'
-      ? prod.resolveSandboxDataDir()
-      : join(process.cwd(), 'data')
-  const providerReadRoots =
-    typeof prod.mergeProviderReadRoots === 'function' &&
-    typeof prod.resolveProviderReadRoots === 'function'
-      ? prod.mergeProviderReadRoots(prod.resolveProviderReadRoots('codex'), [
-          ...authPrepared.readRoots,
-          dataDir
-        ])
-      : []
-  if (typeof prod.policyForRoleV2 === 'function') {
-    return prod.policyForRoleV2({
+function buildProductionPolicy(prod, scratchRoot, workspaceRoot, readRoots = []) {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile('codex', {
+    workspaceRoot
+  })
+  const providerReadRoots = [
+    ...runtimeProfile.hostPathGrants.map((grant) => grant.path),
+    ...readRoots
+  ]
+  if (typeof prod.createSandboxPolicy === 'function') {
+    return prod.createSandboxPolicy({
       role: 'task-worker',
       workspaceRoot,
-      runtimeRoot,
+      scratchRoot,
       providerReadRoots,
-      providerWriteRoots: authPrepared.writeRoots,
+      providerWriteRoots: runtimeProfile.hostPathGrants
+        .filter((grant) => grant.access === 'read-write')
+        .map((grant) => grant.path),
       attachmentReadRoots: readRoots
     })
   }
-  return policyForRoleV2('task-worker', workspaceRoot, runtimeRoot)
+  return sandboxPolicyForRole('task-worker', workspaceRoot, scratchRoot)
 }
 
-function buildMinimalSandboxEnv(runtimeRoot) {
+function buildMinimalSandboxEnv(scratchRoot) {
+  const hostProfile = process.env.USERPROFILE ?? process.env.HOME ?? ''
   const env = {
     PATH: process.env.PATH ?? '',
     LANG: process.env.LANG ?? 'C.UTF-8',
     CODETASK_OUTER_SANDBOX: '1',
-    CODETASK_RUNTIME_ROOT: runtimeRoot,
-    HOME: runtimeRoot,
-    TMPDIR: join(runtimeRoot, 'tmp'),
-    TEMP: join(runtimeRoot, 'tmp'),
-    TMP: join(runtimeRoot, 'tmp')
+    HOME: hostProfile || scratchRoot,
+    TMPDIR: join(scratchRoot, 'tmp'),
+    TEMP: join(scratchRoot, 'tmp'),
+    TMP: join(scratchRoot, 'tmp')
   }
-  const hostProfile = process.env.USERPROFILE ?? process.env.HOME
+  mkdirSync(join(scratchRoot, 'tmp'), { recursive: true })
   if (hostProfile) env.CODETASK_SANDBOX_HOST_PROFILE = hostProfile
   for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY']) {
     if (process.env[key]) env[key] = process.env[key]
@@ -312,12 +302,11 @@ function buildMinimalSandboxEnv(runtimeRoot) {
   if (process.platform === 'win32') {
     env.ELECTRON_RUN_AS_NODE = '1'
     env.ELECTRON_DISABLE_CRASH_REPORTER = '1'
-    env.USERPROFILE = hostProfile ?? runtimeRoot
-    env.APPDATA = join(hostProfile ?? runtimeRoot, 'AppData', 'Roaming')
-    env.LOCALAPPDATA = join(hostProfile ?? runtimeRoot, 'AppData', 'Local')
+    env.USERPROFILE = hostProfile || scratchRoot
+    env.APPDATA = join(hostProfile || scratchRoot, 'AppData', 'Roaming')
+    env.LOCALAPPDATA = join(hostProfile || scratchRoot, 'AppData', 'Local')
     const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')
     env.CODEX_HOME = codexHome
-    env.CODETASK_PROVIDER_AUTH_MODE = 'host-identity'
   }
   return env
 }
@@ -550,10 +539,10 @@ async function runSandboxCodexCase(
 ) {
   const policy = prod
     ? buildProductionPolicy(prod, runtimeRoot, workspace)
-    : policyForRoleV2('task-worker', workspace, runtimeRoot)
+    : sandboxPolicyForRole('task-worker', workspace, runtimeRoot)
   const envBundle = prod
     ? buildProductionSandboxEnv(prod, runtimeRoot, workspace)
-    : { envRecord: buildMinimalSandboxEnv(runtimeRoot), authPrepared: null }
+    : { envRecord: buildMinimalSandboxEnv(runtimeRoot), runtimeProfile: null }
 
   const workerInput = {
     provider: 'codex',
@@ -567,17 +556,13 @@ async function runSandboxCodexCase(
     ...(mcpToolNames ? { mcpToolNames } : {})
   }
 
-  try {
-    return await runSandboxRoleWorker(native, {
-      name: mcpUrl ? 'codex-sandbox-mcp' : 'codex-sandbox-hello',
-      policy,
-      workerInput,
-      envRecord: envBundle.envRecord,
-      timeoutMs: 600_000
-    })
-  } finally {
-    envBundle.authPrepared?.cleanupPlan?.()
-  }
+  return runSandboxRoleWorker(native, {
+    name: mcpUrl ? 'codex-sandbox-mcp' : 'codex-sandbox-hello',
+    policy,
+    workerInput,
+    envRecord: envBundle.envRecord,
+    timeoutMs: 600_000
+  })
 }
 
 function summarizeCodexChunks(result) {
@@ -839,7 +824,7 @@ async function main() {
       }
 
       if (caseFilter === 'all' || caseFilter === 'sandbox-smoke') {
-        const policy = policyForRoleV2('task-worker', workspacePath, runtimeRoot)
+        const policy = sandboxPolicyForRole('task-worker', workspacePath, runtimeRoot)
         const handle = native.launchSandboxedWorker({
           policyJson: wirePolicy(policy),
           command: process.execPath,

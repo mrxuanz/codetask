@@ -1,8 +1,12 @@
 import { createRequire } from 'module'
 import { execFileSync } from 'child_process'
-import { existsSync, readFileSync, realpathSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs'
+import type { Dirent } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
+import { processHostEnvironmentSource } from '../../host-environment'
+
+type HostEnvironment = Readonly<Record<string, string | undefined>>
 
 export interface HostProfilePaths {
   home: string
@@ -10,80 +14,68 @@ export interface HostProfilePaths {
   localAppData: string
 }
 
-export function resolveHostProfilePaths(): HostProfilePaths {
-  const home =
-    process.env.CODETASK_HOST_HOME?.trim() ||
-    process.env.HOME?.trim() ||
-    process.env.USERPROFILE?.trim() ||
-    homedir()
+export function resolveHostProfilePaths(
+  env: HostEnvironment = processHostEnvironmentSource.snapshot(),
+  platform: NodeJS.Platform = process.platform
+): HostProfilePaths {
+  const home = env.HOME?.trim() || env.USERPROFILE?.trim() || homedir()
 
-  if (process.platform === 'win32') {
-    const appData =
-      process.env.CODETASK_HOST_APPDATA?.trim() ||
-      process.env.APPDATA?.trim() ||
-      join(home, 'AppData', 'Roaming')
-    const localAppData =
-      process.env.CODETASK_HOST_LOCALAPPDATA?.trim() ||
-      process.env.LOCALAPPDATA?.trim() ||
-      join(home, 'AppData', 'Local')
+  if (platform === 'win32') {
+    const appData = env.APPDATA?.trim() || join(home, 'AppData', 'Roaming')
+    const localAppData = env.LOCALAPPDATA?.trim() || join(home, 'AppData', 'Local')
     return { home, appData, localAppData }
   }
 
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     return {
       home,
-      appData:
-        process.env.CODETASK_HOST_APPDATA?.trim() || join(home, 'Library', 'Application Support'),
-      localAppData:
-        process.env.CODETASK_HOST_LOCALAPPDATA?.trim() || join(home, 'Library', 'Caches')
+      appData: join(home, 'Library', 'Application Support'),
+      localAppData: join(home, 'Library', 'Caches')
     }
   }
 
   return {
     home,
-    appData: process.env.CODETASK_HOST_APPDATA?.trim() || join(home, '.config'),
-    localAppData: process.env.CODETASK_HOST_LOCALAPPDATA?.trim() || join(home, '.local', 'share')
+    appData: join(home, '.config'),
+    localAppData: join(home, '.local', 'share')
   }
 }
 
 export function resolveCodexHostAuthPath(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CODEX_AUTH_PATH?.trim()
-  if (override) return override
   return join(resolveCodexHostHome(profile), 'auth.json')
 }
 
 export function resolveCodexHostHome(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CODEX_HOME?.trim()
-  if (override) return override
   return join(profile.home, '.codex')
 }
 
 export function resolveCodexHostConfigPath(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CODEX_CONFIG_PATH?.trim()
-  if (override) return override
   return join(resolveCodexHostHome(profile), 'config.toml')
 }
 
-export function resolveCursorHostAuthPathCandidates(profile = resolveHostProfilePaths()): string[] {
-  const override = process.env.CODETASK_CURSOR_AUTH_PATH?.trim()
-  if (override) return [override]
-
-  if (process.platform === 'win32') {
+export function resolveCursorHostAuthPathCandidates(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  if (platform === 'win32') {
     return [join(profile.appData, 'Cursor', 'auth.json')]
   }
 
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     return [
       join(profile.appData, 'Cursor', 'auth.json'),
-      join(resolveCursorHostConfigDir(profile), 'auth.json')
+      join(resolveCursorHostConfigDir(profile, platform), 'auth.json')
     ]
   }
 
-  return [join(resolveCursorHostConfigDir(profile), 'auth.json')]
+  return [join(resolveCursorHostConfigDir(profile, platform), 'auth.json')]
 }
 
-export function resolveCursorHostAuthPath(profile = resolveHostProfilePaths()): string {
-  const candidates = resolveCursorHostAuthPathCandidates(profile)
+export function resolveCursorHostAuthPath(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  const candidates = resolveCursorHostAuthPathCandidates(profile, platform)
   return candidates.find((path) => existsSync(path)) ?? candidates[0] ?? ''
 }
 
@@ -102,10 +94,8 @@ export function snapshotCodexHostAuth(profile = resolveHostProfilePaths()): Code
     if (existsSync(path)) sources.push(path)
   }
 
-  const hasEnvKey = Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.CODEX_API_KEY?.trim())
-
   return {
-    present: sources.some((path) => path.endsWith('auth.json')) || hasEnvKey,
+    present: sources.some((path) => path.endsWith('auth.json')),
     codexHome,
     sources
   }
@@ -120,13 +110,14 @@ export interface CursorHostAuthSnapshot {
 }
 
 export function snapshotCursorHostAuth(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
 ): CursorHostAuthSnapshot {
-  const authCandidates = resolveCursorHostAuthPathCandidates(profile)
+  const authCandidates = resolveCursorHostAuthPathCandidates(profile, platform)
   const authPath =
     authCandidates.find((candidate) => existsSync(candidate)) ?? authCandidates[0] ?? ''
   const cursorHome = resolveCursorHostCursorHome(profile)
-  const configDir = resolveCursorHostConfigDir(profile)
+  const configDir = resolveCursorHostConfigDir(profile, platform)
   const sources: string[] = []
 
   for (const candidate of authCandidates) {
@@ -143,10 +134,8 @@ export function snapshotCursorHostAuth(
     if (existsSync(path)) sources.push(path)
   }
 
-  const hasEnvKey = Boolean(process.env.CURSOR_API_KEY?.trim())
-
   return {
-    present: authCandidates.some((candidate) => existsSync(candidate)) || hasEnvKey,
+    present: authCandidates.some((candidate) => existsSync(candidate)),
     authPath,
     cursorHome,
     configDir,
@@ -155,8 +144,6 @@ export function snapshotCursorHostAuth(
 }
 
 export function resolveClaudeHostConfigDir(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_CLAUDE_CONFIG_DIR?.trim()
-  if (override) return override
   return join(profile.home, '.claude')
 }
 
@@ -166,13 +153,7 @@ export function resolveClaudeProjectConfigDir(workspaceRoot: string): string {
 
 const CLAUDE_SETTINGS_FILENAMES = ['settings.json', 'settings.local.json'] as const
 
-const CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES = [
-  'CODETASK_',
-  'ELECTRON_',
-  'CHROME_',
-  'CRASHPAD_'
-] as const
-
+/** Profile / toolchain keys must never be overridden from Claude settings.env. */
 const CLAUDE_SETTINGS_BLOCKED_ENV_KEYS = new Set([
   'PATH',
   'HOME',
@@ -196,14 +177,20 @@ const CLAUDE_SETTINGS_BLOCKED_ENV_KEYS = new Set([
   'CLAUDE_CONFIG_DIR'
 ])
 
-function isAllowedClaudeSettingsEnvKey(key: string): boolean {
+const CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES = ['CODETASK_', 'ELECTRON_', 'CHROME_', 'CRASHPAD_'] as const
+
+/**
+ * Whitelist for Claude settings.json `env` injection into outer-sandbox turns.
+ * Only Anthropic auth / endpoint / model keys — never PATH/HOME or CodeTask controls.
+ */
+export function isAllowedClaudeSettingsEnvKey(key: string): boolean {
   const upper = key.toUpperCase()
   if (CLAUDE_SETTINGS_BLOCKED_ENV_KEYS.has(upper)) return false
   if (CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))) return false
   return upper.startsWith('ANTHROPIC_') || upper === 'CLAUDE_CODE_OAUTH_TOKEN'
 }
 
-function readClaudeSettingsEnv(settingsPath: string): Record<string, string> {
+export function readClaudeSettingsEnv(settingsPath: string): Record<string, string> {
   if (!existsSync(settingsPath)) return {}
   try {
     const parsed = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
@@ -244,6 +231,7 @@ export interface ClaudeHostSettingsSnapshot {
   configDir: string
   settingsPath: string
   sources: string[]
+  /** Whitelisted auth/model env extracted from settings.json (never secrets from Keychain). */
   env: Record<string, string>
 }
 
@@ -259,6 +247,13 @@ export function snapshotClaudeHostSettings(
     sources: snapshot.sources,
     env: snapshot.env
   }
+}
+
+/** Merge host user settings.env whitelist for outer-sandbox Claude turns. */
+export function resolveClaudeSettingsAuthEnv(
+  profile = resolveHostProfilePaths()
+): Record<string, string> {
+  return { ...snapshotClaudeHostSettings(profile).env }
 }
 
 export function snapshotClaudeProjectSettings(workspaceRoot: string): {
@@ -282,30 +277,53 @@ export function resolveClaudeConfigReadRoots(
   return roots
 }
 
-export function resolveOpencodeHostConfigDir(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_OPENCODE_CONFIG_DIR?.trim()
-  if (override) return override
+export function resolveOpencodeHostConfigDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') return join(profile.appData, 'opencode')
   return join(profile.home, '.config', 'opencode')
 }
 
-export function resolveOpencodeHostDataDir(profile = resolveHostProfilePaths()): string {
-  const override = process.env.CODETASK_OPENCODE_DATA_DIR?.trim()
-  if (override) return override
+export function resolveOpencodeHostDataDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') return join(profile.localAppData, 'opencode')
   return join(profile.home, '.local', 'share', 'opencode')
+}
+
+/**
+ * OpenCode XDG state (locks, kv, prompt-history). Distinct from config/data.
+ * Honors host `XDG_STATE_HOME` when set; otherwise platform defaults.
+ */
+export function resolveOpencodeHostStateDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform,
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
+): string {
+  const xdgState = env.XDG_STATE_HOME?.trim()
+  if (xdgState) return join(xdgState, 'opencode')
+  if (platform === 'win32') return join(profile.localAppData, 'state', 'opencode')
+  return join(profile.home, '.local', 'state', 'opencode')
 }
 
 export interface OpencodeHostAuthSnapshot {
   present: boolean
   configDir: string
   dataDir: string
+  stateDir: string
   sources: string[]
 }
 
 export function snapshotOpencodeHostAuth(
-  profile = resolveHostProfilePaths()
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform,
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
 ): OpencodeHostAuthSnapshot {
-  const configDir = resolveOpencodeHostConfigDir(profile)
-  const dataDir = resolveOpencodeHostDataDir(profile)
+  const configDir = resolveOpencodeHostConfigDir(profile, platform)
+  const dataDir = resolveOpencodeHostDataDir(profile, platform)
+  const stateDir = resolveOpencodeHostStateDir(profile, platform, env)
   const sources: string[] = []
 
   for (const name of ['opencode.json', 'auth.json', 'config.json', 'credentials.json'] as const) {
@@ -318,22 +336,29 @@ export function snapshotOpencodeHostAuth(
     if (existsSync(path)) sources.push(path)
   }
 
-  return { present: sources.length > 0, configDir, dataDir, sources }
+  return {
+    present: sources.some((path) => {
+      const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
+      return name === 'auth.json' || name === 'credentials.json'
+    }),
+    configDir,
+    dataDir,
+    stateDir,
+    sources
+  }
 }
 
-export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths()): string[] {
+export function resolveCursorAgentInstallDirs(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
   const dirs: string[] = []
-  const override = process.env.CODETASK_CURSOR_AGENT_DIR?.trim()
-  if (override) {
-    dirs.push(override)
-    return dirs
-  }
-
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     dirs.push(join(profile.localAppData, 'cursor-agent'))
     dirs.push(join(profile.localAppData, 'Programs', 'cursor-agent'))
-  } else if (process.platform === 'darwin') {
+  } else if (platform === 'darwin') {
     dirs.push(join(profile.appData, 'Cursor'))
+    dirs.push(join(profile.home, '.local', 'share', 'cursor-agent'))
     dirs.push(join(profile.home, '.cursor-agent'))
   } else {
     dirs.push(join(profile.appData, 'Cursor'))
@@ -344,22 +369,49 @@ export function resolveCursorAgentInstallDirs(profile = resolveHostProfilePaths(
   return dirs
 }
 
-const CODEX_NATIVE_TARGET_BY_PLATFORM: Partial<Record<string, string>> = {
-  'win32-x64': 'x86_64-pc-windows-msvc',
-  'win32-arm64': 'aarch64-pc-windows-msvc',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'linux-x64': 'x86_64-unknown-linux-musl',
-  'linux-arm64': 'aarch64-unknown-linux-musl'
+export function resolveCursorCompileCacheDirs(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  const candidates =
+    platform === 'darwin'
+      ? [join(profile.localAppData, 'cursor-compile-cache')]
+      : platform === 'win32'
+        ? [join(profile.localAppData, 'cursor-compile-cache')]
+        : [join(profile.home, '.cache', 'cursor-compile-cache')]
+  return candidates.filter((path) => existsSync(path))
 }
 
-const CODEX_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
-  'x86_64-pc-windows-msvc': '@openai/codex-win32-x64',
-  'aarch64-pc-windows-msvc': '@openai/codex-win32-arm64',
-  'x86_64-apple-darwin': '@openai/codex-darwin-x64',
-  'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
-  'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
-  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64'
+export function resolveDarwinKeychainReadRoots(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  if (platform !== 'darwin') return []
+  return [join(profile.home, 'Library', 'Keychains'), join('/Library', 'Keychains')].filter(
+    (path) => existsSync(path)
+  )
+}
+
+export function resolveCursorAgentMarkerWriteDirs(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  const dirs: string[] = []
+  for (const installRoot of resolveCursorAgentInstallDirs(profile, platform)) {
+    const versionsRoot = join(installRoot, 'versions')
+    let versions: Dirent[]
+    try {
+      versions = readdirSync(versionsRoot, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const version of versions) {
+      if (!version.isDirectory()) continue
+      const running = join(versionsRoot, version.name, '.running')
+      if (existsSync(running)) dirs.push(running)
+    }
+  }
+  return dirs
 }
 
 function addExistingDir(dirs: Set<string>, path: string | null | undefined): void {
@@ -367,87 +419,117 @@ function addExistingDir(dirs: Set<string>, path: string | null | undefined): voi
   dirs.add(path)
 }
 
-export function resolveCodexInstallDirs(): string[] {
-  const dirs = new Set<string>()
-  const targetTriple = CODEX_NATIVE_TARGET_BY_PLATFORM[`${process.platform}-${process.arch}`]
-  const platformPackage = targetTriple ? CODEX_PLATFORM_PACKAGE_BY_TARGET[targetTriple] : undefined
+interface PackageMetadata {
+  readonly name?: string
+  readonly optionalDependencies?: Readonly<Record<string, string>>
+}
+
+function readPackageMetadata(packageJson: string): PackageMetadata | null {
+  try {
+    return JSON.parse(readFileSync(packageJson, 'utf8')) as PackageMetadata
+  } catch {
+    return null
+  }
+}
+
+function resolvePackageJson(packageName: string, from: string): string | null {
+  const req = createRequire(from)
+  try {
+    return req.resolve(`${packageName}/package.json`)
+  } catch {
+    // Some SDKs export their entry point but intentionally hide package.json.
+  }
 
   try {
-    const req = createRequire(__filename)
-    const codexPkgJson = req.resolve('@openai/codex/package.json')
+    let directory = dirname(req.resolve(packageName))
+    while (true) {
+      const packageJson = join(directory, 'package.json')
+      if (readPackageMetadata(packageJson)?.name === packageName) return packageJson
+      const parent = dirname(directory)
+      if (parent === directory) return null
+      directory = parent
+    }
+  } catch {
+    return null
+  }
+}
+
+function resolveInstalledOptionalPackageRoots(packageJson: string): string[] {
+  const metadata = readPackageMetadata(packageJson)
+  const req = createRequire(packageJson)
+  const roots: string[] = []
+  for (const packageName of Object.keys(metadata?.optionalDependencies ?? {})) {
+    const dependencyPackageJson = resolvePackageJson(packageName, packageJson)
+    if (!dependencyPackageJson) continue
+    // Resolve from the owning package as well as the application root; this
+    // supports npm's flat layout and pnpm's nested/linked layout.
+    try {
+      roots.push(dirname(req.resolve(`${packageName}/package.json`)))
+    } catch {
+      roots.push(dirname(dependencyPackageJson))
+    }
+  }
+  return roots
+}
+
+function addExecutableParentDirs(
+  dirs: Set<string>,
+  root: string,
+  executableNames: ReadonlySet<string>,
+  maxDepth = 6
+): void {
+  const visit = (directory: string, depth: number): void => {
+    if (depth > maxDepth) return
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    if (entries.some((entry) => entry.isFile() && executableNames.has(entry.name.toLowerCase()))) {
+      addExistingDir(dirs, directory)
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) visit(join(directory, entry.name), depth + 1)
+    }
+  }
+  visit(root, 0)
+}
+
+export function resolveCodexInstallDirs(): string[] {
+  const dirs = new Set<string>()
+
+  try {
+    const codexPkgJson = resolvePackageJson('@openai/codex', __filename)
+    if (!codexPkgJson) return []
     const codexRoot = dirname(codexPkgJson)
     addExistingDir(dirs, codexRoot)
     addExistingDir(dirs, join(codexRoot, 'bin'))
-
-    if (platformPackage) {
-      const codexReq = createRequire(codexPkgJson)
-      const nativePkgJson = codexReq.resolve(`${platformPackage}/package.json`)
-      const nativeRoot = dirname(nativePkgJson)
+    for (const nativeRoot of resolveInstalledOptionalPackageRoots(codexPkgJson)) {
       addExistingDir(dirs, nativeRoot)
-      const vendorRoot = join(nativeRoot, 'vendor')
-      addExistingDir(dirs, vendorRoot)
-      if (targetTriple) {
-        const tripleRoot = join(vendorRoot, targetTriple)
-        addExistingDir(dirs, tripleRoot)
-        addExistingDir(dirs, join(tripleRoot, 'bin'))
-        addExistingDir(dirs, join(tripleRoot, 'codex-path'))
-        addExistingDir(dirs, join(tripleRoot, 'codex-resources'))
-      }
+      addExecutableParentDirs(dirs, nativeRoot, new Set(['codex', 'codex.exe']))
     }
   } catch {
     // ignore
-  }
-
-  const override = process.env.CODETASK_CODEX_INSTALL_DIR?.trim()
-  if (override) {
-    addExistingDir(dirs, override)
   }
 
   return [...dirs.values()]
 }
 
-const CLAUDE_NATIVE_TARGET_BY_PLATFORM: Partial<Record<string, string>> = {
-  'win32-x64': 'x86_64-pc-windows-msvc',
-  'win32-arm64': 'aarch64-pc-windows-msvc',
-  'darwin-x64': 'x86_64-apple-darwin',
-  'darwin-arm64': 'aarch64-apple-darwin',
-  'linux-x64': 'x86_64-unknown-linux-gnu',
-  'linux-arm64': 'aarch64-unknown-linux-gnu'
-}
-
-const CLAUDE_PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
-  'x86_64-pc-windows-msvc': '@anthropic-ai/claude-agent-sdk-win32-x64',
-  'aarch64-pc-windows-msvc': '@anthropic-ai/claude-agent-sdk-win32-arm64',
-  'x86_64-apple-darwin': '@anthropic-ai/claude-agent-sdk-darwin-x64',
-  'aarch64-apple-darwin': '@anthropic-ai/claude-agent-sdk-darwin-arm64',
-  'x86_64-unknown-linux-gnu': '@anthropic-ai/claude-agent-sdk-linux-x64',
-  'aarch64-unknown-linux-gnu': '@anthropic-ai/claude-agent-sdk-linux-arm64'
-}
-
 export function resolveClaudeInstallDirs(): string[] {
   const dirs = new Set<string>()
-  const targetTriple = CLAUDE_NATIVE_TARGET_BY_PLATFORM[`${process.platform}-${process.arch}`]
-  const platformPackage = targetTriple ? CLAUDE_PLATFORM_PACKAGE_BY_TARGET[targetTriple] : undefined
 
   try {
-    const req = createRequire(__filename)
-    const sdkPkgJson = req.resolve('@anthropic-ai/claude-agent-sdk/package.json')
+    const sdkPkgJson = resolvePackageJson('@anthropic-ai/claude-agent-sdk', __filename)
+    if (!sdkPkgJson) return []
     const sdkRoot = dirname(sdkPkgJson)
     addExistingDir(dirs, sdkRoot)
-
-    if (platformPackage) {
-      const sdkReq = createRequire(sdkPkgJson)
-      const nativePkgJson = sdkReq.resolve(`${platformPackage}/package.json`)
-      const nativeRoot = dirname(nativePkgJson)
+    for (const nativeRoot of resolveInstalledOptionalPackageRoots(sdkPkgJson)) {
       addExistingDir(dirs, nativeRoot)
+      addExecutableParentDirs(dirs, nativeRoot, new Set(['claude', 'claude.exe']))
     }
   } catch {
     // ignore
-  }
-
-  const override = process.env.CODETASK_CLAUDE_INSTALL_DIR?.trim()
-  if (override) {
-    addExistingDir(dirs, override)
   }
 
   return [...dirs.values()]
@@ -515,17 +597,25 @@ export function resolveOpencodeInstallDirs(): string[] {
     // ignore
   }
 
-  const override = process.env.CODETASK_OPENCODE_INSTALL_DIR?.trim()
-  if (override) {
-    addExistingDir(dirs, override)
-  }
-
   return [...dirs.values()]
 }
 
-export function resolveOpencodeExecutable(): string {
-  const fromEnv = process.env.CODETASK_OPENCODE_BIN?.trim()
-  if (fromEnv && existsSync(fromEnv)) return fromEnv
+export function resolveOpencodeExecutable(
+  env:
+    | NodeJS.ProcessEnv
+    | Record<string, string | undefined> = processHostEnvironmentSource.snapshot()
+): string {
+  // Prefer unified ProviderInstallation resolution; BIN env is no longer a config source.
+  try {
+    const nodeRequire = createRequire(__filename)
+    const { resolveProviderExecutable } = nodeRequire(
+      '../../providers/executable.ts'
+    ) as typeof import('../../providers/executable')
+    const resolved = resolveProviderExecutable('opencode', { env })
+    if (resolved?.executable) return resolved.executable
+  } catch {
+    // Fall through to install-dir / bare command.
+  }
 
   const exeNames = process.platform === 'win32' ? ['opencode.exe'] : ['opencode', 'opencode.exe']
   for (const dir of resolveOpencodeInstallDirs()) {
@@ -541,45 +631,16 @@ export function resolveOpencodeExecutable(): string {
   return exeNames[0] ?? 'opencode'
 }
 
-export const RUNTIME_CODEX_HOME_DIR = join('provider', 'codex')
-
-export function runtimeCodexHome(runtimeRoot: string): string {
-  return join(runtimeRoot, RUNTIME_CODEX_HOME_DIR)
-}
-
-export function runtimeCursorHome(runtimeRoot: string): string {
-  return join(runtimeRoot, '.cursor')
-}
-
-export function runtimeCursorConfigDir(runtimeRoot: string): string {
-  return join(runtimeRoot, 'config', 'cursor')
-}
-
-export function cursorProjectSlug(workspaceRoot: string): string {
-  return (
-    workspaceRoot
-      .replace(/^[\\/]+/, '')
-      .replace(/:/g, '')
-      .replace(/[\\/]+/g, '-')
-      .replace(/[^A-Za-z0-9._-]/g, '-')
-      .replace(/^-+|-+$/g, '') || 'workspace'
-  )
-}
-
 export function resolveCursorHostCursorHome(profile = resolveHostProfilePaths()): string {
   return join(profile.home, '.cursor')
 }
 
-export function resolveCursorHostConfigDir(profile = resolveHostProfilePaths()): string {
-  if (process.platform === 'win32') {
+export function resolveCursorHostConfigDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') {
     return join(profile.appData, 'cursor')
   }
   return join(profile.home, '.config', 'cursor')
-}
-
-export function runtimeCursorAuthPath(runtimeRoot: string): string {
-  if (process.platform === 'win32') {
-    return join(runtimeRoot, 'AppData', 'Roaming', 'Cursor', 'auth.json')
-  }
-  return join(runtimeRoot, 'config', 'cursor', 'auth.json')
 }

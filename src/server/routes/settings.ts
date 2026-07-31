@@ -17,12 +17,10 @@ import {
 } from '../settings/mcp'
 import { ok } from '../response'
 import { readStorageStats } from '../storage/stats'
-import {
-  confirmOldStorageDelete,
-  getStorageMigration,
-  startStorageMigration
-} from '../storage/migration'
-import { validateStorageTarget } from '../../main/storage-validation'
+import { SettingsRevisionConflictError } from '../context/settings-store'
+import { loadProviderSettings, saveProviderSettings } from '../settings/providers'
+import { loadBusinessSkillsSettings, saveBusinessSkillsSettings } from '../settings/business-skills'
+import type { BusinessSkillsSettings } from '@shared/contracts/business-skills'
 
 function unwrapSettings<T extends object>(body: T | { settings?: T }): T {
   if ('settings' in body && body.settings !== undefined) return body.settings
@@ -73,6 +71,31 @@ export function createSettingsRoutes(ctx: AppContext): Hono {
     return c.json(ok({ settings: saved }))
   })
 
+  routes.get('/business-skills', async (c) => {
+    await requireUsername(c.req.header('Authorization'))
+    return c.json(ok({ settings: loadBusinessSkillsSettings() }))
+  })
+
+  routes.put('/business-skills', async (c) => {
+    await requireUsername(c.req.header('Authorization'))
+    const body = await c.req.json<BusinessSkillsSettings | { settings?: BusinessSkillsSettings }>()
+    try {
+      const saved = saveBusinessSkillsSettings(unwrapSettings(body))
+      return c.json(ok({ settings: saved }))
+    } catch (error) {
+      if (error instanceof SettingsRevisionConflictError) {
+        throw AppError.conflict('Business skills were updated by another request', {
+          expectedRevision: error.expectedRevision,
+          currentRevision: error.actualRevision
+        })
+      }
+      throw AppError.badRequest(
+        error instanceof Error ? error.message : 'Failed to save business skills',
+        'settings.business_skills.save_failed'
+      )
+    }
+  })
+
   routes.get('/mcp', async (c) => {
     await requireUsername(c.req.header('Authorization'))
     return c.json(
@@ -98,49 +121,62 @@ export function createSettingsRoutes(ctx: AppContext): Hono {
     }
   })
 
-  routes.get('/storage', async (c) => {
+  routes.get('/providers', async (c) => {
     await requireUsername(c.req.header('Authorization'))
-    return c.json(ok(await readStorageStats(ctx)))
+    return c.json(ok(loadProviderSettings()))
   })
 
-  routes.post('/storage/validate-target', async (c) => {
+  routes.put('/providers', async (c) => {
     await requireUsername(c.req.header('Authorization'))
-    if (!ctx.storage?.bootstrapRoot || ctx.storage.managed) {
-      throw AppError.conflict('Storage location is managed by CLI or environment')
+    const rawBody = await c.req.json<unknown>()
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      throw AppError.badRequest(
+        'Provider settings payload must be an object',
+        'settings.providers.invalid_payload'
+      )
     }
-    const body = await c.req.json<{ path?: string }>()
-    const result = validateStorageTarget({
-      path: body.path ?? '',
-      forbiddenRoots: [ctx.storage.bootstrapRoot, ctx.dataDir]
-    })
-    if (!result.ok) throw AppError.badRequest(result.issue ?? 'Storage target is invalid')
-    return c.json(ok(result))
-  })
-
-  routes.post('/storage/migrations', async (c) => {
-    await requireUsername(c.req.header('Authorization'))
-    const body = await c.req.json<{ targetPath?: string }>()
+    const body = rawBody as Record<string, unknown>
+    for (const key of Object.keys(body)) {
+      if (key !== 'providers' && key !== 'expectedRevision') {
+        throw AppError.badRequest(
+          `Provider settings field ${key} is not supported`,
+          'settings.providers.invalid_payload'
+        )
+      }
+    }
+    if (!Object.prototype.hasOwnProperty.call(body, 'providers')) {
+      throw AppError.badRequest('providers is required', 'settings.providers.invalid_payload')
+    }
+    if (
+      body.expectedRevision !== undefined &&
+      (!Number.isInteger(body.expectedRevision) || Number(body.expectedRevision) < 0)
+    ) {
+      throw AppError.badRequest(
+        'expectedRevision must be a non-negative integer',
+        'settings.providers.invalid_revision'
+      )
+    }
     try {
-      return c.json(ok(startStorageMigration(ctx, body.targetPath ?? '')))
+      return c.json(
+        ok(saveProviderSettings(body.providers, body.expectedRevision as number | undefined))
+      )
     } catch (error) {
-      throw AppError.conflict(
-        error instanceof Error ? error.message : 'Storage migration could not start'
+      if (error instanceof SettingsRevisionConflictError) {
+        throw AppError.conflict('Provider settings were updated by another request', {
+          expectedRevision: error.expectedRevision,
+          currentRevision: error.actualRevision
+        })
+      }
+      throw AppError.badRequest(
+        error instanceof Error ? error.message : 'Failed to save Provider settings',
+        'settings.providers.save_failed'
       )
     }
   })
 
-  routes.get('/storage/migrations/:id', async (c) => {
+  routes.get('/storage', async (c) => {
     await requireUsername(c.req.header('Authorization'))
-    const migration = getStorageMigration(ctx, c.req.param('id'))
-    if (!migration) throw AppError.notFound('Storage migration not found')
-    return c.json(ok(migration))
-  })
-
-  routes.post('/storage/migrations/:id/confirm-old-delete', async (c) => {
-    await requireUsername(c.req.header('Authorization'))
-    const deleted = await confirmOldStorageDelete(ctx, c.req.param('id'))
-    if (!deleted) throw AppError.conflict('Old storage cannot be deleted yet')
-    return c.json(ok({ deleted: true }))
+    return c.json(ok(await readStorageStats(ctx)))
   })
 
   return routes

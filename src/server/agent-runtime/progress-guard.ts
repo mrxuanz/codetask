@@ -32,9 +32,6 @@ export function longRunningToolCapMs(
   return configuredMs
 }
 
-/** @deprecated Prefer longRunningToolCapMs — kept for existing test imports. */
-export const toolWallMs = longRunningToolCapMs
-
 export class ProgressGuard {
   private readonly _role: ConversationRole
   private readonly _config: ProgressGuardConfig

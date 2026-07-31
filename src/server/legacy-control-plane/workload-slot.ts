@@ -2,8 +2,8 @@ import { and, eq, type SQL } from 'drizzle-orm'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
-import type { WorkloadOwnerKind, WorkloadRunKind, WorkloadRunSummary } from './workload-slot-store'
-import { findActiveWorkloadRunId, listActiveWorkloadSlots } from './workload-slot-store'
+import type { WorkloadRunSummary } from './workload-slot-store'
+import { listActiveWorkloadSlots } from './workload-slot-store'
 
 let startupWorkloadReady: Promise<void> = Promise.resolve()
 let startupGateBound = false
@@ -165,20 +165,6 @@ export function isWorkloadSlotLeaseLive(slot: WorkloadRunSummary): boolean {
   return currentPid && leaseValid
 }
 
-export async function findActiveSlotOccupant(
-  username: string,
-  exceptId?: string
-): Promise<string | null> {
-  await ensureStartupWorkloadReady()
-  const active = await listActiveWorkloadSlots({ username })
-  for (const slot of active) {
-    if (exceptId && slot.ownerId === exceptId) continue
-    if (!isWorkloadSlotLeaseLive(slot)) continue
-    return slot.ownerId
-  }
-  return null
-}
-
 /**
  * F2 (§7.2/§7.3): execution/planning slot occupancy is process-global. The pool
  * capacity is a single process-wide slot, so occupancy must NOT be filtered by
@@ -244,68 +230,4 @@ export async function findPlanningOccupantGlobal(exceptId?: string): Promise<str
   if (slotOccupant) return slotOccupant
 
   return findDbPlanningSessionGlobal(exceptId)
-}
-
-/**
- * @deprecated Use findExecutionOccupant or findPlanningOccupant instead.
- * This checks ALL pools and is only retained for diagnostic APIs.
- */
-export async function findWorkloadOccupant(
-  username: string,
-  exceptId?: string
-): Promise<string | null> {
-  await ensureStartupWorkloadReady()
-
-  const memExec = findInMemoryExecutionOccupant(username, exceptId)
-  if (memExec) return memExec
-
-  const memPlan = findInMemoryPlanningOccupant(username, exceptId)
-  if (memPlan) return memPlan
-
-  const slotOccupant = await findActiveSlotOccupant(username, exceptId)
-  if (slotOccupant) return slotOccupant
-
-  const dbExec = await findDbRunningJobId(username, exceptId)
-  if (dbExec) return dbExec
-
-  const dbPlan = await findDbPlanningSessionId(username, exceptId)
-  if (dbPlan) return dbPlan
-
-  return null
-}
-
-export async function findOccupyingRun(
-  username: string,
-  exceptId?: string
-): Promise<WorkloadRunSummary | null> {
-  await ensureStartupWorkloadReady()
-  const active = await listActiveWorkloadSlots({ username })
-  for (const slot of active) {
-    if (exceptId && slot.ownerId === exceptId) continue
-    if (!isWorkloadSlotLeaseLive(slot)) continue
-    return slot
-  }
-  return null
-}
-
-export async function findActiveRunForOwner(
-  ownerKind: WorkloadOwnerKind,
-  ownerId: string
-): Promise<WorkloadRunSummary | null> {
-  await ensureStartupWorkloadReady()
-  const runId = await findActiveWorkloadRunId(ownerKind, ownerId)
-  if (!runId) return null
-  const active = await listActiveWorkloadSlots({})
-  return active.find((s) => s.runId === runId) ?? null
-}
-
-export async function isOwnerRunning(
-  ownerKind: WorkloadOwnerKind,
-  ownerId: string,
-  kind?: WorkloadRunKind
-): Promise<boolean> {
-  const active = await findActiveRunForOwner(ownerKind, ownerId)
-  if (!active) return false
-  if (kind) return active.kind === kind
-  return true
 }

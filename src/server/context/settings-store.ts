@@ -6,7 +6,9 @@ const NAMESPACE_TO_PROPERTY = {
   control_plane: 'controlPlane',
   prompts: 'prompts',
   retention: 'retention',
-  user_mcp: 'userMcp',
+  business_skills: 'businessSkills',
+  mcp_json: 'userMcp',
+  provider_runtime: 'providerRuntime',
   ui_server_preferences: 'uiServerPreferences'
 } as const
 

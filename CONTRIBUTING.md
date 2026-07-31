@@ -2,7 +2,7 @@
 
 ## Before You Start
 
-- Node.js 22+
+- Node.js 24.x
 - Rust stable toolchain
 - npm
 

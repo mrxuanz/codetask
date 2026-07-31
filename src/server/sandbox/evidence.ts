@@ -1,9 +1,9 @@
 import { createHash } from 'crypto'
 import type { Readable } from 'stream'
-import type { AnySandboxPolicy, SandboxEvidence } from './types'
+import type { SandboxEvidence, SandboxPolicy } from './types'
 import { serializeSandboxPolicy } from './wire'
 
-export function sha256Policy(policy: AnySandboxPolicy): string {
+export function sha256Policy(policy: SandboxPolicy): string {
   const json = serializeSandboxPolicy(policy)
   return createHash('sha256').update(json).digest('hex')
 }
@@ -60,7 +60,7 @@ export function readOneJsonLine<T>(stream: Readable, timeoutMs = 30_000): Promis
   })
 }
 
-export function assertSandboxEvidence(evidence: SandboxEvidence, policy: AnySandboxPolicy): void {
+export function assertSandboxEvidence(evidence: SandboxEvidence, policy: SandboxPolicy): void {
   if (!evidence.active) {
     throw new Error('sandbox helper did not attest active sandbox')
   }

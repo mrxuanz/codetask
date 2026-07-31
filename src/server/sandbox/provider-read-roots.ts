@@ -1,53 +1,10 @@
-import { execFileSync } from 'child_process'
-import { dirname, normalize, parse, sep } from 'path'
+import { dirname, normalize, parse } from 'path'
 import { existsSync, realpathSync, statSync } from 'fs'
 import type { SupportedCoreCode } from '../conversation/cores'
-import {
-  resolveCursorAgentInstallDirs,
-  resolveCodexInstallDirs,
-  resolveClaudeInstallDirs,
-  resolveOpencodeInstallDirs
-} from './provider-auth/paths'
-import { resolveHostNodeBinDirs } from './toolchain-path'
-
-const PROVIDER_COMMANDS: Record<SupportedCoreCode, string[]> = {
-  codex: ['codex'],
-  'claude-code': ['claude', 'claude-code'],
-  opencode: ['opencode'],
-  cursorcli: ['agent', 'cursor-agent', 'cursor']
-}
-
-const RUNTIME_COMMANDS = ['node']
-const TOOL_HOME_ENV_KEYS = ['VOLTA_HOME', 'NVM_SYMLINK'] as const
-
-function whereCommand(command: string): string[] {
-  if (process.platform === 'win32') {
-    try {
-      const output = execFileSync('where', [command], {
-        encoding: 'utf8',
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'ignore']
-      })
-      return output
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    } catch {
-      return []
-    }
-  }
-
-  try {
-    const output = execFileSync('which', [command], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore']
-    })
-    const line = output.trim()
-    return line ? [line] : []
-  } catch {
-    return []
-  }
-}
+import { getProviderRegistry } from '../providers/access'
+import { providerInstallationResolver } from '../providers/installation'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
+import { resolveHostNodeBinDirs, resolveToolchainContainerRoot } from './toolchain-path'
 
 function safeRealpath(path: string): string {
   try {
@@ -70,22 +27,6 @@ function existingDirectoryFor(path: string): string | null {
   } catch {
     return null
   }
-}
-
-function ancestorNamed(path: string, segment: string): string | null {
-  const normalized = normalize(path)
-  const parsed = parse(normalized)
-  const parts = normalized
-    .slice(parsed.root.length)
-    .split(/[\\/]+/)
-    .filter(Boolean)
-  const expected = segment.toLowerCase()
-  const index = parts.findIndex((part) => {
-    const candidate = part.toLowerCase()
-    return candidate === expected || candidate === `.${expected}`
-  })
-  if (index === -1) return null
-  return safeRealpath(`${parsed.root}${parts.slice(0, index + 1).join(sep)}`)
 }
 
 function isSafeReadRoot(path: string): boolean {
@@ -111,48 +52,54 @@ function addRoot(roots: Map<string, string>, path: string | null | undefined): v
   }
 }
 
-export function resolveProviderReadRoots(provider: SupportedCoreCode): string[] {
+/** Host toolchain roots shared by every Provider (no Provider switch). */
+export function resolveHostToolchainReadRoots(
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+): string[] {
   const roots = new Map<string, string>()
-  const commands = [...PROVIDER_COMMANDS[provider], ...RUNTIME_COMMANDS]
 
-  for (const command of commands) {
-    for (const candidate of whereCommand(command)) {
-      const dir = existingDirectoryFor(candidate)
-      addRoot(roots, dir)
-      addRoot(roots, dir ? ancestorNamed(dir, 'Volta') : null)
-    }
-  }
-
-  for (const key of TOOL_HOME_ENV_KEYS) {
-    addRoot(roots, process.env[key])
-  }
-  for (const dir of resolveHostNodeBinDirs()) {
+  for (const dir of resolveHostNodeBinDirs({
+    env: hostEnvironment
+  })) {
     addRoot(roots, dir)
-    addRoot(roots, ancestorNamed(dir, 'Volta'))
+    addRoot(roots, resolveToolchainContainerRoot(dir))
   }
 
-  if (provider === 'cursorcli') {
-    for (const dir of resolveCursorAgentInstallDirs()) {
+  return [...roots.values()]
+}
+
+/**
+ * Compatibility helper for diagnostics. Production orchestration merges the
+ * selected driver's contribution directly.
+ */
+export function resolveProviderReadRoots(
+  provider: SupportedCoreCode,
+  hostEnvironment: HostEnvironmentSnapshot = processHostEnvironmentSource.snapshot()
+): string[] {
+  const roots = new Map<string, string>()
+  const driver = getProviderRegistry().get(provider)
+  const installDirs = driver.installDirs(hostEnvironment)
+
+  for (const path of resolveHostToolchainReadRoots(hostEnvironment)) {
+    addRoot(roots, path)
+  }
+
+  // Prefer unified installation resolution so entry/canonical read roots match launch.
+  const installation = providerInstallationResolver.resolve(provider, {
+    hostEnv: hostEnvironment,
+    settings: driver.settings,
+    installDirs
+  })
+  if (installation) {
+    for (const path of [installation.resolvedPath, installation.canonicalPath]) {
+      const dir = existingDirectoryFor(path)
       addRoot(roots, dir)
+      addRoot(roots, dir ? resolveToolchainContainerRoot(dir) : null)
     }
   }
 
-  if (provider === 'codex') {
-    for (const dir of resolveCodexInstallDirs()) {
-      addRoot(roots, dir)
-    }
-  }
-
-  if (provider === 'claude-code') {
-    for (const dir of resolveClaudeInstallDirs()) {
-      addRoot(roots, dir)
-    }
-  }
-
-  if (provider === 'opencode') {
-    for (const dir of resolveOpencodeInstallDirs()) {
-      addRoot(roots, dir)
-    }
+  for (const dir of installDirs) {
+    addRoot(roots, dir)
   }
 
   return [...roots.values()]

@@ -3,15 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { setup } from '@renderer/api/auth'
-import { api } from '@renderer/api/client'
-import { setToken } from '@renderer/auth/token'
 import CredentialsForm from '@renderer/components/auth/CredentialsForm.vue'
+import FolderBrowseDialog from '@renderer/components/shared/FolderBrowseDialog.vue'
 import Button from '@renderer/components/ui/Button.vue'
-import Dialog from '@renderer/components/ui/Dialog.vue'
 import Input from '@renderer/components/ui/Input.vue'
 import Label from '@renderer/components/ui/Label.vue'
 import PageShell from '@renderer/components/ui/PageShell.vue'
-import FolderBrowsePanel from '@renderer/components/shared/FolderBrowsePanel.vue'
 import { useBootstrap } from '@renderer/composables/useBootstrap'
 import { useFolderBrowse } from '@renderer/composables/useFolderBrowse'
 import { translateApiError } from '@renderer/i18n/translateApiError'
@@ -34,9 +31,7 @@ function storageErrorMessage(error: unknown): string {
 
 const needSetupToken = computed(() => bootstrapData.value?.setupTokenRequired ?? false)
 const storagePhase = computed(() => bootstrapData.value?.storagePhase)
-const needsStorage = computed(
-  () => storagePhase.value === 'selection_required' || storagePhase.value === 'recovery_required'
-)
+const needsStorage = computed(() => storagePhase.value === 'selection_required')
 const storagePath = ref('')
 const storageIssue = ref<string | null>(null)
 const pickerOpen = ref(false)
@@ -53,7 +48,8 @@ const {
   currentDirectoryPath,
   openEntry,
   goParent,
-  joinNewFolderPath,
+  selectFolder,
+  createFolder,
   start: startBrowse
 } = useFolderBrowse({ active: pickerOpen })
 
@@ -66,9 +62,7 @@ onMounted(async () => {
   try {
     const response = await fetchStorageBootstrap()
     storagePath.value = response.data.defaultCandidate
-    storageIssue.value = response.data.issue
-      ? translateApiError(response.data.issue, t)
-      : null
+    storageIssue.value = response.data.issue ? translateApiError(response.data.issue, t) : null
   } catch (error) {
     storageIssue.value = storageErrorMessage(error)
   }
@@ -88,37 +82,20 @@ function closeStoragePicker(): void {
   pickerOpen.value = false
 }
 
-function selectStoragePath(path: string): void {
-  const target = path.trim()
-  if (!target) {
-    browseError.value = t('folderPicker.selectRequired')
-    return
-  }
-  storagePath.value = target
+async function selectStoragePath(path: string): Promise<void> {
+  const selected = await selectFolder(path)
+  if (!selected) return
+  storagePath.value = selected
   pickerOpen.value = false
 }
 
 async function createAndSelectFolder(): Promise<void> {
-  const target = joinNewFolderPath()
-  if (!target) {
-    browseError.value = t('folderPicker.folderNameRequired')
-    return
-  }
   creatingFolder.value = true
-  browseError.value = null
   try {
-    const created = await api<{ path: string }>('/api/fs/mkdir', {
-      method: 'POST',
-      body: JSON.stringify({ path: target })
-    })
-    const path = created.data.path || target
+    const path = await createFolder()
+    if (!path) return
     storagePath.value = path
-    newFolderName.value = ''
-    query.value = withTrailingSeparator(path)
-    await loadBrowse(query.value)
     pickerOpen.value = false
-  } catch (error) {
-    browseError.value = error instanceof Error ? error.message : t('folderPicker.browseFailed')
   } finally {
     creatingFolder.value = false
   }
@@ -127,9 +104,7 @@ async function createAndSelectFolder(): Promise<void> {
 async function ensureStorageReady(): Promise<void> {
   storageIssue.value = null
   const response = await validateStorageTarget(storagePath.value)
-  const action =
-    response.data.action ??
-    (storagePhase.value === 'recovery_required' ? 'recover' : 'initialize')
+  const action = response.data.action ?? 'initialize'
   if (action === 'recover') {
     await recoverStorageTarget(response.data.canonicalPath, response.data.nonce)
   } else {
@@ -163,8 +138,7 @@ async function onSubmit(payload: {
     }
   }
 
-  const res = await setup(payload.username, payload.password, payload.setupToken)
-  setToken(res.data.token, res.data.expires_at)
+  await setup(payload.username, payload.password, payload.setupToken)
   await refresh()
   await router.replace('/home')
 }
@@ -187,13 +161,7 @@ async function onSubmit(payload: {
           <div class="flex min-w-0 flex-col gap-2 border-b pb-4">
             <Label for="storage-path">{{ t('setup.storagePathLabel') }}</Label>
             <p class="text-xs leading-relaxed text-muted-foreground break-words">
-              {{
-                t(
-                  storagePhase === 'recovery_required'
-                    ? 'setup.storageRecoveryDescription'
-                    : 'setup.storageDescription'
-                )
-              }}
+              {{ t('setup.storageDescription') }}
             </p>
             <!-- Always stack: long Windows paths + Browse overflow every phone/tablet width. -->
             <div class="flex min-w-0 flex-col gap-2">
@@ -224,36 +192,23 @@ async function onSubmit(payload: {
       </CredentialsForm>
     </PageShell>
 
-    <Dialog
+    <FolderBrowseDialog
+      v-model:query="query"
+      v-model:new-folder-name="newFolderName"
       :open="pickerOpen"
-      class="flex h-[min(92dvh,720px)] min-h-0 max-h-[min(92dvh,720px)] w-full max-w-2xl flex-col sm:h-[min(90dvh,720px)] sm:max-h-[min(90dvh,720px)]"
+      :parent-path="parentPath"
+      :current-path="currentDirectoryPath()"
+      :entries="entries"
+      :loading="browsing"
+      :submitting="creatingFolder"
+      :error="browseError"
+      :select-current-label="t('setup.storageSelectDirectory')"
+      :create-folder-label="t('setup.storageCreateFolder')"
       @close="closeStoragePicker"
-    >
-      <div class="shrink-0 border-b border-border px-3 py-3 sm:px-4 sm:py-4">
-        <h2 class="text-base font-semibold">{{ t('setup.storageBrowseTitle') }}</h2>
-        <p class="mt-1 text-sm text-muted-foreground break-words">
-          {{ t('setup.storageBrowseHint') }}
-        </p>
-      </div>
-      <FolderBrowsePanel
-        fill-height
-        :query="query"
-        :parent-path="parentPath"
-        :current-path="currentDirectoryPath()"
-        :entries="entries"
-        :new-folder-name="newFolderName"
-        :loading="browsing"
-        :submitting="creatingFolder"
-        :error="browseError"
-        :select-current-label="t('setup.storageSelectDirectory')"
-        :create-folder-label="t('setup.storageCreateFolder')"
-        @update:query="query = $event"
-        @update:new-folder-name="newFolderName = $event"
-        @go-parent="goParent"
-        @open-entry="openEntry"
-        @select="selectStoragePath"
-        @create-folder="createAndSelectFolder"
-      />
-    </Dialog>
+      @go-parent="goParent"
+      @open-entry="openEntry"
+      @select="selectStoragePath"
+      @create-folder="createAndSelectFolder"
+    />
   </div>
 </template>

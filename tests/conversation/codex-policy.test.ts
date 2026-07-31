@@ -7,9 +7,12 @@ import {
   buildCodexTurnPlan,
   resolveCodexMcpToolNamesForTurn,
   resolveCodexOuterSandbox
-} from '../../src/server/agent-runtime/providers/codex-policy'
+} from '../../src/server/providers/codex/turn-plan.ts'
 import { applyLoopbackNoProxyEnv } from '../../src/server/agent-runtime/env'
-import { resolveCodexMcpStartupTurnError } from '../../src/server/agent-runtime/providers/codex-sdk'
+import {
+  resolveCodexConfigTurnError,
+  resolveCodexMcpStartupTurnError
+} from '../../src/server/agent-runtime/providers/codex-sdk'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'
 
 const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-codex-policy-'))
@@ -60,7 +63,8 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
     { outerSandbox: false }
   )
   assert.equal(conversation.outerSandbox, false)
-  assert.equal(conversation.threadOptions.sandboxMode, 'danger-full-access')
+  assert.equal(conversation.threadOptions.sandboxMode, 'workspace-write')
+  assert.equal(conversation.threadOptions.additionalDirectories, undefined)
   assert.equal(conversation.mcpToolNames, undefined)
   assert.ok(
     conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
@@ -100,8 +104,8 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.equal(task.threadOptions.sandboxMode, 'danger-full-access')
   assert.equal(task.sdkConfig?.sandbox_mode, 'danger-full-access')
   assert.ok(task.mcpToolNames?.includes('report_task_result'))
-  assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
-  assert.equal(task.env.CODETASK_TASK_IDEMPOTENCY_SCOPE, 'logical-task')
+  assert.equal('CODETASK_TASK_IDEMPOTENCY_KEY' in task.env, false)
+  assert.equal('CODETASK_TASK_IDEMPOTENCY_SCOPE' in task.env, false)
 })
 
 test('applyLoopbackNoProxyEnv preserves inherited entries and synchronizes both casings', () => {
@@ -145,6 +149,19 @@ test('resolveCodexMcpStartupTurnError maps required system MCP startup failures 
     ),
     null
   )
+})
+
+test('Codex config failures are classified from the SDK runtime that actually launched', () => {
+  assert.equal(
+    resolveCodexConfigTurnError(new Error('Failed to load configuration: invalid TOML at line 3'))
+      ?.code,
+    'provider.codex.config_invalid'
+  )
+  assert.equal(
+    resolveCodexConfigTurnError(new Error('config.toml parse error near model_provider'))?.code,
+    'provider.codex.config_invalid'
+  )
+  assert.equal(resolveCodexConfigTurnError(new Error('model overloaded')), null)
 })
 
 test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {

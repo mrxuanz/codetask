@@ -1,17 +1,5 @@
-import {
-  applyTaskIdempotencyEnv,
-  buildSandboxPreparedProviderEnv,
-  buildProviderChildEnv
-} from '../env'
 import { throwSdkTurnError } from '../errors'
-import { buildClaudeMcpServers } from '../mcp'
-import { resolveClaudeSettingSources, resolveClaudeSystemPrompt } from './claude-policy'
-import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '../roles'
-import {
-  CLI_READ_ONLY_BUILTINS,
-  capabilityProfileIsReadOnly,
-  resolveInputCapabilityProfile
-} from '../capabilities'
+import { buildClaudeTurnOptions } from '../../providers/claude/turn-options'
 import { createTurnError } from '../../../shared/turn-errors.ts'
 import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '../types'
 import { advanceTextSnapshot, appendTextPiece } from '../delta-emit'
@@ -21,31 +9,41 @@ import {
   partialCompletedChunk
 } from '../turn-scope'
 import { abortReason, createProviderTurnScope, forwardAbortSignal } from '../provider-turn'
+import { sandboxTurnDebug } from '../../debug/sandbox-turn'
+import {
+  requiresClaudeSdkSpawnGateway,
+  spawnClaudeSdkInvocation
+} from '../../providers/claude/sdk-spawn'
+import type {
+  SpawnOptions as ClaudeSdkSpawnOptions,
+  SpawnedProcess
+} from '@anthropic-ai/claude-agent-sdk'
 
 export async function* streamClaudeTurn(
   input: AgentTurnInput,
   options?: AgentTurnOptions
 ): AsyncGenerator<AgentTurnChunk> {
-  const outerSandbox = options?.outerSandbox ?? false
-  if (!outerSandbox && roleRequiresOuterSandbox(input.role)) {
-    throw createTurnError('sandbox.required', {
-      detail: 'Claude bypassPermissions requires OS outer sandbox'
-    })
-  }
+  const plan = buildClaudeTurnOptions(input, { outerSandbox: options?.outerSandbox })
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
-  const capabilityProfile = resolveInputCapabilityProfile(input)
-  const readOnly = capabilityProfileIsReadOnly(capabilityProfile)
-  const builtins = readOnly ? [...CLI_READ_ONLY_BUILTINS] : [...CLI_FULL_ACCESS_BUILTINS]
+  const executableInvocation = plan.executableInvocation
+  const spawnClaudeCodeProcess =
+    executableInvocation && requiresClaudeSdkSpawnGateway(executableInvocation)
+      ? (spawnOptions: ClaudeSdkSpawnOptions): SpawnedProcess =>
+          spawnClaudeSdkInvocation(executableInvocation, spawnOptions) as SpawnedProcess
+      : undefined
   let reply = ''
   let thinking = ''
 
-  const userMcpServers = input.userMcpServers ?? {}
-  // Always build the CodeTask MCP map so we can pin it with strictMcpConfig when
-  // host settingSources are loaded (overrides ~/.claude settings MCP).
-  const mcpServers = buildClaudeMcpServers(input.mcpUrl, userMcpServers)
-  const mcpServerNames = Object.keys(mcpServers)
-  const mcpToolAllowlist = mcpServerNames.map((name) => `mcp__${name}__*`)
-  const allowedTools = mcpToolAllowlist.length > 0 ? [...builtins, ...mcpToolAllowlist] : builtins
+  sandboxTurnDebug('claude: turn options', {
+    outerSandbox: plan.outerSandbox,
+    readOnly: plan.readOnly,
+    installationId: plan.installationId,
+    executableStrategy: plan.executableStrategy,
+    pathToClaudeCodeExecutable: plan.pathToClaudeCodeExecutable,
+    structuredSpawn: Boolean(spawnClaudeCodeProcess),
+    settingSources: plan.settingSources,
+    pinMcpConfig: plan.pinMcpConfig
+  })
 
   const turnScope = createProviderTurnScope(input.role, options, {})
   const turnAbort = new AbortController()
@@ -54,41 +52,31 @@ export async function* streamClaudeTurn(
   }
   const turnAbortListener = forwardAbortSignal(turnScope.signal, turnAbort)
 
-  const providerEnv = outerSandbox
-    ? buildSandboxPreparedProviderEnv()
-    : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
-  applyTaskIdempotencyEnv(providerEnv, input.idempotencyKey)
-
-  const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
-  // When host settings load, pin MCP to CodeTask's map (possibly empty) so user
-  // ~/.claude MCP does not leak in. Outer-sandbox turns already use empty
-  // settingSources and only need MCP when CodeTask injected servers.
-  const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
-
   const stream = query({
     prompt: input.prompt,
     options: {
       cwd: input.cwd,
-      systemPrompt: resolveClaudeSystemPrompt(input.systemPrompt),
-      settingSources,
-      // Read-only: disable filesystem skills/plugins even though user settings load.
-      ...(readOnly ? { skills: [], plugins: [] } : {}),
-      tools: builtins,
-      allowedTools,
-      disallowedTools: readOnly
-        ? ['AskUserQuestion', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'Agent']
-        : ['AskUserQuestion'],
-      permissionMode: 'bypassPermissions',
+      systemPrompt: plan.systemPrompt,
+      settingSources: [...plan.settingSources],
+      ...(plan.readOnly ? { skills: [], plugins: [] } : {}),
+      tools: [...plan.builtins],
+      allowedTools: [...plan.allowedTools],
+      disallowedTools: [...plan.disallowedTools],
+      permissionMode: plan.permissionMode,
+      allowDangerouslySkipPermissions: plan.allowDangerouslySkipPermissions,
       persistSession: true,
       abortController: turnAbort,
-      env: providerEnv,
-      // Keep Claude's inner sandbox off; OS outer sandbox (when used) is the boundary.
-      sandbox: { enabled: false },
-      ...(input.model !== undefined ? { model: input.model } : {}),
-      ...(input.runtimeSessionId ? { resume: input.runtimeSessionId } : {}),
-      ...(pinMcpConfig
+      env: plan.env,
+      sandbox: plan.sandbox,
+      ...(plan.model !== undefined ? { model: plan.model } : {}),
+      ...(plan.resume ? { resume: plan.resume } : {}),
+      ...(plan.pathToClaudeCodeExecutable
+        ? { pathToClaudeCodeExecutable: plan.pathToClaudeCodeExecutable }
+        : {}),
+      ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
+      ...(plan.pinMcpConfig
         ? {
-            mcpServers: mcpServers as NonNullable<
+            mcpServers: plan.mcpServers as NonNullable<
               NonNullable<Parameters<typeof query>[0]['options']>['mcpServers']
             >,
             strictMcpConfig: true

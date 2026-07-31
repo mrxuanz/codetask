@@ -16,9 +16,11 @@ export type CaseManifest = {
   workspaceFixture?: string
   stagedFixture?: string
   /**
-   * Optional worker kill timer. Omit or <=0 (default) to wait until the driver
-   * exits on CodeTask API terminal state. Positive values are for rare harness
-   * probes only — not for normal agent turns/jobs.
+   * Optional overall worker budget.
+   * Omit or <=0 → unbounded case wait for CodeTask business API terminal;
+   * OpenCode startup/prompt/report stages stay finite.
+   * Positive values shrink stage budgets to fit.
+   * `--no-timeout` unlocks OpenCode stage ceilings (forbidden in CI).
    */
   timeoutMs?: number
   skipReason?: string
@@ -53,6 +55,7 @@ const DRAFT_MUTATION_TOOLS = [
   'codetask_unlock_draft_contract',
   'codetask_confirm_draft_section',
   'codetask_update_ability_providers',
+  'codetask_update_draft_execution_config',
   'codetask_upload_attachment',
   'codetask_confirm_draft',
   'codetask_confirm_draft_final',
@@ -102,6 +105,7 @@ function buildPlannerManifests(): Record<string, CaseManifest> {
     'codetask_wait_turn',
     'codetask_list_messages',
     'codetask_get_thread_drafts',
+    'codetask_update_draft_execution_config',
     'codetask_confirm_draft',
     'codetask_confirm_draft_final',
     'codetask_get_latest_job',
@@ -142,6 +146,7 @@ function buildJobManifests(): Record<string, CaseManifest> {
     'codetask_get_turn',
     'codetask_list_messages',
     'codetask_get_thread_drafts',
+    'codetask_update_draft_execution_config',
     'codetask_confirm_draft',
     'codetask_confirm_draft_final',
     'codetask_get_latest_job',
@@ -190,6 +195,7 @@ function buildJobManifests(): Record<string, CaseManifest> {
             ? [
                 'mcp.codetask_create_project',
                 'mcp.codetask_start_turn',
+                'mcp.codetask_update_draft_execution_config',
                 'mcp.codetask_confirm_draft_final',
                 'case.report_result'
               ]
@@ -507,6 +513,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'codetask_get_thread',
       'case_next_fixture',
       'codetask_get_thread_drafts',
+      'codetask_update_draft_execution_config',
       'codetask_confirm_draft',
       'codetask_confirm_draft_final',
       'codetask_get_latest_job',
@@ -620,6 +627,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'codetask_wait_turn',
       'codetask_list_messages',
       'codetask_get_thread_drafts',
+      'codetask_update_draft_execution_config',
       'codetask_confirm_draft',
       'codetask_confirm_draft_final',
       'codetask_get_latest_job',
@@ -629,6 +637,8 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [
       'mcp.codetask_start_turn',
       'mcp.codetask_get_thread_drafts',
+      'mcp.codetask_update_draft_execution_config',
+      'mcp.codetask_confirm_draft_final',
       'case.report_result'
     ],
     oracle: { requireProject: true, requireThread: true },
@@ -649,13 +659,20 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'codetask_wait_turn',
       'codetask_list_messages',
       'codetask_get_thread_drafts',
+      'codetask_update_draft_execution_config',
       'codetask_confirm_draft',
       'codetask_confirm_draft_final',
       'codetask_get_latest_job',
       'case_checkpoint',
       'report_case_result'
     ],
-    requiredOperations: ['mcp.case_next_fixture', 'mcp.codetask_start_turn', 'case.report_result'],
+    requiredOperations: [
+      'mcp.case_next_fixture',
+      'mcp.codetask_start_turn',
+      'mcp.codetask_update_draft_execution_config',
+      'mcp.codetask_confirm_draft_final',
+      'case.report_result'
+    ],
     oracle: { requireProject: true, requireThread: true },
     workspaceFixture: 'notes-search-project',
     stagedFixture: 'conversation/draft-multiturn.json'

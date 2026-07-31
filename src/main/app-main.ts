@@ -1,14 +1,13 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { parseCliArgs } from './cli'
 import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
 import { SafeLoggerImpl } from '../server/application/safe-logger'
-import { resolveDataDirSelection } from './data-dir'
-import { discoverRunningService } from './service-discovery'
 import { createElectronServerPlatform } from './electron-server-platform'
 import { createShutdownSignalHandler } from './shutdown-signal'
+import { initializeProcessHostEnvironment } from '../server/host-environment'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
 
@@ -108,36 +107,9 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
-    if (cli.mode === 'desktop') {
-      const storage = resolveDataDirSelection({ explicitDataDir: cli.dataDir, mode: cli.mode })
-      serverInfo = await discoverRunningService(
-        storage.bootstrap,
-        storage.phase === 'ready' ? storage.dataDir : undefined
-      )
-      if (serverInfo) {
-        console.log(`[desktop] using running service at ${serverInfo.url}`)
-      }
-    }
-    serverInfo ??= await startAppServer(cli, createElectronServerPlatform())
+    await initializeProcessHostEnvironment()
+    serverInfo = await startAppServer(cli, createElectronServerPlatform())
     ipcMain.handle('get-server-info', () => serverInfo)
-    ipcMain.handle('select-data-directory', async () => {
-      const owner = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-      const result = owner
-        ? await dialog.showOpenDialog(owner, {
-            title: 'Choose CodeTask data directory',
-            properties: ['openDirectory', 'createDirectory']
-          })
-        : await dialog.showOpenDialog({
-            title: 'Choose CodeTask data directory',
-            properties: ['openDirectory', 'createDirectory']
-          })
-      return result.canceled ? null : (result.filePaths[0] ?? null)
-    })
-    ipcMain.handle('relaunch-app', async () => {
-      await gracefulShutdownFromApp()
-      app.relaunch()
-      app.exit(0)
-    })
     if (cli.smokeTest) {
       await runPackagedSmoke(serverInfo)
       return

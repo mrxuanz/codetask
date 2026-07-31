@@ -19,7 +19,6 @@ import { migration018DraftReferences } from './018_draft_references'
 import { migration019DesignPlanArtifacts } from './019_design_plan_artifacts'
 import { migration020JobSnapshot } from './020_job_snapshot'
 import { migration021CorpusRevision } from './021_corpus_revision'
-import { migration022AuthGuard } from './022_auth_guard'
 import { migration023WorkloadSlots } from './023_workload_slots'
 import { migration024JobPausingStatus } from './024_job_pausing_status'
 import { migration025RuntimeBytes } from './025_runtime_bytes'
@@ -35,6 +34,9 @@ import { migration034JobArtifactBlob } from './034_job_artifact_blob'
 import { migration035JobSuspensionRecovery } from './035_job_suspension_recovery'
 import { migration036ConversationTurns } from './036_conversation_turns'
 import { migration039PromoteRestartInterruptedPaused } from './039_promote_restart_interrupted_paused'
+import { migration040DestructiveAuthCurrent } from './040_destructive_auth_current'
+import { migration041AuthSecretSqlite } from './041_auth_secret_sqlite'
+import { migration042ExecutionProfile } from './042_execution_profile'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -60,7 +62,6 @@ export const allMigrations = [
   migration019DesignPlanArtifacts,
   migration020JobSnapshot,
   migration021CorpusRevision,
-  migration022AuthGuard,
   migration023WorkloadSlots,
   migration024JobPausingStatus,
   migration025RuntimeBytes,
@@ -75,7 +76,10 @@ export const allMigrations = [
   migration034JobArtifactBlob,
   migration035JobSuspensionRecovery,
   migration036ConversationTurns,
-  migration039PromoteRestartInterruptedPaused
+  migration039PromoteRestartInterruptedPaused,
+  migration040DestructiveAuthCurrent,
+  migration041AuthSecretSqlite,
+  migration042ExecutionProfile
 ]
 
 export function applyMigrations(db: Database.Database): void {

@@ -6,6 +6,8 @@ import type { ConversationMessageDto } from '../types'
 import { getMessage, insertMessage, listMessages } from '../messages'
 import { bindPayloadWorkspace, draftPayloadToClientJson } from './normalize'
 import type { TaskLaunchDraftPayload } from './types'
+import type { SupportedCoreCode } from '../cores'
+import { resolveDraftExecutionConfig } from './normalize'
 import { resolveThreadWizardPhaseWrite } from '../../wizard/phase'
 import { getThreadRow } from '../../threads/service'
 import type { Thread } from '../../db/schema'
@@ -34,6 +36,7 @@ export function createCollectingDraftPayload(input: {
   sourceMessageId: string
   title: string
   workspacePath: string
+  coreCode: SupportedCoreCode
 }): TaskLaunchDraftPayload {
   const title = input.title.trim() || 'New Task'
   return bindPayloadWorkspace(
@@ -57,6 +60,7 @@ export function createCollectingDraftPayload(input: {
       abilities: [],
       references: [],
       sourceAttachments: [],
+      executionConfig: resolveDraftExecutionConfig({ abilities: [] }, input.coreCode),
       revision: 1,
       collecting: true
     },
@@ -113,7 +117,8 @@ export async function ensureCollectingDraft(input: {
     draftId: `draft-${randomUUID()}`,
     sourceMessageId: input.sourceMessageId,
     title: input.threadTitle,
-    workspacePath: input.workspacePath
+    workspacePath: input.workspacePath,
+    coreCode: input.coreCode as SupportedCoreCode
   })
 
   const message = await insertMessage({

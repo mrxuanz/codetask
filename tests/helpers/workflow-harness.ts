@@ -375,6 +375,7 @@ export class WorkflowHarness {
   private authHeaders(): Record<string, string> {
     return {
       Authorization: `Bearer ${this.token}`,
+      'x-codetask-auth-transport': 'bearer',
       'Content-Type': 'application/json'
     }
   }

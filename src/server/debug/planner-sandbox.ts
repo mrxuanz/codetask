@@ -1,3 +1,5 @@
+import { getRuntimeFeatures } from '../config/runtime-features'
+
 let seq = 0
 const t0 = Date.now()
 
@@ -16,7 +18,7 @@ function formatDetail(detail: unknown): string {
 }
 
 export function plannerSandboxDebug(step: string, detail?: unknown): void {
-  if (process.env.CODETASK_DEBUG_PLANNER_SANDBOX === '0') return
+  if (!getRuntimeFeatures().debug.plannerSandbox) return
   seq += 1
   const elapsedMs = Date.now() - t0
   console.log(

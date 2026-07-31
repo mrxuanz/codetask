@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { tNote } from '../i18n'
 import { progress } from '../reports/progress'
 
 /**
@@ -21,22 +22,21 @@ export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: b
 
   if (options.keepRuntime) {
     progress('supervisor', 'preflight.keep_runtime', {
-      note: '启动仍强制清空测试数据库与.runtime；如需留档请先自行拷贝'
+      note: tNote('preflight.keep_runtime')
     })
   }
 
   progress('supervisor', 'preflight.database_reset_begin', {
-    note: '开始清空业务测试数据库与运行数据'
+    note: tNote('preflight.database_reset_begin')
   })
 
   killLeftoverBusinessProcesses(runtimeRoot)
-  killLeftoverOpencodeServe()
 
   // Explicit DB wipe first (in case dir delete is partial)
   const dbRemoved = wipeTestDatabases(e2eRoot)
   progress('supervisor', 'preflight.database_cleared', {
     removed: dbRemoved,
-    note: '测试数据库已清空'
+    note: tNote('preflight.database_cleared')
   })
 
   const cleared: Array<{ path: string; removed: number }> = []
@@ -68,7 +68,7 @@ export function runPreflightCleanup(options: { repoRoot: string; keepRuntime?: b
   progress('supervisor', 'preflight.runtime_cleared', {
     path: runtimeRoot,
     cleared,
-    note: '已重置运行目录；本次将使用全新空库'
+    note: tNote('preflight.runtime_cleared')
   })
 }
 
@@ -178,34 +178,6 @@ function killLeftoverBusinessProcesses(runtimeRoot: string): void {
   })
 }
 
-function killLeftoverOpencodeServe(): void {
-  const isOpencodeServe = (commandLine: string): boolean => {
-    const compact = commandLine.toLowerCase().replace(/["']+/g, ' ').replace(/\s+/g, ' ')
-    return compact.includes('opencode') && /\sserve(\s|$)/.test(compact)
-  }
-
-  let signaled = 0
-  for (const row of processListMatching(['opencode', 'opencode.exe'])) {
-    if (!isOpencodeServe(row.commandLine)) continue
-    if (killPid(row.pid, false)) signaled += 1
-  }
-  sleepMs(500)
-  const leftover = processListMatching(['opencode', 'opencode.exe']).filter((row) =>
-    isOpencodeServe(row.commandLine)
-  )
-  for (const row of leftover) {
-    if (killPid(row.pid, true)) signaled += 1
-  }
-  if (leftover.length > 0) sleepMs(300)
-  const remaining = processListMatching(['opencode', 'opencode.exe']).filter((row) =>
-    isOpencodeServe(row.commandLine)
-  ).length
-  progress('supervisor', 'preflight.opencode_serve_cleared', {
-    patternsSignaled: signaled,
-    remaining
-  })
-}
-
 function killProcessesMatching(patterns: string[], force = false): number {
   const selfPid = process.pid
   const parentPid = process.ppid
@@ -293,14 +265,21 @@ function killPid(pid: number, force = false): boolean {
   }
 
   try {
-    process.kill(pid, force ? 'SIGKILL' : 'SIGTERM')
+    // E2E workers are process-group leaders. Signal their group first so
+    // provider descendants cannot survive an interrupted previous run.
+    process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM')
     return true
   } catch {
-    const result = spawnSync('kill', [force ? '-9' : '-TERM', String(pid)], {
-      encoding: 'utf8',
-      stdio: 'ignore'
-    })
-    return (result.status ?? 1) === 0
+    try {
+      process.kill(pid, force ? 'SIGKILL' : 'SIGTERM')
+      return true
+    } catch {
+      const result = spawnSync('kill', [force ? '-9' : '-TERM', String(pid)], {
+        encoding: 'utf8',
+        stdio: 'ignore'
+      })
+      return (result.status ?? 1) === 0
+    }
   }
 }
 
@@ -322,7 +301,6 @@ function clearDirectoryWithRetries(dir: string, runtimeRoot: string): void {
       error: 'EPERM_or_busy'
     })
     killLeftoverBusinessProcesses(runtimeRoot)
-    killLeftoverOpencodeServe()
     sleepMs(300 + attempt * 200)
   }
 }

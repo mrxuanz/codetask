@@ -5,14 +5,17 @@ import {
   createSandboxFixture,
   expectedBackend,
   loadNative,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   runInSandbox,
+  sandboxRuntimeTestsEnabled,
   sandboxTestsEnabled,
   sha256Policy
 } from './sandbox-test-utils.mjs'
 
 const gate = sandboxTestsEnabled()
 const describe = gate.enabled ? nodeDescribe : nodeDescribe.skip
+const runtimeGate = sandboxRuntimeTestsEnabled()
+const describeRuntime = runtimeGate.enabled ? nodeDescribe : nodeDescribe.skip
 
 describe('native addon loads and exposes required exports', () => {
   it('exports preflight, launchSandboxedWorker, helperVersion', () => {
@@ -42,14 +45,14 @@ describe('native addon loads and exposes required exports', () => {
   })
 })
 
-describe('launchSandboxedWorker attestation contract', () => {
+describeRuntime('launchSandboxedWorker attestation contract', () => {
   it('returns active evidence with matching policy hash and platform backend', async (t) => {
     const native = loadNative()
     native.preflight()
     const fixture = createSandboxFixture('codeteam-native-addon-')
     t.after(() => fixture.cleanup())
 
-    const policy = policyForRoleV2('task-worker', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('task-worker', fixture.workspace, fixture.runtime)
     const result = await runInSandbox(
       native,
       policy,
@@ -72,7 +75,7 @@ describe('launchSandboxedWorker attestation contract', () => {
     const fixture = createSandboxFixture('codeteam-native-pid-')
     t.after(() => fixture.cleanup())
 
-    const policy = policyForRoleV2('planner', fixture.workspace, fixture.runtime)
+    const policy = sandboxPolicyForRole('planner', fixture.workspace, fixture.runtime)
     const shell = process.platform === 'win32' ? 'cmd.exe' : 'sh'
     const shellArgs =
       process.platform === 'win32' ? ['/c', 'echo pid-test'] : ['-lc', 'echo pid-test']
@@ -82,7 +85,7 @@ describe('launchSandboxedWorker attestation contract', () => {
         version: 2,
         role: policy.role,
         cwd: policy.cwd,
-        runtime_root: policy.runtimeRoot,
+        runtime_root: policy.scratchRoot,
         filesystem: {
           default_access: policy.filesystem.defaultAccess,
           allowed_read_roots: policy.filesystem.allowedReadRoots,

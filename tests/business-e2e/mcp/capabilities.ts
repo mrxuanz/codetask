@@ -8,6 +8,12 @@ export type FixturePhaseState = {
   unlocked: string[]
 }
 
+export type DraftExecutionConfig = {
+  plannerCoreCode: string
+  sliceVerifierCoreCode: string
+  milestoneVerifierCoreCode: string
+}
+
 export type Capability = {
   capabilityId: string
   caseRunId: string
@@ -16,6 +22,8 @@ export type Capability = {
   createdAt: number
   revoked: boolean
   workspaceRoot?: string
+  /** Per-draft run config for this case — product authority for planner/verifiers. */
+  executionConfig?: DraftExecutionConfig
   checkpoints: string[]
   fixtureState?: FixturePhaseState
   agentReport?: {
@@ -37,6 +45,7 @@ export class CapabilityStore {
     allowedTools: string[]
     workspaceRoot?: string
     fixtureState?: FixturePhaseState
+    executionConfig?: DraftExecutionConfig
   }): Capability {
     const capabilityId = `cap_${randomBytes(12).toString('hex')}`
     const capability: Capability = {
@@ -47,6 +56,7 @@ export class CapabilityStore {
       createdAt: Date.now(),
       revoked: false,
       workspaceRoot: input.workspaceRoot,
+      executionConfig: input.executionConfig,
       checkpoints: [],
       fixtureState: input.fixtureState
     }

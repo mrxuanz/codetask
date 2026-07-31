@@ -1,6 +1,6 @@
 /**
- * Intentional mutex for Cursor host-state writes (MCP approvals / data-dir init).
- * Runtime-copy already isolates CURSOR_DATA_DIR per scope; this lock only serializes
+ * Intentional mutex for Cursor host-state writes (MCP approvals / config mutation).
+ * Cursor ACP uses host defaults (no CURSOR_DATA_DIR redirect); this lock only serializes
  * concurrent host-config mutation within a process — never whole prompts, never other providers.
  */
 let chain: Promise<void> = Promise.resolve()

@@ -144,7 +144,7 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 ### 要件
 
-- Node.js 22+
+- Node.js 24.x
 - Rust toolchain（サンドボックス native ビルド時）
 - いずれか 1 つの Agent CLI をインストール・ログイン済み: Codex、Claude Code、OpenCode、Cursor CLI
 - Windows / macOS / Linux（サンドボックス能力はプラットフォーム依存）
@@ -194,3 +194,7 @@ npm run test:sandbox
 npm run typecheck
 npm run test:ci               # typecheck + 高速テストスイート
 ```
+
+## アーキテクチャドキュメント
+
+- [ADR: ホスト認可・Provider 解決・Control Plane（中国語）](./adr/0001-host-auth-and-control-plane.md)

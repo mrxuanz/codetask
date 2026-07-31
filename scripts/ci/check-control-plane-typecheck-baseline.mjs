@@ -14,30 +14,6 @@ const knownDiagnostics = [
     count: 1
   },
   {
-    file: 'src/server/agent-runtime/providers/claude-sdk.ts',
-    code: 'TS2379',
-    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
-    count: 1
-  },
-  {
-    file: 'src/server/agent-runtime/providers/codex-policy.ts',
-    code: 'TS2379',
-    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
-    count: 1
-  },
-  {
-    file: 'src/server/agent-runtime/providers/cursor-policy.ts',
-    code: 'TS2379',
-    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
-    count: 1
-  },
-  {
-    file: 'src/server/agent-runtime/providers/opencode-sdk.ts',
-    code: 'TS2379',
-    sourceLine: 'const capabilityProfile = resolveInputCapabilityProfile(input)',
-    count: 2
-  },
-  {
     file: 'src/server/agent-runtime/runner.ts',
     code: 'TS2379',
     sourceLine: 'yield* withSandboxLeaseRefresh(sandboxStream, {',

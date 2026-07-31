@@ -40,7 +40,8 @@ export class PublicApiClient {
     meta?: { operationId?: string; auth?: boolean }
   ): Promise<{ status: number; data: T; raw: ApiEnvelope<T> }> {
     const headers: Record<string, string> = {
-      Accept: 'application/json'
+      Accept: 'application/json',
+      'x-codetask-auth-transport': 'bearer'
     }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (meta?.auth !== false) {

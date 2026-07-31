@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import { AppError } from '../error'
+import { processHostEnvironmentSource } from '../host-environment'
 
 export interface BrowseEntry {
   name: string
@@ -13,8 +14,13 @@ export interface BrowseResult {
   entries: BrowseEntry[]
 }
 
+export interface FolderSelection {
+  path: string
+  created: boolean
+}
+
 function userHome(): string {
-  const home = process.env.USERPROFILE || homedir()
+  const home = processHostEnvironmentSource.snapshot().USERPROFILE || homedir()
   if (!home) {
     throw AppError.internal('Unable to resolve user home directory', 'project.home_not_found')
   }
@@ -93,7 +99,26 @@ export function normalizeWorkspacePath(input: string, createIfMissing: boolean):
     )
   }
 
-  return displayPathString(canonical)
+  return resolveExistingDirectory(canonical)
+}
+
+/**
+ * Resolve the folder-picker result into one canonical contract.
+ *
+ * Browsing is intentionally side-effect free. The caller explicitly decides whether a missing
+ * folder may be created, and receives only the canonical folder address plus creation metadata.
+ */
+export function resolveFolderSelection(input: string, createIfMissing: boolean): FolderSelection {
+  const expanded = expandTilde(input)
+  if (!expanded) {
+    throw AppError.badRequest('Folder path is required', 'folderPicker.selectRequired')
+  }
+  const absolute = isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded)
+  const existed = existsSync(absolute)
+  return {
+    path: normalizeWorkspacePath(input, createIfMissing),
+    created: !existed
+  }
 }
 
 export function inferTitleFromPath(workspaceRoot: string): string {

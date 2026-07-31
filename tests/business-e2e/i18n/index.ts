@@ -36,6 +36,10 @@ export function tStep(step: string): string {
   return messages().steps[step] ?? step
 }
 
+export function tNote(key: string): string {
+  return messages().notes[key] ?? key
+}
+
 export function tBanner(): string {
   return messages().banner
 }

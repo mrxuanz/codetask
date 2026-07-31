@@ -26,6 +26,44 @@ function fail(error: string): ToolResult {
   return { ok: false, content: { error }, error }
 }
 
+function readExecutionConfigArgs(args: Record<string, unknown>): {
+  plannerCoreCode: string
+  sliceVerifierCoreCode: string
+  milestoneVerifierCoreCode: string
+} | null {
+  const plannerCoreCode = String(args.plannerCoreCode ?? '').trim()
+  const sliceVerifierCoreCode = String(args.sliceVerifierCoreCode ?? '').trim()
+  const milestoneVerifierCoreCode = String(args.milestoneVerifierCoreCode ?? '').trim()
+  if (!plannerCoreCode || !sliceVerifierCoreCode || !milestoneVerifierCoreCode) return null
+  return { plannerCoreCode, sliceVerifierCoreCode, milestoneVerifierCoreCode }
+}
+
+async function ensureDraftExecutionConfig(
+  ctx: ToolContext,
+  threadId: string,
+  messageId: string,
+  override?: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  } | null
+): Promise<{
+  plannerCoreCode: string
+  sliceVerifierCoreCode: string
+  milestoneVerifierCoreCode: string
+}> {
+  const fromArgs = override ?? null
+  const fromCapability = ctx.capabilities.get(ctx.capabilityId)?.executionConfig
+  const config = fromArgs ?? fromCapability
+  if (!config) {
+    throw new Error(
+      'draft.execution_config_required: set codetask_update_draft_execution_config before confirm_draft_final'
+    )
+  }
+  await ops.updateDraftExecutionConfig(ctx.client, threadId, messageId, config)
+  return config
+}
+
 function normalizeArtifacts(value: unknown): unknown {
   if (typeof value === 'string') {
     try {
@@ -111,7 +149,7 @@ export const TOOL_DEFS: Array<{
   {
     name: 'codetask_wait_turn',
     description:
-      'Poll until turn reaches a terminal status (completed|failed|cancelled). Omit timeoutMs to wait for CodeTask; pass a positive timeoutMs only for short negative probes.',
+      'Poll until turn reaches a terminal status (completed|failed|cancelled) from the CodeTask business API. Omit timeoutMs to wait indefinitely for that status; pass a positive timeoutMs only for short negative probes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -176,7 +214,8 @@ export const TOOL_DEFS: Array<{
   },
   {
     name: 'codetask_confirm_draft_final',
-    description: 'Final-confirm a draft and enter planning',
+    description:
+      'Final-confirm a draft and enter planning. Requires a per-draft executionConfig (planner + verifiers) already set or available from the case runtime.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -184,6 +223,28 @@ export const TOOL_DEFS: Array<{
         messageId: { type: 'string' }
       },
       required: ['threadId', 'messageId']
+    }
+  },
+  {
+    name: 'codetask_update_draft_execution_config',
+    description:
+      'Set this draft’s one-shot run configuration (planner + slice/milestone verifiers). Must be called before confirm_draft_final; values are frozen into the job executionProfile.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        messageId: { type: 'string' },
+        plannerCoreCode: { type: 'string' },
+        sliceVerifierCoreCode: { type: 'string' },
+        milestoneVerifierCoreCode: { type: 'string' }
+      },
+      required: [
+        'threadId',
+        'messageId',
+        'plannerCoreCode',
+        'sliceVerifierCoreCode',
+        'milestoneVerifierCoreCode'
+      ]
     }
   },
   {
@@ -256,7 +317,7 @@ export const TOOL_DEFS: Array<{
   {
     name: 'codetask_wait_job',
     description:
-      'Poll until job reaches a terminal status (completed|failed|cancelled). Omit timeoutMs to wait for CodeTask; pass a positive timeoutMs only for short negative probes.',
+      'Poll until job reaches a terminal status (completed|failed|cancelled) from the CodeTask business API. Omit timeoutMs to wait indefinitely for that status; pass a positive timeoutMs only for short negative probes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -562,10 +623,31 @@ const handlers: Record<string, ToolHandler> = {
   async codetask_confirm_draft(args, ctx) {
     return ok(await ops.confirmDraft(ctx.client, String(args.threadId), String(args.messageId)))
   },
-  async codetask_confirm_draft_final(args, ctx) {
+  async codetask_update_draft_execution_config(args, ctx) {
+    const config = readExecutionConfigArgs(args)
+    if (!config) {
+      return fail(
+        'plannerCoreCode, sliceVerifierCoreCode, and milestoneVerifierCoreCode are required'
+      )
+    }
     return ok(
-      await ops.confirmDraftFinal(ctx.client, String(args.threadId), String(args.messageId))
+      await ops.updateDraftExecutionConfig(
+        ctx.client,
+        String(args.threadId),
+        String(args.messageId),
+        config
+      )
     )
+  },
+  async codetask_confirm_draft_final(args, ctx) {
+    const threadId = String(args.threadId)
+    const messageId = String(args.messageId)
+    // Product authority is per-draft executionConfig. Apply (or re-apply) it
+    // immediately before confirm-final so the job executionProfile freezes the
+    // case’s planner/verifier cores — never global control-plane settings.
+    const executionConfig = await ensureDraftExecutionConfig(ctx, threadId, messageId)
+    const result = await ops.confirmDraftFinal(ctx.client, threadId, messageId)
+    return ok({ ...(result as object), executionConfig })
   },
   async codetask_get_latest_job(args, ctx) {
     return ok(await ops.getLatestJob(ctx.client, String(args.threadId)))

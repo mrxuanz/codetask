@@ -1,17 +1,16 @@
 import { randomUUID } from 'crypto'
 import type { SliceVerificationRecordDto } from '@shared/contracts/evidence'
-import type { SavedJobPlan } from '../planner/plan-types'
+import type { JobExecutionProfile, SavedJobPlan } from '../planner/plan-types'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
 import {
-  resolveSliceVerifierCoreCode,
-  resolveMilestoneVerifierCoreCode
-} from '../settings/control-plane'
+  resolveMilestoneVerifierPromptBody,
+  resolveSliceVerifierPromptBody
+} from '../settings/prompts'
 import {
-  buildMilestoneVerifierSystemPrompt,
-  buildSliceVerifierSystemPrompt
-} from '../verification/prompts'
+  appendBusinessSkillSnapshot
+} from '../settings/business-skills'
 import type { GateMilestoneState, GateSliceState } from './execution-gate'
 import type { TaskProgressItemDto, TaskProgressSliceDto } from './types'
 import type { MilestoneVerificationVerdict, SliceVerificationVerdict } from './verification/types'
@@ -144,6 +143,7 @@ export async function runSliceVerification(input: {
   threadId: string
   workspacePath: string
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   slice: GateSliceState
   taskItems: TaskProgressItemDto[]
   signal: AbortSignal
@@ -153,15 +153,8 @@ export async function runSliceVerification(input: {
   verdict?: SliceVerificationVerdict
   infraMiss?: boolean
 }> {
-  const coreCode = await resolveSliceVerifierCoreCode()
+  const coreCode = input.executionProfile.sliceVerifierCoreCode
   const core = await ensureCoreAvailable(coreCode)
-  const runtimeRoot = ensureJobTaskRuntimeRoot(
-    getAppContext().dataDir,
-    input.threadId,
-    input.jobId,
-    `verify-${input.slice.id}`,
-    core.code
-  )
   const model = resolveCoreModel(core.code as SupportedCoreCode)
   const sessionId = `slice-mcp-${randomUUID()}`
   const mcpUrl = buildSliceVerifierMcpUrl({
@@ -198,10 +191,12 @@ export async function runSliceVerification(input: {
       capabilityProfile: 'verifier-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: input.workspacePath,
-      runtimeRoot,
       prompt,
       model,
-      systemPrompt: buildSliceVerifierSystemPrompt(),
+      systemPrompt: appendBusinessSkillSnapshot(
+        resolveSliceVerifierPromptBody(),
+        input.executionProfile.skills.sliceVerifier
+      ),
       mcpUrl,
       signal: input.signal
     })) {
@@ -238,6 +233,7 @@ export async function runMilestoneVerification(input: {
   threadId: string
   workspacePath: string
   plan: SavedJobPlan
+  executionProfile: JobExecutionProfile
   milestone: GateMilestoneState
   slices: GateSliceState[]
   taskItems: TaskProgressItemDto[]
@@ -249,15 +245,8 @@ export async function runMilestoneVerification(input: {
   verdict?: MilestoneVerificationVerdict | undefined
   infraMiss?: boolean | undefined
 }> {
-  const coreCode = await resolveMilestoneVerifierCoreCode()
+  const coreCode = input.executionProfile.milestoneVerifierCoreCode
   const core = await ensureCoreAvailable(coreCode)
-  const runtimeRoot = ensureJobTaskRuntimeRoot(
-    getAppContext().dataDir,
-    input.threadId,
-    input.jobId,
-    `verify-${input.milestone.id}`,
-    core.code
-  )
   const model = resolveCoreModel(core.code as SupportedCoreCode)
   const sessionId = `milestone-mcp-${randomUUID()}`
   const mcpUrl = buildMilestoneVerifierMcpUrl({
@@ -296,10 +285,12 @@ export async function runMilestoneVerification(input: {
       capabilityProfile: 'verifier-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: input.workspacePath,
-      runtimeRoot,
       prompt,
       model,
-      systemPrompt: buildMilestoneVerifierSystemPrompt(),
+      systemPrompt: appendBusinessSkillSnapshot(
+        resolveMilestoneVerifierPromptBody(),
+        input.executionProfile.skills.milestoneVerifier
+      ),
       mcpUrl,
       signal: input.signal
     })) {

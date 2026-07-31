@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use codeteam_sandbox_adapter::{effective_roots_attestation, parse_task_policy_json};
 
 use crate::attestation::{apply_attestation_env, write_attestation_artifact};
-use crate::protocol::{SandboxEvidence, SandboxPolicy, sha256_policy_json};
+use crate::protocol::{sha256_policy_json, SandboxEvidence, SandboxPolicy};
 
 #[cfg(windows)]
 pub struct SpawnedSandbox {
@@ -106,19 +106,8 @@ fn ensure_runtime_dirs(policy: &SandboxPolicy) -> anyhow::Result<()> {
     let runtime_root = policy.runtime_root();
     std::fs::create_dir_all(format!("{runtime_root}/tmp"))?;
 
-    match policy {
-        SandboxPolicy::V1(p) => {
-            for rule in &p.filesystem.rules {
-                if rule.access == "write" {
-                    std::fs::create_dir_all(&rule.path)?;
-                }
-            }
-        }
-        SandboxPolicy::V2(p) => {
-            for root in &p.filesystem.allowed_write_roots {
-                std::fs::create_dir_all(root)?;
-            }
-        }
+    for root in &policy.filesystem.allowed_write_roots {
+        std::fs::create_dir_all(root)?;
     }
     Ok(())
 }

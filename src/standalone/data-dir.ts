@@ -1,75 +1,94 @@
-import { homedir } from 'os'
-import { join, resolve } from 'path'
-import type { AppMode } from '../main/cli'
-import { resolveStorageLocation, type DataDirResolution } from '../main/storage-locator'
+import { existsSync, readFileSync } from 'fs'
+import { dirname, join, resolve } from 'path'
+import { dataDirFromDbPath, type DataDirResolution } from '../main/storage-selection'
+import {
+  ensureInitializationConfig,
+  resolveInitializationConfigPath,
+  resolveInitializationDefaultDataDir,
+  writeInitializationConfig
+} from '../main/initialization-config'
 
-export interface NodeDataDirEnvironment {
+export interface NodeDataDirRuntime {
   platform?: NodeJS.Platform
   homeDir?: string
-  env?: NodeJS.ProcessEnv
+  isPackaged?: boolean
+  executablePath?: string
+  developmentRoot?: string
 }
 
-function environment(input: NodeDataDirEnvironment): {
-  platform: NodeJS.Platform
-  homeDir: string
-  env: NodeJS.ProcessEnv
-} {
-  return {
-    platform: input.platform ?? process.platform,
-    homeDir: input.homeDir ?? homedir(),
-    env: input.env ?? process.env
+function isCodeTaskPackage(path: string): boolean {
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8')) as {
+      name?: unknown
+      main?: unknown
+    }
+    return value.name === 'task' || value.main === './out/main/index.js'
+  } catch {
+    return false
   }
 }
 
-/** Shared installation metadata stays compatible with the Electron entry point. */
-export function resolveNodeBootstrapRoot(input: NodeDataDirEnvironment = {}): string {
-  const runtime = environment(input)
-  const configured = runtime.env.CODETASK_BOOTSTRAP_ROOT?.trim()
-  if (configured) return resolve(configured)
-
-  if (runtime.platform === 'win32') {
-    return join(
-      runtime.env.APPDATA?.trim() || join(runtime.homeDir, 'AppData', 'Roaming'),
-      'CodeTask'
-    )
+function resolveNodeDevelopmentRoot(): string {
+  let current = process.argv[1] ? dirname(resolve(process.argv[1])) : process.cwd()
+  for (;;) {
+    const packageJson = join(current, 'package.json')
+    if (existsSync(packageJson) && isCodeTaskPackage(packageJson)) return current
+    const parent = dirname(current)
+    if (parent === current) return process.cwd()
+    current = parent
   }
-  return join(runtime.env.XDG_CONFIG_HOME?.trim() || join(runtime.homeDir, '.config'), 'codetask')
 }
 
-/** Node-owned default data root; an existing shared locator still takes precedence. */
-export function resolveNodeDefaultDataDir(input: NodeDataDirEnvironment = {}): string {
-  const runtime = environment(input)
-  const configured = runtime.env.CODETASK_DATA_HOME?.trim()
-  if (configured) return resolve(configured)
+function runningAsSingleExecutable(): boolean {
+  if (!process.argv[1]) return true
+  return resolve(process.argv[1]) === resolve(process.execPath)
+}
 
-  if (runtime.platform === 'win32') {
-    const local = runtime.env.LOCALAPPDATA?.trim() || join(runtime.homeDir, 'AppData', 'Local')
-    return join(local, 'CodeTask', 'data')
-  }
-  if (runtime.platform === 'darwin') {
-    return join(runtime.homeDir, 'Library', 'Application Support', 'codetask', 'data')
-  }
-  return join(
-    runtime.env.XDG_DATA_HOME?.trim() || join(runtime.homeDir, '.local', 'share'),
-    'codetask'
-  )
+export function resolveNodeInitializationConfigPath(input: NodeDataDirRuntime = {}): string {
+  return resolveInitializationConfigPath({
+    isPackaged: input.isPackaged ?? runningAsSingleExecutable(),
+    executablePath: input.executablePath ?? process.execPath,
+    developmentRoot: input.developmentRoot ?? resolveNodeDevelopmentRoot()
+  })
+}
+
+/** Both Electron and Node read dbPath from the same initialization-file contract. */
+export function resolveNodeDefaultDataDir(input: NodeDataDirRuntime = {}): string {
+  const configPath = resolveNodeInitializationConfigPath(input)
+  const configured = ensureInitializationConfig(configPath).dbPath
+  return configured
+    ? dataDirFromDbPath(configured)
+    : resolveInitializationDefaultDataDir(configPath)
+}
+
+export function writeNodeDataInitializationConfig(
+  dataDir: string,
+  input: NodeDataDirRuntime = {}
+): string {
+  const dbPath = join(resolve(dataDir), 'db', 'app.db')
+  return writeInitializationConfig(resolveNodeInitializationConfigPath(input), dbPath).dbPath
 }
 
 export function resolveNodeDataDirSelection(
   input: {
-    explicitDataDir?: string
-    mode: AppMode
-    bootstrapRoot?: string
     defaultDataDir?: string
-  },
-  runtime: NodeDataDirEnvironment = {}
+  } = {},
+  runtime: NodeDataDirRuntime = {}
 ): DataDirResolution {
-  const env = runtime.env ?? process.env
-  return resolveStorageLocation({
-    explicitDataDir: input.explicitDataDir,
-    envDataDir: env.CODETASK_DATA_DIR,
-    mode: input.mode,
-    bootstrapRoot: input.bootstrapRoot ?? resolveNodeBootstrapRoot(runtime),
-    defaultDataDir: input.defaultDataDir ?? resolveNodeDefaultDataDir(runtime)
-  })
+  const configPath = resolveNodeInitializationConfigPath(runtime)
+  const initializationConfig =
+    input.defaultDataDir === undefined ? ensureInitializationConfig(configPath) : { dbPath: '' }
+  const defaultDataDir =
+    input.defaultDataDir ??
+    (initializationConfig.dbPath
+      ? dataDirFromDbPath(initializationConfig.dbPath)
+      : resolveInitializationDefaultDataDir(configPath))
+  if (initializationConfig.dbPath) {
+    return {
+      phase: 'ready',
+      dataDir: dataDirFromDbPath(initializationConfig.dbPath),
+      source: 'config'
+    }
+  }
+  return { phase: 'selection_required', dataDir: defaultDataDir, source: 'candidate' }
 }

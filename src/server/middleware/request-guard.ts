@@ -15,8 +15,6 @@ function isLoopbackHost(host: string): boolean {
 }
 
 export function requestGuard(security: SecurityContext): MiddlewareHandler {
-  const publicOrigin = process.env.CODETASK_PUBLIC_ORIGIN?.trim()
-
   return async (c, next) => {
     if (isMcpApiRoute(c.req.path)) {
       return next()
@@ -73,19 +71,8 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
         }
 
         if (security.mode === 'server') {
-          const publicHost = publicOrigin
-            ? publicOrigin
-                .replace(/^https?:\/\//, '')
-                .split(':')[0]
-                ?.toLowerCase()
-            : null
           const sameOriginAsHost = Boolean(host && originHost === host)
-          const allowed =
-            (publicHost !== null && originHost === publicHost) ||
-            isLoopbackHost(originHost) ||
-            sameOriginAsHost
-
-          if (!allowed) {
+          if (!sameOriginAsHost) {
             return new Response(
               JSON.stringify({
                 data: null,

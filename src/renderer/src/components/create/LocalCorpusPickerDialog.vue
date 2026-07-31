@@ -46,6 +46,7 @@ const {
   currentDirectoryPath,
   openEntry,
   goParent,
+  selectFolder,
   start: startBrowse
 } = useFolderBrowse({ active })
 
@@ -69,14 +70,14 @@ function basename(path: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
-function handleSelectPath(path: string): void {
-  const trimmed = path.trim()
-  if (!trimmed) {
+async function handleSelectPath(path: string): Promise<void> {
+  const selected = await selectFolder(path)
+  if (!selected) {
     formError.value = t('folderPicker.selectRequired')
     return
   }
-  selectedPath.value = trimmed
-  name.value = basename(trimmed)
+  selectedPath.value = selected
+  name.value = basename(selected)
   description.value = ''
   formError.value = null
   step.value = 'details'

@@ -1,4 +1,4 @@
-import type { SavedJobPlan } from './plan'
+import type { JobExecutionProfile, SavedJobPlan } from './plan'
 import type { JobReferenceManifestDto } from '../job-references'
 import type { SliceVerificationRecordDto, TaskBlockerKind, TaskEvidenceDto } from './evidence'
 import type { TurnErrorDto } from './turn-errors'
@@ -117,6 +117,7 @@ export interface ThreadJobDto {
   taskProgress: TaskProgressDto
   abilities: ThreadJobAbilityDto[]
   plan?: SavedJobPlan | null | undefined
+  executionProfile?: JobExecutionProfile | undefined
   referenceManifest?: JobReferenceManifestDto | null | undefined
 
   referenceManifestStale?: boolean | undefined
