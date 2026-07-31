@@ -45,7 +45,10 @@ export async function* streamCursorSessionTurn(
 
   // P5: do not mutate real-project .cursor/cli.json (probe only).
   removeInvalidCursorCliConfig(input.cwd)
-  if (plan.mcpServers.length > 0) {
+  // Outer-sandbox turns already pass `--approve-mcps`. Writing host
+  // `~/.cursor/projects/.../mcp-approvals.json` is not in the Cursor write-grant
+  // set (`~/.config/cursor`) and fails with EPERM under seatbelt.
+  if (plan.mcpServers.length > 0 && !plan.outerSandbox) {
     const approvals = await materializeCursorMcpApprovals({
       cwd: input.cwd,
       servers: plan.mcpServers,
@@ -57,6 +60,10 @@ export async function* streamCursorSessionTurn(
         servers: plan.mcpServers.map((server) => server.name)
       })
     }
+  } else if (plan.mcpServers.length > 0 && plan.outerSandbox) {
+    debugCursor('skipped MCP approvals materialize (outer sandbox; rely on --approve-mcps)', {
+      servers: plan.mcpServers.map((server) => server.name)
+    })
   }
 
   const runtimeOptions = {

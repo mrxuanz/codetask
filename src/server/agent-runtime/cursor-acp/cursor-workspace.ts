@@ -91,6 +91,20 @@ function atomicWriteJson(path: string, value: unknown): void {
   renameSync(tmpPath, path)
 }
 
+function isSandboxHostStateWriteDenied(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'EPERM' || code === 'EACCES'
+}
+
+/**
+ * Pre-seed Cursor MCP approvals under the host `~/.cursor/projects/<slug>/` tree.
+ *
+ * Outer-sandbox turns must not call this: seatbelt write grants cover
+ * `~/.config/cursor` (identity), not `~/.cursor/projects`, and those turns already
+ * pass `--approve-mcps`. Host (planner/conversation) turns still need this file
+ * when `--approve-mcps` is absent (e.g. planner `--mode ask`).
+ */
 export async function materializeCursorMcpApprovals(input: {
   cwd: string
   servers: CursorAcpMcpServer[]
@@ -108,19 +122,29 @@ export async function materializeCursorMcpApprovals(input: {
     const projectDir = join(cursorDataDir, 'projects', projectSlug)
     const approvalsPath = join(projectDir, 'mcp-approvals.json')
 
-    mkdirSync(projectDir, { recursive: true })
+    try {
+      mkdirSync(projectDir, { recursive: true })
 
-    const existing = readApprovalIds(approvalsPath)
-    const merged = [...existing]
-    const seen = new Set(existing)
-    for (const approvalId of approvalIds) {
-      if (seen.has(approvalId)) continue
-      seen.add(approvalId)
-      merged.push(approvalId)
+      const existing = readApprovalIds(approvalsPath)
+      const merged = [...existing]
+      const seen = new Set(existing)
+      for (const approvalId of approvalIds) {
+        if (seen.has(approvalId)) continue
+        seen.add(approvalId)
+        merged.push(approvalId)
+      }
+
+      atomicWriteJson(approvalsPath, merged)
+      return { approvalsPath }
+    } catch (error) {
+      // Sandbox / OS may deny writes to ~/.cursor/projects even when identity
+      // config under ~/.config/cursor is writable. Callers with --approve-mcps
+      // can proceed without this file.
+      if (isSandboxHostStateWriteDenied(error)) {
+        return null
+      }
+      throw error
     }
-
-    atomicWriteJson(approvalsPath, merged)
-    return { approvalsPath }
   })
 }
 

@@ -1,13 +1,23 @@
 import type { ConversationRole } from '../roles'
 import {
   createTurnError,
+  indicatesCursorAcpKeepaliveTimeout,
+  indicatesCursorProviderCapacity,
   isUserTurnCancellation,
   normalizeTurnError
 } from '../../../shared/turn-errors.ts'
-import { isConversationCursorScope } from './runtime-registry'
 
 export function isEmptyAcpReply(reply: string): boolean {
   return !reply.trim()
+}
+
+/** Avoid importing runtime-registry from this light guard module. */
+function isConversationCursorScope(scopeId: string): boolean {
+  return (
+    scopeId.startsWith('conversation:chat:') ||
+    scopeId.startsWith('conversation:create_task:') ||
+    /^conversation:[^:]+$/.test(scopeId)
+  )
 }
 
 export function shouldInvalidateCursorScopedRuntime(
@@ -28,6 +38,8 @@ export function shouldInvalidateCursorScopedRuntime(
     case 'provider.cursor.cli_missing':
       return true
     case 'provider.cursor.acp_empty_turn':
+    case 'turn.capacity_limited':
+    case 'provider.cursor.acp_keepalive_timeout':
       return false
     case 'provider.cursor.acp_failed': {
       const detail = (normalized.detail ?? normalized.message).toLowerCase()
@@ -43,27 +55,47 @@ export function shouldInvalidateCursorScopedRuntime(
   }
 }
 
-function stderrIndicatesCloudDisconnect(stderrTail: string): boolean {
-  const lower = stderrTail.toLowerCase()
+export function stderrIndicatesCursorCloudFailure(stderrTail: string): boolean {
   return (
-    lower.includes('keepalive') ||
-    lower.includes('http/2') ||
-    lower.includes('stream ended without turnended') ||
-    lower.includes('retriableerror') ||
-    lower.includes('connecterror')
+    indicatesCursorProviderCapacity(stderrTail) || indicatesCursorAcpKeepaliveTimeout(stderrTail)
   )
 }
 
-export function assertTaskWorkerAcpCompletion(input: {
+function cloudFailureFromStderr(stderrTail: string) {
+  const detail = stderrTail.trim().slice(-600) || undefined
+  if (indicatesCursorProviderCapacity(stderrTail)) {
+    return createTurnError('turn.capacity_limited', { detail })
+  }
+  return createTurnError('provider.cursor.acp_keepalive_timeout', { detail })
+}
+
+const ROLES_REQUIRING_NONEMPTY_REPLY: ReadonlySet<ConversationRole> = new Set([
+  'task-worker',
+  'milestone-verifier',
+  'slice-verifier'
+])
+
+/**
+ * Cursor ACP may report a clean stop while stderr shows a cloud disconnect.
+ * Task/verifier roles also treat empty replies as incomplete turns.
+ * Planner success is MCP-side (finalize_plan); empty assistant text is normal.
+ */
+export function assertCursorAcpCompletion(input: {
   role: ConversationRole
   reply: string
   stderrTail: string
   promptSettledError: unknown | null
 }): { partial?: true } {
-  if (input.role !== 'task-worker') return {}
+  if (stderrIndicatesCursorCloudFailure(input.stderrTail)) {
+    throw cloudFailureFromStderr(input.stderrTail)
+  }
 
-  if (stderrIndicatesCloudDisconnect(input.stderrTail)) {
-    throw createTurnError('provider.cursor.acp_keepalive_timeout')
+  if (input.role === 'planner' || input.role === 'conversation') {
+    return {}
+  }
+
+  if (!ROLES_REQUIRING_NONEMPTY_REPLY.has(input.role)) {
+    return {}
   }
 
   if (input.promptSettledError && !isEmptyAcpReply(input.reply)) {
@@ -76,3 +108,6 @@ export function assertTaskWorkerAcpCompletion(input: {
 
   return {}
 }
+
+/** @deprecated Prefer assertCursorAcpCompletion — kept for call-site compatibility. */
+export const assertTaskWorkerAcpCompletion = assertCursorAcpCompletion

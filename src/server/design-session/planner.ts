@@ -1,11 +1,12 @@
 import { randomUUID } from 'crypto'
 import { and, asc, eq, isNull } from 'drizzle-orm'
-import { getAppContext } from '../bootstrap'
+import { getAppConfig, getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { saveDesignAbilities } from '../db/design-plan'
 import { threadJobs } from '../db/schema'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import { streamAgentTurn } from '../agent-runtime/runner'
+import { resolveTurnMaxRetries, turnRetryDelayMs } from '../agent-runtime/retry'
 import { resolveCoreModel } from '../conversation/models'
 import { buildPlannerUserMessage } from '../planner/prompts'
 import {
@@ -43,7 +44,16 @@ import {
 import type { PlanProgressDto } from '../legacy-control-plane/types'
 import { emitJobEvent } from '../legacy-control-plane/service'
 import { AppError } from '../error'
-import { createTurnError } from '../../shared/turn-errors.ts'
+import {
+  isPlannerSilentEmptyTurnError,
+  resolvePlannerMissingFinalizeError
+} from './planner-finalize'
+import {
+  createTurnError,
+  isRetryableTurnError,
+  isTurnError,
+  TURN_CANCELLED
+} from '../../shared/turn-errors.ts'
 import {
   createPlannerRun,
   finishPlannerRun,
@@ -150,6 +160,24 @@ function summarizePlannerSession(session: PlannerMcpSession): Record<string, unk
     hasPlanOutline: Boolean(session.planOutline),
     allowedAbilityCodes: session.allowedAbilityCodes
   }
+}
+
+function sleepPlannerRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : TURN_CANCELLED)
+      return
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason instanceof Error ? signal.reason : TURN_CANCELLED)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function summarizeDraftForPlanner(draft: TaskLaunchDraftPayload): Record<string, unknown> {
@@ -383,186 +411,242 @@ async function runDesignPlanner(
     const core = await ensureCoreAvailable(plannerCoreCode)
     const model = resolveCoreModel(core.code as SupportedCoreCode)
 
-    const mcpSessionId = `plan-mcp-${randomUUID()}`
     const referenceManifest = await loadDesignReferenceManifest(designSessionId)
 
-    plannerSession = {
-      sessionId: mcpSessionId,
-      jobId: designSessionId,
-      threadId,
-      runId: run.runId,
-      ownerKind: 'thread_job',
-      ownerId: designSessionId,
-      allowedAbilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode),
-      validReferenceIds:
-        referenceManifest?.references.map((item) => item.id) ??
-        planningDraft.references.map((item) => item.id),
-      referenceManifest,
-      taskContexts: new Map(),
-      planOutline: null,
-      phaseAdvance,
-      planRevision: revisionBefore + 1,
-      clearConfirmed: Boolean(options?.regenerationInstruction),
-      abortTurn: () => {
-        const controller = getRunController(run.runId)
-        if (controller && !controller.signal.aborted) {
-          try {
-            controller.abort('finalize_plan')
-          } catch {
-            // ignore
+    const plannerPrompt = buildPlannerUserMessage({
+      draft: planningDraft,
+      workspacePath,
+      threadId
+    })
+    const regenerationSection = options?.regenerationInstruction?.trim()
+      ? [
+          '',
+          '## Plan regeneration instruction',
+          '',
+          options.regenerationInstruction.trim(),
+          '',
+          'Produce a revised execution plan that addresses the instruction above.',
+          'All prior plan confirmations are void — treat this as a fresh structured plan.'
+        ].join('\n')
+      : ''
+
+    const plannerReadRoots = referenceManifest
+      ? resolveReferenceManifestReadRoots({
+          workspaceRoot: workspacePath,
+          manifest: referenceManifest
+        })
+      : resolveDraftReferenceReadRoots({ threadId, draft: planningDraft })
+
+    const maxSilentEmptyAttempts = resolveTurnMaxRetries(getAppConfig().turn.maxRetries)
+    let lastSilentEmptyError: Error | null = null
+
+    for (let attempt = 1; attempt <= maxSilentEmptyAttempts; attempt += 1) {
+      if (attempt > 1) {
+        const delayMs = turnRetryDelayMs(attempt - 1, lastSilentEmptyError)
+        plannerSandboxDebug('runDesignPlanner: retrying after silent empty turn', {
+          designSessionId,
+          runId: run.runId,
+          attempt,
+          maxSilentEmptyAttempts,
+          delayMs
+        })
+        const retryProgress: PlanProgressDto = {
+          ...defaultPlanProgress(),
+          phase: 'planning',
+          status: 'running',
+          progressCode: 'plan.regenerating',
+          progressParams: { attempt, maxAttempts: maxSilentEmptyAttempts },
+          message: null
+        }
+        const retryJob = await updateDesignSessionRowFenced(designSessionId, run.runId, {
+          planProgress: retryProgress,
+          lastError: null
+        })
+        if (retryJob) {
+          emitJobEvent(designSessionId, {
+            event: 'plan_progress',
+            data: { planProgress: retryProgress }
+          })
+          emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job: retryJob } })
+        }
+        await sleepPlannerRetry(delayMs, run.signal)
+        if (getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)) {
+          if (await commitPlanningSoftPause(designSessionId, designRunId)) {
+            runOutcome = 'user_stopped'
+            return
           }
         }
-      },
-      onPlanOutlineRegistered: async () => {
-        const outline = plannerSession!.planOutline!
-        const partial = flattenRegisteredPlan(outline, plannerSession!.taskContexts)
-        await pushDesignPlanningProgress(designSessionId, run.runId, 0, partial, outline)
-      },
-      onTaskContextRegistered: async (_key, done) => {
-        const outline = plannerSession!.planOutline!
-        const partial = flattenRegisteredPlan(outline, plannerSession!.taskContexts)
-        await pushDesignPlanningProgress(designSessionId, run.runId, done, partial, outline)
       }
-    }
 
-    const session = plannerSession
-    registerPlannerMcpSession(session)
+      const mcpSessionId = `plan-mcp-${randomUUID()}`
+      plannerSession = {
+        sessionId: mcpSessionId,
+        jobId: designSessionId,
+        threadId,
+        runId: run.runId,
+        ownerKind: 'thread_job',
+        ownerId: designSessionId,
+        allowedAbilityCodes: planningDraft.abilities.map((ability) => ability.abilityCode),
+        validReferenceIds:
+          referenceManifest?.references.map((item) => item.id) ??
+          planningDraft.references.map((item) => item.id),
+        referenceManifest,
+        taskContexts: new Map(),
+        planOutline: null,
+        phaseAdvance,
+        planRevision: revisionBefore + 1,
+        clearConfirmed: Boolean(options?.regenerationInstruction),
+        abortTurn: () => {
+          const controller = getRunController(run.runId)
+          if (controller && !controller.signal.aborted) {
+            try {
+              controller.abort('finalize_plan')
+            } catch {
+              // ignore
+            }
+          }
+        },
+        onPlanOutlineRegistered: async () => {
+          const outline = plannerSession!.planOutline!
+          const partial = flattenRegisteredPlan(outline, plannerSession!.taskContexts)
+          await pushDesignPlanningProgress(designSessionId, run.runId, 0, partial, outline)
+        },
+        onTaskContextRegistered: async (_key, done) => {
+          const outline = plannerSession!.planOutline!
+          const partial = flattenRegisteredPlan(outline, plannerSession!.taskContexts)
+          await pushDesignPlanningProgress(designSessionId, run.runId, done, partial, outline)
+        }
+      }
 
-    plannerSandboxDebug('runDesignPlanner: mcp session registered', {
-      designSessionId,
-      runId: run.runId,
-      mcpSessionId,
-      ...summarizePlannerSession(session),
-      validReferenceIds: session.validReferenceIds.length,
-      hasReferenceManifest: Boolean(referenceManifest)
-    })
+      const session = plannerSession
+      registerPlannerMcpSession(session)
 
-    let mcpUrl: string | undefined
-    try {
-      mcpUrl = buildPlannerMcpUrl({ sessionId: mcpSessionId, jobId: designSessionId })
-    } catch (error) {
-      unregisterPlannerMcpSession(mcpSessionId)
-      throw createTurnError('plan.mcp_unavailable', {
-        detail: error instanceof Error ? error.message : String(error)
-      })
-    }
-
-    try {
-      const plannerPrompt = buildPlannerUserMessage({
-        draft: planningDraft,
-        workspacePath,
-        threadId
-      })
-      const regenerationSection = options?.regenerationInstruction?.trim()
-        ? [
-            '',
-            '## Plan regeneration instruction',
-            '',
-            options.regenerationInstruction.trim(),
-            '',
-            'Produce a revised execution plan that addresses the instruction above.',
-            'All prior plan confirmations are void — treat this as a fresh structured plan.'
-          ].join('\n')
-        : ''
-
-      const plannerReadRoots = referenceManifest
-        ? resolveReferenceManifestReadRoots({
-            workspaceRoot: workspacePath,
-            manifest: referenceManifest
-          })
-        : resolveDraftReferenceReadRoots({ threadId, draft: planningDraft })
-
-      plannerSandboxDebug('runDesignPlanner: entering streamAgentTurn', {
+      plannerSandboxDebug('runDesignPlanner: mcp session registered', {
         designSessionId,
         runId: run.runId,
-        provider: core.code,
-        model,
-        promptChars: (plannerPrompt + regenerationSection).length,
-        readRoots: plannerReadRoots.length,
-        mcpUrl: Boolean(mcpUrl)
+        mcpSessionId,
+        attempt,
+        ...summarizePlannerSession(session),
+        validReferenceIds: session.validReferenceIds.length,
+        hasReferenceManifest: Boolean(referenceManifest)
       })
 
-      let chunkCount = 0
-      await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
-        for await (const chunk of streamAgentTurn({
-          role: 'planner',
-          capabilityProfile: 'planner-read',
-          provider: core.code as SupportedCoreCode,
-          workspaceRoot: workspacePath,
-          prompt: plannerPrompt + regenerationSection,
+      let mcpUrl: string | undefined
+      try {
+        mcpUrl = buildPlannerMcpUrl({ sessionId: mcpSessionId, jobId: designSessionId })
+      } catch (error) {
+        unregisterPlannerMcpSession(mcpSessionId)
+        throw createTurnError('plan.mcp_unavailable', {
+          detail: error instanceof Error ? error.message : String(error)
+        })
+      }
+
+      try {
+        plannerSandboxDebug('runDesignPlanner: entering streamAgentTurn', {
+          designSessionId,
+          runId: run.runId,
+          attempt,
+          provider: core.code,
           model,
-          systemPrompt: appendBusinessSkillSnapshot(
-            resolvePlannerPromptBody(),
-            executionProfile.skills.planner
-          ),
-          mcpUrl,
-          readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
-          signal: run.signal,
-          jobId: plannerScopeId
-        })) {
-          chunkCount += 1
-          if (chunk.type !== 'thinking_delta' && chunk.type !== 'delta') {
-            plannerSandboxDebug('runDesignPlanner: turn chunk', {
-              designSessionId,
-              runId: run.runId,
-              chunkType: chunk.type,
-              chunkCount
-            })
-          }
-          if (chunk.type === 'completed') break
-          if (getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)) {
-            getRunController(run.runId)?.abort()
-            runOutcome = 'user_stopped'
-            break
-          }
-        }
-      })
+          promptChars: (plannerPrompt + regenerationSection).length,
+          readRoots: plannerReadRoots.length,
+          mcpUrl: Boolean(mcpUrl)
+        })
 
-      if (await commitPlanningSoftPause(designSessionId, designRunId)) {
-        runOutcome = 'user_stopped'
+        let chunkCount = 0
+        await runWithExecutionRunContext({ runId: run.runId, signal: run.signal }, async () => {
+          for await (const chunk of streamAgentTurn({
+            role: 'planner',
+            capabilityProfile: 'planner-read',
+            provider: core.code as SupportedCoreCode,
+            workspaceRoot: workspacePath,
+            prompt: plannerPrompt + regenerationSection,
+            model,
+            systemPrompt: appendBusinessSkillSnapshot(
+              resolvePlannerPromptBody(),
+              executionProfile.skills.planner
+            ),
+            mcpUrl,
+            readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
+            signal: run.signal,
+            jobId: plannerScopeId
+          })) {
+            chunkCount += 1
+            if (chunk.type !== 'thinking_delta' && chunk.type !== 'delta') {
+              plannerSandboxDebug('runDesignPlanner: turn chunk', {
+                designSessionId,
+                runId: run.runId,
+                chunkType: chunk.type,
+                chunkCount
+              })
+            }
+            if (chunk.type === 'completed') break
+            if (getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)) {
+              getRunController(run.runId)?.abort()
+              runOutcome = 'user_stopped'
+              break
+            }
+          }
+        })
+
+        if (await commitPlanningSoftPause(designSessionId, designRunId)) {
+          runOutcome = 'user_stopped'
+          return
+        }
+
+        plannerSandboxDebug('runDesignPlanner: streamAgentTurn finished', {
+          designSessionId,
+          runId: run.runId,
+          attempt,
+          chunkCount,
+          ...summarizePlannerSession(session),
+          planCommitted
+        })
+      } finally {
+        unregisterPlannerMcpSession(mcpSessionId)
+        plannerSandboxDebug('runDesignPlanner: mcp session unregistered', {
+          designSessionId,
+          mcpSessionId,
+          attempt
+        })
+      }
+
+      await session.finalizerPromise
+
+      if (session.planCommitted) {
+        planCommitted = true
+        runOutcome = 'success'
+        await finishPlannerRun(designRunId, {
+          status: 'completed',
+          planRevisionAfter: session.planRevision
+        })
+        plannerSandboxDebug('runDesignPlanner: done (plan committed during stream)', {
+          designSessionId,
+          attempt
+        })
         return
       }
 
-      plannerSandboxDebug('runDesignPlanner: streamAgentTurn finished', {
+      const missingFinalizeError = resolvePlannerMissingFinalizeError(session)
+      plannerSandboxDebug('runDesignPlanner: failed (no finalize_plan)', {
         designSessionId,
-        runId: run.runId,
-        chunkCount,
-        ...summarizePlannerSession(session),
-        planCommitted
+        attempt,
+        errorCode: isTurnError(missingFinalizeError) ? missingFinalizeError.code : null,
+        ...summarizePlannerSession(session)
       })
-    } finally {
-      unregisterPlannerMcpSession(mcpSessionId)
-      plannerSandboxDebug('runDesignPlanner: mcp session unregistered', {
-        designSessionId,
-        mcpSessionId
-      })
-    }
 
-    await session.finalizerPromise
+      if (
+        isPlannerSilentEmptyTurnError(missingFinalizeError) &&
+        isRetryableTurnError(missingFinalizeError) &&
+        attempt < maxSilentEmptyAttempts &&
+        !getAppContext().runtimeRegistry.shouldStopPlanning(designSessionId)
+      ) {
+        lastSilentEmptyError = missingFinalizeError
+        continue
+      }
 
-    if (session.planCommitted) {
-      planCommitted = true
-      runOutcome = 'success'
-      await finishPlannerRun(designRunId, {
-        status: 'completed',
-        planRevisionAfter: session.planRevision
-      })
-      plannerSandboxDebug('runDesignPlanner: done (plan committed during stream)', {
-        designSessionId
-      })
-      return
+      throw missingFinalizeError
     }
-
-    if (session.finalizerError) {
-      throw session.finalizerError
-    }
-    plannerSandboxDebug('runDesignPlanner: failed (no finalize_plan)', {
-      designSessionId,
-      ...summarizePlannerSession(session)
-    })
-    throw createTurnError('draft.plan_not_ready', {
-      detail: 'Planner did not finalize the structured plan via finalize_plan'
-    })
   } catch (error) {
     if (isPlannerPlanCommitted(planCommitted, plannerSession)) {
       planCommitted = true

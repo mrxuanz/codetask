@@ -99,6 +99,8 @@ export function planFailureFromSandboxError(error: unknown): SandboxFailurePlan 
     }
   }
 
+  // Preserve provider capacity / keepalive codes on the job so UI/retry paths
+  // do not look like a planner contract miss (draft.plan_not_ready).
   return {
     lastError: fallback,
     planProgress: {
@@ -108,7 +110,12 @@ export function planFailureFromSandboxError(error: unknown): SandboxFailurePlan 
       contextsTotal: 0,
       message: null,
       progressCode: 'plan.planning_failed',
-      progressParams: null
+      progressParams:
+        fallback.code === 'turn.capacity_limited' ||
+        fallback.code === 'provider.cursor.acp_keepalive_timeout' ||
+        fallback.code === 'turn.incomplete'
+          ? { providerCode: fallback.code }
+          : null
     }
   }
 }

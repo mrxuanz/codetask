@@ -39,7 +39,9 @@ export {
   normalizeTurnError,
   normalizeTurnErrorFromMessage,
   turnErrorFromUnknown,
-  isUserTurnCancellation
+  isUserTurnCancellation,
+  indicatesCursorProviderCapacity,
+  indicatesCursorAcpKeepaliveTimeout
 } from './normalize.ts'
 
 export {
