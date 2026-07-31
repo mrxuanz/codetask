@@ -20,18 +20,6 @@ export function createLegacyApplicationRuntime(
     logger,
     stages: [
       {
-        name: 'scrub-runtime-credentials',
-        execute: async () => {
-          const { dataPaths } = await import('../data-paths')
-          const { scrubCredentialSnapshotsInTree } =
-            await import('../sandbox/provider-auth/snapshot-manifest')
-          const scrubbed = scrubCredentialSnapshotsInTree(dataPaths(ctx.dataDir).runtimes)
-          if (scrubbed.manifests > 0 || scrubbed.rejectedPaths > 0) {
-            logger.info('scrubbed provider credential snapshots on startup', { ...scrubbed })
-          }
-        }
-      },
-      {
         // FIX-PLAN F3-B (§8.5): fence stale task attempts from a dead process to `interrupted`
         // before any Job is resumed, so resume creates a fresh attempt under the same identity.
         name: 'interrupt-orphan-task-attempts',
@@ -106,7 +94,7 @@ export function createLegacyApplicationRuntime(
       {
         name: 'prune-runtime-trees',
         execute: async () => {
-          const result = await pruneOrphanRuntimeTrees(ctx.dataDir, ctx.db)
+          const result = await pruneOrphanRuntimeTrees(ctx.dataDir)
           if (result.removedPaths.length > 0) {
             logger.info('pruned orphan runtime trees', { count: result.removedPaths.length })
           }
@@ -134,16 +122,14 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
     if (
       result.expiredArtifacts > 0 ||
       result.orphanAttachments > 0 ||
-      result.staleRuntimes > 0 ||
-      result.completedTaskRuntimes > 0 ||
+      result.legacyRuntimesRemoved > 0 ||
       result.staleAttachmentDirs > 0 ||
-      result.orphanRuntimeTrees > 0 ||
       result.sqliteMaintenance.ran
     ) {
       logger.info('retention startup janitor pass', {
         expiredArtifacts: result.expiredArtifacts,
         orphanAttachments: result.orphanAttachments,
-        completedTaskRuntimes: result.completedTaskRuntimes
+        legacyRuntimesRemoved: result.legacyRuntimesRemoved
       })
     }
   } catch (error: unknown) {

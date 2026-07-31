@@ -1,4 +1,4 @@
-import type { AnySandboxPolicy, SandboxEvidence } from './types'
+import type { SandboxEvidence, SandboxPolicy } from './types'
 import { assertSandboxEvidence, sha256Policy } from './evidence'
 import { SandboxError } from './types'
 import type { SandboxChild } from '../../../native/codeteam-sandbox/index.d'
@@ -9,7 +9,7 @@ import { serializeSandboxPolicy } from './wire'
 
 export interface SpawnedSandboxWorker {
   handle: SandboxChild
-  policy: AnySandboxPolicy
+  policy: SandboxPolicy
 }
 
 export interface LaunchedSandbox extends SpawnedSandboxWorker {
@@ -32,7 +32,7 @@ function mapEvidence(raw: SandboxChild['evidence']): SandboxEvidence {
 }
 
 export async function launchSandboxedWorker(input: {
-  policy: AnySandboxPolicy
+  policy: SandboxPolicy
   command: string
   args: string[]
   env: Record<string, string>
@@ -47,8 +47,7 @@ export async function launchSandboxedWorker(input: {
     command: input.command,
     args: input.args,
     cwd: input.policy.cwd,
-    role: input.policy.role,
-    policyVersion: input.policy.version
+    role: input.policy.role
   })
   const native = loadSandboxNative()
   const handle = native.launchSandboxedWorker({
@@ -71,8 +70,7 @@ export async function launchSandboxedWorker(input: {
   }
 
   sandboxTurnDebug('sandbox launcher: spawn handle ready', {
-    pid: handle.pid,
-    policyVersion: input.policy.version
+    pid: handle.pid
   })
 
   return { handle, policy: input.policy }
@@ -113,7 +111,7 @@ export function awaitSandboxWorkerAttestation(
     pid: handle.pid,
     backend: evidence.backend,
     sandboxPid: evidence.sandboxPid,
-    policyVersion: evidence.protocolVersion,
+    nativeProtocolVersion: evidence.protocolVersion,
     readRootsHash: evidence.effectiveReadRootsHash,
     writeRootsHash: evidence.effectiveWriteRootsHash
   })

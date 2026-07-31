@@ -10,6 +10,7 @@ import { jobArtifacts, threadJobs, type ThreadJob } from '../db/schema'
 import type { PlanProgressDto, TaskProgressDto, ThreadJobDto } from './types'
 import type { SavedJobPlan } from '../planner/plan-types'
 import { getAppContext } from '../bootstrap'
+import { parseJobExecutionProfileJson } from '../execution-profile'
 import { signAssetUrlsInValue } from '../auth/sign-asset-url'
 import { onJobStatusTransition } from '../retention'
 import { readRetentionSettings } from '../retention/settings'
@@ -355,6 +356,7 @@ export async function mapJob(
     taskProgress,
     abilities,
     plan: includePlan ? (plan ?? undefined) : undefined,
+    executionProfile: parseJobExecutionProfileJson(row.executionProfileJson) ?? undefined,
     referenceManifest: manifest
       ? (signAssetUrlsInValue(
           getAppContext().security.authSecret,

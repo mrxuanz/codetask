@@ -53,6 +53,7 @@ import {
 } from '../../wizard/edit-guard'
 import { conversationMcpToolDefinitionsForPhase } from './tools'
 import { getConversationMcpSession } from './session'
+import { normalizeCoreCode } from '../cores'
 
 type JsonRpcId = string | number | null
 
@@ -244,6 +245,7 @@ async function proposeTaskDraft(
     sourceMessageId: session.userMessageId,
     proposed,
     workspacePath: session.workspacePath,
+    coreCode: normalizeCoreCode(session.coreCode),
     sourceAttachments: session.turnAttachments
   })
   const collectingDraft = await findCollectingDraftMessage(session.username, session.threadId)

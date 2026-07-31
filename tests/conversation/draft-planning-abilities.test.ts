@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   ensureDraftPlanningAbilities,
+  resolveDraftExecutionConfig,
   buildUnlockedDraftPayload,
   buildUnlockedRequirementsContractPayload
 } from '../../src/server/conversation/draft/normalize'
@@ -57,6 +58,38 @@ describe('ensureDraftPlanningAbilities', () => {
     assert.ok(next.abilities.some((ability) => ability.abilityCode === 'project-setup'))
     assert.ok(next.abilities.some((ability) => ability.abilityCode === 'frontend-implementation'))
     assert.ok(next.abilities.some((ability) => ability.abilityCode === 'general-implementation'))
+  })
+})
+
+describe('resolveDraftExecutionConfig', () => {
+  it('uses the draft-selected cores for this planning run', () => {
+    const draft = emptyDraft()
+    draft.executionConfig = {
+      plannerCoreCode: 'claude-code',
+      sliceVerifierCoreCode: 'codex',
+      milestoneVerifierCoreCode: 'cursorcli'
+    }
+
+    assert.deepEqual(resolveDraftExecutionConfig(draft, 'opencode'), draft.executionConfig)
+  })
+
+  it('falls back to the thread core for Planner and ability core for verification', () => {
+    const draft = emptyDraft()
+    draft.abilities = [
+      {
+        abilityCode: 'testing-validation',
+        label: 'Testing',
+        description: 'Verify',
+        reason: 'Need evidence',
+        recommendedCoreCode: 'codex'
+      }
+    ]
+
+    assert.deepEqual(resolveDraftExecutionConfig(draft, 'claude-code'), {
+      plannerCoreCode: 'claude-code',
+      sliceVerifierCoreCode: 'codex',
+      milestoneVerifierCoreCode: 'codex'
+    })
   })
 })
 

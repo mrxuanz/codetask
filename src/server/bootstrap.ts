@@ -1,9 +1,9 @@
-import { randomBytes, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { JobEventBus, RuntimeRegistry, SettingsStore, type AppContext } from './context'
 import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
 import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } from './retention'
-import { getOrCreateAuthSecret } from './auth/secret'
+import { loadDatabaseAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
 import { SafeLoggerImpl } from './application/safe-logger'
 import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
@@ -21,19 +21,27 @@ import {
   stopArtifactExpiryScheduler
 } from './retention/expiry-scheduler'
 import {
-  EncryptedFileMcpSecretProvider,
-  MemoryMcpSecretProvider
-} from './settings/mcp-secret-provider'
-import {
-  collectMcpSecretReferenceIds,
-  resolveProtectedMcpSensitiveValues
-} from './settings/mcp-secrets'
-import {
   createAppConfig,
   DEFAULT_APP_CONFIG,
   type AppConfig,
   type AppConfigOverrides
 } from './config/app-config'
+import {
+  mergeProvidersConfigOverrides,
+  parseProvidersConfigOverrides
+} from '../shared/providers/settings'
+import { createProviderRegistry } from './providers/composition'
+import { ProviderRuntimeManager } from './providers/lifecycle'
+import { SecureAuthService } from './auth/service'
+import { configureRuntimeMode, resetRuntimeMode } from './runtime-mode'
+import {
+  configureRuntimeFeatures,
+  resetRuntimeFeatures
+} from './config/runtime-features'
+import {
+  configureShellChildEnvironment,
+  resetShellChildEnvironment
+} from './shell-child-environment'
 
 export type { AppContext } from './context'
 
@@ -43,13 +51,9 @@ export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
   config?: AppConfigOverrides
-  authSecretPath?: string
-  authSecret?: string
-  mcpSecretPath?: string
+  shellChildEnvironment?: Record<string, string>
   storage?: {
-    bootstrapRoot: string
     source: string
-    managed: boolean
   }
 }
 
@@ -105,43 +109,46 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     }
 
     const mode = options.mode ?? 'desktop'
+    configureRuntimeMode(mode)
+    configureShellChildEnvironment(options.shellChildEnvironment)
     const settings = new SettingsStore(options.dataDir, db)
-    const authSecret =
-      options.authSecret ??
-      (options.authSecretPath
-        ? getOrCreateAuthSecret(options.authSecretPath)
-        : randomBytes(32).toString('hex'))
-    const mcpSecrets = options.mcpSecretPath
-      ? new EncryptedFileMcpSecretProvider(options.mcpSecretPath, authSecret)
-      : new MemoryMcpSecretProvider()
-    const persistedMcp = settings.readNamespace('user_mcp')
-    if (persistedMcp.value) {
-      resolveProtectedMcpSensitiveValues(persistedMcp.value, mcpSecrets)
-      mcpSecrets.pruneExcept(collectMcpSecretReferenceIds(persistedMcp.value))
-    } else {
-      mcpSecrets.pruneExcept(new Set())
-    }
+    const authSecret = loadDatabaseAuthSecret(db)
     const bootId = randomUUID()
+    const persistedProviderValue = settings.readNamespace('provider_runtime').value
+    const persistedProviderOverrides = parseProvidersConfigOverrides(
+      persistedProviderValue?.providers ?? persistedProviderValue ?? {}
+    )
+    const config = createAppConfig({
+      ...options.config,
+      providers: mergeProvidersConfigOverrides(
+        persistedProviderOverrides,
+        options.config?.providers
+      )
+    })
+    configureRuntimeFeatures({
+      sandbox: config.sandbox,
+      debug: config.debug
+    })
 
     const nextContext: AppContext = {
-      config: createAppConfig(options.config),
+      config,
       dataDir: options.dataDir,
       db,
       settings,
       security: {
         mode,
         authSecret,
-        mcpSecrets
+        auth: new SecureAuthService(db, authSecret)
       },
       eventBus: new JobEventBus(),
       runtimeRegistry: new RuntimeRegistry(),
       executionRuntime: new JobExecutionRuntimeRegistry(),
+      providerRegistry: createProviderRegistry(config.providers),
+      providerRuntimeManager: new ProviderRuntimeManager(),
       bootId,
       applicationRuntime: null,
       ...(options.storage ? { storage: options.storage } : {})
     }
-    process.env.CODETASK_DATA_DIR = options.dataDir
-
     appContext = nextContext
 
     startRetentionJanitor()
@@ -153,16 +160,14 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
         if (
           result.expiredArtifacts > 0 ||
           result.orphanAttachments > 0 ||
-          result.staleRuntimes > 0 ||
-          result.completedTaskRuntimes > 0 ||
+          result.legacyRuntimesRemoved > 0 ||
           result.staleAttachmentDirs > 0 ||
-          result.orphanRuntimeTrees > 0 ||
           result.sqliteMaintenance.ran
         ) {
           bootstrapLogger.info('retention startup janitor pass', {
             expiredArtifacts: result.expiredArtifacts,
             orphanAttachments: result.orphanAttachments,
-            completedTaskRuntimes: result.completedTaskRuntimes
+            legacyRuntimesRemoved: result.legacyRuntimesRemoved
           })
         }
       })
@@ -174,6 +179,9 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
 
     return appContext
   } catch (error) {
+    resetRuntimeMode()
+    resetRuntimeFeatures()
+    resetShellChildEnvironment()
     closeDatabaseForTests()
     throw error
   }
@@ -189,7 +197,15 @@ export async function shutdownRuntime(
 ): Promise<void> {
   const ctx = appContext
   if (!ctx) return
+  // Reject new Provider turns first, let the application drain active owners,
+  // then close any remaining turn handles and shared protocol transports.
+  ctx.providerRuntimeManager.beginDrain()
   await shutdownApplicationRuntime(ctx, reason)
+  await ctx.providerRuntimeManager.closeAll().catch((error: unknown) => {
+    bootstrapLogger.warn('provider runtime shutdown failed', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+  })
 }
 
 export async function resetAppContextForTests(): Promise<void> {
@@ -199,6 +215,7 @@ export async function resetAppContextForTests(): Promise<void> {
 
   const ctx = appContext
   if (ctx) {
+    await ctx.providerRuntimeManager.closeAll().catch(() => undefined)
     await waitForPlanningToDrainForTests(ctx)
     await resetApplicationRuntimeForTests(ctx)
   }
@@ -213,5 +230,8 @@ export async function resetAppContextForTests(): Promise<void> {
   }
 
   appContext = null
+  resetRuntimeMode()
+  resetRuntimeFeatures()
+  resetShellChildEnvironment()
   closeDatabaseForTests()
 }

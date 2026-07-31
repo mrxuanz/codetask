@@ -8,14 +8,15 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync
 } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import {
   loadNative,
-  policyForRoleV2,
+  sandboxPolicyForRole,
   sandboxTestsEnabled,
   wirePolicy
 } from './sandbox-test-utils.mjs'
@@ -72,41 +73,19 @@ function resolveRoleWorkerPath(_role = 'codex') {
 }
 
 function loadProductionSandboxModule() {
-  const chunksDir = join(process.cwd(), 'out', 'main', 'chunks')
-  if (!existsSync(chunksDir)) return null
-  for (const file of readdirSync(chunksDir)) {
-    if (!file.endsWith('.js')) continue
-    try {
-      const mod = require(join(chunksDir, file))
-      if (
-        typeof mod.prepareProviderAuth === 'function' &&
-        typeof mod.buildSandboxEnv === 'function'
-      ) {
-        return mod
-      }
-    } catch {
-      /* best-effort, ignore errors */
+  const entry = join(process.cwd(), 'out', 'main', 'sandbox', 'provider-runtime-diagnostics.js')
+  if (!existsSync(entry)) return null
+  try {
+    const mod = require(entry)
+    if (
+      typeof mod.prepareProviderRuntimeProfile === 'function' &&
+      typeof mod.buildSandboxEnv === 'function' &&
+      typeof mod.createSandboxPolicy === 'function'
+    ) {
+      return mod
     }
-  }
-  return null
-}
-
-function loadProviderPolicyModule() {
-  const candidates = [
-    join(process.cwd(), 'out', 'main', 'chunks'),
-    join(process.cwd(), 'out', 'main')
-  ]
-  for (const dir of candidates) {
-    if (!existsSync(dir)) continue
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith('.js')) continue
-      try {
-        const mod = require(join(dir, file))
-        if (typeof mod.buildCursorAcpCliArgs === 'function') return mod
-      } catch {
-        /* best-effort, ignore errors */
-      }
-    }
+  } catch {
+    /* The caller reports a missing/invalid production diagnostics entry. */
   }
   return null
 }
@@ -115,70 +94,57 @@ function hostHome() {
   return process.env.USERPROFILE ?? process.env.HOME ?? homedir()
 }
 
-function authStatus(provider) {
-  switch (provider) {
-    case 'codex': {
-      const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')
-      const hasFile = existsSync(join(codexHome, 'auth.json'))
-      const hasEnv = Boolean(
-        process.env.OPENAI_API_KEY?.trim() || process.env.CODEX_API_KEY?.trim()
-      )
-      return { present: hasFile || hasEnv, detail: hasFile ? codexHome : 'env-key-only' }
-    }
-    case 'cursorcli': {
-      const candidates = [
-        join(hostHome(), 'AppData', 'Roaming', 'Cursor', 'auth.json'),
-        join(hostHome(), '.config', 'cursor', 'auth.json')
-      ]
-      const hasFile = candidates.some((p) => existsSync(p))
-      const hasEnv = Boolean(process.env.CURSOR_API_KEY?.trim())
-      return {
-        present: hasFile || hasEnv,
-        detail: hasFile ? 'auth.json' : hasEnv ? 'env-key' : 'missing'
-      }
-    }
-    case 'claude-code': {
-      const hasEnv = Boolean(
-        process.env.ANTHROPIC_API_KEY?.trim() || process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim()
-      )
-      const settings = join(hostHome(), '.claude', 'settings.json')
-      return {
-        present: hasEnv || existsSync(settings),
-        detail: existsSync(settings) ? settings : 'env'
-      }
-    }
-    case 'opencode': {
-      const configDir = join(hostHome(), '.config', 'opencode')
-      const hasConfig = ['opencode.json', 'auth.json'].some((n) => existsSync(join(configDir, n)))
-      const hasEnv = Boolean(
-        process.env.OPENCODE_API_KEY?.trim() ||
-        process.env.ANTHROPIC_API_KEY?.trim() ||
-        process.env.OPENAI_API_KEY?.trim()
-      )
-      return { present: hasConfig || hasEnv, detail: hasConfig ? configDir : 'env' }
-    }
-    default:
-      return { present: false, detail: 'unknown' }
+function normalizePath(path) {
+  const normalized = resolve(path)
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+function isPathWithin(parent, candidate) {
+  const fromParent = relative(normalizePath(parent), normalizePath(candidate))
+  return fromParent === '' || (!fromParent.startsWith('..') && !isAbsolute(fromParent))
+}
+
+function providerAuthStatus(prod, provider, _scratchRoot, workspaceRoot) {
+  const profile = prod.prepareProviderRuntimeProfile(provider)
+  return {
+    present: profile.diagnostics.authMaterialPresent,
+    detail: profile.diagnostics.authMaterialPresent
+      ? 'native host identity detected'
+      : 'native host identity not detected'
   }
 }
 
-function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
-  const prepared = prod.prepareProviderAuth(provider, runtimeRoot, { workspaceRoot })
+function analyzeStaticProvider(prod, provider, scratchRoot, workspaceRoot) {
+  const prepared = prod.prepareProviderRuntimeProfile(provider)
+  const readRoots = prepared.hostPathGrants.map((grant) => grant.path)
+  const writeRootsFromProfile = prepared.hostPathGrants
+    .filter((grant) => grant.access === 'read-write')
+    .map((grant) => grant.path)
   const host = hostHome()
-  const hostWrites = (prepared.writeRoots ?? []).filter((root) =>
-    root.toLowerCase().startsWith(host.toLowerCase())
+  const hostWrites = writeRootsFromProfile.filter((root) => isPathWithin(host, root))
+  const fullHostHomeGranted = prepared.hostPathGrants.some(
+    (grant) => normalizePath(grant.path) === normalizePath(host)
   )
+  // Host-identity: TMP stays on host (or unset); scratch is ephemeral OS-temp only —
+  // provider durable state must NOT be redirected under scratch.
+  const tmpKeys = ['TMPDIR', 'TMP', 'TEMP']
+  const tmpRedirectedIntoScratch = tmpKeys.some((key) => {
+    const value = prepared.environment[key]
+    return Boolean(value) && isPathWithin(scratchRoot, value)
+  })
+  const homeRedirectedIntoScratch =
+    Boolean(prepared.environment.HOME) && isPathWithin(scratchRoot, prepared.environment.HOME)
 
-  const policy = prod.policyForRoleV2
-    ? prod.policyForRoleV2({
+  const policy = prod.createSandboxPolicy
+    ? prod.createSandboxPolicy({
         role: 'task-worker',
         workspaceRoot,
-        runtimeRoot,
-        providerReadRoots: prepared.readRoots,
-        providerWriteRoots: prepared.writeRoots,
+        scratchRoot,
+        providerReadRoots: readRoots,
+        providerWriteRoots: writeRootsFromProfile,
         attachmentReadRoots: []
       })
-    : policyForRoleV2('task-worker', workspaceRoot, runtimeRoot)
+    : sandboxPolicyForRole('task-worker', workspaceRoot, scratchRoot)
 
   const writeRoots =
     policy.filesystem?.allowedWriteRoots ?? policy.filesystem?.allowed_write_roots ?? []
@@ -189,53 +155,58 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
     authPresent: prepared.diagnostics.authMaterialPresent,
     warnings: prepared.diagnostics.warnings,
     env: {
-      HOME: prepared.envPatch.HOME,
-      CODEX_HOME: prepared.envPatch.CODEX_HOME ?? null,
-      CURSOR_CONFIG_DIR: prepared.envPatch.CURSOR_CONFIG_DIR ?? null,
-      CLAUDE_CONFIG_DIR: prepared.envPatch.CLAUDE_CONFIG_DIR ?? null,
-      XDG_CONFIG_HOME: prepared.envPatch.XDG_CONFIG_HOME ?? null
+      HOME: prepared.environment.HOME,
+      CODEX_HOME: prepared.environment.CODEX_HOME ?? null,
+      CURSOR_CONFIG_DIR: prepared.environment.CURSOR_CONFIG_DIR ?? null,
+      CLAUDE_CONFIG_DIR: prepared.environment.CLAUDE_CONFIG_DIR ?? null,
+      XDG_CONFIG_HOME: prepared.environment.XDG_CONFIG_HOME ?? null,
+      XDG_STATE_HOME: prepared.environment.XDG_STATE_HOME ?? null
     },
     hostWriteRoots: hostWrites,
-    policyWriteTouchesHost: writeRoots.some((root) =>
-      root.toLowerCase().startsWith(host.toLowerCase())
+    declaredHostWritesApplied: hostWrites.every((root) =>
+      writeRoots.some((policyRoot) => isPathWithin(policyRoot, root))
     ),
+    fullHostHomeGranted,
+    hostIdentityOk: !tmpRedirectedIntoScratch && !homeRedirectedIntoScratch,
     runtimeIsolated:
-      prepared.envPatch.HOME === runtimeRoot &&
-      prepared.diagnostics.mode === 'runtime-copy' &&
-      hostWrites.length === 0
+      prepared.schemaVersion === 1 &&
+      prepared.diagnostics.mode === 'host-identity' &&
+      !tmpRedirectedIntoScratch &&
+      !homeRedirectedIntoScratch &&
+      !fullHostHomeGranted
   }
 }
 
-function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, provider) {
-  const authPrepared = prod.prepareProviderAuth(provider, runtimeRoot, { workspaceRoot })
-  if (typeof prod.runProviderAuthPreflight === 'function') {
-    prod.runProviderAuthPreflight(provider, authPrepared)
-  }
-  const dataDir =
-    typeof prod.resolveSandboxDataDir === 'function'
-      ? prod.resolveSandboxDataDir()
-      : join(process.cwd(), 'data')
-  const envRecord = prod.buildSandboxEnv({
-    runtimeRoot,
-    dataDir,
-    providerEnv: authPrepared.envPatch
+function buildProductionSandboxEnv(prod, scratchRoot, workspaceRoot, provider) {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, {
+    workspaceRoot
   })
-  return { envRecord, authPrepared, dataDir }
+  const envRecord = prod.buildSandboxEnv({
+    scratchRoot,
+    providerEnv: runtimeProfile.environment
+  })
+  return { envRecord, runtimeProfile }
 }
 
-function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, provider) {
-  const authPrepared = prod.prepareProviderAuth(provider, runtimeRoot, { workspaceRoot })
-  if (prod.policyForRoleV2) {
-    return prod.policyForRoleV2({
+function buildProductionPolicy(prod, scratchRoot, workspaceRoot, provider) {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, {
+    workspaceRoot
+  })
+  const providerReadRoots = runtimeProfile.hostPathGrants.map((grant) => grant.path)
+  const providerWriteRoots = runtimeProfile.hostPathGrants
+    .filter((grant) => grant.access === 'read-write')
+    .map((grant) => grant.path)
+  if (prod.createSandboxPolicy) {
+    return prod.createSandboxPolicy({
       role: 'task-worker',
       workspaceRoot,
-      runtimeRoot,
-      providerReadRoots: authPrepared.readRoots,
-      providerWriteRoots: authPrepared.writeRoots,
+      scratchRoot,
+      providerReadRoots,
+      providerWriteRoots,
       attachmentReadRoots: []
     })
   }
-  return policyForRoleV2('task-worker', workspaceRoot, runtimeRoot)
+  return sandboxPolicyForRole('task-worker', workspaceRoot, scratchRoot)
 }
 
 function ensureWindowsSetup(native) {
@@ -446,59 +417,49 @@ function startProbeMcpServer(toolName = 'report_task_result') {
   })
 }
 
-async function runProviderLiveCase(native, prod, provider, workspace, runtimeRoot) {
-  const policy = buildProductionPolicy(prod, runtimeRoot, workspace, provider)
-  const envBundle = buildProductionSandboxEnv(prod, runtimeRoot, workspace, provider)
+async function runProviderLiveCase(native, prod, provider, workspace, scratchRoot) {
+  const policy = buildProductionPolicy(prod, scratchRoot, workspace, provider)
+  const envBundle = buildProductionSandboxEnv(prod, scratchRoot, workspace, provider)
 
   const workerInput = {
     provider,
     role: 'task-worker',
     cwd: workspace,
-    runtimeRoot,
     prompt: 'Reply with exactly: pong',
     systemPrompt: 'Sandbox diagnostic agent. Follow instructions exactly.'
   }
 
-  try {
-    return await runSandboxRoleWorker(native, {
-      name: `${provider}-hello`,
-      policy,
-      workerInput,
-      envRecord: envBundle.envRecord
-    })
-  } finally {
-    envBundle.authPrepared?.cleanupPlan?.()
-  }
+  return runSandboxRoleWorker(native, {
+    name: `${provider}-hello`,
+    policy,
+    workerInput,
+    envRecord: envBundle.envRecord
+  })
 }
 
-async function runProviderMcpCase(native, prod, provider, workspace, runtimeRoot, mcpUrl) {
-  const policy = buildProductionPolicy(prod, runtimeRoot, workspace, provider)
-  const envBundle = buildProductionSandboxEnv(prod, runtimeRoot, workspace, provider)
+async function runProviderMcpCase(native, prod, provider, workspace, scratchRoot, mcpUrl) {
+  const policy = buildProductionPolicy(prod, scratchRoot, workspace, provider)
+  const envBundle = buildProductionSandboxEnv(prod, scratchRoot, workspace, provider)
 
   const workerInput = {
     provider,
     role: 'task-worker',
     cwd: workspace,
-    runtimeRoot,
     prompt: `Call codeteam-manager report_task_result now with status "completed". Then reply: mcp-ok`,
     systemPrompt: 'Sandbox diagnostic agent. You must call MCP tools when asked.',
     mcpUrl,
     mcpToolNames: ['report_task_result']
   }
 
-  try {
-    return await runSandboxRoleWorker(native, {
-      name: `${provider}-mcp`,
-      policy,
-      workerInput,
-      envRecord: envBundle.envRecord
-    })
-  } finally {
-    envBundle.authPrepared?.cleanupPlan?.()
-  }
+  return runSandboxRoleWorker(native, {
+    name: `${provider}-mcp`,
+    policy,
+    workerInput,
+    envRecord: envBundle.envRecord
+  })
 }
 
-function listRuntimeStateFiles(runtimeRoot, max = 40) {
+function listScratchStateFiles(scratchRoot, max = 40) {
   const found = []
   function walk(dir, depth) {
     if (depth > 6 || found.length >= max) return
@@ -514,31 +475,41 @@ function listRuntimeStateFiles(runtimeRoot, max = 40) {
       if (entry.isDirectory()) {
         walk(full, depth + 1)
       } else if (entry.isFile() && /\.(json|toml)$/i.test(entry.name)) {
-        found.push(full.slice(runtimeRoot.length + 1))
+        found.push(full.slice(scratchRoot.length + 1))
       }
     }
   }
-  walk(runtimeRoot, 0)
+  walk(scratchRoot, 0)
   return found
 }
 
-function checkHostNotPolluted(provider) {
+function snapshotHostPollutionCandidates(provider) {
   const host = hostHome()
-  const suspects = []
+  const snapshot = new Map()
   if (provider === 'cursorcli') {
     const approvals = join(host, '.cursor', 'projects')
     if (existsSync(approvals)) {
       try {
         for (const slug of readdirSync(approvals)) {
           const file = join(approvals, slug, 'mcp-approvals.json')
-          if (existsSync(file)) suspects.push(file)
+          if (existsSync(file)) {
+            const stat = statSync(file)
+            snapshot.set(file, `${stat.size}:${stat.mtimeMs}`)
+          }
         }
       } catch {
         /* best-effort, ignore errors */
       }
     }
   }
-  return suspects
+  return snapshot
+}
+
+function detectHostPollution(provider, before) {
+  const after = snapshotHostPollutionCandidates(provider)
+  return [...after].flatMap(([path, fingerprint]) =>
+    before.get(path) === fingerprint ? [] : [path]
+  )
 }
 
 async function main() {
@@ -569,29 +540,28 @@ async function main() {
     if (!prod) {
       report.failures.push('Production sandbox module missing — run npm run build')
     } else {
-      const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-provider-static-'))
+      const scratchRoot = mkdtempSync(join(tmpdir(), 'codetask-provider-static-'))
       try {
         for (const provider of providers) {
           report.static[provider] = analyzeStaticProvider(
             prod,
             provider,
-            runtimeRoot,
+            scratchRoot,
             workspacePath
           )
           if (!report.static[provider].runtimeIsolated) {
-            report.failures.push(`${provider}: static runtime isolation check failed`)
+            report.failures.push(`${provider}: static host-identity isolation check failed`)
           }
         }
-        const policyMod = loadProviderPolicyModule()
-        if (policyMod?.buildCursorAcpCliArgs) {
-          report.cursorCliArgs = policyMod.buildCursorAcpCliArgs({
+        if (prod.buildCursorAcpCliArgs) {
+          report.cursorCliArgs = prod.buildCursorAcpCliArgs({
             outerSandbox: true,
             cwd: workspacePath
           })
         }
         log('static', 'checks done', report.static)
       } finally {
-        rmSync(runtimeRoot, { recursive: true, force: true })
+        rmSync(scratchRoot, { recursive: true, force: true })
       }
     }
   }
@@ -613,11 +583,13 @@ async function main() {
         ensureWindowsSetup(native)
 
         const base = mkdtempSync(join(tmpdir(), 'codetask-provider-live-'))
-        const runtimeRoot = join(base, 'runtime')
-        mkdirSync(runtimeRoot, { recursive: true })
+        const scratchRoot = join(base, 'scratch')
+        mkdirSync(scratchRoot, { recursive: true })
 
         for (const provider of providers) {
-          const auth = authStatus(provider)
+          const providerScratch = join(scratchRoot, provider)
+          mkdirSync(providerScratch, { recursive: true })
+          const auth = providerAuthStatus(prod, provider, providerScratch, workspacePath)
           report.live[provider] = { auth, hello: null, mcp: null }
 
           if (!auth.present) {
@@ -626,8 +598,7 @@ async function main() {
             continue
           }
 
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const hostSnapshots = {}
+          const hostSnapshot = snapshotHostPollutionCandidates(provider)
 
           try {
             const hello = await runProviderLiveCase(
@@ -635,7 +606,7 @@ async function main() {
               prod,
               provider,
               workspacePath,
-              runtimeRoot
+              providerScratch
             )
             report.live[provider].hello = {
               ...summarizeChunks(hello),
@@ -664,7 +635,7 @@ async function main() {
               prod,
               provider,
               workspacePath,
-              runtimeRoot,
+              providerScratch,
               probe.url
             )
             report.live[provider].mcp = {
@@ -689,8 +660,8 @@ async function main() {
             await probe.close()
           }
 
-          report.live[provider].runtimeStateFiles = listRuntimeStateFiles(runtimeRoot)
-          report.live[provider].hostPollution = checkHostNotPolluted(provider)
+          report.live[provider].scratchStateFiles = listScratchStateFiles(providerScratch)
+          report.live[provider].hostPollution = detectHostPollution(provider, hostSnapshot)
           if (report.live[provider].hostPollution.length > 0) {
             report.failures.push(
               `${provider}: host mcp-approvals still present: ${report.live[provider].hostPollution.join(', ')}`
@@ -698,7 +669,7 @@ async function main() {
           }
         }
 
-        report.live.runtimeRoot = runtimeRoot
+        report.live.scratchRoot = scratchRoot
       }
     }
   }

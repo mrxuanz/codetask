@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { createCursorPermissionHandler } from '../../src/server/agent-runtime/cursor-acp/permissions'
-import { buildCursorTurnPlan } from '../../src/server/agent-runtime/providers/cursor-policy'
+import {
+  CursorAcpSessionRouter,
+  openCursorAcpSession
+} from '../../src/server/agent-runtime/cursor-acp/acp-shared'
+import { buildCursorTurnPlan } from '../../src/server/providers/cursor/turn-plan'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types'
 
 const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-cursor-acp-'))
@@ -23,7 +27,7 @@ function baseInput(role: AgentTurnInput['role']): AgentTurnInput {
   }
 }
 
-test('permission handler prefers allow-always over allow-once', async () => {
+test('permission handler prefers one-turn grants over persistent grants', async () => {
   const handler = createCursorPermissionHandler()
   const result = await handler({
     params: {
@@ -33,7 +37,7 @@ test('permission handler prefers allow-always over allow-once', async () => {
 
   assert.equal(result.outcome.outcome, 'selected')
   if (result.outcome.outcome === 'selected') {
-    assert.equal(result.outcome.optionId, 'allow-always')
+    assert.equal(result.outcome.optionId, 'allow-once')
   }
 })
 
@@ -152,6 +156,7 @@ test('buildCursorTurnPlan: conversation/planner run directly with scoped MCP', (
     assert.equal(plan.capabilityProfile, capabilityProfile)
     assert.equal(plan.cliArgs.includes('--sandbox'), false)
     assert.deepEqual(plan.cliArgs.slice(0, 2), ['--mode', 'ask'])
+    assert.deepEqual(plan.cliArgs.slice(-3), ['--workspace', '/workspace', 'acp'])
     assert.equal(plan.cliArgs.includes('--approve-mcps'), false)
     assert.equal(plan.mcpServers.length, 1)
     assert.equal(plan.mcpServers[0]?.name, 'codeteam-manager')
@@ -159,7 +164,7 @@ test('buildCursorTurnPlan: conversation/planner run directly with scoped MCP', (
   }
 })
 
-test('buildCursorTurnPlan: task-worker uses outer sandbox full-access CLI and key', () => {
+test('buildCursorTurnPlan: task-worker uses outer sandbox without control env', () => {
   const plan = buildCursorTurnPlan(
     { ...baseInput('task-worker'), idempotencyKey: 'logical-task-key' },
     { outerSandbox: true }
@@ -167,6 +172,67 @@ test('buildCursorTurnPlan: task-worker uses outer sandbox full-access CLI and ke
   assert.equal(plan.outerSandbox, true)
   assert.ok(plan.cliArgs.includes('--sandbox'))
   assert.ok(plan.cliArgs.includes('disabled'))
+  assert.deepEqual(plan.cliArgs.slice(-3), ['--workspace', '/workspace', 'acp'])
   assert.ok(plan.cliArgs.includes('--approve-mcps'))
-  assert.equal(plan.env.CODETASK_TASK_IDEMPOTENCY_KEY, 'logical-task-key')
+  assert.equal('CODETASK_TASK_IDEMPOTENCY_KEY' in plan.env, false)
+})
+
+test('Cursor ACP loads sessions only through the advertised public capability and pins cwd', async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = []
+  const ctx = {
+    async request(method: string, params: Record<string, unknown>) {
+      calls.push({ method, params })
+      return {}
+    }
+  }
+  const session = await openCursorAcpSession(
+    ctx as never,
+    {
+      protocolVersion: 1,
+      agentCapabilities: { loadSession: true }
+    },
+    new CursorAcpSessionRouter(),
+    '/workspace',
+    'existing-session',
+    []
+  )
+  assert.equal(session.sessionId, 'existing-session')
+  assert.deepEqual(calls, [
+    {
+      method: 'session/load',
+      params: {
+        sessionId: 'existing-session',
+        cwd: '/workspace',
+        additionalDirectories: [],
+        mcpServers: []
+      }
+    }
+  ])
+  session.dispose()
+})
+
+test('Cursor ACP does not silently replace a failed resumable session', async () => {
+  const ctx = {
+    async request() {
+      throw new Error('cwd mismatch')
+    }
+  }
+  await assert.rejects(
+    () =>
+      openCursorAcpSession(
+        ctx as never,
+        {
+          protocolVersion: 1,
+          agentCapabilities: { loadSession: true }
+        },
+        new CursorAcpSessionRouter(),
+        '/workspace',
+        'existing-session',
+        []
+      ),
+    (error: unknown) =>
+      error instanceof Error &&
+      'detail' in error &&
+      /refused to load session.*cwd mismatch/i.test(String((error as { detail?: unknown }).detail))
+  )
 })

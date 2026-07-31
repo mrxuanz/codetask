@@ -13,8 +13,6 @@ import { buildJobReferenceManifest } from '../../src/shared/job-references'
 
 test('detectSandboxReadCapabilities defaults to directory-only projection', () => {
   resetSandboxReadCapabilitiesCache()
-  const prev = process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST
-  delete process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST
   try {
     const caps = detectSandboxReadCapabilities()
     assert.equal(caps.readRootMode, 'directory_only')
@@ -23,8 +21,6 @@ test('detectSandboxReadCapabilities defaults to directory-only projection', () =
     assert.equal(typeof caps.nativeSandboxAvailable, 'boolean')
   } finally {
     resetSandboxReadCapabilitiesCache()
-    if (prev === undefined) delete process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST
-    else process.env.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST = prev
   }
 })
 

@@ -41,8 +41,6 @@ export type {
   HubEvent,
   HubSubscriptionsDto,
   HubTopic,
-  JobHubEnvelope,
-  JobHubSubscriptionsDto,
   ThreadHubEvent
 } from './job-event-hub'
 export {

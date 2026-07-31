@@ -1,6 +1,7 @@
 import { createRequire } from 'module'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { CodeteamSandboxNative } from './types'
 
@@ -19,9 +20,10 @@ function packagedAppPath(): string | null {
 
 function resolveAddonDir(): string | null {
   const paths: string[] = []
+  const hostEnv = processHostEnvironmentSource.snapshot()
 
-  if (process.env.CODETEAM_SANDBOX_NATIVE?.trim()) {
-    paths.push(process.env.CODETEAM_SANDBOX_NATIVE.trim())
+  if (hostEnv.CODETEAM_SANDBOX_NATIVE?.trim()) {
+    paths.push(hostEnv.CODETEAM_SANDBOX_NATIVE.trim())
   }
 
   const appPath = packagedAppPath()

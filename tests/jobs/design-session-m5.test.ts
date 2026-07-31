@@ -15,6 +15,10 @@ import type { ThreadJob } from '../../src/server/db/schema'
 import { buildJobReferenceManifest } from '../../src/shared/job-references'
 import { AppError } from '../../src/server/error'
 import { ReferenceFileMissingError } from '../../src/server/legacy-control-plane/reference-paths'
+import {
+  TEST_JOB_EXECUTION_PROFILE,
+  TEST_JOB_EXECUTION_PROFILE_JSON
+} from '../helpers/execution-profile'
 
 function samplePlan(): SavedJobPlan {
   return {
@@ -85,6 +89,7 @@ function sampleSession(overrides: Partial<ThreadJob> = {}): ThreadJob {
     taskCurrentTaskId: null,
     taskMessage: null,
     taskMetaJson: '{}',
+    executionProfileJson: TEST_JOB_EXECUTION_PROFILE_JSON,
     referenceManifestJson: null,
     manifestRevision: 1,
     corpusRevision: 1,
@@ -170,6 +175,23 @@ test('validateLaunchPreconditions allows unconfirmed plan nodes', () => {
   )
 })
 
+test('validateLaunchPreconditions rejects a missing execution profile', () => {
+  assert.throws(
+    () =>
+      validateLaunchPreconditions({
+        session: sampleSession({ executionProfileJson: null }),
+        plan: samplePlan(),
+        manifest: buildJobReferenceManifest({
+          jobId: 'ds-test',
+          threadId: 'thread-1',
+          references: []
+        })
+      }),
+    (error: unknown) =>
+      error instanceof AppError && error.data.turnErrorCode === 'job.execution_profile_invalid'
+  )
+})
+
 test('buildJobSnapshot captures revision metadata', () => {
   const session = sampleSession()
   const plan = samplePlan()
@@ -183,6 +205,7 @@ test('buildJobSnapshot captures revision metadata', () => {
   const snapshot = buildJobSnapshot({
     session,
     plan,
+    executionProfile: TEST_JOB_EXECUTION_PROFILE,
     abilities: [{ abilityCode: 'general-implementation', recommendedCoreCode: 'codex' }],
     manifest
   })
@@ -193,6 +216,7 @@ test('buildJobSnapshot captures revision metadata', () => {
   assert.equal(snapshot.manifestRevision, 1)
   assert.equal(snapshot.workspaceRoot, '/workspace/project')
   assert.equal(snapshot.executionPlan.tasks.length, 1)
+  assert.deepEqual(snapshot.executionProfile, TEST_JOB_EXECUTION_PROFILE)
 })
 
 test('validateLaunchPreconditions checks resolved paths exist', () => {

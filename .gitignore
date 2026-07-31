@@ -12,6 +12,7 @@ target/
 
 # Local app data & databases
 data/
+/codetask-data.json
 *.db
 *.db-journal
 *.db-wal

@@ -114,6 +114,12 @@ export interface TaskLaunchDraftReference {
   localPath?: string | undefined
 }
 
+export interface DraftExecutionConfig {
+  plannerCoreCode: SupportedCoreCode
+  sliceVerifierCoreCode: SupportedCoreCode
+  milestoneVerifierCoreCode: SupportedCoreCode
+}
+
 export interface TaskLaunchDraftPayload {
   draftId: string
   sourceMessageId: string
@@ -138,6 +144,8 @@ export interface TaskLaunchDraftPayload {
   abilities: TaskLaunchDraftAbility[]
   references: TaskLaunchDraftReference[]
   sourceAttachments: MessageAttachment[]
+  /** Per-launch CLI choices; captured with role Skills in the Job's separate execution profile. */
+  executionConfig?: DraftExecutionConfig
   revision?: number
 
   collecting?: boolean

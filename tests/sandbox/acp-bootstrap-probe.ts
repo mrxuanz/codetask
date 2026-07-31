@@ -8,7 +8,7 @@ import {
   PROTOCOL_VERSION,
   type ClientContext
 } from '@agentclientprotocol/sdk'
-import { buildCursorAcpCliArgs } from '../../src/server/agent-runtime/provider-policy'
+import { buildCursorAcpCliArgs } from '../../src/server/providers/cursor/turn-plan'
 import { stripElectronInheritedEnv } from '../../src/server/agent-runtime/env'
 import {
   classifyCursorAcpError,
@@ -91,7 +91,7 @@ export async function runAcpBootstrapProbe(input: {
   envPatch: Record<string, string>
 }): Promise<AcpBootstrapProbeResult> {
   const started = Date.now()
-  const env = mergeEnv(input.envPatch)
+  const env = mergeEnv(input.environment)
   const command = resolveCursorAgentCommand()
   const executable = resolveCursorAgentExecutable(command, env)
   const cliArgs = buildCursorAcpCliArgs({ outerSandbox: true, cwd: input.cwd })

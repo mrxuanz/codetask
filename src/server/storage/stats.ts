@@ -26,25 +26,22 @@ function sqliteClient(ctx: AppContext): Database.Database | null {
 export async function readStorageStats(ctx: AppContext): Promise<{
   dataDir: string
   source: string
-  managed: boolean
   bytes: {
     total: number
     database: number
     wal: number
     attachments: number
     artifacts: number
-    runtimes: number
   }
   sqlite: { freelistPages: number; pageSize: number; reclaimableBytes: number }
 }> {
   const paths = dataPaths(ctx.dataDir)
   const dbBytes = await directoryBytes(paths.dbFile)
   const walBytes = await directoryBytes(`${paths.dbFile}-wal`)
-  const [attachments, messages, jobs, runtimes, total] = await Promise.all([
+  const [attachments, messages, jobs, total] = await Promise.all([
     directoryBytes(paths.attachments),
     directoryBytes(paths.artifactsMessages),
     directoryBytes(paths.artifactsJobs),
-    directoryBytes(paths.runtimes),
     directoryBytes(ctx.dataDir)
   ])
   const sqlite = sqliteClient(ctx)
@@ -53,14 +50,12 @@ export async function readStorageStats(ctx: AppContext): Promise<{
   return {
     dataDir: ctx.dataDir,
     source: ctx.storage?.source ?? 'unknown',
-    managed: ctx.storage?.managed ?? true,
     bytes: {
       total,
       database: dbBytes,
       wal: walBytes,
       attachments,
-      artifacts: messages + jobs,
-      runtimes
+      artifacts: messages + jobs
     },
     sqlite: { freelistPages, pageSize, reclaimableBytes: freelistPages * pageSize }
   }

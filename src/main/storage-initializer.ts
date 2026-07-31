@@ -2,19 +2,11 @@ import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../server/db'
-import {
-  StorageLocatorRepository,
-  createStorageLocator,
-  writeDataRootMarker,
-  type DataRootMarker,
-  type StorageLocationSource
-} from './storage-locator'
 
-export function initializeStorageRoot(input: {
+export function initializeStorageRoot(input: { dataDir: string }): {
   dataDir: string
-  locatorRepository: StorageLocatorRepository
-  source?: StorageLocationSource
-}): { dataDir: string; marker: DataRootMarker } {
+  dbPath: string
+} {
   const target = resolve(input.dataDir)
   if (existsSync(target) && readdirSync(target).length > 0) {
     throw new Error('Storage target must be empty')
@@ -28,10 +20,7 @@ export function initializeStorageRoot(input: {
   let movedEmptyTarget = false
   try {
     mkdirSync(staging, { recursive: false, mode: 0o700 })
-    const marker = writeDataRootMarker(staging, id)
-    for (const dir of ['blobs/attachments', 'runtimes', 'migration']) {
-      mkdirSync(join(staging, dir), { recursive: true })
-    }
+    mkdirSync(join(staging, 'assets'), { recursive: true })
     const db = createIsolatedTestDatabase(staging)
     closeIsolatedTestDatabase(db)
 
@@ -40,15 +29,8 @@ export function initializeStorageRoot(input: {
       movedEmptyTarget = true
     }
     renameSync(staging, target)
-    input.locatorRepository.write(
-      createStorageLocator({
-        dataDir: target,
-        source: input.source ?? 'desktop_setup',
-        installationId: marker.installationId
-      })
-    )
     if (movedEmptyTarget) rmSync(emptyBackup, { recursive: true, force: true })
-    return { dataDir: target, marker }
+    return { dataDir: target, dbPath: join(target, 'db', 'app.db') }
   } catch (error) {
     rmSync(staging, { recursive: true, force: true })
     if (movedEmptyTarget && !existsSync(target) && existsSync(emptyBackup)) {

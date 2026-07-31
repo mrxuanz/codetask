@@ -5,7 +5,7 @@ import { getDb } from '../db'
 import { saveDesignAbilities } from '../db/design-plan'
 import { threadJobs } from '../db/schema'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureJobRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
 import { buildPlannerUserMessage } from '../planner/prompts'
 import {
@@ -13,7 +13,10 @@ import {
   resolveReferenceManifestReadRoots
 } from '../sandbox/reference-roots'
 import { resolvePlannerPromptBody } from '../settings/prompts'
-import { resolvePlannerCoreCode } from '../settings/control-plane'
+import {
+  appendBusinessSkillSnapshot,
+  resolveBusinessSkillSnapshot
+} from '../settings/business-skills'
 import { buildPlannerMcpUrl } from '../planner/mcp/url'
 import {
   registerPlannerMcpSession,
@@ -27,11 +30,16 @@ import {
   flattenRegisteredPlan
 } from '../planner/save-plan'
 import type { SavedJobPlan } from '../planner/plan-types'
+import type { JobExecutionProfile } from '@shared/contracts/plan'
 import { countPlanUnits } from '../planner/mcp/normalize'
 import { plannerSandboxDebug } from '../debug/planner-sandbox'
 import { planFailureFromSandboxError } from '../sandbox/sandbox-failure'
 import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
-import { ensureDraftPlanningAbilities } from '../conversation/draft/normalize'
+import {
+  ensureDraftPlanningAbilities,
+  resolveDraftExecutionConfig,
+  withDraftExecutionConfig
+} from '../conversation/draft/normalize'
 import type { PlanProgressDto } from '../legacy-control-plane/types'
 import { emitJobEvent } from '../legacy-control-plane/service'
 import { AppError } from '../error'
@@ -306,7 +314,28 @@ async function runDesignPlanner(
       designSessionId,
       planRevisionBefore: revisionBefore
     })
-    const planningDraft = ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode)
+    const planningDraft = withDraftExecutionConfig(
+      ensureDraftPlanningAbilities(draft, coreCode as SupportedCoreCode),
+      coreCode as SupportedCoreCode
+    )
+    const selectedCores = resolveDraftExecutionConfig(planningDraft, coreCode as SupportedCoreCode)
+    const executionProfile: JobExecutionProfile = {
+      ...selectedCores,
+      skills: {
+        planner: resolveBusinessSkillSnapshot('planner'),
+        taskWorker: resolveBusinessSkillSnapshot('taskWorker'),
+        sliceVerifier: resolveBusinessSkillSnapshot('sliceVerifier'),
+        milestoneVerifier: resolveBusinessSkillSnapshot('milestoneVerifier')
+      }
+    }
+    const profileUpdated = await updateDesignSessionRowFenced(designSessionId, run.runId, {
+      executionProfile
+    })
+    if (!profileUpdated) {
+      throw createTurnError('turn.unknown', {
+        detail: 'Planning run lost ownership before saving its execution profile'
+      })
+    }
     if (planningDraft.abilities.length > 0 && draft.abilities.length === 0) {
       await saveDesignAbilities(
         getDb(),
@@ -350,14 +379,8 @@ async function runDesignPlanner(
     registerRunRuntime(run.runId, buildCursorPlannerRuntimeHandle(plannerScopeId))
     await updateRunRuntimeRef(run.runId, { kind: 'sandbox-worker', scopeId: plannerScopeId })
 
-    const plannerCoreCode = await resolvePlannerCoreCode(coreCode)
+    const plannerCoreCode = executionProfile.plannerCoreCode
     const core = await ensureCoreAvailable(plannerCoreCode)
-    const runtimeRoot = ensureJobRuntimeRoot(
-      getAppContext().dataDir,
-      threadId,
-      designSessionId,
-      core.code as SupportedCoreCode
-    )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
 
     const mcpSessionId = `plan-mcp-${randomUUID()}`
@@ -466,10 +489,12 @@ async function runDesignPlanner(
           capabilityProfile: 'planner-read',
           provider: core.code as SupportedCoreCode,
           workspaceRoot: workspacePath,
-          runtimeRoot,
           prompt: plannerPrompt + regenerationSection,
           model,
-          systemPrompt: resolvePlannerPromptBody(),
+          systemPrompt: appendBusinessSkillSnapshot(
+            resolvePlannerPromptBody(),
+            executionProfile.skills.planner
+          ),
           mcpUrl,
           readRoots: plannerReadRoots.length > 0 ? plannerReadRoots : undefined,
           signal: run.signal,
@@ -623,7 +648,7 @@ async function runDesignPlanner(
       await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
     } finally {
       try {
-        // Planner uses snapshot-read / runtimeRoot writes only, but clear any
+        // Planner uses snapshot-read / host-identity defaults; clear any
         // legacy lease defensively if setup reached an older compatibility path.
         const { releaseWorkspaceLeaseForOwner } =
           await import('../legacy-control-plane/workspace-lease-store')
@@ -726,7 +751,7 @@ async function startDesignSessionPlanningRow(
     row.id,
     payload,
     row.workspacePath,
-    threadRow.coreCode
+    resolveDraftExecutionConfig(payload, threadRow.coreCode as SupportedCoreCode).plannerCoreCode
   )
 }
 
@@ -859,7 +884,7 @@ export async function retryDesignSessionPlanning(
     designSessionId,
     payload,
     project.workspaceRoot,
-    row.coreCode
+    resolveDraftExecutionConfig(payload, row.coreCode as SupportedCoreCode).plannerCoreCode
   )
   return updated
 }

@@ -23,28 +23,14 @@ import { createProjectThreadRoutes, createThreadRoutes } from './threads'
 import { createTurnRoutes } from './turns'
 import { isV3Authoritative } from '../application/cutover-state'
 import { mountV3Routes } from '../http/v3/mount'
-import { isStorageMigrationActive } from '../storage/migration'
 
 export function createApiRoutes(ctx: AppContext): Hono {
   const api = new Hono()
 
-  api.use('*', requireAuth())
+  api.use('*', requireAuth(ctx.security))
   api.use('*', requestGuard(ctx.security))
   api.use('*', requestTimeout(ctx.config.http.requestTimeoutMs))
   api.use('*', bodySizeLimit())
-  api.use('*', async (c, next) => {
-    if (
-      isStorageMigrationActive() &&
-      !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) &&
-      !c.req.path.includes('/settings/storage/migrations')
-    ) {
-      return c.json(
-        fail(50301, 'storage_migration_in_progress', { error: 'storage_migration_in_progress' }),
-        503
-      )
-    }
-    return next()
-  })
 
   api.get('/health', (c) => {
     return c.json(ok({ status: 'ok' }))

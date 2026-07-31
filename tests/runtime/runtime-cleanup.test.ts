@@ -15,7 +15,7 @@ test('isTerminalJobStatus matches completed lifecycle states', () => {
   assert.equal(isTerminalJobStatus('running'), false)
 })
 
-test('runtime dir helpers resolve under data/runtimes', () => {
+test('legacy runtime dir helpers resolve under data/runtimes wipe targets', () => {
   const dataDir = join('tmp', 'codetask-data')
   assert.equal(threadRuntimeDir(dataDir, 'thread-1'), join(dataDir, 'runtimes', 'thread-1'))
   assert.equal(

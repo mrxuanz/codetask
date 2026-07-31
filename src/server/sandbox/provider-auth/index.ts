@@ -1,45 +1,48 @@
-export { prepareProviderAuth, type PrepareProviderAuthOptions } from './bridge'
 export {
-  ProviderAuthError,
-  providerAuthFailureMessage,
-  runProviderAuthPreflight
-} from './preflight'
-export {
-  filterCodexConfigToml,
-  materializeCodexAuth,
-  materializeCursorAuth,
-  materializeOpencodeAuth,
-  ensureCursorRuntimeAuth,
-  runtimeCursorCliAuthPath,
-  opencodeRuntimeLayout
-} from './materialize'
-export {
-  CREDENTIAL_SNAPSHOT_MANIFEST,
-  credentialSnapshotManifestPath,
-  scrubCredentialSnapshotManifest,
-  scrubCredentialSnapshotsInTree,
-  writeCredentialSnapshotManifest
-} from './snapshot-manifest'
+  prepareClaudeRuntimeProfile,
+  prepareCodexRuntimeProfile,
+  prepareCursorRuntimeProfile,
+  prepareOpenCodeRuntimeProfile,
+  prepareProviderRuntimeProfile,
+  type ProviderRuntimePreparationOptions
+} from './bridge'
+export { ProviderAuthError } from './errors'
 export {
   resolveCodexHostAuthPath,
+  resolveCodexHostHome,
   resolveCodexInstallDirs,
   resolveClaudeInstallDirs,
   resolveCursorHostAuthPath,
+  resolveCursorHostConfigDir,
+  resolveOpencodeHostConfigDir,
+  resolveOpencodeHostDataDir,
+  resolveOpencodeHostStateDir,
   resolveOpencodeInstallDirs,
   resolveOpencodeExecutable,
+  isAllowedClaudeSettingsEnvKey,
+  readClaudeSettingsEnv,
   resolveClaudeConfigReadRoots,
   resolveClaudeHostConfigDir,
   resolveClaudeProjectConfigDir,
+  resolveClaudeSettingsAuthEnv,
   resolveHostProfilePaths,
   snapshotClaudeHostSettings,
   snapshotClaudeProjectSettings,
   resolveCursorAgentInstallDirs
 } from './paths'
 export type {
-  ProviderAuthDiagnostics,
+  ProviderRuntimeDiagnostics,
+  ProviderRuntimeLogDto,
   ProviderAuthMode,
-  ProviderAuthPrepared,
-  ProviderFilesystemProfile,
-  CredentialSnapshotSpec,
-  ProviderAuthPreflightResult
+  ProviderPathGrant,
+  ProviderPathGrantAccess,
+  ProviderPathGrantKind,
+  ProviderRuntimePlatform,
+  ProviderRuntimeProfile
+} from './types'
+export {
+  PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION,
+  providerRuntimeReadRoots,
+  providerRuntimeWriteRoots,
+  toProviderRuntimeLogDto
 } from './types'

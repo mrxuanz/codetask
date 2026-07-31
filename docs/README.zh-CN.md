@@ -144,7 +144,7 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 ### 环境要求
 
-- Node.js 22+
+- Node.js 24.x
 - Rust toolchain（构建沙箱 native 组件时需要）
 - 已安装并登录至少一种 Agent CLI：Codex、Claude Code、OpenCode 或 Cursor CLI
 - Windows / macOS / Linux（沙箱能力与平台相关）
@@ -194,3 +194,7 @@ npm run test:sandbox
 npm run typecheck
 npm run test:ci               # typecheck + 快速测试套件
 ```
+
+## 架构文档
+
+- [ADR：宿主机授权、Provider 解析与 Control Plane](./adr/0001-host-auth-and-control-plane.md)

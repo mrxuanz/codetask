@@ -1,28 +1,74 @@
 #!/usr/bin/env node
 /**
- * Reset launched thread_jobs back to design-session plan_editing (执行树确认阶段).
+ * Reset launched thread_jobs back to design-session plan_editing.
  *
  * Usage:
- *   node scripts/reset-jobs-to-plan-edit.mjs [jobId ...]
+ *   node scripts/reset-jobs-to-plan-edit.mjs --db <path> --job <jobId> [--job <jobId> ...] --apply
  *
- * With no args, resets the three jobs from the 2026-07-05 session.
- * Uses the sqlite3 CLI (no native Node bindings required).
+ * Dry-run (default): omit --apply to only list matching rows.
+ * Always requires explicit --db and at least one --job. Creates a .bak copy before write.
  */
 
+import { copyFileSync, existsSync } from 'fs'
 import { spawnSync } from 'child_process'
-import { join } from 'path'
-import { fileURLToPath } from 'url'
+import { resolve } from 'path'
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url))
-const dbPath = join(__dirname, '../data/db/app.db')
+function printUsage() {
+  console.error(`Usage:
+  node scripts/reset-jobs-to-plan-edit.mjs --db <path> --job <jobId> [--job <jobId> ...] [--apply]
 
-const DEFAULT_JOB_IDS = [
-  'job-4d995b51-c763-4656-8553-295a1236e766',
-  'job-5fa43ba1-38cb-420d-8c54-39db36ee3fd5',
-  'job-0e16a059-31d8-48c7-8b24-7015cf9e9db5'
-]
+Options:
+  --db <path>   SQLite database path (required)
+  --job <id>    Job id to reset (required, repeatable)
+  --apply       Perform the write (creates <db>.bak first). Without --apply, dry-run only.
+`)
+}
 
-const jobIds = process.argv.slice(2).length > 0 ? process.argv.slice(2) : DEFAULT_JOB_IDS
+function parseArgs(argv) {
+  const jobIds = []
+  let dbPath = null
+  let apply = false
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === '--apply') {
+      apply = true
+      continue
+    }
+    if (arg === '--db') {
+      dbPath = argv[++i]
+      continue
+    }
+    if (arg === '--job') {
+      const id = argv[++i]
+      if (id) jobIds.push(id)
+      continue
+    }
+    if (arg === '--help' || arg === '-h') {
+      printUsage()
+      process.exit(0)
+    }
+    console.error(`Unknown argument: ${arg}`)
+    printUsage()
+    process.exit(1)
+  }
+
+  return { dbPath, jobIds, apply }
+}
+
+const { dbPath, jobIds, apply } = parseArgs(process.argv.slice(2))
+
+if (!dbPath || jobIds.length === 0) {
+  printUsage()
+  process.exit(1)
+}
+
+const resolvedDb = resolve(dbPath)
+if (!existsSync(resolvedDb)) {
+  console.error(`Database not found: ${resolvedDb}`)
+  process.exit(1)
+}
+
 const quotedIds = jobIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(', ')
 
 const sql = `
@@ -31,7 +77,7 @@ FROM thread_jobs j
 WHERE j.id IN (${quotedIds});
 `
 
-const lookup = spawnSync('sqlite3', [dbPath, sql], { encoding: 'utf8' })
+const lookup = spawnSync('sqlite3', [resolvedDb, sql], { encoding: 'utf8' })
 if (lookup.status !== 0) {
   console.error(lookup.stderr || 'sqlite3 lookup failed')
   process.exit(lookup.status ?? 1)
@@ -47,9 +93,25 @@ const rows = lookup.stdout
   })
 
 if (rows.length === 0) {
-  console.log('No matching thread_jobs rows found (already reset?)')
+  console.log('No matching thread_jobs rows found')
   process.exit(0)
 }
+
+console.log(`${apply ? 'Will reset' : 'Dry-run'} ${rows.length} job(s):\n`)
+for (const row of rows) {
+  console.log(`  - ${row.title}`)
+  console.log(`      design session: ${row.dsId}`)
+  console.log(`      job:            ${row.jobId}`)
+}
+
+if (!apply) {
+  console.log('\nRe-run with --apply to write changes (a .bak backup will be created).')
+  process.exit(0)
+}
+
+const backupPath = `${resolvedDb}.bak`
+copyFileSync(resolvedDb, backupPath)
+console.log(`\nBackup written: ${backupPath}`)
 
 const now = "strftime('%s','now')"
 const statements = ['BEGIN;']
@@ -93,16 +155,14 @@ WHERE id = '${draft}';`)
 
 statements.push('COMMIT;')
 
-const apply = spawnSync('sqlite3', [dbPath], { input: statements.join('\n'), encoding: 'utf8' })
-if (apply.status !== 0) {
-  console.error(apply.stderr || 'sqlite3 apply failed')
-  process.exit(apply.status ?? 1)
+const applyResult = spawnSync('sqlite3', [resolvedDb], {
+  input: statements.join('\n'),
+  encoding: 'utf8'
+})
+if (applyResult.status !== 0) {
+  console.error(applyResult.stderr || 'sqlite3 apply failed')
+  process.exit(applyResult.status ?? 1)
 }
 
-console.log(`Reset ${rows.length} job(s) to plan_editing:\n`)
-for (const row of rows) {
-  console.log(`  ✓ ${row.title}`)
-  console.log(`      design session: ${row.dsId}`)
-  console.log(`      removed job:    ${row.jobId}`)
-}
-console.log('\nRestart the Electron app, then continue each draft at step 3 (执行树).')
+console.log(`\nReset ${rows.length} job(s) to plan_editing.`)
+console.log('Restart the Electron app, then continue each draft at step 3 (执行树).')

@@ -10,7 +10,6 @@ import { controlPlaneSchema } from '../../../src/server/infra/sqlite/control-pla
 import { SqliteJobRepository } from '../../../src/server/infra/sqlite/control-plane/job-repository'
 import { createControlPlaneTransaction } from '../../../src/server/infra/sqlite/control-plane/sqlite-control-plane-unit-of-work'
 import { InternalExecutionCommandServiceImpl } from '../../../src/server/application/internal-execution-command-service'
-import { JobEventHub } from '../../../src/server/application/job-event-hub'
 import { EventHub } from '../../../src/server/application/event-hub'
 import { StartupCoordinator } from '../../../src/server/application/startup-coordinator'
 import { SafeLoggerImpl } from '../../../src/server/application/safe-logger'
@@ -406,27 +405,45 @@ describe('PR0 Required Scenarios 9-14 (C2)', () => {
       assert.equal(hub.getSubscriberCount(), 1)
     })
 
-    it('must maintain fairness across topics', () => {
-      const hub = new JobEventHub({ maxQueueSize: 10, coalesceWindowMs: 1000 })
-      const sentA: unknown[] = []
-      const sentB: unknown[] = []
-      hub.registerConnection('job:a', {
-        send(e: unknown) {
-          sentA.push(e)
+    it('coalesces newer revisions for the same entity and topic while dispatching', () => {
+      const hub = new EventHub(
+        { maxQueueSize: 10, maxQueueBytes: 1024 },
+        {
+          debug() {
+            void 0
+          },
+          info() {
+            void 0
+          },
+          warn() {
+            void 0
+          },
+          error() {
+            void 0
+          }
         }
+      )
+      const revisions: number[] = []
+      let publishedWhileDispatching = false
+
+      hub.subscribe('consumer', (event) => {
+        revisions.push(event.revision)
+        if (publishedWhileDispatching) return
+        publishedWhileDispatching = true
+        hub.publish({ ...event, eventId: 2, revision: 2 })
+        hub.publish({ ...event, eventId: 3, revision: 3 })
       })
-      hub.registerConnection('job:b', {
-        send(e: unknown) {
-          sentB.push(e)
-        }
+
+      hub.publish({
+        eventId: 1,
+        topic: 'job:job-1',
+        type: 'job.changed',
+        entityId: 'job-1',
+        revision: 1,
+        payload: {}
       })
-      for (let i = 0; i < 5; i++) {
-        hub.push('job:a', i + 1, { revision: i + 1 })
-      }
-      hub.push('job:b', 1, { type: 'terminal', state: 'failed' })
-      hub.flush()
-      assert.ok(sentB.length >= 1, 'terminal topic must not be starved')
-      assert.ok(sentA.length >= 1)
+
+      assert.deepEqual(revisions, [1, 3])
     })
   })
 

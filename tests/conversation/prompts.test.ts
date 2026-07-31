@@ -10,10 +10,10 @@ import {
 } from '../../src/server/conversation/prompts'
 import { buildWorkspaceSnapshot } from '../../src/server/conversation/workspace-snapshot'
 
-test('buildChatConversationBody is a lightweight coding assistant without task workflow', () => {
+test('buildChatConversationBody is an optional writable chat template without task workflow', () => {
   const body = buildChatConversationBody('Test Agent')
   assert.match(body, /coding assistant/)
-  assert.match(body, /read and edit files/)
+  assert.match(body, /small, targeted edits/)
   assert.doesNotMatch(body, /propose_task_draft/)
   assert.doesNotMatch(body, /Discussion Workflow/)
   assert.doesNotMatch(body, /coordination assistant/)
@@ -45,14 +45,25 @@ test('buildConversationSystemPrompt create_task mode includes MCP workflow', () 
   assert.match(prompt, /propose_task_draft/)
 })
 
-test('ordinary chat service injects no CodeTask system or permission prompt', () => {
-  const source = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
-  assert.doesNotMatch(source, /The project workspace is writable for this turn/)
-  assert.doesNotMatch(source, /The project workspace is read-only for this turn/)
-  assert.match(
-    source,
-    /const systemPrompt = createTaskMode[\s\S]*?: undefined[\s\S]*?streamAgentTurn/
+test('ordinary chat and create-task access are resolved by separate turn-policy modules', () => {
+  const chatPolicy = readFileSync(
+    join(process.cwd(), 'src/server/conversation/turn-policy/chat.ts'),
+    'utf8'
   )
+  const createTaskPolicy = readFileSync(
+    join(process.cwd(), 'src/server/conversation/turn-policy/create-task.ts'),
+    'utf8'
+  )
+  const service = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
+  assert.match(chatPolicy, /acquireWorkspaceLease/)
+  assert.match(chatPolicy, /'chat-write'/)
+  assert.match(chatPolicy, /resolveConversationPromptBody/)
+  assert.doesNotMatch(chatPolicy, /appendBusinessSkillSnapshot/)
+  assert.match(createTaskPolicy, /'create-task-read'/)
+  assert.match(createTaskPolicy, /appendBusinessSkillSnapshot/)
+  assert.match(service, /resolveChatAccess/)
+  assert.match(service, /resolveCreateTaskAccess/)
+  assert.doesNotMatch(service, /const capabilityProfile = createTaskMode/)
 })
 
 test('draft and Planner required MCP setup fail explicitly', () => {

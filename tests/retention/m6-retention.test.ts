@@ -9,7 +9,6 @@ import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src
 import {
   draftReferences,
   jobArtifacts,
-  jobTasks,
   projects,
   threadJobs,
   threadMessages,
@@ -18,10 +17,10 @@ import {
 import { SettingsStore } from '../../src/server/context/settings-store'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
 import {
-  pruneCompletedTaskRuntimeTrees,
-  pruneStaleThreadAttachmentDirs
+  pruneStaleThreadAttachmentDirs,
+  wipeLegacyProductRuntimes
 } from '../../src/server/retention/janitor'
-import { estimateJobRuntimeBytes, jobTaskRuntimeDir } from '../../src/server/runtime/cleanup'
+import { jobRuntimeDir } from '../../src/server/runtime/cleanup'
 import {
   collectThreadPurgeTargets,
   purgeJobFilesystem,
@@ -206,13 +205,13 @@ test('purgeThreadFilesystem removes attachments and message artifacts', async ()
     writeFileSync(join(attachmentDir(dataDir, threadId, attachmentId), 'ref.png'), 'png')
     mkdirSync(messageArtifactDir(dataDir, messageId), { recursive: true })
     writeFileSync(join(messageArtifactDir(dataDir, messageId), 'payload.json.gz'), 'gz')
-    mkdirSync(join(dataPaths(dataDir).runtimes, threadId), { recursive: true })
+    mkdirSync(join(join(dataDir, 'runtimes'), threadId), { recursive: true })
 
     await purgeThreadFilesystem(dataDir, threadId, targets)
 
     assert.equal(existsSync(threadAttachmentsDir(dataDir, threadId)), false)
     assert.equal(existsSync(messageArtifactDir(dataDir, messageId)), false)
-    assert.equal(existsSync(join(dataPaths(dataDir).runtimes, threadId)), false)
+    assert.equal(existsSync(join(join(dataDir, 'runtimes'), threadId)), false)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })
@@ -239,62 +238,25 @@ test('janitor prunes stale attachment dirs', async () => {
   }
 })
 
-test('janitor removes only completed task runtimes from a running job', async () => {
+test('janitor wipes legacy runtimes tree (no longer per-task)', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-task-runtime-'))
   const db = createIsolatedTestDatabase(dataDir)
   try {
     await seedMinimalJob(db, 'job-running', 'running')
-    await db.insert(jobTasks).values([
-      {
-        jobId: 'job-running',
-        taskId: 'task-completed',
-        title: 'Completed task',
-        sortOrder: 0,
-        status: 'completed'
-      },
-      {
-        jobId: 'job-running',
-        taskId: 'task-running',
-        title: 'Running task',
-        sortOrder: 1,
-        status: 'running'
-      },
-      {
-        jobId: 'job-running',
-        taskId: '../outside-task-root',
-        title: 'Invalid historical task id',
-        sortOrder: 2,
-        status: 'completed'
-      }
-    ])
+    const legacyJobRoot = jobRuntimeDir(dataDir, 'thread-1', 'job-running')
+    mkdirSync(join(legacyJobRoot, 'tasks', 'task-completed', 'opencode', 'cache'), {
+      recursive: true
+    })
+    mkdirSync(join(legacyJobRoot, 'tasks', 'task-running', 'opencode', 'cache'), {
+      recursive: true
+    })
+    writeFileSync(join(legacyJobRoot, 'tasks', 'task-completed', 'opencode', 'cache', 'a.bin'), '1')
+    writeFileSync(join(legacyJobRoot, 'tasks', 'task-running', 'opencode', 'cache', 'b.bin'), '2')
 
-    const completedRuntime = jobTaskRuntimeDir(dataDir, 'thread-1', 'job-running', 'task-completed')
-    const runningRuntime = jobTaskRuntimeDir(dataDir, 'thread-1', 'job-running', 'task-running')
-    mkdirSync(join(completedRuntime, 'opencode', 'cache', 'nested'), { recursive: true })
-    mkdirSync(join(runningRuntime, 'opencode', 'cache'), { recursive: true })
-    const outsideTaskRoot = join(
-      dataDir,
-      'runtimes',
-      'thread-1',
-      'jobs',
-      'job-running',
-      'outside-task-root'
-    )
-    mkdirSync(outsideTaskRoot, { recursive: true })
-    writeFileSync(join(completedRuntime, 'opencode', 'cache', 'nested', 'cache.bin'), '12345')
-    writeFileSync(join(runningRuntime, 'opencode', 'cache', 'cache.bin'), '1234567')
-    writeFileSync(join(outsideTaskRoot, 'keep.bin'), '123')
-
-    // Runtime accounting must include files nested more than one directory deep.
-    assert.equal(await estimateJobRuntimeBytes(dataDir, 'thread-1', 'job-running'), 15)
-
-    const result = await pruneCompletedTaskRuntimeTrees(dataDir, db)
+    const result = await wipeLegacyProductRuntimes(dataDir)
 
     assert.equal(result.removed, 1)
-    assert.equal(existsSync(completedRuntime), false)
-    assert.equal(existsSync(runningRuntime), true)
-    assert.equal(existsSync(outsideTaskRoot), true)
-    assert.equal(await estimateJobRuntimeBytes(dataDir, 'thread-1', 'job-running'), 10)
+    assert.equal(existsSync(join(dataDir, 'runtimes')), false)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

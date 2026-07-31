@@ -69,14 +69,3 @@ export async function saveDesignPlanProgress(
 ): Promise<void> {
   return savePlanProgress(db, designSessionId, progress)
 }
-
-/** @deprecated Single-row merge: plan already lives on the job; do not copy. */
-export async function copyDesignPlanToJob(
-  _db: AppDatabase,
-  _designSessionId: string,
-  _jobId: string
-): Promise<void> {
-  throw new Error(
-    'copyDesignPlanToJob is removed: design sessions and jobs share one thread_jobs row'
-  )
-}

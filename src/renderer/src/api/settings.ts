@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { ApiResponse } from './types'
+import type { BusinessSkillsSettings } from '@shared/contracts/business-skills'
 
 export interface AgentCoreOption {
   code: string
@@ -62,6 +63,19 @@ export function updatePromptSettings(
   settings: PromptSettings
 ): Promise<ApiResponse<{ settings: PromptSettings }>> {
   return api<{ settings: PromptSettings }>('/api/settings/prompts', {
+    method: 'PUT',
+    body: JSON.stringify({ settings })
+  })
+}
+
+export function fetchBusinessSkills(): Promise<ApiResponse<{ settings: BusinessSkillsSettings }>> {
+  return api<{ settings: BusinessSkillsSettings }>('/api/settings/business-skills')
+}
+
+export function updateBusinessSkills(
+  settings: BusinessSkillsSettings
+): Promise<ApiResponse<{ settings: BusinessSkillsSettings }>> {
+  return api<{ settings: BusinessSkillsSettings }>('/api/settings/business-skills', {
     method: 'PUT',
     body: JSON.stringify({ settings })
   })

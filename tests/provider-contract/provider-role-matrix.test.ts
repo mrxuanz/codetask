@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { SUPPORTED_CORE_CODES } from '../../src/server/conversation/cores'
 import {
-  buildCursorAcpCliArgs,
   resolveProviderOuterSandbox,
   resolveProviderRunPolicy
 } from '../../src/server/agent-runtime/provider-policy'
+import { buildCursorAcpCliArgs } from '../../src/server/providers/cursor/turn-plan'
 import {
   resolveRoleMcpToolNames,
   type ConversationRole
@@ -19,15 +19,28 @@ const ROLES: ConversationRole[] = [
   'milestone-verifier'
 ]
 
-test('resolveProviderRunPolicy uses runtime-copy inside outer sandbox', () => {
+test('resolveProviderRunPolicy uses native host identity inside outer sandbox', () => {
   const policy = resolveProviderRunPolicy({
-    outerSandbox: true,
-    runtimeRoot: '/tmp/runtime'
+    outerSandbox: true
   })
   assert.equal(policy.innerAccess, 'full-access')
   assert.equal(policy.approvals, 'auto')
-  assert.equal(policy.authMode, 'runtime-copy')
-  assert.equal(policy.stateRoot, '/tmp/runtime')
+  assert.equal(policy.authMode, 'host-identity')
+})
+
+test('resolveProviderRunPolicy ignores CODETASK_OUTER_SANDBOX env', () => {
+  const previous = process.env.CODETASK_OUTER_SANDBOX
+  process.env.CODETASK_OUTER_SANDBOX = '1'
+  try {
+    const policy = resolveProviderRunPolicy({
+      outerSandbox: false
+    })
+    assert.equal(policy.outerSandbox, false)
+    assert.equal(policy.authMode, 'host-identity')
+  } finally {
+    if (previous === undefined) delete process.env.CODETASK_OUTER_SANDBOX
+    else process.env.CODETASK_OUTER_SANDBOX = previous
+  }
 })
 
 test('resolveProviderOuterSandbox matrix', () => {
@@ -62,7 +75,16 @@ test('resolveRoleMcpToolNames per role', () => {
 })
 
 test('buildCursorAcpCliArgs sandbox matrix', () => {
-  assert.deepEqual(buildCursorAcpCliArgs({ outerSandbox: false }), ['--approve-mcps', 'acp'])
+  assert.deepEqual(buildCursorAcpCliArgs({ outerSandbox: false, cwd: '/workspace/proj' }), [
+    '--trust',
+    '--force',
+    '--sandbox',
+    'enabled',
+    '--approve-mcps',
+    '--workspace',
+    '/workspace/proj',
+    'acp'
+  ])
   assert.deepEqual(
     buildCursorAcpCliArgs({
       outerSandbox: true,

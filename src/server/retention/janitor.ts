@@ -1,26 +1,21 @@
 import { existsSync } from 'fs'
 import { readdir, rm } from 'fs/promises'
 import { join } from 'path'
-import { eq, or } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '@shared/job-references'
 import type { getDb } from '../db'
 import {
   draftReferences,
   jobArtifacts,
-  jobTasks,
   messageArtifacts,
   threadJobs,
   threadMessages,
   threads
 } from '../db/schema'
 import { dataPaths, threadAttachmentsDir } from '../data-paths'
-import { cleanupJobTaskRuntimeTree } from '../runtime/cleanup'
+import { wipeLegacyRuntimesRoot } from '../runtime/cleanup'
 
 type AppDatabase = ReturnType<typeof getDb>
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000)
-}
 
 export async function removeThreadAttachmentsDir(
   dataDir: string,
@@ -53,52 +48,9 @@ export async function pruneOrphanAttachments(
   return { removed }
 }
 
-export async function pruneStalePausedRuntimeTrees(
-  dataDir: string,
-  db: AppDatabase,
-  pausedDays: number
-): Promise<{ removed: number }> {
-  if (pausedDays <= 0) return { removed: 0 }
-
-  const cutoff = nowSec() - pausedDays * 86_400
-  const rows = await db
-    .select({ id: threadJobs.id, threadId: threadJobs.threadId, updatedAt: threadJobs.updatedAt })
-    .from(threadJobs)
-    .where(or(eq(threadJobs.status, 'paused'), eq(threadJobs.status, 'pausing')))
-
-  let removed = 0
-  for (const row of rows) {
-    if (row.updatedAt >= cutoff) continue
-    const jobPath = join(dataPaths(dataDir).runtimes, row.threadId, 'jobs', row.id)
-    if (!existsSync(jobPath)) continue
-    await rm(jobPath, { recursive: true, force: true })
-    removed += 1
-  }
-
-  return { removed }
-}
-
-export async function pruneCompletedTaskRuntimeTrees(
-  dataDir: string,
-  db: AppDatabase
-): Promise<{ removed: number }> {
-  const rows = await db
-    .select({
-      jobId: jobTasks.jobId,
-      taskId: jobTasks.taskId,
-      threadId: threadJobs.threadId
-    })
-    .from(jobTasks)
-    .innerJoin(threadJobs, eq(jobTasks.jobId, threadJobs.id))
-    .where(eq(jobTasks.status, 'completed'))
-
-  let removed = 0
-  for (const row of rows) {
-    if (await cleanupJobTaskRuntimeTree(dataDir, row.threadId, row.jobId, row.taskId)) {
-      removed += 1
-    }
-  }
-  return { removed }
+/** One-shot wipe of leftover data/runtimes (product no longer creates this tree). */
+export async function wipeLegacyProductRuntimes(dataDir: string): Promise<{ removed: number }> {
+  return wipeLegacyRuntimesRoot(dataDir)
 }
 
 export async function pruneOrphanMessageArtifactDirs(

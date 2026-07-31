@@ -2,39 +2,17 @@ import type { ConversationRole } from '../agent-runtime/roles'
 
 export type AgentRole = ConversationRole
 
-export interface FileRule {
-  path: string
-  access: 'read' | 'write' | 'none'
-}
-
+/**
+ * Canonical application sandbox policy.
+ *
+ * Native protocol discriminators are added only by the wire adapter. Business
+ * and scheduling code cannot select a V1/V2/V3 policy API.
+ */
 export interface SandboxPolicy {
-  version: 1
   role: AgentRole
   cwd: string
-  runtimeRoot: string
-  filesystem: {
-    default: 'none' | 'read'
-    rules: FileRule[]
-    protectedNames: string[]
-  }
-  network: {
-    ip: 'full' | 'none'
-    inbound: boolean
-    allowLoopback: boolean
-    unixSockets: string[]
-  }
-  process: {
-    isolateFromHost: true
-    allowOwnDescendantSignals: true
-    denyPtrace: true
-  }
-}
-
-export interface SandboxPolicyV2 {
-  version: 2
-  role: AgentRole
-  cwd: string
-  runtimeRoot: string
+  /** Ephemeral OS-temp scratch for attestation / worker IPC (native wire: runtime_root). */
+  scratchRoot: string
   filesystem: {
     defaultAccess: 'none'
     allowedReadRoots: string[]
@@ -54,23 +32,10 @@ export interface SandboxPolicyV2 {
   }
 }
 
-export type AnySandboxPolicy = SandboxPolicy | SandboxPolicyV2
-
-export function isSandboxPolicyV2(policy: AnySandboxPolicy): policy is SandboxPolicyV2 {
-  return policy.version === 2
-}
-
 export type SandboxBackend = 'linux-bwrap-seccomp' | 'macos-seatbelt' | 'windows-elevated'
 
-export interface SandboxRunRequest {
-  protocolVersion: 1 | 2
-  policy: AnySandboxPolicy
-  command: string
-  args: string[]
-  env: Record<string, string>
-}
-
 export interface SandboxEvidence {
+  /** Native attestation protocol; not an application policy selector. */
   protocolVersion: 1 | 2
   active: boolean
   backend: SandboxBackend

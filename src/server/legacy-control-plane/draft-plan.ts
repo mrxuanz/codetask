@@ -22,6 +22,8 @@ import {
   buildUnlockedRequirementsContractPayload,
   syncRequirementsContractFromDraft
 } from '../conversation/draft/normalize'
+import { resolveDraftExecutionConfig } from '../conversation/draft/normalize'
+import { ensureDraftExecutionConfigAvailable } from '../conversation/draft/execution-config'
 import {
   isDraftEditable,
   isDraftSectionLocked,
@@ -835,6 +837,11 @@ async function validateDraftForPlanning(
     payload,
     row.coreCode as SupportedCoreCode
   )
+  payloadWithAbilities.executionConfig = resolveDraftExecutionConfig(
+    payloadWithAbilities,
+    row.coreCode as SupportedCoreCode
+  )
+  await ensureDraftExecutionConfigAvailable(payloadWithAbilities.executionConfig)
   if (payloadWithAbilities.abilities.some((a) => !a.recommendedCoreCode)) {
     throw AppError.badRequest(
       'Select an execution CLI for every ability',
@@ -1017,7 +1024,7 @@ export async function confirmDraftAndStartPlanning(
     jobId,
     confirmedPayload,
     project.workspaceRoot,
-    row.coreCode
+    confirmedPayload.executionConfig?.plannerCoreCode ?? row.coreCode
   )
 
   await advanceWizardPhase(username, threadId, {

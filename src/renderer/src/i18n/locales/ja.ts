@@ -57,29 +57,12 @@ export default {
     storageInitializing: '初期化中…',
     storageValidatedPath: '検証済みパス：{path}',
     storageRestarting: 'ストレージを初期化しました',
-    storageRecoveryTitle: 'ストレージの復旧が必要です',
-    storageRecoveryDescription:
-      '保存先が破損しているか見つかりません。既存の CodeTask データディレクトリを復旧するか、空のフォルダを選んで再初期化できます。',
-    storageRecover: 'このディレクトリを使用',
-    storageRecovering: '復旧中…',
-    storageRecovered: '保存先を復旧しました',
     errors: {
       pathNotAbsolute: '絶対パスを入力してください',
       pathNotWritable: '書き込みできません。別の場所を選んでください',
-      pathNotEmpty:
-        '空でないディレクトリで、CodeTask データルートでもありません。空のフォルダを選んでください',
+      pathNotEmpty: '空でないディレクトリです。空のフォルダを選んでください',
       pathForbiddenRoot: 'システムルートやホームディレクトリは使用できません',
-      pathOwnedByOther: 'このディレクトリは別の CodeTask インストールに属しています',
-      markerMissing:
-        '有効な CodeTask データマーカーがありません。初回は空フォルダを、復旧時は元のデータディレクトリを選んでください',
       databaseMissing: 'このディレクトリにデータベースがありません',
-      locatorUnreadable: '保存された保存先設定が壊れています。再度選択してください',
-      locatorInvalid: '保存された保存先設定が無効です。再度選択してください',
-      legacyLocatorConflict:
-        '異なる保存先設定が複数見つかりました。使用する元のデータディレクトリを選択してください',
-      legacyLocatorMigrationFailed:
-        '元の保存先設定を移行できませんでした。元のデータディレクトリを再度選択してください',
-      installationMismatch: 'データディレクトリがこのインストールと一致しません',
       validationExpired: 'ディレクトリ検証の期限が切れました。再試行してください',
       insufficientSpace: 'ディスク容量が不足しています'
     }
@@ -467,6 +450,13 @@ export default {
       saving: '保存中…',
       contractSaveFailed: '要件契約の保存に失敗しました',
       abilitiesCli: '能力 / CLI',
+      executionConfig: '今回の実行設定',
+      executionConfigHint:
+        'Planner と検証 CLI の選択は独立した実行プロファイルに保存され、Job はその設定を使用します。',
+      plannerCli: 'Planner CLI',
+      sliceVerifierCli: 'Slice Verifier CLI',
+      milestoneVerifierCli: 'Milestone Verifier CLI',
+      executionConfigSaveFailed: '実行設定の保存に失敗しました',
       selectCli: 'CLI を選択',
       cliUnavailable: '利用不可',
       references: '参考資料',
@@ -515,6 +505,7 @@ export default {
         storage: 'データストレージ',
         sandbox: 'サンドボックス',
         controlPlane: 'Control Plane',
+        skills: 'Business Skills',
         mcp: 'MCP',
         prompts: 'Prompts'
       },
@@ -537,29 +528,13 @@ export default {
       },
       storage: {
         title: 'データストレージ',
-        description:
-          '使用量を確認し、検証・移行・再起動を通じてデータルート全体を安全に移動します。',
+        description: '現在のデータディレクトリと使用量を確認します。',
         loading: 'ストレージ情報を読み込み中…',
         loadFailed: 'ストレージ情報の読み込みに失敗しました',
         currentPath: '現在のデータルート',
         source: 'ソース：{source}',
         total: '合計',
-        reclaimable: 'DB 回収可能',
-        changeTitle: 'データルートを移動',
-        browse: '参照',
-        browseTitle: '新しいデータディレクトリを選択',
-        browseHint: 'ローカルフォルダを参照するか、新しいサブフォルダを作成して選択できます。',
-        selectDirectory: 'このディレクトリを使用',
-        createFolder: '作成して選択',
-        migrate: '検証して移行',
-        managed: 'このパスは CLI または環境設定で管理されているため、ここでは変更できません。',
-        phase: '移行フェーズ：{phase}',
-        restart: '新しいデータルートで再起動',
-        restartServerRequired:
-          '新しいデータルートへ切り替えるには、管理者が codetask-server サービスを再起動してください。',
-        deleteOld: '古いデータルートを削除',
-        migrationFailed: 'ストレージ移行に失敗しました',
-        deleteOldFailed: '古いストレージの削除に失敗しました'
+        reclaimable: 'DB 回収可能'
       },
       languageSection: {
         title: '言語',
@@ -573,6 +548,28 @@ export default {
         sliceVerifier: 'Slice Verifier',
         milestoneVerifier: 'Milestone Verifier',
         unavailable: '利用不可'
+      },
+      skills: {
+        title: 'Business Skills',
+        description:
+          '再利用可能な業務指示を管理し、会話、ドラフト、Planner、検証フローに割り当てます。',
+        hint: '任意の Skill を追加できます。Planner と検証 Skill は計画開始時に実行ツリーへ保存されます。',
+        add: 'Skill を追加',
+        newSkill: '新しい Business Skill',
+        enabled: '有効',
+        id: 'Skill ID（小文字・数字・ハイフン）',
+        name: '名前',
+        descriptionLabel: '説明',
+        instructions: '業務指示',
+        workflows: '使用フロー',
+        workflow: {
+          conversation: '通常会話',
+          draft: 'ドラフト会話',
+          planner: 'Planner',
+          taskWorker: 'Task Worker',
+          sliceVerifier: 'Slice Verifier',
+          milestoneVerifier: 'Milestone Verifier'
+        }
       },
       prompts: {
         title: 'プロンプトポリシー',

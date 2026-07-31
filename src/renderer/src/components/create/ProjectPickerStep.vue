@@ -1,20 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { browseFilesystem, fetchBrowseParent } from '@renderer/api/fs'
-import type { BrowseEntry } from '@renderer/api/fs'
 import type { HomeProject } from '@renderer/composables/useHomeWorkspace'
+import { useFolderBrowse } from '@renderer/composables/useFolderBrowse'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Input from '@renderer/components/ui/Input.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
 import { translateApiError } from '@renderer/i18n/translateApiError'
-import {
-  defaultBrowsePath,
-  joinChildPath,
-  withTrailingSeparator,
-  workspaceRootsMatch
-} from '@renderer/lib/workspace'
+import { workspaceRootsMatch } from '@renderer/lib/workspace'
 
 const props = defineProps<{
   projects: HomeProject[]
@@ -28,70 +22,28 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const query = ref(defaultBrowsePath())
-const parentPath = ref('')
-const entries = ref<BrowseEntry[]>([])
-const newFolderName = ref('')
-const browsing = ref(false)
 const submitting = ref(false)
-const error = ref<string | null>(null)
-
-async function loadBrowse(partialPath: string): Promise<void> {
-  browsing.value = true
-  error.value = null
-  try {
-    const res = await browseFilesystem(partialPath)
-    parentPath.value = res.data.parentPath
-    entries.value = res.data.entries
-    if (!partialPath.trim()) {
-      query.value = res.data.parentPath
-    }
-  } catch (err) {
-    parentPath.value = ''
-    entries.value = []
-    const message = err instanceof Error ? err.message : t('folderPicker.browseFailed')
-    error.value = translateApiError(message, t)
-  } finally {
-    browsing.value = false
-  }
-}
-
-function currentDirectoryPath(): string {
-  return parentPath.value || query.value.trim()
-}
-
-function openEntry(entry: BrowseEntry): void {
-  query.value = withTrailingSeparator(entry.path)
-  newFolderName.value = ''
-}
-
-async function goParent(): Promise<void> {
-  const target = currentDirectoryPath()
-  if (!target) return
-  browsing.value = true
-  error.value = null
-  try {
-    const res = await fetchBrowseParent(target)
-    query.value = withTrailingSeparator(res.data.parentPath)
-    newFolderName.value = ''
-    await loadBrowse(query.value)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : t('folderPicker.parentFailed')
-    error.value = translateApiError(message, t)
-  } finally {
-    browsing.value = false
-  }
-}
+const {
+  query,
+  parentPath,
+  entries,
+  newFolderName,
+  loading: browsing,
+  error,
+  currentDirectoryPath,
+  openEntry,
+  goParent,
+  selectFolder,
+  createFolder,
+  start
+} = useFolderBrowse()
 
 async function submitFolder(targetPath?: string): Promise<void> {
-  const target = targetPath?.trim() || query.value.trim() || parentPath.value
-  if (!target) {
-    error.value = t('folderPicker.selectRequired')
-    return
-  }
   submitting.value = true
   error.value = null
   try {
+    const target = await selectFolder(targetPath)
+    if (!target) return
     const existing = props.projects.find((project) =>
       workspaceRootsMatch(project.workspaceRoot, target)
     )
@@ -108,29 +60,27 @@ async function submitFolder(targetPath?: string): Promise<void> {
   }
 }
 
-function createAndSubmitFolder(): void {
-  const base = currentDirectoryPath()
-  const target = joinChildPath(base, newFolderName.value)
-  if (!target) {
-    error.value = t('folderPicker.folderNameRequired')
-    return
+async function createAndSubmitFolder(): Promise<void> {
+  submitting.value = true
+  error.value = null
+  try {
+    const target = await createFolder()
+    if (!target) return
+    const existing = props.projects.find((project) =>
+      workspaceRootsMatch(project.workspaceRoot, target)
+    )
+    if (existing) emit('selectProject', existing.id)
+    else emit('addProject', target)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : t('folderPicker.addFailed')
+    error.value = translateApiError(message, t)
+  } finally {
+    submitting.value = false
   }
-  void submitFolder(target)
 }
 
 onMounted(() => {
-  query.value = defaultBrowsePath()
-  void loadBrowse(query.value)
-})
-
-let browseTimer: number | undefined
-watch(query, (value) => {
-  if (browseTimer !== undefined) {
-    window.clearTimeout(browseTimer)
-  }
-  browseTimer = window.setTimeout(() => {
-    void loadBrowse(value)
-  }, 200)
+  start()
 })
 </script>
 

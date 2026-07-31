@@ -3,6 +3,11 @@ import { join } from 'node:path'
 import { PublicApiClient } from '../api/client'
 import * as ops from '../api/operations'
 import { resolveProfile } from '../config/profiles'
+import {
+  draftExecutionConfigFromRoles,
+  executionProfileCoresMatch,
+  type DraftExecutionConfig
+} from '../config/execution-config'
 import { PROBE_SERVER_NAME, resolveProviderQueue } from '../config/providers'
 import { startSettingsMcpProbe } from '../probes/settings-mcp-probe'
 import { MANIFESTS, resolveCaseIds, type CaseManifest } from '../cases/catalog'
@@ -43,9 +48,11 @@ import { startDedicatedServer, type ServerHandle } from './server-process'
 import { runPreflightCleanup } from './preflight'
 import { assertWorkspaceCopied, copyFixtureWorkspace } from './workspace-copy'
 import type { FixturePhaseState } from '../mcp/capabilities'
-import { progress } from '../reports/progress'
+import { localStamp, progress } from '../reports/progress'
 import { setLang, tFailure, tSuccess } from '../i18n'
 import { htmlFileNameForConversationCore } from '../config/sdk-html'
+import { assertNoTimeoutAllowed } from '../config/timeouts'
+import { runOpencodeCanary, type OpencodeCanaryResult } from '../drivers/opencode-canary'
 
 function readFlag(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name)
@@ -74,9 +81,19 @@ Examples:
   npm run business:e2e -- --providers codex --part conversation
   npm run business:e2e -- --providers cursor,opencode --case chat-basic --lang en
   npm run business:e2e -- --providers all --suite both
+
+OpenCode driver uses the host OpenCode installation, authentication, and default model.
+
+Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
+  (completed|failed|cancelled). Case workers are not wall-clock-killed by default.
+  OpenCode startup/prompt/report stages stay finite unless --no-timeout
+  (forbidden when CI=1/true). Positive timeoutMs is for short probes / overall caps.
 `)
     process.exit(0)
   }
+
+  const noTimeout = hasFlag(argv, '--no-timeout')
+  assertNoTimeoutAllowed(noTimeout)
 
   const providerQueue = resolveProviderQueue({
     providers: readFlag(argv, '--providers'),
@@ -89,7 +106,7 @@ Examples:
     gate: readFlag(argv, '--gate')
   })
   for (const warning of selection.warnings) {
-    console.warn(`[business-e2e] warn · ${warning}`)
+    console.warn(`[business-e2e][${localStamp()}] warn · ${warning}`)
   }
   const caseIds =
     selection.legacyGate != null
@@ -97,6 +114,9 @@ Examples:
       : selection.caseIds.length > 0
         ? selection.caseIds
         : resolveCaseIds({})
+  if (caseIds.length === 0) {
+    throw new Error('business_e2e_selection_empty:use --list for valid cases, parts, and suites')
+  }
   const keepRuntime =
     hasFlag(argv, '--keep-runtime') || process.env.BUSINESS_E2E_KEEP_RUNTIME === '1'
   const runStartedAt = new Date().toISOString()
@@ -111,10 +131,11 @@ Examples:
       core: p.core,
       skip: p.skipReason ?? null
     })),
-    阶段: selection.part?.map(labelForPart) ?? null,
-    套件: selection.suite,
-    用例: caseIds.map((id) => scopeLabelForCaseId(id)),
-    数量: caseIds.length
+    // Stable English keys; values already go through i18n labels.
+    parts: selection.part?.map(labelForPart) ?? null,
+    suite: selection.suite,
+    cases: caseIds.map((id) => scopeLabelForCaseId(id)),
+    count: caseIds.length
   })
 
   const runId = createRunId()
@@ -177,6 +198,18 @@ Examples:
       })
     }
 
+    const needsOpencodeDriver = caseIds.some((id) => MANIFESTS[id]?.driver === 'opencode')
+    let opencodeCanary: OpencodeCanaryResult | null = null
+    if (needsOpencodeDriver && mcp) {
+      const canaryWorkspace = join(runRoot, 'canary-workspace')
+      mkdirSync(canaryWorkspace, { recursive: true })
+      writeFileSync(join(canaryWorkspace, 'README.md'), 'business-e2e opencode canary\n', 'utf8')
+      opencodeCanary = await runOpencodeCanary({
+        mcpUrl: mcp.url,
+        workspaceRoot: canaryWorkspace
+      })
+    }
+
     for (const slot of providerQueue) {
       const profile = slot.profile
       if (slot.skipReason) {
@@ -192,7 +225,7 @@ Examples:
         continue
       }
 
-      progress('supervisor', 'settings.control_plane', {
+      progress('supervisor', 'provider.slot', {
         provider: slot.alias,
         core: slot.core,
         profile: profile.name
@@ -249,6 +282,37 @@ Examples:
           continue
         }
 
+        if (manifest.driver === 'opencode' && opencodeCanary && !opencodeCanary.ok) {
+          report = {
+            runId,
+            caseRunId,
+            caseId: id,
+            driverProvider: profile.driverProvider,
+            roleProviders: profile.roleProviders,
+            agentReportedCompleted: false,
+            requiredOperationsObserved: false,
+            oraclePassed: false,
+            noProcessLeak: true,
+            classification: opencodeCanary.classification ?? 'provider_unavailable',
+            summary: `opencode_canary_failed:${opencodeCanary.error ?? 'unknown'}`,
+            durationMs: Date.now() - started,
+            serverPid: server?.pid,
+            error: opencodeCanary.error
+          }
+          progress(scope, 'case.skipped', {
+            reason: 'opencode_canary_failed',
+            classification: report.classification,
+            error: opencodeCanary.error
+          })
+          caseSummaries.push({
+            caseId: `${labelForCaseId(id)}/${slot.alias}`,
+            classification: report.classification
+          })
+          failed += 1
+          reports.writeCase(report)
+          continue
+        }
+
         try {
           if (!server || !isAlive(server.pid)) {
             throw Object.assign(new Error('sut_crash'), { classification: 'sut_crash' })
@@ -268,7 +332,8 @@ Examples:
             ledger,
             registry,
             probeMcpUrl: settingsProbe?.url,
-            probeMcpName: settingsProbe?.name ?? PROBE_SERVER_NAME
+            probeMcpName: settingsProbe?.name ?? PROBE_SERVER_NAME,
+            noTimeout
           })
         } catch (error) {
           const classification = classifyError(error)
@@ -376,6 +441,7 @@ async function executeCase(ctx: {
   registry: ProcessRegistry
   probeMcpUrl?: string
   probeMcpName?: string
+  noTimeout?: boolean
 }): Promise<CaseReport> {
   const {
     manifest,
@@ -390,7 +456,8 @@ async function executeCase(ctx: {
     repoRoot,
     layout,
     probeMcpUrl,
-    probeMcpName
+    probeMcpName,
+    noTimeout
   } = ctx
   const started = Date.now()
   const caseDir = join(layout.cases, caseRunId)
@@ -418,25 +485,12 @@ async function executeCase(ctx: {
     await ensureAuthenticated(client, vault, server)
   }
 
-  progress(scopeLabelForCaseId(manifest.caseId), 'settings.control_plane', {
+  progress(scopeLabelForCaseId(manifest.caseId), 'draft.execution_config.prepare', {
     planner: profile.roleProviders.planner,
     slice: profile.roleProviders.sliceVerifier,
     milestone: profile.roleProviders.milestoneVerifier
   })
-  await ops.putControlPlanePolicies(client.withCase(caseRunId), {
-    plannerCoreCode: profile.roleProviders.planner,
-    sliceVerifierCoreCode: profile.roleProviders.sliceVerifier,
-    milestoneVerifierCoreCode: profile.roleProviders.milestoneVerifier
-  })
-  const controlPlane = await ops.getControlPlanePolicies(client.withCase(caseRunId))
-  ledger.record({
-    caseRunId,
-    operationId: 'settings.control_plane.verified',
-    transport: 'http',
-    routeOrTool: '/api/settings/control-plane',
-    ok: true,
-    detail: controlPlane
-  })
+  const executionConfig = draftExecutionConfigFromRoles(profile.roleProviders)
 
   const workspaceRoot = join(layout.workspaces, caseRunId)
   if (manifest.workspaceFixture) {
@@ -486,7 +540,8 @@ async function executeCase(ctx: {
     caseId: manifest.caseId,
     allowedTools: manifest.allowedTools,
     workspaceRoot,
-    fixtureState
+    fixtureState,
+    executionConfig
   })
 
   const conversationCore = profile.roleProviders.conversation
@@ -499,9 +554,11 @@ async function executeCase(ctx: {
   const resultPath = join(caseDir, 'worker-result.json')
   progress(scopeLabelForCaseId(manifest.caseId), 'worker.start', {
     driver: manifest.driver,
-    // <=0: no worker kill timer — wait for driver / CodeTask terminal state.
+    // <=0: unbounded case wait (business API terminal). Positive = explicit ceiling.
     timeoutMs: manifest.timeoutMs ?? 0,
-    ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {})
+    noTimeout: Boolean(noTimeout),
+    ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {}),
+    executionConfig
   })
   const workerResult = await runCaseWorker(
     {
@@ -515,8 +572,10 @@ async function executeCase(ctx: {
       skillPaths: manifest.skills.map((name) => skillPath(repoRoot, name)),
       fixturePath: manifest.fixture ? fixturePath(repoRoot, manifest.fixture) : undefined,
       timeoutMs: manifest.timeoutMs ?? 0,
+      noTimeout,
       resultPath,
       conversationCore,
+      executionConfig,
       expectedHtmlFile,
       probeMcpUrl,
       probeMcpName
@@ -536,7 +595,8 @@ async function executeCase(ctx: {
     registry,
     artifacts,
     expectedHtmlFile,
-    expectedThreadCore: conversationCore
+    expectedThreadCore: conversationCore,
+    expectedExecutionConfig: executionConfig
   })
 
   const agentReportedCompleted = Boolean(
@@ -639,16 +699,12 @@ async function runSupervisorCase(ctx: {
     }
     case 'G0-003': {
       const dataOk = server.dataDir.startsWith(runRoot)
-      const bootOk = server.bootstrapDir.startsWith(runRoot)
-      oracleResults.push(
-        { name: 'data_dir_isolated', passed: dataOk, detail: { dataDir: server.dataDir } },
-        {
-          name: 'bootstrap_isolated',
-          passed: bootOk,
-          detail: { bootstrapDir: server.bootstrapDir }
-        }
-      )
-      if (!dataOk || !bootOk) classification = 'assertion_failed'
+      oracleResults.push({
+        name: 'data_dir_isolated',
+        passed: dataOk,
+        detail: { dataDir: server.dataDir }
+      })
+      if (!dataOk) classification = 'assertion_failed'
       break
     }
     case 'G0-004': {
@@ -810,6 +866,7 @@ async function buildOracleResults(input: {
   artifacts: { projectId?: string; threadId?: string; turnId?: string }
   expectedHtmlFile?: string
   expectedThreadCore: string
+  expectedExecutionConfig: DraftExecutionConfig
 }): Promise<OracleResult[]> {
   const results: OracleResult[] = []
   results.push(runAgentReportOracle(input.capability))
@@ -848,6 +905,20 @@ async function buildOracleResults(input: {
     )
   }
 
+  if (
+    input.artifacts.threadId &&
+    input.manifest.allowedTools.includes('codetask_confirm_draft_final') &&
+    input.manifest.requiredOperations.includes('mcp.codetask_confirm_draft_final')
+  ) {
+    results.push(
+      await runExecutionProfileOracle({
+        client: input.client,
+        threadId: input.artifacts.threadId,
+        expected: input.expectedExecutionConfig
+      })
+    )
+  }
+
   if (input.manifest.caseId === 'G6-001' || input.manifest.caseId === 'G6-002') {
     const workspaceRoot = input.capability?.workspaceRoot
     if (workspaceRoot) {
@@ -877,6 +948,47 @@ async function buildOracleResults(input: {
   }
 
   return results
+}
+
+async function runExecutionProfileOracle(input: {
+  client: PublicApiClient
+  threadId: string
+  expected: DraftExecutionConfig
+}): Promise<OracleResult> {
+  try {
+    const job = await ops.getLatestJob(input.client, input.threadId)
+    if (!job) {
+      return {
+        name: 'execution_profile_matches',
+        passed: false,
+        detail: { reason: 'job_missing', expected: input.expected }
+      }
+    }
+    const profile = job.executionProfile
+    const passed = executionProfileCoresMatch(profile, input.expected)
+    return {
+      name: 'execution_profile_matches',
+      passed,
+      detail: {
+        expected: input.expected,
+        actual: profile
+          ? {
+              plannerCoreCode: (profile as Record<string, unknown>).plannerCoreCode,
+              sliceVerifierCoreCode: (profile as Record<string, unknown>).sliceVerifierCoreCode,
+              milestoneVerifierCoreCode: (profile as Record<string, unknown>)
+                .milestoneVerifierCoreCode
+            }
+          : null,
+        jobId: job.id ?? job.jobId
+      }
+    }
+  } catch (error) {
+    return {
+      name: 'execution_profile_matches',
+      passed: false,
+      detail: { reason: String(error), expected: input.expected }
+    }
+  }
 }
 
 async function runNotesSearchFileOracle(workspaceRoot: string): Promise<OracleResult> {

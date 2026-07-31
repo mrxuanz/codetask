@@ -2,10 +2,9 @@ import { api } from './client'
 import type { ApiResponse } from './types'
 
 export interface StorageBootstrapData {
-  phase: 'selection_required' | 'ready' | 'recovery_required'
+  phase: 'selection_required' | 'ready'
   defaultCandidate: string
-  source: 'none' | 'cli' | 'env' | 'locator'
-  managed: boolean
+  source: 'none' | 'config'
   issue?: string
 }
 
@@ -52,62 +51,16 @@ export function recoverStorageTarget(
 export interface StorageStatsData {
   dataDir: string
   source: string
-  managed: boolean
   bytes: {
     total: number
     database: number
     wal: number
     attachments: number
     artifacts: number
-    runtimes: number
   }
   sqlite: { freelistPages: number; pageSize: number; reclaimableBytes: number }
 }
 
-export interface StorageMigrationData {
-  migrationId: string
-  phase:
-    | 'validating_target'
-    | 'draining'
-    | 'checkpointing'
-    | 'copying'
-    | 'verifying'
-    | 'switching_locator'
-    | 'restart_required'
-    | 'failed'
-  oldDataDir: string
-  targetDataDir: string
-  copiedBytes: number
-  copiedFiles: number
-  startedAt: string
-  updatedAt: string
-  error?: string
-}
-
 export function fetchStorageStats(): Promise<ApiResponse<StorageStatsData>> {
   return api<StorageStatsData>('/api/settings/storage')
-}
-
-export function startStorageMigration(
-  targetPath: string
-): Promise<ApiResponse<StorageMigrationData>> {
-  return api<StorageMigrationData>('/api/settings/storage/migrations', {
-    method: 'POST',
-    body: JSON.stringify({ targetPath })
-  })
-}
-
-export function fetchStorageMigration(
-  migrationId: string
-): Promise<ApiResponse<StorageMigrationData>> {
-  return api<StorageMigrationData>(`/api/settings/storage/migrations/${migrationId}`)
-}
-
-export function confirmOldStorageDelete(
-  migrationId: string
-): Promise<ApiResponse<{ deleted: boolean }>> {
-  return api<{ deleted: boolean }>(
-    `/api/settings/storage/migrations/${migrationId}/confirm-old-delete`,
-    { method: 'POST' }
-  )
 }

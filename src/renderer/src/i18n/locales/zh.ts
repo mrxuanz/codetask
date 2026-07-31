@@ -45,7 +45,7 @@ export default {
     passwordMismatch: '两次输入的密码不一致',
     storageTitle: '选择数据存储目录',
     storageDescription:
-      '选择 CodeTask 存放数据库、附件和隔离 Provider 运行时的位置。默认目录不存在时会自动创建。',
+      '选择 CodeTask 存放数据库和附件的位置。默认目录不存在时会自动创建。',
     storagePathLabel: '数据目录',
     storagePathRequired: '请填写数据目录',
     storageBrowse: '浏览',
@@ -59,26 +59,12 @@ export default {
     storageInitializing: '正在初始化…',
     storageValidatedPath: '已校验路径：{path}',
     storageRestarting: '存储已初始化',
-    storageRecoveryTitle: '需要恢复数据存储',
-    storageRecoveryDescription:
-      '已保存的数据位置损坏或丢失。可选择原先的 CodeTask 数据目录恢复，也可选择空目录重新初始化。',
-    storageRecover: '使用此目录',
-    storageRecovering: '正在恢复…',
-    storageRecovered: '数据位置已恢复',
     errors: {
       pathNotAbsolute: '请填写绝对路径',
       pathNotWritable: '目录不可写，请换一个有写权限的位置',
-      pathNotEmpty: '目录非空且不是 CodeTask 数据目录，请选择空目录',
+      pathNotEmpty: '目录非空，请选择空目录',
       pathForbiddenRoot: '不能使用系统根目录或用户主目录',
-      pathOwnedByOther: '该目录已属于另一个 CodeTask 安装',
-      markerMissing:
-        '目录缺少有效的 CodeTask 数据标记。首次安装请选空目录；恢复时请选原先的数据目录',
       databaseMissing: '目录中找不到数据库文件',
-      locatorUnreadable: '已保存的数据位置配置损坏，请重新选择数据目录',
-      locatorInvalid: '已保存的数据位置配置无效，请重新选择数据目录',
-      legacyLocatorConflict: '检测到多份不同的数据位置配置，请选择要使用的原数据目录',
-      legacyLocatorMigrationFailed: '迁移原数据位置配置失败，请重新选择原数据目录',
-      installationMismatch: '数据目录与当前安装不匹配',
       validationExpired: '目录校验已过期，请重试',
       insufficientSpace: '磁盘空间不足'
     }
@@ -493,6 +479,12 @@ export default {
       saving: '保存中…',
       contractSaveFailed: '保存需求合同失败',
       abilitiesCli: '能力 / CLI',
+      executionConfig: '本次执行配置',
+      executionConfigHint: 'Planner 与校验器选择会固化到独立运行配置，后续 Job 按此配置运行。',
+      plannerCli: 'Planner CLI',
+      sliceVerifierCli: '切片校验 CLI',
+      milestoneVerifierCli: '里程碑校验 CLI',
+      executionConfigSaveFailed: '保存本次执行配置失败',
       selectCli: '选择 CLI',
       cliUnavailable: '不可用',
       references: '参考资料',
@@ -551,6 +543,7 @@ export default {
         storage: '数据存储',
         sandbox: '沙箱',
         controlPlane: '控制平面',
+        skills: '业务 Skills',
         mcp: 'MCP',
         prompts: '提示词'
       },
@@ -573,27 +566,13 @@ export default {
       },
       storage: {
         title: '数据存储',
-        description: '查看存储占用，并通过校验、迁移和重启安全搬移完整数据根目录。',
+        description: '查看当前数据目录与存储占用。',
         loading: '正在加载存储信息…',
         loadFailed: '加载存储信息失败',
         currentPath: '当前数据根目录',
         source: '来源：{source}',
         total: '总量',
-        reclaimable: 'DB 可回收',
-        changeTitle: '搬移数据根目录',
-        browse: '浏览',
-        browseTitle: '选择新的数据目录',
-        browseHint: '浏览本机文件夹，也可新建子目录后选择。',
-        selectDirectory: '选择此目录',
-        createFolder: '创建并选择',
-        migrate: '校验并迁移',
-        managed: '该路径由 CLI 或环境变量管理，不能在此处更改。',
-        phase: '迁移阶段：{phase}',
-        restart: '重启并切换到新目录',
-        restartServerRequired: '请由管理员重启 codetask-server 服务以切换到新目录。',
-        deleteOld: '删除旧数据目录',
-        migrationFailed: '数据存储迁移失败',
-        deleteOldFailed: '删除旧数据目录失败'
+        reclaimable: 'DB 可回收'
       },
       languageSection: {
         title: '语言',
@@ -606,6 +585,27 @@ export default {
         sliceVerifier: '切片校验器',
         milestoneVerifier: '里程碑校验器',
         unavailable: '不可用'
+      },
+      skills: {
+        title: '业务 Skills',
+        description: '维护可复用的业务指令，并把它们绑定到对话、草案、Planner 和校验流程。',
+        hint: '可以新增任意 Skill；Job 开始规划时会把 Planner 与校验 Skill 固化进执行树。',
+        add: '添加 Skill',
+        newSkill: '新业务 Skill',
+        enabled: '启用',
+        id: 'Skill ID（小写字母、数字与连字符）',
+        name: '名称',
+        descriptionLabel: '说明',
+        instructions: '业务指令',
+        workflows: '使用流程',
+        workflow: {
+          conversation: '普通对话',
+          draft: '草案对话',
+          planner: 'Planner',
+          taskWorker: '任务执行',
+          sliceVerifier: '切片校验',
+          milestoneVerifier: '里程碑校验'
+        }
       },
       prompts: {
         title: '提示词策略',

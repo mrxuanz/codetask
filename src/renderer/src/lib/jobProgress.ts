@@ -15,6 +15,7 @@ import {
 } from '@shared/job-display'
 import { formatUnixTimestamp } from '@renderer/lib/formatDateTime'
 import { resolvePlanningPercent } from '@shared/plan-generation-progress'
+import { getProviderDescriptors } from '@shared/providers/descriptors'
 
 export { resolveJobLifecycleBucket, type JobLifecycleBucket }
 
@@ -62,12 +63,9 @@ export interface JobProgressSnapshot {
   tone: 'active' | 'success' | 'danger'
 }
 
-const CORE_LABELS: Record<string, string> = {
-  codex: 'Codex',
-  'claude-code': 'Claude Code',
-  opencode: 'OpenCode',
-  cursorcli: 'Cursor CLI'
-}
+const CORE_LABELS: Record<string, string> = Object.fromEntries(
+  Object.values(getProviderDescriptors()).map((descriptor) => [descriptor.code, descriptor.label])
+)
 
 export function coreLabel(code: string): string {
   return CORE_LABELS[code] ?? code

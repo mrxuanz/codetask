@@ -1,6 +1,11 @@
 import type { MiddlewareHandler } from 'hono'
-import { findSessionUsername } from '../auth/service'
-import { resolveSessionTokenFromRequest } from '../auth/session'
+import type { SecurityContext } from '../context/types'
+import {
+  clearSessionCookies,
+  readSessionCredential,
+  requestHasValidCsrf
+} from '../auth/http-session'
+import { runWithAuthPrincipal } from '../auth/session'
 
 interface AllowlistEntry {
   method: string
@@ -16,8 +21,8 @@ const PUBLIC_ALLOWLIST: AllowlistEntry[] = [
 ]
 
 export const ATTACHMENT_GET_PATH = /^\/threads\/[^/]+\/attachments\/[^/]+$/
-
 const API_PREFIX = '/api'
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 export function normalizedApiPath(path: string): string {
   const withoutQuery = path.split('?')[0] ?? path
@@ -29,13 +34,13 @@ export function normalizedApiPath(path: string): string {
 }
 
 export function isPublicApiRoute(method: string, path: string): boolean {
-  const p = normalizedApiPath(path)
-  return PUBLIC_ALLOWLIST.some((entry) => entry.method === method && entry.path === p)
+  const normalized = normalizedApiPath(path)
+  return PUBLIC_ALLOWLIST.some((entry) => entry.method === method && entry.path === normalized)
 }
 
 export function isMcpApiRoute(path: string): boolean {
-  const p = normalizedApiPath(path)
-  return p === '/mcp' || p.startsWith('/mcp/')
+  const normalized = normalizedApiPath(path)
+  return normalized === '/mcp' || normalized.startsWith('/mcp/')
 }
 
 export function isAttachmentAssetTokenGet(
@@ -43,51 +48,60 @@ export function isAttachmentAssetTokenGet(
   path: string,
   assetToken?: string | null
 ): boolean {
-  if (method !== 'GET') return false
-  if (!assetToken?.trim()) return false
-  return ATTACHMENT_GET_PATH.test(normalizedApiPath(path))
+  return (
+    method === 'GET' &&
+    Boolean(assetToken?.trim()) &&
+    ATTACHMENT_GET_PATH.test(normalizedApiPath(path))
+  )
 }
 
-function unauthorizedResponse(message: string): Response {
+function authError(message: string, status = 401): Response {
   return new Response(
     JSON.stringify({
       data: null,
-      status: 40101,
+      status: status === 403 ? 40301 : 40101,
       extra: {},
       message,
       success: false
     }),
     {
-      status: 401,
+      status,
       headers: { 'Content-Type': 'application/json' }
     }
   )
 }
 
-export function requireAuth(): MiddlewareHandler {
+export function requireAuth(security?: SecurityContext): MiddlewareHandler {
   return async (c, next) => {
     if (isPublicApiRoute(c.req.method, c.req.path) || isMcpApiRoute(c.req.path)) {
       return next()
     }
-
-    if (isAttachmentAssetTokenGet(c.req.method, c.req.path, c.req.query('asset_token') || c.req.header('x-asset-token'))) {
+    if (
+      isAttachmentAssetTokenGet(
+        c.req.method,
+        c.req.path,
+        c.req.query('asset_token') || c.req.header('x-asset-token')
+      )
+    ) {
       return next()
     }
 
-    const authHeader = c.req.header('Authorization')
-    const token = resolveSessionTokenFromRequest({
-      ...(authHeader !== undefined ? { authHeader } : {})
-    })
-
-    if (!token) {
-      return unauthorizedResponse('Authentication required')
+    const credential = readSessionCredential(c)
+    if (!credential.token) return authError('Authentication required')
+    if (!security) return authError('Invalid or expired session')
+    const principal = security.auth.authenticateToken(credential.token)
+    if (!principal) {
+      if (credential.transport === 'cookie') clearSessionCookies(c)
+      return authError('Invalid or expired session')
+    }
+    if (
+      credential.transport === 'cookie' &&
+      !SAFE_METHODS.has(c.req.method) &&
+      !requestHasValidCsrf(c, security.authSecret)
+    ) {
+      return authError('Invalid CSRF token', 403)
     }
 
-    const username = await findSessionUsername(token)
-    if (!username) {
-      return unauthorizedResponse('Invalid or expired session')
-    }
-
-    return next()
+    return runWithAuthPrincipal(principal, next)
   }
 }
