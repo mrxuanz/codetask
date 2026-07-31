@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import type { SliceVerificationRecordDto } from '@shared/contracts/evidence'
 import type { JobExecutionProfile, SavedJobPlan } from '../planner/plan-types'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureJobTaskRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
 import {
   resolveMilestoneVerifierPromptBody,
@@ -155,13 +155,6 @@ export async function runSliceVerification(input: {
 }> {
   const coreCode = input.executionProfile.sliceVerifierCoreCode
   const core = await ensureCoreAvailable(coreCode)
-  const runtimeRoot = ensureJobTaskRuntimeRoot(
-    getAppContext().dataDir,
-    input.threadId,
-    input.jobId,
-    `verify-${input.slice.id}`,
-    core.code
-  )
   const model = resolveCoreModel(core.code as SupportedCoreCode)
   const sessionId = `slice-mcp-${randomUUID()}`
   const mcpUrl = buildSliceVerifierMcpUrl({
@@ -198,7 +191,6 @@ export async function runSliceVerification(input: {
       capabilityProfile: 'verifier-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: input.workspacePath,
-      runtimeRoot,
       prompt,
       model,
       systemPrompt: appendBusinessSkillSnapshot(
@@ -255,13 +247,6 @@ export async function runMilestoneVerification(input: {
 }> {
   const coreCode = input.executionProfile.milestoneVerifierCoreCode
   const core = await ensureCoreAvailable(coreCode)
-  const runtimeRoot = ensureJobTaskRuntimeRoot(
-    getAppContext().dataDir,
-    input.threadId,
-    input.jobId,
-    `verify-${input.milestone.id}`,
-    core.code
-  )
   const model = resolveCoreModel(core.code as SupportedCoreCode)
   const sessionId = `milestone-mcp-${randomUUID()}`
   const mcpUrl = buildMilestoneVerifierMcpUrl({
@@ -300,7 +285,6 @@ export async function runMilestoneVerification(input: {
       capabilityProfile: 'verifier-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: input.workspacePath,
-      runtimeRoot,
       prompt,
       model,
       systemPrompt: appendBusinessSkillSnapshot(

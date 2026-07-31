@@ -17,8 +17,8 @@ test('sandbox core consumes only the shell-provided child environment overlay', 
   })
 
   configureShellChildEnvironment({})
-  assert.equal(buildSandboxEnv({ runtimeRoot }).ELECTRON_RUN_AS_NODE, undefined)
+  assert.equal(buildSandboxEnv({ scratchRoot: runtimeRoot }).ELECTRON_RUN_AS_NODE, undefined)
 
   configureShellChildEnvironment({ ELECTRON_RUN_AS_NODE: '1' })
-  assert.equal(buildSandboxEnv({ runtimeRoot }).ELECTRON_RUN_AS_NODE, '1')
+  assert.equal(buildSandboxEnv({ scratchRoot: runtimeRoot }).ELECTRON_RUN_AS_NODE, '1')
 })

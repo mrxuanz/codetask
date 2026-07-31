@@ -105,7 +105,7 @@ function isPathWithin(parent, candidate) {
 }
 
 function providerAuthStatus(prod, provider, runtimeRoot, workspaceRoot) {
-  const profile = prod.prepareProviderRuntimeProfile(provider, runtimeRoot, { workspaceRoot })
+  const profile = prod.prepareProviderRuntimeProfile(provider)
   return {
     present: profile.diagnostics.authMaterialPresent,
     detail: profile.diagnostics.authMaterialPresent
@@ -115,7 +115,7 @@ function providerAuthStatus(prod, provider, runtimeRoot, workspaceRoot) {
 }
 
 function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
-  const prepared = prod.prepareProviderRuntimeProfile(provider, runtimeRoot, { workspaceRoot })
+  const prepared = prod.prepareProviderRuntimeProfile(provider)
   const readRoots = prepared.hostPathGrants.map((grant) => grant.path)
   const writeRootsFromProfile = prepared.hostPathGrants
     .filter((grant) => grant.access === 'read-write')
@@ -173,7 +173,7 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
 }
 
 function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, provider) {
-  const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, runtimeRoot, {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, {
     workspaceRoot
   })
   const dataDir =
@@ -189,7 +189,7 @@ function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, provider) {
 }
 
 function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, provider) {
-  const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, runtimeRoot, {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, {
     workspaceRoot
   })
   const providerReadRoots = runtimeProfile.hostPathGrants.map((grant) => grant.path)

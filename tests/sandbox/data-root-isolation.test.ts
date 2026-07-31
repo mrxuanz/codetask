@@ -11,7 +11,7 @@ test('sandbox worker environment never inherits private manager state', () => {
   process.env.CODETASK_PRIVATE_STATE = join(runtimeRoot, '..', 'private-manager-state')
 
   try {
-    const env = buildSandboxEnv({ runtimeRoot })
+    const env = buildSandboxEnv({ scratchRoot: runtimeRoot })
     assert.equal(env.CODETASK_PRIVATE_STATE, undefined)
     assert.equal(
       Object.values(env).some((value) => value === process.env.CODETASK_PRIVATE_STATE),
@@ -32,7 +32,7 @@ test('sandbox worker environment drops bootstrap and management credential varia
   process.env.CODETASK_CREDENTIAL_PATH = '/private/bootstrap/credential'
 
   try {
-    const env = buildSandboxEnv({ runtimeRoot })
+    const env = buildSandboxEnv({ scratchRoot: runtimeRoot })
     assert.equal(env.CODETASK_AUTH_SECRET, undefined)
     assert.equal(env.CODETASK_CREDENTIAL_PATH, undefined)
   } finally {

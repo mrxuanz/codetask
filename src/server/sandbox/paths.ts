@@ -61,7 +61,7 @@ function assertSafeWriteRoot(path: string): void {
   const home = hostEnv.HOME ?? hostEnv.USERPROFILE
   if (home) {
     const homeCanon = canonicalizePath(home)
-    if (path === homeCanon && !path.includes('runtime')) {
+    if (path === homeCanon) {
       throw new SandboxError(
         `User HOME cannot be used as a writable root: ${path}`,
         'sandbox.policy.home_write'
@@ -100,7 +100,7 @@ function dedupRoots(paths: string[]): string[] {
 
 export function compileSandboxPolicy(policy: SandboxPolicy): SandboxPolicy {
   const cwd = canonicalizePath(policy.cwd)
-  const runtimeRoot = canonicalizePath(policy.runtimeRoot)
+  const scratchRoot = canonicalizePath(policy.scratchRoot)
 
   const allowedReadRoots = dedupRoots(
     policy.filesystem.allowedReadRoots.map((root) => canonicalizePath(root))
@@ -124,7 +124,7 @@ export function compileSandboxPolicy(policy: SandboxPolicy): SandboxPolicy {
   return {
     ...policy,
     cwd,
-    runtimeRoot,
+    scratchRoot,
     filesystem: {
       ...policy.filesystem,
       allowedReadRoots,

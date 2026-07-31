@@ -293,19 +293,37 @@ export function resolveOpencodeHostDataDir(
   return join(profile.home, '.local', 'share', 'opencode')
 }
 
+/**
+ * OpenCode XDG state (locks, kv, prompt-history). Distinct from config/data.
+ * Honors host `XDG_STATE_HOME` when set; otherwise platform defaults.
+ */
+export function resolveOpencodeHostStateDir(
+  profile = resolveHostProfilePaths(),
+  platform: NodeJS.Platform = process.platform,
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
+): string {
+  const xdgState = env.XDG_STATE_HOME?.trim()
+  if (xdgState) return join(xdgState, 'opencode')
+  if (platform === 'win32') return join(profile.localAppData, 'state', 'opencode')
+  return join(profile.home, '.local', 'state', 'opencode')
+}
+
 export interface OpencodeHostAuthSnapshot {
   present: boolean
   configDir: string
   dataDir: string
+  stateDir: string
   sources: string[]
 }
 
 export function snapshotOpencodeHostAuth(
   profile = resolveHostProfilePaths(),
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  env: HostEnvironment = processHostEnvironmentSource.snapshot()
 ): OpencodeHostAuthSnapshot {
   const configDir = resolveOpencodeHostConfigDir(profile, platform)
   const dataDir = resolveOpencodeHostDataDir(profile, platform)
+  const stateDir = resolveOpencodeHostStateDir(profile, platform, env)
   const sources: string[] = []
 
   for (const name of ['opencode.json', 'auth.json', 'config.json', 'credentials.json'] as const) {
@@ -325,6 +343,7 @@ export function snapshotOpencodeHostAuth(
     }),
     configDir,
     dataDir,
+    stateDir,
     sources
   }
 }

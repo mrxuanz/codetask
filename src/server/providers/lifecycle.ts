@@ -28,7 +28,7 @@ export class ProviderRuntimeManager {
       return Object.freeze({ id: `turn:${id}`, reusePolicy })
     }
     const scopeId =
-      context.input.providerRuntimeScopeId?.trim() || `conversation:${context.controls.runtimeRoot}`
+      context.input.providerRuntimeScopeId?.trim() || `conversation:${context.input.cwd}`
     return Object.freeze({ id: scopeId, reusePolicy })
   }
 

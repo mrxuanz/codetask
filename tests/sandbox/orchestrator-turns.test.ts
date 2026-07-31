@@ -31,7 +31,6 @@ test('already-aborted supervisor turn fails before starting a provider session',
         role: 'planner',
         coreCode: 'cursor',
         workspaceRoot: '/tmp',
-        runtimeRoot: '/tmp',
         prompt: 'x',
         signal: controller.signal,
         capabilityProfile: 'planner-read'
@@ -67,7 +66,6 @@ test('supervisor client publishes completed only after worker cleanup exits succ
       role: 'planner',
       coreCode: 'cursor',
       workspaceRoot: '/tmp',
-      runtimeRoot: '/tmp',
       prompt: 'x',
       capabilityProfile: 'planner-read'
     })
@@ -116,7 +114,6 @@ test('aborted sandbox turn unregisters active job turn in finally', async () => 
         role: 'planner',
         coreCode: 'cursor',
         workspaceRoot: '/tmp',
-        runtimeRoot: '/tmp',
         prompt: 'x',
         jobId,
         signal: controller.signal,

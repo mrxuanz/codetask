@@ -14,8 +14,6 @@ import type { SavedJobPlan } from '../planner/plan-types'
 import type { JobExecutionProfile } from '@shared/contracts/plan'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
 import {
-  ensureJobRuntimeRoot,
-  ensureJobTaskRuntimeRoot,
   streamAgentTurn
 } from '../agent-runtime/runner'
 import { memoryDebug } from '../debug/memory'
@@ -1367,12 +1365,6 @@ async function executeSingleTask(
 
   const coreCode = resolveCoreForTask(job, flat)
   const core = await ensureCoreAvailable(coreCode)
-  // Cursor CLI host-state projection stays job-scoped across tasks, while the ACP
-  // worker process itself is one-shot per turn. Other providers use task-scoped homes.
-  const runtimeRoot =
-    core.code === 'cursorcli'
-      ? ensureJobRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, core.code)
-      : ensureJobTaskRuntimeRoot(getAppContext().dataDir, job.threadId, job.id, taskId, core.code)
   const model = resolveCoreModel(core.code as SupportedCoreCode)
 
   const sessionId = `task-mcp-${randomUUID()}`
@@ -1511,7 +1503,6 @@ async function executeSingleTask(
       capabilityProfile: 'task-sandbox',
       provider: core.code as SupportedCoreCode,
       workspaceRoot: job.workspacePath ?? '',
-      runtimeRoot,
       readRoots,
       prompt: buildTaskWorkerUserMessage({
         taskTitle: flat.title,

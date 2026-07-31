@@ -95,7 +95,6 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
         provider: 'codex',
         role: 'conversation',
         cwd: '/workspace',
-        runtimeRoot: '/runtime/conversation-a',
         prompt: 'hello'
       },
       installation,
@@ -106,7 +105,7 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
   }
 
   assert.equal(seen[0]?.runtimeScope?.reusePolicy, 'conversation-scoped')
-  assert.equal(seen[0]?.runtimeScope?.id, 'conversation:/runtime/conversation-a')
+  assert.equal(seen[0]?.runtimeScope?.id, 'conversation:/workspace')
   assert.equal(seen[0]?.input.providerSettings, DEFAULT_PROVIDERS_CONFIG.codex)
   assert.deepEqual(events, [
     'stream:delta',
@@ -127,7 +126,6 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
           provider: 'codex',
           role: 'task-worker',
           cwd: '/workspace',
-          runtimeRoot: '/runtime/task-a',
           prompt: 'blocked'
         },
         installation,

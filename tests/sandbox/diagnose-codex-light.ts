@@ -362,7 +362,7 @@ async function runStaticForRole(
     { outerSandbox }
   )
 
-  const prepared = outerSandbox ? prepareProviderRuntimeForTest('codex', runtimeRoot) : null
+  const prepared = outerSandbox ? prepareProviderRuntimeForTest('codex') : null
   const codexHome = outerSandbox
     ? (prepared!.environment.CODEX_HOME ?? resolveCodexHostHome())
     : join(process.env.CODEX_HOME ?? join(process.env.HOME ?? runtimeRoot, '.codex'))
@@ -465,7 +465,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderRuntimeForTest('codex', runtimeRoot)
+  const prepared = prepareProviderRuntimeForTest('codex')
 
   try {
     if (caseFilter === 'all' || caseFilter === 'static') {

@@ -8,7 +8,6 @@ const registry = createProviderRegistry()
 
 export function prepareProviderRuntimeForTest(
   provider: SupportedCoreCode,
-  runtimeRoot: string,
   options: {
     workspaceRoot?: string | undefined
     hostEnvironment?: Readonly<Record<string, string | undefined>> | undefined
@@ -19,7 +18,6 @@ export function prepareProviderRuntimeForTest(
     ...options.hostEnvironment
   })
   return registry.get(provider).prepareRuntimeProfile({
-    runtimeRoot,
     workspaceRoot: options.workspaceRoot,
     hostEnvironment
   })

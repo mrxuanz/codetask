@@ -16,6 +16,7 @@ export {
   resolveCursorHostConfigDir,
   resolveOpencodeHostConfigDir,
   resolveOpencodeHostDataDir,
+  resolveOpencodeHostStateDir,
   resolveOpencodeInstallDirs,
   resolveOpencodeExecutable,
   isAllowedClaudeSettingsEnvKey,

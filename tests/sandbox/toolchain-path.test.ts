@@ -73,7 +73,7 @@ test('Windows discovery accepts case-insensitive Path and a node.exe entry', () 
 test('sandbox worker PATH always exposes the Node runtime that launched CodeTask', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-sandbox-node-'))
   try {
-    const env = buildSandboxEnv({ runtimeRoot, providerEnv: { PATH: '/usr/bin' } })
+    const env = buildSandboxEnv({ scratchRoot: runtimeRoot, providerEnv: { PATH: '/usr/bin' } })
     assert.ok(env.PATH?.split(delimiter).includes(dirname(process.execPath)))
   } finally {
     rmSync(runtimeRoot, { recursive: true, force: true })

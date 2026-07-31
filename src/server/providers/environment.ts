@@ -5,7 +5,7 @@ import { PROVIDER_OWNED_ENV_KEYS } from './owned-env'
 
 /**
  * CodeTask-owned internal control keys that must not leak across launches.
- * authMode / runtimeRoot / outerSandbox travel on ProviderTurnContext, not env.
+ * authMode / outerSandbox travel on ProviderTurnContext, not env.
  */
 export const CODETASK_TRANSIENT_ENV_KEYS = [
   'CODETASK_TASK_IDEMPOTENCY_KEY',

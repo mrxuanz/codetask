@@ -21,13 +21,11 @@ const ROLES: ConversationRole[] = [
 
 test('resolveProviderRunPolicy uses native host identity inside outer sandbox', () => {
   const policy = resolveProviderRunPolicy({
-    outerSandbox: true,
-    runtimeRoot: '/tmp/runtime'
+    outerSandbox: true
   })
   assert.equal(policy.innerAccess, 'full-access')
   assert.equal(policy.approvals, 'auto')
   assert.equal(policy.authMode, 'host-identity')
-  assert.equal(policy.stateRoot, '/tmp/runtime')
 })
 
 test('resolveProviderRunPolicy ignores CODETASK_OUTER_SANDBOX env', () => {
@@ -35,8 +33,7 @@ test('resolveProviderRunPolicy ignores CODETASK_OUTER_SANDBOX env', () => {
   process.env.CODETASK_OUTER_SANDBOX = '1'
   try {
     const policy = resolveProviderRunPolicy({
-      outerSandbox: false,
-      runtimeRoot: '/tmp/runtime'
+      outerSandbox: false
     })
     assert.equal(policy.outerSandbox, false)
     assert.equal(policy.authMode, 'host-identity')

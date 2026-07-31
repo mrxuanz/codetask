@@ -14,7 +14,6 @@ function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
     provider: 'codex',
     role: 'conversation',
     cwd: '/workspace',
-    runtimeRoot: '/runtime/a',
     prompt: 'hello',
     ...overrides
   }
@@ -30,11 +29,10 @@ test('buildProviderTurnContext carries controls without reading process.env', ()
 
   try {
     const context = buildProviderTurnContext({
-      input: baseInput({ runtimeRoot: '/runtime/explicit' }),
+      input: baseInput(),
       options: { outerSandbox: false },
       authMode: 'host-identity'
     })
-    assert.equal(context.controls.runtimeRoot, '/runtime/explicit')
     assert.equal(context.controls.outerSandbox, false)
     assert.equal(context.controls.authMode, 'host-identity')
   } finally {
@@ -47,9 +45,8 @@ test('buildProviderTurnContext carries controls without reading process.env', ()
   }
 })
 
-test('PreparedProviderTurn forwards controls.runtimeRoot and controls.outerSandbox', () => {
+test('PreparedProviderTurn forwards controls.outerSandbox', () => {
   const source = readFileSync(join(root, 'src/server/providers/delegating-driver.ts'), 'utf8')
-  assert.match(source, /runtimeRoot:\s*input\.turn\.controls\.runtimeRoot/)
   assert.match(source, /outerSandbox:\s*input\.turn\.controls\.outerSandbox/)
 })
 

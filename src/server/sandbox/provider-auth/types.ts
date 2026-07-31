@@ -17,8 +17,8 @@ export type ProviderPathGrantKind =
 /**
  * A single, auditable host path made visible to a Provider process.
  *
- * Runtime-owned paths are deliberately not represented here: the sandbox
- * already grants the per-instance runtime root read/write access.
+ * Ephemeral OS-temp scratch is granted separately by sandbox policy.
+ * SDK/ACP durable paths appear here as host identity/configuration grants.
  */
 export interface ProviderPathGrant {
   readonly path: string
@@ -54,9 +54,6 @@ export interface ProviderRuntimeProfile {
   readonly provider: SupportedCoreCode
   readonly platform: ProviderRuntimePlatform
   readonly mode: ProviderAuthMode
-  readonly runtimeRoot: string
-  /** Private instance-owned state root. It is always inside runtimeRoot. */
-  readonly stateRoot: string
   readonly environment: Readonly<Record<string, string>>
   readonly hostPathGrants: readonly ProviderPathGrant[]
   readonly diagnostics: ProviderRuntimeDiagnostics

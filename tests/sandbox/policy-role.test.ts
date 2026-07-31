@@ -9,16 +9,16 @@ import { serializeSandboxPolicy } from '../../src/server/sandbox/wire'
 test('conversation workspace is writable only with exclusive workspace access', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-policy-role-'))
   const workspaceRoot = join(root, 'workspace')
-  const runtimeRoot = join(root, 'runtime')
+  const scratchRoot = join(root, 'scratch')
   mkdirSync(workspaceRoot)
-  mkdirSync(runtimeRoot)
+  mkdirSync(scratchRoot)
   const canonicalWorkspace = realpathSync(workspaceRoot)
   t.after(() => rmSync(root, { recursive: true, force: true }))
 
   const readOnly = createSandboxPolicy({
     role: 'conversation',
     workspaceRoot,
-    runtimeRoot,
+    scratchRoot,
     workspaceAccess: 'live-read'
   })
   assert.equal('version' in readOnly, false)
@@ -29,7 +29,7 @@ test('conversation workspace is writable only with exclusive workspace access', 
   const writable = createSandboxPolicy({
     role: 'conversation',
     workspaceRoot,
-    runtimeRoot,
+    scratchRoot,
     workspaceAccess: 'exclusive-write'
   })
   assert.equal(writable.filesystem.allowedWriteRoots.includes(canonicalWorkspace), true)
@@ -38,15 +38,15 @@ test('conversation workspace is writable only with exclusive workspace access', 
 test('native policy version exists only at the wire boundary', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-policy-wire-'))
   const workspaceRoot = join(root, 'workspace')
-  const runtimeRoot = join(root, 'runtime')
+  const scratchRoot = join(root, 'scratch')
   mkdirSync(workspaceRoot)
-  mkdirSync(runtimeRoot)
+  mkdirSync(scratchRoot)
   t.after(() => rmSync(root, { recursive: true, force: true }))
 
   const policy = createSandboxPolicy({
     role: 'planner',
     workspaceRoot,
-    runtimeRoot,
+    scratchRoot,
     workspaceAccess: 'live-read'
   })
   const wire = JSON.parse(serializeSandboxPolicy(policy)) as Record<string, unknown>
@@ -61,7 +61,7 @@ test('sandbox policy rejects relative workspace roots instead of resolving proce
       createSandboxPolicy({
         role: 'task-worker',
         workspaceRoot: 'relative-workspace',
-        runtimeRoot: 'relative-runtime',
+        scratchRoot: 'relative-runtime',
         workspaceAccess: 'exclusive-write'
       }),
     (error: unknown) =>

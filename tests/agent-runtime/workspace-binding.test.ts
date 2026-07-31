@@ -12,15 +12,10 @@ import {
 
 const root = mkdtempSync(join(tmpdir(), 'codetask-workspace-binding-'))
 const realWorkspace = join(root, 'workspace-real')
-const realRuntime = join(root, 'runtime-real')
 const workspace = join(root, 'workspace')
-const runtime = join(root, 'runtime')
 mkdirSync(realWorkspace)
-mkdirSync(realRuntime)
 const canonicalWorkspace = realpathSync.native(realWorkspace)
-const canonicalRuntime = realpathSync.native(realRuntime)
 symlinkSync(realWorkspace, workspace, process.platform === 'win32' ? 'junction' : 'dir')
-symlinkSync(realRuntime, runtime, process.platform === 'win32' ? 'junction' : 'dir')
 
 test.after(() => {
   rmSync(root, { recursive: true, force: true })
@@ -28,7 +23,7 @@ test.after(() => {
 
 test('workspace binding rejects relative paths and canonicalizes aliases once', () => {
   assert.throws(
-    () => resolveWorkspaceBinding({ workspaceRoot: 'workspace', runtimeRoot: runtime }),
+    () => resolveWorkspaceBinding({ workspaceRoot: 'workspace' }),
     (error: unknown) =>
       error instanceof Error &&
       'code' in error &&
@@ -36,11 +31,9 @@ test('workspace binding rejects relative paths and canonicalizes aliases once', 
   )
 
   const binding = resolveWorkspaceBinding({
-    workspaceRoot: workspace,
-    runtimeRoot: runtime
+    workspaceRoot: workspace
   })
   assert.equal(binding.workspaceRoot, canonicalWorkspace)
-  assert.equal(binding.runtimeRoot, canonicalRuntime)
   assert.equal(binding.fingerprint.length, 64)
   assert.equal(workspacePathsEqual(workspace, realWorkspace), true)
 })

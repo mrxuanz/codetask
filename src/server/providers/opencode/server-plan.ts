@@ -94,7 +94,7 @@ export function buildOpenCodeServerPlan(
   const pathOverride = resolveOpenCodePathOverride(input)
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
-    : buildProviderChildEnv(input.runtimeRoot)
+    : buildProviderChildEnv()
   const logLevel =
     typeof config.logLevel === 'string' && config.logLevel.trim()
       ? config.logLevel.trim()

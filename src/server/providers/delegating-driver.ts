@@ -79,7 +79,6 @@ export function createPreparedProviderTurn(input: {
       const detachOption = forwardSignal(input.turn.options?.signal, controller)
       const turnInput: AgentTurnInput = {
         ...input.turn.input,
-        runtimeRoot: input.turn.controls.runtimeRoot,
         installation: input.installation,
         providerSettings: input.turn.input.providerSettings,
         providerRuntimeScope: input.turn.runtimeScope

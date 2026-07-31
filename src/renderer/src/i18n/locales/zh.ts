@@ -45,7 +45,7 @@ export default {
     passwordMismatch: '两次输入的密码不一致',
     storageTitle: '选择数据存储目录',
     storageDescription:
-      '选择 CodeTask 存放数据库、附件和隔离 Provider 运行时的位置。默认目录不存在时会自动创建。',
+      '选择 CodeTask 存放数据库和附件的位置。默认目录不存在时会自动创建。',
     storagePathLabel: '数据目录',
     storagePathRequired: '请填写数据目录',
     storageBrowse: '浏览',

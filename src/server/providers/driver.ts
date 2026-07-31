@@ -25,7 +25,6 @@ export interface ProviderPreflightContext {
 }
 
 export interface ProviderRuntimePreparationContext {
-  readonly runtimeRoot: string
   readonly workspaceRoot?: string | undefined
   readonly hostEnvironment: HostEnvironmentSnapshot
   readonly platform?: NodeJS.Platform | undefined
@@ -33,10 +32,9 @@ export interface ProviderRuntimePreparationContext {
 
 /**
  * Explicit turn controls for CodeTask-internal decisions.
- * Never derive these from process.env between modules.
+ * Never derive these from process.env between modules (Electron is shell; Hono is core).
  */
 export interface ProviderTurnControls {
-  readonly runtimeRoot: string
   readonly outerSandbox: boolean
   readonly authMode: ProviderAuthMode
 }
@@ -62,7 +60,6 @@ export function buildProviderTurnContext(input: {
     installation: input.installation ?? input.input.installation,
     runtimeScope: input.input.providerRuntimeScope,
     controls: {
-      runtimeRoot: input.input.runtimeRoot,
       outerSandbox: input.options?.outerSandbox ?? false,
       authMode: input.authMode
     }

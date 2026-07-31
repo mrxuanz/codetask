@@ -5,7 +5,7 @@ import { getProviderDescriptor } from '../../shared/providers/descriptors'
 /**
  * Per-provider env keys adapters may inject into the child process.
  * Only third-party auth / provider-native keys — not CodeTask BIN/MODEL config.
- * Internal controls (authMode / outerSandbox / runtimeRoot) travel on
+ * Internal controls (authMode / outerSandbox) travel on
  * ProviderTurnContext, not env overlays.
  */
 export const PROVIDER_OWNED_ENV_KEYS: Readonly<Record<SupportedCoreCode, readonly string[]>> =

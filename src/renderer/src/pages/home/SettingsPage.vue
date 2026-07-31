@@ -295,10 +295,6 @@ onMounted(() => {
                     </p>
                   </div>
                   <div class="rounded-md border p-3">
-                    <p class="text-muted-foreground">Runtime</p>
-                    <p class="mt-1 font-medium">{{ formatBytes(storageStats.bytes.runtimes) }}</p>
-                  </div>
-                  <div class="rounded-md border p-3">
                     <p class="text-muted-foreground">Attachments</p>
                     <p class="mt-1 font-medium">
                       {{ formatBytes(storageStats.bytes.attachments) }}

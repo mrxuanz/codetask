@@ -7,7 +7,8 @@ import {
 } from '../helpers/provider-runtime'
 import {
   resolveOpencodeHostConfigDir,
-  resolveOpencodeHostDataDir
+  resolveOpencodeHostDataDir,
+  resolveOpencodeHostStateDir
 } from '../../src/server/sandbox/provider-auth/paths'
 import { providerRuntimeWriteRoots } from '../../src/server/sandbox/provider-auth/types'
 import { spawnProviderInvocation } from '../../src/server/providers/spawn'
@@ -73,12 +74,14 @@ async function runStatic(runtimeRoot: string): Promise<{
   }
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderRuntimeForTest('opencode', runtimeRoot)
+  const prepared = prepareProviderRuntimeForTest('opencode')
   const hostConfigDir = resolveOpencodeHostConfigDir()
   const hostDataDir = resolveOpencodeHostDataDir()
+  const hostStateDir = resolveOpencodeHostStateDir()
   const layout = {
     configHome: dirname(hostConfigDir),
-    dataHome: dirname(hostDataDir)
+    dataHome: dirname(hostDataDir),
+    stateHome: dirname(hostStateDir)
   }
 
   const report = {
@@ -97,9 +100,10 @@ async function runStatic(runtimeRoot: string): Promise<{
       prepared.environment.HOME !== runtimeRoot &&
       prepared.environment.XDG_CONFIG_HOME === layout.configHome &&
       prepared.environment.XDG_DATA_HOME === layout.dataHome &&
-      !('XDG_STATE_HOME' in prepared.environment) &&
+      prepared.environment.XDG_STATE_HOME === layout.stateHome &&
       !('XDG_CACHE_HOME' in prepared.environment) &&
       providerRuntimeWriteRoots(prepared).includes(hostDataDir) &&
+      providerRuntimeWriteRoots(prepared).includes(hostStateDir) &&
       listRuntimeFiles(runtimeRoot).length === 0
   }
 
@@ -111,7 +115,7 @@ async function runStatic(runtimeRoot: string): Promise<{
 }
 
 async function runServerProbe(runtimeRoot: string): Promise<unknown> {
-  const prepared = prepareProviderRuntimeForTest('opencode', runtimeRoot)
+  const prepared = prepareProviderRuntimeForTest('opencode')
   const env = buildMergedEnv(prepared.environment)
   const driver = getProviderDriverForTest('opencode')
   const installation = await driver.discover({

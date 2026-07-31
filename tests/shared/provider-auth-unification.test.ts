@@ -25,11 +25,11 @@ test('ProviderRegistry driver is the only complete production runtime entry (PRU
 
 test('ProviderAuthMode always uses native host identity paths (PRU-05-01)', () => {
   assert.equal(
-    resolveProviderRunPolicy({ outerSandbox: true, runtimeRoot: '/r' }).authMode,
+    resolveProviderRunPolicy({ outerSandbox: true }).authMode,
     'host-identity'
   )
   assert.equal(
-    resolveProviderRunPolicy({ outerSandbox: false, runtimeRoot: '/r' }).authMode,
+    resolveProviderRunPolicy({ outerSandbox: false }).authMode,
     'host-identity'
   )
   const policySource = readFileSync(
@@ -73,8 +73,6 @@ test('toProviderRuntimeLogDto never embeds forged tokens or host paths (PRU-05-0
     provider: 'codex',
     platform: process.platform as 'darwin' | 'linux' | 'win32',
     mode: 'host-identity',
-    runtimeRoot: '/runtime',
-    stateRoot: '/runtime',
     environment: { HOME: '/runtime' },
     hostPathGrants: [
       {

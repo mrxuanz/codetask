@@ -7,20 +7,17 @@ export interface ProviderRunPolicy {
   outerSandbox: boolean
   innerAccess: 'full-access'
   approvals: 'auto'
-  stateRoot: string
   authMode: ProviderAuthMode
 }
 
 export function resolveProviderRunPolicy(input: {
-  /** Explicit control — must not be inferred from process.env. */
+  /** Explicit control — must not be inferred from process.env / Electron shell. */
   outerSandbox: boolean
-  runtimeRoot: string
 }): ProviderRunPolicy {
   return {
     outerSandbox: input.outerSandbox,
     innerAccess: 'full-access',
     approvals: 'auto',
-    stateRoot: input.runtimeRoot,
     // Authentication always uses native host identity paths. The outer sandbox
     // decides which exact Provider paths are visible; it never copies them.
     authMode: 'host-identity'

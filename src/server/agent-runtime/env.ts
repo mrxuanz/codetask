@@ -1,5 +1,3 @@
-import { mkdirSync } from 'fs'
-import { join } from 'path'
 import { augmentPathWithHostNode } from '../sandbox/toolchain-path'
 import { processHostEnvironmentSource } from '../host-environment'
 import { stripProviderHostConfiguration } from '../providers/environment'
@@ -102,14 +100,6 @@ export function applyLoopbackNoProxyEnv(env: Record<string, string>): Record<str
   return env
 }
 
-/**
- * CodeTask scratch for outer OS-sandbox turns (attestation / CA materialization).
- * Host-identity SDK/ACP data stays on host defaults — do not pre-create provider trees.
- */
-export function ensureIsolatedProviderDirs(runtimeRoot: string): void {
-  mkdirSync(join(runtimeRoot, 'tmp'), { recursive: true })
-}
-
 export function buildSandboxPreparedProviderEnv(): Record<string, string> {
   const env = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
   env.PATH = augmentPathWithHostNode(env.PATH)
@@ -127,10 +117,10 @@ export function buildSandboxPreparedProviderEnv(): Record<string, string> {
 
 /**
  * Child env for provider SDK/ACP turns: host identity + host TMP/XDG defaults.
- * Does not redirect durable provider data into runtimeRoot.
+ * Does not redirect durable provider data into any CodeTask scratch tree.
  */
-export function buildProviderChildEnv(runtimeRoot: string): Record<string, string> {
-  void runtimeRoot
+export function buildProviderChildEnv(_unused?: string): Record<string, string> {
+  void _unused
   const hostEnvironment = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
 
   const hostHome =

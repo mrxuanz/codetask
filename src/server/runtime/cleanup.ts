@@ -1,68 +1,66 @@
 import { existsSync } from 'fs'
-import { readdir, readFile, rm, stat } from 'fs/promises'
-import { isAbsolute, join, relative, sep } from 'path'
-import type { getDb } from '../db'
-import { threadJobs, threads } from '../db/schema'
-import {
-  dataPaths,
-  jobRuntimeDirPath,
-  jobTaskRuntimeDirPath,
-  threadRuntimeDirPath
-} from '../data-paths'
+import { rm } from 'fs/promises'
+import { join } from 'path'
 
-type AppDatabase = ReturnType<typeof getDb>
+/**
+ * Legacy CodeTask per-turn trees under data/runtimes.
+ * No longer created — helpers only wipe leftovers safely.
+ */
+function legacyRuntimesRoot(dataDir: string): string {
+  return join(dataDir, 'runtimes')
+}
 
+function legacyThreadRuntimeDir(dataDir: string, threadId: string): string {
+  return join(legacyRuntimesRoot(dataDir), threadId)
+}
+
+function legacyJobRuntimeDir(dataDir: string, threadId: string, jobId: string): string {
+  return join(legacyThreadRuntimeDir(dataDir, threadId), 'jobs', jobId)
+}
+
+function legacyJobTaskRuntimeDir(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): string {
+  return join(legacyJobRuntimeDir(dataDir, threadId, jobId), 'tasks', taskId)
+}
+
+/** @deprecated Path helpers retained for tests that assert legacy wipe targets. */
 export function threadRuntimeDir(dataDir: string, threadId: string): string {
-  return threadRuntimeDirPath(dataDir, threadId)
+  return legacyThreadRuntimeDir(dataDir, threadId)
 }
 
+/** @deprecated */
 export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string): string {
-  return jobRuntimeDirPath(dataDir, threadId, jobId)
+  return legacyJobRuntimeDir(dataDir, threadId, jobId)
 }
 
+/** @deprecated */
 export function jobTaskRuntimeDir(
   dataDir: string,
   threadId: string,
   jobId: string,
   taskId: string
 ): string {
-  return jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId)
-}
-
-async function estimateDirectoryBytes(dir: string): Promise<number> {
-  if (!existsSync(dir)) return 0
-  let total = 0
-  try {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        total += await estimateDirectoryBytes(full)
-      } else if (entry.isFile()) {
-        try {
-          total += (await stat(full)).size
-        } catch {
-          // skip files that disappear during measurement
-        }
-      }
-    }
-  } catch {
-    // skip inaccessible directories
-  }
-  return total
-}
-
-export async function estimateJobRuntimeBytes(
-  dataDir: string,
-  threadId: string,
-  jobId: string
-): Promise<number> {
-  return estimateDirectoryBytes(jobRuntimeDir(dataDir, threadId, jobId))
+  return legacyJobTaskRuntimeDir(dataDir, threadId, jobId, taskId)
 }
 
 export async function removeDirectoryIfExists(path: string): Promise<boolean> {
   if (!existsSync(path)) return false
   await rm(path, { recursive: true, force: true })
   return true
+}
+
+/**
+ * Wipe the entire legacy data/runtimes tree. SDK/ACP no longer store anything there.
+ */
+export async function wipeLegacyRuntimesRoot(dataDir: string): Promise<{ removed: number }> {
+  const root = legacyRuntimesRoot(dataDir)
+  if (!existsSync(root)) return { removed: 0 }
+  await rm(root, { recursive: true, force: true })
+  return { removed: 1 }
 }
 
 export type CleanupJobRuntimeResult =
@@ -72,9 +70,8 @@ export type CleanupJobRuntimeResult =
   | 'deferred_slot'
 
 /**
- * Delete the Job runtime tree when safe.
- * Returns deferred_* when the execution loop or workload slot is still held so callers can
- * retry after unwind (status often flips to terminal before finally/release).
+ * Delete a legacy Job runtime tree when present.
+ * Returns deferred_* when the execution loop or workload slot is still held.
  */
 export async function cleanupJobRuntimeTree(
   dataDir: string,
@@ -83,7 +80,7 @@ export async function cleanupJobRuntimeTree(
   options: { deletionDrained?: boolean } = {}
 ): Promise<CleanupJobRuntimeResult> {
   if (options.deletionDrained) {
-    const removed = await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+    const removed = await removeDirectoryIfExists(legacyJobRuntimeDir(dataDir, threadId, jobId))
     return removed ? 'deleted' : 'absent'
   }
   try {
@@ -99,7 +96,7 @@ export async function cleanupJobRuntimeTree(
   } catch {
     // Standalone retention tests may not have a bootstrapped application context.
   }
-  const removed = await removeDirectoryIfExists(jobRuntimeDir(dataDir, threadId, jobId))
+  const removed = await removeDirectoryIfExists(legacyJobRuntimeDir(dataDir, threadId, jobId))
   return removed ? 'deleted' : 'absent'
 }
 
@@ -109,29 +106,13 @@ export function isDeferredCleanupResult(
   return result === 'deferred_active' || result === 'deferred_slot'
 }
 
-/**
- * Completed task checkpoints and evidence are durable in SQLite/blob artifacts. Their Provider
- * runtime is disposable even while later tasks in the same Job are still running.
- */
 export async function cleanupJobTaskRuntimeTree(
   dataDir: string,
   threadId: string,
   jobId: string,
   taskId: string
 ): Promise<boolean> {
-  const tasksRoot = join(jobRuntimeDir(dataDir, threadId, jobId), 'tasks')
-  const taskRuntime = jobTaskRuntimeDir(dataDir, threadId, jobId, taskId)
-  const relativeTaskPath = relative(tasksRoot, taskRuntime)
-  if (
-    !relativeTaskPath ||
-    relativeTaskPath === '..' ||
-    relativeTaskPath.startsWith(`..${sep}`) ||
-    isAbsolute(relativeTaskPath)
-  ) {
-    console.warn('[retention] refused task runtime path outside task root', jobId, taskId)
-    return false
-  }
-  return removeDirectoryIfExists(taskRuntime)
+  return removeDirectoryIfExists(legacyJobTaskRuntimeDir(dataDir, threadId, jobId, taskId))
 }
 
 export async function cleanupThreadRuntimeTree(
@@ -141,7 +122,7 @@ export async function cleanupThreadRuntimeTree(
 ): Promise<void> {
   try {
     if (options.deletionDrained) {
-      await removeDirectoryIfExists(threadRuntimeDir(dataDir, threadId))
+      await removeDirectoryIfExists(legacyThreadRuntimeDir(dataDir, threadId))
       return
     }
     const { getAppContext } = await import('../bootstrap')
@@ -151,7 +132,7 @@ export async function cleanupThreadRuntimeTree(
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Refusing to delete')) throw error
   }
-  await removeDirectoryIfExists(threadRuntimeDir(dataDir, threadId))
+  await removeDirectoryIfExists(legacyThreadRuntimeDir(dataDir, threadId))
 }
 
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'failed', 'cancelled'])
@@ -170,47 +151,22 @@ export async function cleanupJobRuntimeTreeIfTerminal(
   return cleanupJobRuntimeTree(dataDir, threadId, jobId)
 }
 
+/** @deprecated Prefer wipeLegacyRuntimesRoot — kept for janitor/startup call sites. */
 export async function pruneOrphanRuntimeTrees(
-  dataDir: string,
-  db: AppDatabase
+  dataDir: string
 ): Promise<{ removedPaths: string[] }> {
-  const runtimesRoot = dataPaths(dataDir).runtimes
-  if (!existsSync(runtimesRoot)) return { removedPaths: [] }
+  const result = await wipeLegacyRuntimesRoot(dataDir)
+  if (result.removed === 0) return { removedPaths: [] }
+  return { removedPaths: [legacyRuntimesRoot(dataDir)] }
+}
 
-  const [threadRows, jobRows] = await Promise.all([
-    db.select({ id: threads.id }).from(threads),
-    db.select({ id: threadJobs.id, threadId: threadJobs.threadId }).from(threadJobs)
-  ])
-
-  const validThreadIds = new Set(threadRows.map((row) => row.id))
-  const validJobDirs = new Set(jobRows.map((row) => `${row.threadId}/${row.id}`))
-  const removedPaths: string[] = []
-
-  for (const threadEntry of await readdir(runtimesRoot, { withFileTypes: true })) {
-    if (!threadEntry.isDirectory()) continue
-    const threadId = threadEntry.name
-    const threadPath = join(runtimesRoot, threadId)
-
-    if (!validThreadIds.has(threadId)) {
-      await rm(threadPath, { recursive: true, force: true })
-      removedPaths.push(threadPath)
-      continue
-    }
-
-    const jobsPath = join(threadPath, 'jobs')
-    if (!existsSync(jobsPath)) continue
-
-    for (const jobEntry of await readdir(jobsPath, { withFileTypes: true })) {
-      if (!jobEntry.isDirectory()) continue
-      const key = `${threadId}/${jobEntry.name}`
-      if (validJobDirs.has(key)) continue
-      const jobPath = join(jobsPath, jobEntry.name)
-      await rm(jobPath, { recursive: true, force: true })
-      removedPaths.push(jobPath)
-    }
-  }
-
-  return { removedPaths }
+/** Durable provider state is not under data/runtimes anymore. */
+export async function estimateJobRuntimeBytes(
+  _dataDir: string,
+  _threadId: string,
+  _jobId: string
+): Promise<number> {
+  return 0
 }
 
 export interface RuntimeSummary {
@@ -219,50 +175,9 @@ export interface RuntimeSummary {
 }
 
 export async function extractRuntimeSummary(
-  dataDir: string,
-  threadId: string,
-  jobId: string
+  _dataDir: string,
+  _threadId: string,
+  _jobId: string
 ): Promise<RuntimeSummary | null> {
-  const dir = jobRuntimeDir(dataDir, threadId, jobId)
-  if (!existsSync(dir)) return null
-
-  const changedFiles: string[] = []
-  let logTail: string | null = null
-
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
-        try {
-          const subEntries = await readdir(join(dir, entry.name), { withFileTypes: true })
-          for (const sub of subEntries) {
-            if (sub.isFile()) {
-              changedFiles.push(`${entry.name}/${sub.name}`)
-            }
-          }
-        } catch {
-          // skip
-        }
-      }
-    }
-
-    const logPaths = [join(dir, 'stderr.log'), join(dir, 'stdout.log'), join(dir, 'agent.log')]
-    for (const logPath of logPaths) {
-      if (existsSync(logPath)) {
-        try {
-          const content = await readFile(logPath, 'utf8')
-          const lines = content.split('\n')
-          logTail = lines.slice(-50).join('\n')
-          break
-        } catch {
-          // skip
-        }
-      }
-    }
-  } catch {
-    // skip
-  }
-
-  if (changedFiles.length === 0 && !logTail) return null
-  return { changedFiles, logTail }
+  return null
 }

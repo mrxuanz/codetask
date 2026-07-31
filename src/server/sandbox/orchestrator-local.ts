@@ -5,6 +5,7 @@ import { formatSdkTurnError } from '../agent-runtime/errors'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
 import { buildLaunchSpec } from '../providers/launch-env'
 import { buildSandboxEnv } from './env'
+import { createSandboxScratchDir, removeSandboxScratchDir } from './scratch'
 import {
   awaitSandboxWorkerAttestation,
   launchSandboxedWorker,
@@ -33,7 +34,6 @@ export interface RunSandboxedTurnInput {
   role: ConversationRole
   coreCode: SupportedCoreCode
   workspaceRoot: string
-  runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null | undefined
   model?: string | undefined
@@ -167,136 +167,140 @@ async function* readWorkerJsonl(
 export async function* streamSandboxedConversationTurnLocal(
   input: RunSandboxedTurnInput
 ): AsyncGenerator<AgentTurnChunk> {
-  sandboxTurnDebug('sandbox orchestrator(local): begin turn', {
-    role: input.role,
-    coreCode: input.coreCode,
-    workspaceRoot: input.workspaceRoot,
-    runtimeRoot: input.runtimeRoot,
-    hasMcpUrl: Boolean(input.mcpUrl),
-    extraReadRoots: input.readRoots?.length ?? 0
-  })
-
-  throwIfSandboxTurnAborted(input.signal)
-  if (process.platform === 'win32') {
-    const { ensureWindowsSandboxReady } = await import('./windows-bootstrap')
-    await ensureWindowsSandboxReady(input.runtimeRoot)
-  }
-  preflightSandbox()
-  throwIfSandboxTurnAborted(input.signal)
-
-  const workerInput: AgentTurnInput = {
-    provider: input.coreCode,
-    role: input.role,
-    cwd: input.workspaceRoot,
-    runtimeRoot: input.runtimeRoot,
-    prompt: input.prompt,
-    runtimeSessionId: input.runtimeSessionId,
-    model: input.model,
-    systemPrompt: input.systemPrompt,
-    mcpUrl: input.mcpUrl,
-    mcpToolNames: input.mcpToolNames,
-    userMcpServers: input.userMcpServers,
-    capabilityProfile: input.capabilityProfile,
-    installation: input.installation,
-    providerSettings: input.providerSettings,
-    jobId: input.jobId,
-    providerRuntimeScopeId: input.providerRuntimeScopeId,
-    idempotencyKey: input.idempotencyKey
-  }
-
-  const workerPath = resolveRoleWorkerPath()
-
-  // The supervisor process uses the same Driver implementation, while the
-  // installation/settings snapshot itself comes from the application process.
-  const { getProviderRegistry } = await import('../providers/access')
-  const driver = getProviderRegistry().get(input.coreCode)
-  const hostEnvironment = processHostEnvironmentSource.snapshot()
-  const runtimeProfile = driver.prepareRuntimeProfile({
-    runtimeRoot: input.runtimeRoot,
-    workspaceRoot: input.workspaceRoot,
-    hostEnvironment
-  })
-  throwIfSandboxTurnAborted(input.signal)
-
-  // PRU-11-06 / PRU-11-08: preflight + sandbox roots come from the Registry driver.
-  const installation = input.installation
-  if (installation.provider !== input.coreCode) {
-    throw new SandboxError(
-      `Provider installation mismatch: expected ${input.coreCode}, got ${installation.provider}`,
-      'sandbox.sdk.error'
-    )
-  }
-  await driver.preflight({ installation, runtimeProfile })
-  throwIfSandboxTurnAborted(input.signal)
-
+  const scratchRoot = createSandboxScratchDir(input.role)
   try {
-    const launchSpec = buildLaunchSpec(input.coreCode, {
-      cwd: input.workspaceRoot,
-      env: { ...runtimeProfile.environment },
-      providerOverlay: { ...runtimeProfile.environment },
-      installation,
-      providerSettings: input.providerSettings
+    sandboxTurnDebug('sandbox orchestrator(local): begin turn', {
+      role: input.role,
+      coreCode: input.coreCode,
+      workspaceRoot: input.workspaceRoot,
+      scratchRoot,
+      hasMcpUrl: Boolean(input.mcpUrl),
+      extraReadRoots: input.readRoots?.length ?? 0
     })
-    sandboxTurnDebug('launch-spec', { summary: launchSpec.redactedSummary })
-  } catch {
-    // Executable may be unresolved here; the worker launch path will surface the error.
+
+    throwIfSandboxTurnAborted(input.signal)
+    if (process.platform === 'win32') {
+      const { ensureWindowsSandboxReady } = await import('./windows-bootstrap')
+      const { getAppContext } = await import('../bootstrap')
+      await ensureWindowsSandboxReady(getAppContext().dataDir)
+    }
+    preflightSandbox()
+    throwIfSandboxTurnAborted(input.signal)
+
+    const workerInput: AgentTurnInput = {
+      provider: input.coreCode,
+      role: input.role,
+      cwd: input.workspaceRoot,
+      prompt: input.prompt,
+      runtimeSessionId: input.runtimeSessionId,
+      model: input.model,
+      systemPrompt: input.systemPrompt,
+      mcpUrl: input.mcpUrl,
+      mcpToolNames: input.mcpToolNames,
+      userMcpServers: input.userMcpServers,
+      capabilityProfile: input.capabilityProfile,
+      installation: input.installation,
+      providerSettings: input.providerSettings,
+      jobId: input.jobId,
+      providerRuntimeScopeId: input.providerRuntimeScopeId,
+      idempotencyKey: input.idempotencyKey
+    }
+
+    const workerPath = resolveRoleWorkerPath()
+
+    // The supervisor process uses the same Driver implementation, while the
+    // installation/settings snapshot itself comes from the application process.
+    const { getProviderRegistry } = await import('../providers/access')
+    const driver = getProviderRegistry().get(input.coreCode)
+    const hostEnvironment = processHostEnvironmentSource.snapshot()
+    const runtimeProfile = driver.prepareRuntimeProfile({
+      workspaceRoot: input.workspaceRoot,
+      hostEnvironment
+    })
+    throwIfSandboxTurnAborted(input.signal)
+
+    // PRU-11-06 / PRU-11-08: preflight + sandbox roots come from the Registry driver.
+    const installation = input.installation
+    if (installation.provider !== input.coreCode) {
+      throw new SandboxError(
+        `Provider installation mismatch: expected ${input.coreCode}, got ${installation.provider}`,
+        'sandbox.sdk.error'
+      )
+    }
+    await driver.preflight({ installation, runtimeProfile })
+    throwIfSandboxTurnAborted(input.signal)
+
+    try {
+      const launchSpec = buildLaunchSpec(input.coreCode, {
+        cwd: input.workspaceRoot,
+        env: { ...runtimeProfile.environment },
+        providerOverlay: { ...runtimeProfile.environment },
+        installation,
+        providerSettings: input.providerSettings
+      })
+      sandboxTurnDebug('launch-spec', { summary: launchSpec.redactedSummary })
+    } catch {
+      // Executable may be unresolved here; the worker launch path will surface the error.
+    }
+
+    const contribution = driver.contributeSandboxPolicy({
+      installation,
+      runtimeProfile,
+      hostEnvironment
+    })
+    const providerReadRoots = mergeProviderReadRoots(
+      [...contribution.readRoots, ...resolveHostToolchainReadRoots(hostEnvironment)],
+      [...resolveRuntimeReadRoots(hostEnvironment), ...(input.readRoots ?? [])]
+    )
+
+    // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
+    // Conversation/planner roles can read the project and write ephemeral scratch + host grants;
+    // task-worker remains the sole role that may write the real workspace.
+    const policy = createSandboxPolicy({
+      role: input.role,
+      workspaceRoot: input.workspaceRoot,
+      scratchRoot,
+      providerReadRoots,
+      ...(contribution.writeRoots.length > 0
+        ? { providerWriteRoots: [...contribution.writeRoots] }
+        : {}),
+      ...(input.readRoots ? { attachmentReadRoots: input.readRoots } : {}),
+      ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {})
+    })
+
+    sandboxTurnDebug(
+      'sandbox orchestrator: provider runtime profile prepared',
+      toProviderRuntimeLogDto(runtimeProfile)
+    )
+
+    const env = buildSandboxEnv({
+      scratchRoot,
+      providerEnv: { ...contribution.environment },
+      mcpToken: input.mcpToken
+    })
+    const readRoots = collectPolicyReadRoots(policy)
+    const writeRoots = collectPolicyWriteRoots(policy)
+
+    // Every provider turn, including Cursor task work, owns a fresh sandbox worker.
+    // Keeping Cursor ACP alive across tasks allowed a wedged permission service to poison the
+    // remainder of the job. Verification already uses this one-shot lifecycle.
+    const spawned = await launchSandboxedWorker({
+      policy,
+      command: process.execPath,
+      args: [workerPath],
+      env,
+      readRoots,
+      writeRoots,
+      signal: input.signal
+    })
+
+    const handle = spawned.handle
+    handle.writeStdin(Buffer.from(JSON.stringify(workerInput), 'utf8'))
+    handle.endStdin()
+    awaitSandboxWorkerAttestation(spawned)
+
+    yield* readWorkerJsonl(handle, input.signal)
+  } finally {
+    removeSandboxScratchDir(scratchRoot)
   }
-
-  const contribution = driver.contributeSandboxPolicy({
-    installation,
-    runtimeProfile,
-    hostEnvironment
-  })
-  const providerReadRoots = mergeProviderReadRoots(
-    [...contribution.readRoots, ...resolveHostToolchainReadRoots(hostEnvironment)],
-    [...resolveRuntimeReadRoots(hostEnvironment), ...(input.readRoots ?? [])]
-  )
-
-  // WorkspaceAccessMode is enforced by the effective OS policy, not only by admission metadata.
-  // Conversation/planner roles can read the project and write runtime/provider state only;
-  // task-worker remains the sole role that may write the real workspace.
-  const policy = createSandboxPolicy({
-    role: input.role,
-    workspaceRoot: input.workspaceRoot,
-    runtimeRoot: input.runtimeRoot,
-    providerReadRoots,
-    ...(contribution.writeRoots.length > 0
-      ? { providerWriteRoots: [...contribution.writeRoots] }
-      : {}),
-    ...(input.readRoots ? { attachmentReadRoots: input.readRoots } : {}),
-    ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {})
-  })
-
-  sandboxTurnDebug(
-    'sandbox orchestrator: provider runtime profile prepared',
-    toProviderRuntimeLogDto(runtimeProfile)
-  )
-
-  const env = buildSandboxEnv({
-    runtimeRoot: input.runtimeRoot,
-    providerEnv: { ...contribution.environment },
-    mcpToken: input.mcpToken
-  })
-  const readRoots = collectPolicyReadRoots(policy)
-  const writeRoots = collectPolicyWriteRoots(policy)
-
-  // Every provider turn, including Cursor task work, owns a fresh sandbox worker.
-  // Keeping Cursor ACP alive across tasks allowed a wedged permission service to poison the
-  // remainder of the job. Verification already uses this one-shot lifecycle.
-  const spawned = await launchSandboxedWorker({
-    policy,
-    command: process.execPath,
-    args: [workerPath],
-    env,
-    readRoots,
-    writeRoots,
-    signal: input.signal
-  })
-
-  const handle = spawned.handle
-  handle.writeStdin(Buffer.from(JSON.stringify(workerInput), 'utf8'))
-  handle.endStdin()
-  awaitSandboxWorkerAttestation(spawned)
-
-  yield* readWorkerJsonl(handle, input.signal)
 }

@@ -57,7 +57,6 @@ export interface StorageStatsData {
     wal: number
     attachments: number
     artifacts: number
-    runtimes: number
   }
   sqlite: { freelistPages: number; pageSize: number; reclaimableBytes: number }
 }
