@@ -27,7 +27,7 @@ import {
   type CursorAcpSessionHandle
 } from './acp-shared'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../delta-emit'
-import { assertTaskWorkerAcpCompletion } from './turn-guards'
+import { assertCursorAcpCompletion } from './turn-guards'
 import { recordAcpToolCallActivity } from '../turn-scope'
 import type { AgentCapabilityProfile } from '../capabilities'
 
@@ -555,7 +555,7 @@ export class CursorAcpSessionRuntime {
       turnScope.dispose()
     }
 
-    const completionCheck = assertTaskWorkerAcpCompletion({
+    const completionCheck = assertCursorAcpCompletion({
       role: input.role,
       reply,
       stderrTail: diagnostics.getStderrTail(),

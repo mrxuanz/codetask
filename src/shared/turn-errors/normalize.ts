@@ -49,7 +49,20 @@ function matchExactDefaultMessage(message: string): TurnErrorCode | undefined {
   return undefined
 }
 
-function indicatesCursorAcpKeepaliveTimeout(message: string): boolean {
+/** Cursor cloud / model capacity signals (ConnectError resource_exhausted, etc.). */
+export function indicatesCursorProviderCapacity(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('resource_exhausted') ||
+    lower.includes('unable to reach the model provider') ||
+    lower.includes('model is at capacity') ||
+    lower.includes('model provider is at capacity') ||
+    lower.includes('capacity exceeded')
+  )
+}
+
+/** Cursor ACP stream / HTTP2 / ConnectError keepalive disconnect signals. */
+export function indicatesCursorAcpKeepaliveTimeout(message: string): boolean {
   const lower = message.toLowerCase()
   return (
     lower.includes('keepalive') ||
@@ -111,6 +124,10 @@ export function normalizeTurnError(error: unknown): TurnErrorDto {
   }
 
   const raw = readErrorMessage(error)
+  // Capacity is more specific than generic ConnectError keepalive mapping.
+  if (indicatesCursorProviderCapacity(raw)) {
+    return createTurnError('turn.capacity_limited', { detail: raw }).toDto()
+  }
   if (indicatesCursorAcpKeepaliveTimeout(raw)) {
     return createTurnError('provider.cursor.acp_keepalive_timeout', { detail: raw }).toDto()
   }

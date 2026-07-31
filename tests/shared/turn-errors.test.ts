@@ -19,6 +19,14 @@ test('normalizeTurnError maps Cursor keepalive failures to acp_keepalive_timeout
   assert.match(dto.message, /cloud connection timed out/i)
 })
 
+test('normalizeTurnError maps resource_exhausted ConnectError to capacity_limited', () => {
+  const dto = normalizeTurnError(
+    new Error('ConnectError: [resource_exhausted] Unable to reach the model provider')
+  )
+  assert.equal(dto.code, 'turn.capacity_limited')
+  assert.match(dto.message, /capacity/i)
+})
+
 test('normalizeTurnError does not guess that an unowned AbortError is a user cancellation', () => {
   const dto = normalizeTurnError(
     Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
