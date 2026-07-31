@@ -35,6 +35,10 @@ import { ProviderRuntimeManager } from './providers/lifecycle'
 import { SecureAuthService } from './auth/service'
 import { configureRuntimeMode, resetRuntimeMode } from './runtime-mode'
 import {
+  configureRuntimeFeatures,
+  resetRuntimeFeatures
+} from './config/runtime-features'
+import {
   configureShellChildEnvironment,
   resetShellChildEnvironment
 } from './shell-child-environment'
@@ -121,6 +125,10 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
         options.config?.providers
       )
     })
+    configureRuntimeFeatures({
+      sandbox: config.sandbox,
+      debug: config.debug
+    })
 
     const nextContext: AppContext = {
       config,
@@ -174,6 +182,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     return appContext
   } catch (error) {
     resetRuntimeMode()
+    resetRuntimeFeatures()
     resetShellChildEnvironment()
     closeDatabaseForTests()
     throw error
@@ -224,6 +233,7 @@ export async function resetAppContextForTests(): Promise<void> {
 
   appContext = null
   resetRuntimeMode()
+  resetRuntimeFeatures()
   resetShellChildEnvironment()
   closeDatabaseForTests()
 }

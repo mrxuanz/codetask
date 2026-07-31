@@ -33,6 +33,7 @@ async function main(): Promise<void> {
     timeoutMs: input.timeoutMs,
     noTimeout: input.noTimeout,
     conversationCore: input.conversationCore,
+    executionConfig: input.executionConfig,
     expectedHtmlFile: input.expectedHtmlFile,
     probeMcpUrl: input.probeMcpUrl,
     probeMcpName: input.probeMcpName

@@ -99,10 +99,16 @@ test('E2E source has no model, executable-path, HOME, or HTML-simulation switche
     'utf8'
   )
   const fakeSource = readFileSync(new URL('./drivers/fake.ts', import.meta.url), 'utf8')
+  const supervisorSource = readFileSync(new URL('./supervisor/main.ts', import.meta.url), 'utf8')
   const opencodeSources = `${promptSource}\n${driverSource}\n${canarySource}`
 
   assert.doesNotMatch(opencodeSources, /BUSINESS_OPENCODE_MODEL|CODETASK_OPENCODE_BIN|OPENCODE_BIN/)
   assert.doesNotMatch(promptSource, /\bHOME\s*:/)
   assert.doesNotMatch(promptSource, /\bmodel\s*:\s*input\./)
   assert.doesNotMatch(fakeSource, /BUSINESS_E2E_REQUIRE_AGENT_HTML|created-by=fake-driver/)
+  // Draft→job authority is per-draft executionConfig, not global control-plane settings.
+  assert.doesNotMatch(supervisorSource, /putControlPlanePolicies/)
+  assert.match(supervisorSource, /draftExecutionConfigFromRoles/)
+  assert.match(fakeSource, /codetask_update_draft_execution_config/)
+  assert.match(driverSource, /codetask_update_draft_execution_config/)
 })

@@ -1,5 +1,8 @@
 import { EventEmitter } from 'events'
 import { fork, type ChildProcess } from 'child_process'
+import { mkdtempSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   isSupervisorCommand,
   isSupervisorEvent,
@@ -7,13 +10,16 @@ import {
   type SupervisorEvent
 } from '../../sandbox/supervisor-protocol'
 import { processHostEnvironmentSource } from '../host-environment'
-import {
-  getShellChildEnvironment,
-  serializeShellChildEnvironment,
-  SERIALIZED_SHELL_CHILD_ENV
-} from '../shell-child-environment'
+import { getRuntimeFeatures } from '../config/runtime-features'
+import { getShellChildEnvironment } from '../shell-child-environment'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { SandboxError } from './types'
+import {
+  SUPERVISOR_BOOTSTRAP_ARG_PREFIX,
+  SUPERVISOR_WORKER_ARG
+} from './supervisor-args'
+
+export { SUPERVISOR_BOOTSTRAP_ARG_PREFIX, SUPERVISOR_WORKER_ARG } from './supervisor-args'
 
 const SUPERVISOR_START_TIMEOUT_MS = 30_000
 const MAX_SUPERVISOR_RESTARTS = 5
@@ -25,6 +31,20 @@ function resolveSupervisorEntryPath(): string {
     'Sandbox supervisor is not built; run npm run build first',
     'sandbox.supervisor.missing'
   )
+}
+
+function writeSupervisorBootstrapFile(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'codetask-supervisor-'))
+  const path = join(dir, 'bootstrap.json')
+  writeFileSync(
+    path,
+    JSON.stringify({
+      shellChildEnvironment: getShellChildEnvironment(),
+      runtimeFeatures: getRuntimeFeatures()
+    }),
+    'utf8'
+  )
+  return path
 }
 
 export class SandboxSupervisorManager extends EventEmitter {
@@ -68,13 +88,12 @@ export class SandboxSupervisorManager extends EventEmitter {
       this.lastError = undefined
       const entry = resolveSupervisorEntryPath()
       const hostEnv = processHostEnvironmentSource.snapshot()
-      const child = fork(entry, [], {
+      const bootstrapPath = writeSupervisorBootstrapFile()
+      const child = fork(entry, [SUPERVISOR_WORKER_ARG, `${SUPERVISOR_BOOTSTRAP_ARG_PREFIX}${bootstrapPath}`], {
         execPath: process.execPath,
         env: {
           ...hostEnv,
-          ...getShellChildEnvironment(),
-          [SERIALIZED_SHELL_CHILD_ENV]: serializeShellChildEnvironment(),
-          CODETASK_SANDBOX_SUPERVISOR_WORKER: '1'
+          ...getShellChildEnvironment()
         },
         stdio: ['pipe', 'pipe', 'pipe', 'ipc']
       })

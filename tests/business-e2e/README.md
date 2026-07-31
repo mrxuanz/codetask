@@ -40,6 +40,8 @@ npm run business:e2e -- --providers all --suite both --lang en
 
 `--providers` / `--profile` selects what to run (`all` = every supported provider). No `BUSINESS_ALLOW_*` env.
 
+Planner / slice / milestone verifier cores for draft→job cases come from the **per-draft** `executionConfig` (Test MCP `codetask_update_draft_execution_config`), not from global `/api/settings/control-plane`.
+
 ## Phase 3 registration (short)
 
 1. Supervisor starts `probes/settings-mcp-probe.ts`.

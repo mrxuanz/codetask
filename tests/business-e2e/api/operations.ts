@@ -488,6 +488,28 @@ export async function updateDraftAbilities(
   return result.data
 }
 
+export async function updateDraftExecutionConfig(
+  client: PublicApiClient,
+  threadId: string,
+  messageId: string,
+  config: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  }
+): Promise<unknown> {
+  const result = await client.request(
+    'PATCH',
+    `/api/threads/${threadId}/messages/${messageId}/draft/execution-config`,
+    config,
+    { operationId: 'draft.execution_config' }
+  )
+  if (result.status >= 400) {
+    throw new Error(`draft.execution_config_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data
+}
+
 export async function uploadThreadAttachment(
   client: PublicApiClient,
   threadId: string,

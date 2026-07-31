@@ -32,6 +32,9 @@ import { fetchStorageStats, type StorageStatsData } from '@renderer/api/storage'
 
 type SettingsSection = 'language' | 'storage' | 'sandbox' | 'skills' | 'mcp' | 'prompts'
 
+/** Temporarily hide the Business Skills settings section from the UI. */
+const SHOW_BUSINESS_SKILLS_SETTINGS = false
+
 const { t } = useI18n()
 
 const section = ref<SettingsSection>('language')
@@ -54,7 +57,9 @@ const sections = [
   { key: 'language' as const, labelKey: 'workspace.settings.sections.language' },
   { key: 'storage' as const, labelKey: 'workspace.settings.sections.storage' },
   { key: 'sandbox' as const, labelKey: 'workspace.settings.sections.sandbox' },
-  { key: 'skills' as const, labelKey: 'workspace.settings.sections.skills' },
+  ...(SHOW_BUSINESS_SKILLS_SETTINGS
+    ? [{ key: 'skills' as const, labelKey: 'workspace.settings.sections.skills' }]
+    : []),
   { key: 'mcp' as const, labelKey: 'workspace.settings.sections.mcp' },
   { key: 'prompts' as const, labelKey: 'workspace.settings.sections.prompts' }
 ]
@@ -102,10 +107,12 @@ async function loadSettings(): Promise<void> {
       fetchConversationCores(),
       fetchPromptSettings(),
       fetchMcpSettings(),
-      fetchBusinessSkills()
+      SHOW_BUSINESS_SKILLS_SETTINGS ? fetchBusinessSkills() : Promise.resolve(null)
     ])
     cores.value = coresRes.data.cores
-    businessSkillsDraft.value = structuredClone(skillsRes.data.settings)
+    businessSkillsDraft.value = skillsRes
+      ? structuredClone(skillsRes.data.settings)
+      : null
     promptDraft.value = structuredClone(promptRes.data.settings)
     promptDefaults.value = promptRes.data.defaults
     mcpDraft.value = structuredClone(mcpRes.data.settings)
@@ -326,7 +333,14 @@ onMounted(() => {
             </CardContent>
           </Card>
 
-          <Card v-if="!loading && section === 'skills' && businessSkillsDraft">
+          <Card
+            v-if="
+              SHOW_BUSINESS_SKILLS_SETTINGS &&
+              !loading &&
+              section === 'skills' &&
+              businessSkillsDraft
+            "
+          >
             <CardHeader class="pb-3">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>

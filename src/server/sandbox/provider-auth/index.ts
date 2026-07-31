@@ -37,8 +37,7 @@ export type {
   ProviderPathGrantAccess,
   ProviderPathGrantKind,
   ProviderRuntimePlatform,
-  ProviderRuntimeProfile,
-  ProviderAuthPreflightResult
+  ProviderRuntimeProfile
 } from './types'
 export {
   PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION,

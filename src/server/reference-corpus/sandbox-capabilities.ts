@@ -1,4 +1,4 @@
-import { processHostEnvironmentSource } from '../host-environment'
+import { getRuntimeFeatures } from '../config/runtime-features'
 
 export type SandboxReadRootMode = 'directory_only'
 
@@ -20,16 +20,12 @@ export function detectSandboxReadCapabilities(): SandboxReadCapabilities {
   // Reference projection is shared by direct Planner/create-task turns. It must
   // never probe or load the native sandbox; execution preflight owns that check.
   const nativeSandboxAvailable = false
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  const singleFileAllowlist =
-    hostEnv.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST === '1' ||
-    hostEnv.CODETASK_SANDBOX_SINGLE_FILE_ALLOWLIST === 'true'
 
   cached = {
     platform: process.platform,
     nativeSandboxAvailable,
     readRootMode: 'directory_only',
-    singleFileAllowlist
+    singleFileAllowlist: getRuntimeFeatures().sandbox.singleFileAllowlist
   }
   return cached
 }

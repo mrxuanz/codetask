@@ -2,7 +2,6 @@ export {
   ensureConversationRuntimeRoot,
   ensureJobRuntimeRoot,
   ensureJobTaskRuntimeRoot,
-  ensureRuntimeRoot,
   streamAgentTurn,
   streamConversationTurn
 } from './runner'

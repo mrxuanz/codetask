@@ -2,16 +2,18 @@ import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { dataPaths } from '../data-paths'
 import { processHostEnvironmentSource } from '../host-environment'
+import { getRuntimeFeatures } from '../config/runtime-features'
 import { SandboxError } from './types'
 import { loadSandboxNative, resolveRunnerEntryScript, resolveSetupEntryScript } from './native'
 
 let initPromise: Promise<void> | null = null
 
 export function fixedSandboxHome(dataDir: string): string {
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_HOME?.trim()) {
-    return hostEnv.CODETASK_SANDBOX_HOME.trim()
+  const configured = getRuntimeFeatures().sandbox.home?.trim()
+  if (configured) {
+    return configured
   }
+  const hostEnv = processHostEnvironmentSource.snapshot()
   if (process.platform === 'win32') {
     const localAppData = hostEnv.LOCALAPPDATA
     if (localAppData) {

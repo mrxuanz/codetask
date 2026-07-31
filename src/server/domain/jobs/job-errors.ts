@@ -9,15 +9,6 @@ export class CommandError extends Error {
   }
 }
 
-/** @deprecated Use CommandError for command failures. */
-export class DomainError extends CommandError {
-  constructor(code: string, message: string, details?: Record<string, unknown>) {
-    super(code, commandErrorStatus(code), details)
-    this.message = message
-    this.name = 'DomainError'
-  }
-}
-
 function commandErrorStatus(code: string): 400 | 404 | 409 | 410 | 503 {
   switch (code) {
     case 'contract.invalid_payload':

@@ -19,6 +19,12 @@ export type DriverStartInput = {
   noTimeout?: boolean
   /** Selected SUT conversation SDK / core for every thread created by this case. */
   conversationCore: string
+  /** Per-draft planner/verifier cores; must be written onto the draft before confirm-final. */
+  executionConfig: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  }
   expectedHtmlFile?: string
   /** Phase-3 settings probe base URL (http://127.0.0.1:port). */
   probeMcpUrl?: string

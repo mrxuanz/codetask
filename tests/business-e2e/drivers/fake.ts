@@ -34,6 +34,25 @@ function selectedConversationCore(input: DriverStartInput): string {
   return core
 }
 
+async function applyDraftExecutionConfig(
+  mcp: McpToolClient,
+  input: DriverStartInput,
+  threadId: string,
+  messageId: string,
+  push: Push
+): Promise<void> {
+  const detail = await mcp.callTool('codetask_update_draft_execution_config', {
+    threadId,
+    messageId,
+    ...input.executionConfig
+  })
+  push('draft.execution_config', { messageId, config: input.executionConfig, detail })
+  await mcp.callTool('case_checkpoint', {
+    name: 'execution_config_set',
+    detail: input.executionConfig
+  })
+}
+
 /**
  * Deterministic driver used to validate Test MCP + public API surfaces
  * without consuming external Driver model quota. SUT agents may still run.
@@ -330,6 +349,7 @@ export class FakeDriver implements AgentDriver {
           threadId: ctx.threadId,
           messageId: lastMessageId
         })
+        await applyDraftExecutionConfig(mcp, input, ctx.threadId, lastMessageId, push)
         await mcp.callTool('codetask_confirm_draft_final', {
           threadId: ctx.threadId,
           messageId: lastMessageId
@@ -417,6 +437,13 @@ export class FakeDriver implements AgentDriver {
         threadId: ctx.threadId,
         messageId,
         selections: [{ abilityCode: 'task_worker', coreCode: 'cursor' }]
+      })
+    )
+    await soft('execution_config_missing_draft', () =>
+      mcp.callTool('codetask_update_draft_execution_config', {
+        threadId: ctx.threadId,
+        messageId,
+        ...input.executionConfig
       })
     )
 
@@ -547,6 +574,8 @@ export class FakeDriver implements AgentDriver {
     })
     push('draft.confirmed')
     await this.waitForWizardPhase(mcp, ctx.threadId, 'draft_review', push)
+
+    await applyDraftExecutionConfig(mcp, input, ctx.threadId, draftMessageId, push)
 
     const confirmFinal = (await mcp.callTool('codetask_confirm_draft_final', {
       threadId: ctx.threadId,

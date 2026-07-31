@@ -176,9 +176,6 @@ function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, provider) {
   const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, runtimeRoot, {
     workspaceRoot
   })
-  if (typeof prod.runProviderAuthPreflight === 'function') {
-    prod.runProviderAuthPreflight(provider, runtimeProfile)
-  }
   const dataDir =
     typeof prod.resolveSandboxDataDir === 'function'
       ? prod.resolveSandboxDataDir()

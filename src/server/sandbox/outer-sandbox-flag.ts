@@ -1,16 +1,11 @@
-import { processHostEnvironmentSource } from '../host-environment'
+import { getRuntimeFeatures } from '../config/runtime-features'
 import { getRuntimeMode } from '../runtime-mode'
 
 export function isOuterSandboxEnabled(): boolean {
-  const hostEnv = processHostEnvironmentSource.snapshot()
   const mode = getRuntimeMode()
-  if (mode === 'server' && hostEnv.CODETASK_DISABLE_OUTER_SANDBOX === '1') {
-    console.warn(
-      '[sandbox] CODETASK_DISABLE_OUTER_SANDBOX is ignored in server mode; outer sandbox stays enabled'
-    )
-  }
+  // Server mode always keeps outer sandbox on — desktop may disable via AppConfig.
   if (mode === 'server') {
     return true
   }
-  return hostEnv.CODETASK_DISABLE_OUTER_SANDBOX !== '1'
+  return getRuntimeFeatures().sandbox.outerSandboxEnabled
 }

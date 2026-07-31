@@ -85,9 +85,3 @@ export function toProviderRuntimeLogDto(profile: ProviderRuntimeProfile): Provid
     hostWriteGrantCount: writeGrantCount
   }
 }
-
-export interface ProviderAuthPreflightResult {
-  ok: boolean
-  message: string
-  loggedIn?: boolean
-}

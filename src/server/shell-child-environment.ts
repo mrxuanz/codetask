@@ -1,34 +1,11 @@
-import { processHostEnvironmentSource } from './host-environment'
-
-const SERIALIZED_SHELL_CHILD_ENV = 'CODETASK_SHELL_CHILD_ENV_JSON'
-
 let configuredEnvironment: Record<string, string> | null = null
-
-function parseSerializedEnvironment(value: string | undefined): Record<string, string> {
-  if (!value) return {}
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[1] === 'string' && entry[0].trim().length > 0
-      )
-    )
-  } catch {
-    return {}
-  }
-}
 
 export function configureShellChildEnvironment(environment?: Record<string, string>): void {
   configuredEnvironment = { ...(environment ?? {}) }
 }
 
 export function getShellChildEnvironment(): Record<string, string> {
-  return {
-    ...(configuredEnvironment ??
-      parseSerializedEnvironment(processHostEnvironmentSource.snapshot()[SERIALIZED_SHELL_CHILD_ENV]))
-  }
+  return { ...(configuredEnvironment ?? {}) }
 }
 
 export function serializeShellChildEnvironment(): string {
@@ -39,4 +16,8 @@ export function resetShellChildEnvironment(): void {
   configuredEnvironment = null
 }
 
-export { SERIALIZED_SHELL_CHILD_ENV }
+/**
+ * Historical fork-IPC key. Still stripped from provider children so a leftover
+ * host value cannot leak; no longer read as a product/config channel.
+ */
+export const SERIALIZED_SHELL_CHILD_ENV = 'CODETASK_SHELL_CHILD_ENV_JSON'

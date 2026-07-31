@@ -120,7 +120,7 @@ export function buildCodexTurnPlan(
 
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
-    : buildProviderChildEnv(input.runtimeRoot, { preserveHostIdentity: true })
+    : buildProviderChildEnv(input.runtimeRoot)
   if (input.mcpUrl) applyLoopbackNoProxyEnv(env)
 
   const sandboxMode: CodexSandboxMode = outerSandbox

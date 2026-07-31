@@ -28,15 +28,6 @@ import {
 } from './capabilities'
 import { appendWorkspaceAuthorityPrompt, resolveWorkspaceBinding } from './workspace-binding'
 
-export function ensureRuntimeRoot(dataDir: string, threadId: string, coreCode: string): string {
-  return join(dataPaths(dataDir).runtimes, threadId, coreCode)
-}
-
-/**
- * Conversation Cursor (and other providers) isolate chat vs create-task state.
- * Path: runtimes/<threadId>/<kind>/<coreCode>
- * Directory is created lazily only when an outer-sandbox turn needs scratch.
- */
 export function ensureConversationRuntimeRoot(
   dataDir: string,
   threadId: string,

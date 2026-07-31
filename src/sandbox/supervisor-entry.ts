@@ -16,6 +16,48 @@ import {
   SUPERVISOR_CANCEL_DRAIN_TIMEOUT_MS,
   armCancelDrainWatchdog
 } from '../server/sandbox/cancel-drain-watchdog'
+import { markSandboxSupervisorWorker } from '../server/sandbox/process-role'
+import {
+  SUPERVISOR_BOOTSTRAP_ARG_PREFIX,
+  SUPERVISOR_WORKER_ARG
+} from '../server/sandbox/supervisor-args'
+import { configureShellChildEnvironment } from '../server/shell-child-environment'
+import { configureRuntimeFeatures, type RuntimeFeatures } from '../server/config/runtime-features'
+import { readFileSync, rmSync } from 'fs'
+
+function hydrateSupervisorBootstrap(): void {
+  if (!process.argv.includes(SUPERVISOR_WORKER_ARG)) {
+    console.error('[sandbox-supervisor] missing supervisor worker argv marker')
+    process.exit(1)
+  }
+  markSandboxSupervisorWorker()
+
+  const bootstrapArg = process.argv.find((arg) => arg.startsWith(SUPERVISOR_BOOTSTRAP_ARG_PREFIX))
+  if (!bootstrapArg) return
+  const path = bootstrapArg.slice(SUPERVISOR_BOOTSTRAP_ARG_PREFIX.length)
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      shellChildEnvironment?: Record<string, string>
+      runtimeFeatures?: RuntimeFeatures
+    }
+    if (parsed.shellChildEnvironment) {
+      configureShellChildEnvironment(parsed.shellChildEnvironment)
+    }
+    if (parsed.runtimeFeatures) {
+      configureRuntimeFeatures(parsed.runtimeFeatures)
+    }
+  } catch (error) {
+    console.error('[sandbox-supervisor] failed to hydrate bootstrap file:', error)
+  } finally {
+    try {
+      rmSync(path, { force: true })
+    } catch {
+      // ignore
+    }
+  }
+}
+
+hydrateSupervisorBootstrap()
 
 interface ActiveTurn {
   controller: AbortController

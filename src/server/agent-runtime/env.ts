@@ -17,22 +17,6 @@ const BLOCKED_ENV = [
   SERIALIZED_SHELL_CHILD_ENV
 ] as const
 
-const HOST_PROFILE_ENV_KEYS = new Set([
-  'HOME',
-  'USERPROFILE',
-  'HOMEDRIVE',
-  'HOMEPATH',
-  'APPDATA',
-  'LOCALAPPDATA',
-  'TMPDIR',
-  'TEMP',
-  'TMP',
-  'XDG_CONFIG_HOME',
-  'XDG_CACHE_HOME',
-  'XDG_DATA_HOME',
-  'XDG_STATE_HOME'
-])
-
 export const WINDOWS_CRASH_REPORTER_ENV: Record<string, string> = {
   ELECTRON_DISABLE_CRASH_REPORTER: '1',
   ELECTRON_ENABLE_LOGGING: '0',
@@ -81,10 +65,6 @@ export function stripElectronInheritedEnv(env: Record<string, string>): void {
   }
 }
 
-export interface ProviderChildEnvOptions {
-  preserveHostIdentity?: boolean
-}
-
 const LOOPBACK_NO_PROXY_ENTRIES = ['127.0.0.1', 'localhost', '::1'] as const
 
 /**
@@ -130,39 +110,6 @@ export function ensureIsolatedProviderDirs(runtimeRoot: string): void {
   mkdirSync(join(runtimeRoot, 'tmp'), { recursive: true })
 }
 
-function applyIsolatedWindowsProfile(runtimeRoot: string, env: Record<string, string>): void {
-  const appData = join(runtimeRoot, 'AppData', 'Roaming')
-  const localAppData = join(runtimeRoot, 'AppData', 'Local')
-  const tmp = join(runtimeRoot, 'tmp')
-  const crashpad = join(tmp, 'crashpad')
-  mkdirSync(appData, { recursive: true })
-  mkdirSync(localAppData, { recursive: true })
-  mkdirSync(join(localAppData, 'CrashDumps'), { recursive: true })
-  mkdirSync(crashpad, { recursive: true })
-  mkdirSync(join(runtimeRoot, 'config'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'cache'), { recursive: true })
-  mkdirSync(join(runtimeRoot, 'data'), { recursive: true })
-  mkdirSync(join(runtimeRoot, '.claude'), { recursive: true })
-
-  env.HOME = runtimeRoot
-  env.USERPROFILE = runtimeRoot
-  env.APPDATA = appData
-  env.LOCALAPPDATA = localAppData
-  env.TMPDIR = tmp
-  env.TEMP = tmp
-  env.TMP = tmp
-  if (/^[A-Za-z]:/.test(runtimeRoot)) {
-    env.HOMEDRIVE = runtimeRoot.slice(0, 2)
-    env.HOMEPATH = runtimeRoot.slice(2) || '\\'
-  }
-  env.XDG_CONFIG_HOME = join(runtimeRoot, 'config')
-  env.XDG_CACHE_HOME = join(runtimeRoot, 'cache')
-  env.XDG_DATA_HOME = join(runtimeRoot, 'data')
-  env.CLAUDE_CONFIG_DIR = join(runtimeRoot, '.claude')
-  env.BREAKPAD_DUMP_LOCATION = crashpad
-  applyWindowsCrashReporterEnv(env)
-}
-
 export function buildSandboxPreparedProviderEnv(): Record<string, string> {
   const env = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
   env.PATH = augmentPathWithHostNode(env.PATH)
@@ -178,58 +125,40 @@ export function buildSandboxPreparedProviderEnv(): Record<string, string> {
   return env
 }
 
-export function buildProviderChildEnv(
-  runtimeRoot: string,
-  options?: ProviderChildEnvOptions
-): Record<string, string> {
-  const preserveHost = options?.preserveHostIdentity ?? true
-  if (!preserveHost) {
-    ensureIsolatedProviderDirs(runtimeRoot)
-  }
+/**
+ * Child env for provider SDK/ACP turns: host identity + host TMP/XDG defaults.
+ * Does not redirect durable provider data into runtimeRoot.
+ */
+export function buildProviderChildEnv(runtimeRoot: string): Record<string, string> {
+  void runtimeRoot
   const hostEnvironment = stripProviderHostConfiguration(processHostEnvironmentSource.snapshot())
 
   const hostHome =
-    hostEnvironment.HOME ?? hostEnvironment.USERPROFILE ?? hostEnvironment.HOMEPATH ?? runtimeRoot
+    hostEnvironment.HOME ?? hostEnvironment.USERPROFILE ?? hostEnvironment.HOMEPATH ?? ''
 
   const env: Record<string, string> = {
     PATH: augmentPathWithHostNode(hostEnvironment.PATH, { env: hostEnvironment }),
     LANG: hostEnvironment.LANG ?? 'C.UTF-8'
   }
 
-  if (preserveHost) {
-    env.HOME = hostHome
-    if (hostEnvironment.USERPROFILE) env.USERPROFILE = hostEnvironment.USERPROFILE
-    if (hostEnvironment.HOMEDRIVE) env.HOMEDRIVE = hostEnvironment.HOMEDRIVE
-    if (hostEnvironment.HOMEPATH) env.HOMEPATH = hostEnvironment.HOMEPATH
-    if (hostEnvironment.APPDATA) env.APPDATA = hostEnvironment.APPDATA
-    if (hostEnvironment.LOCALAPPDATA) env.LOCALAPPDATA = hostEnvironment.LOCALAPPDATA
-    // Host TMP/XDG defaults — do not redirect SDK/ACP durable or temp data into runtimeRoot.
-    const hostTmp =
-      hostEnvironment.TMPDIR?.trim() ||
-      hostEnvironment.TEMP?.trim() ||
-      hostEnvironment.TMP?.trim()
-    if (hostTmp) {
-      env.TMPDIR = hostTmp
-      env.TEMP = hostTmp
-      env.TMP = hostTmp
-    }
-  } else if (process.platform === 'win32') {
-    applyIsolatedWindowsProfile(runtimeRoot, env)
-  } else {
-    mkdirSync(join(runtimeRoot, 'config'), { recursive: true })
-    mkdirSync(join(runtimeRoot, 'cache'), { recursive: true })
-    mkdirSync(join(runtimeRoot, 'data'), { recursive: true })
-    env.HOME = runtimeRoot
-    env.TMPDIR = join(runtimeRoot, 'tmp')
-    env.XDG_CONFIG_HOME = join(runtimeRoot, 'config')
-    env.XDG_CACHE_HOME = join(runtimeRoot, 'cache')
-    env.XDG_DATA_HOME = join(runtimeRoot, 'data')
+  if (hostHome) env.HOME = hostHome
+  if (hostEnvironment.USERPROFILE) env.USERPROFILE = hostEnvironment.USERPROFILE
+  if (hostEnvironment.HOMEDRIVE) env.HOMEDRIVE = hostEnvironment.HOMEDRIVE
+  if (hostEnvironment.HOMEPATH) env.HOMEPATH = hostEnvironment.HOMEPATH
+  if (hostEnvironment.APPDATA) env.APPDATA = hostEnvironment.APPDATA
+  if (hostEnvironment.LOCALAPPDATA) env.LOCALAPPDATA = hostEnvironment.LOCALAPPDATA
+
+  const hostTmp =
+    hostEnvironment.TMPDIR?.trim() || hostEnvironment.TEMP?.trim() || hostEnvironment.TMP?.trim()
+  if (hostTmp) {
+    env.TMPDIR = hostTmp
+    env.TEMP = hostTmp
+    env.TMP = hostTmp
   }
 
   for (const [key, value] of Object.entries(hostEnvironment)) {
     if (typeof value !== 'string') continue
     if (key in env) continue
-    if (!preserveHost && HOST_PROFILE_ENV_KEYS.has(key)) continue
     env[key] = value
   }
 

@@ -1,6 +1,6 @@
 import type { AgentTurnChunk } from '../agent-runtime/types'
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
-import { processHostEnvironmentSource } from '../host-environment'
+import { getRuntimeFeatures } from '../config/runtime-features'
 
 import { streamSandboxedTurnViaSupervisor } from './supervisor-client'
 
@@ -10,6 +10,7 @@ import {
 } from './orchestrator-local'
 import { closeJobCursorSandbox } from './job-cursor-pool'
 import { getSandboxSupervisorManager } from './supervisor-manager'
+import { isSandboxSupervisorWorker } from './process-role'
 import { SandboxError } from './types'
 
 export type { RunSandboxedTurnInput } from './orchestrator-local'
@@ -50,11 +51,8 @@ function abortJobTurns(jobId: string, reason: string): void {
 }
 
 export function shouldUseSandboxSupervisor(): boolean {
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') return false
-
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR_WORKER === '1') return false
-
+  if (!getRuntimeFeatures().sandbox.supervisorEnabled) return false
+  if (isSandboxSupervisorWorker()) return false
   return true
 }
 

@@ -25,8 +25,6 @@ export interface JobEventHub {
   onAnyEvent: (listener: TopicHubListener) => () => void
   /** Force PUT subscriptions now (turn watch must not wait for debounce). */
   flushSubscriptionsNow: () => Promise<void>
-  /** @deprecated Prefer onAnyEvent */
-  onAnyJobEvent: (listener: TopicHubListener) => () => void
 }
 
 export const JobEventHubKey: InjectionKey<JobEventHub> = Symbol('jobEventHub')
@@ -152,9 +150,6 @@ export function provideJobEventHub(): JobEventHub {
     onAnyEvent(listener) {
       globalListeners.add(listener)
       return () => globalListeners.delete(listener)
-    },
-    onAnyJobEvent(listener) {
-      return hub.onAnyEvent(listener)
     }
   }
 
