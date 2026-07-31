@@ -48,18 +48,8 @@ export async function pruneOrphanAttachments(
   return { removed }
 }
 
-export async function pruneStalePausedRuntimeTrees(
-  dataDir: string,
-  _db: AppDatabase,
-  _pausedDays: number
-): Promise<{ removed: number }> {
-  return wipeLegacyRuntimesRoot(dataDir)
-}
-
-export async function pruneCompletedTaskRuntimeTrees(
-  dataDir: string,
-  _db: AppDatabase
-): Promise<{ removed: number }> {
+/** One-shot wipe of leftover data/runtimes (product no longer creates this tree). */
+export async function wipeLegacyProductRuntimes(dataDir: string): Promise<{ removed: number }> {
   return wipeLegacyRuntimesRoot(dataDir)
 }
 

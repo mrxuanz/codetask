@@ -206,15 +206,18 @@ export function sha256Policy(policy) {
 export function createSandboxFixture(prefix = 'codeteam-sandbox-fixture-') {
   const base = mkdtempSync(join(tmpdir(), prefix))
   const workspace = join(base, 'workspace')
-  const runtime = join(base, 'runtime')
+  const scratch = join(base, 'scratch')
   const verifierOutput = join(base, 'verifier-out')
   mkdirSync(workspace, { recursive: true })
-  mkdirSync(runtime, { recursive: true })
+  mkdirSync(scratch, { recursive: true })
   mkdirSync(verifierOutput, { recursive: true })
   return {
     base,
     workspace,
-    runtime,
+    /** Ephemeral OS-temp stand-in (not data/runtimes). */
+    scratch,
+    /** @deprecated alias for scratch */
+    runtime: scratch,
     verifierOutput,
     cleanup() {
       rmSync(base, { recursive: true, force: true })

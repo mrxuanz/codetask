@@ -9,7 +9,6 @@ import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src
 import {
   draftReferences,
   jobArtifacts,
-  jobTasks,
   projects,
   threadJobs,
   threadMessages,
@@ -18,10 +17,10 @@ import {
 import { SettingsStore } from '../../src/server/context/settings-store'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
 import {
-  pruneCompletedTaskRuntimeTrees,
-  pruneStaleThreadAttachmentDirs
+  pruneStaleThreadAttachmentDirs,
+  wipeLegacyProductRuntimes
 } from '../../src/server/retention/janitor'
-import { estimateJobRuntimeBytes, jobTaskRuntimeDir } from '../../src/server/runtime/cleanup'
+import { jobRuntimeDir } from '../../src/server/runtime/cleanup'
 import {
   collectThreadPurgeTargets,
   purgeJobFilesystem,
@@ -244,51 +243,17 @@ test('janitor wipes legacy runtimes tree (no longer per-task)', async () => {
   const db = createIsolatedTestDatabase(dataDir)
   try {
     await seedMinimalJob(db, 'job-running', 'running')
-    await db.insert(jobTasks).values([
-      {
-        jobId: 'job-running',
-        taskId: 'task-completed',
-        title: 'Completed task',
-        sortOrder: 0,
-        status: 'completed'
-      },
-      {
-        jobId: 'job-running',
-        taskId: 'task-running',
-        title: 'Running task',
-        sortOrder: 1,
-        status: 'running'
-      },
-      {
-        jobId: 'job-running',
-        taskId: '../outside-task-root',
-        title: 'Invalid historical task id',
-        sortOrder: 2,
-        status: 'completed'
-      }
-    ])
+    const legacyJobRoot = jobRuntimeDir(dataDir, 'thread-1', 'job-running')
+    mkdirSync(join(legacyJobRoot, 'tasks', 'task-completed', 'opencode', 'cache'), {
+      recursive: true
+    })
+    mkdirSync(join(legacyJobRoot, 'tasks', 'task-running', 'opencode', 'cache'), {
+      recursive: true
+    })
+    writeFileSync(join(legacyJobRoot, 'tasks', 'task-completed', 'opencode', 'cache', 'a.bin'), '1')
+    writeFileSync(join(legacyJobRoot, 'tasks', 'task-running', 'opencode', 'cache', 'b.bin'), '2')
 
-    const completedRuntime = jobTaskRuntimeDir(dataDir, 'thread-1', 'job-running', 'task-completed')
-    const runningRuntime = jobTaskRuntimeDir(dataDir, 'thread-1', 'job-running', 'task-running')
-    mkdirSync(join(completedRuntime, 'opencode', 'cache', 'nested'), { recursive: true })
-    mkdirSync(join(runningRuntime, 'opencode', 'cache'), { recursive: true })
-    const outsideTaskRoot = join(
-      dataDir,
-      'runtimes',
-      'thread-1',
-      'jobs',
-      'job-running',
-      'outside-task-root'
-    )
-    mkdirSync(outsideTaskRoot, { recursive: true })
-    writeFileSync(join(completedRuntime, 'opencode', 'cache', 'nested', 'cache.bin'), '12345')
-    writeFileSync(join(runningRuntime, 'opencode', 'cache', 'cache.bin'), '1234567')
-    writeFileSync(join(outsideTaskRoot, 'keep.bin'), '123')
-
-    // Durable provider state is not under data/runtimes anymore.
-    assert.equal(await estimateJobRuntimeBytes(dataDir, 'thread-1', 'job-running'), 0)
-
-    const result = await pruneCompletedTaskRuntimeTrees(dataDir, db)
+    const result = await wipeLegacyProductRuntimes(dataDir)
 
     assert.equal(result.removed, 1)
     assert.equal(existsSync(join(dataDir, 'runtimes')), false)
