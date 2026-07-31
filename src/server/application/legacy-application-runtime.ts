@@ -122,16 +122,14 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
     if (
       result.expiredArtifacts > 0 ||
       result.orphanAttachments > 0 ||
-      result.staleRuntimes > 0 ||
-      result.completedTaskRuntimes > 0 ||
+      result.legacyRuntimesRemoved > 0 ||
       result.staleAttachmentDirs > 0 ||
-      result.orphanRuntimeTrees > 0 ||
       result.sqliteMaintenance.ran
     ) {
       logger.info('retention startup janitor pass', {
         expiredArtifacts: result.expiredArtifacts,
         orphanAttachments: result.orphanAttachments,
-        completedTaskRuntimes: result.completedTaskRuntimes
+        legacyRuntimesRemoved: result.legacyRuntimesRemoved
       })
     }
   } catch (error: unknown) {

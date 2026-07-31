@@ -29,7 +29,8 @@ export {
   removeThreadAttachmentsDir,
   pruneOrphanAttachments,
   pruneOrphanMessageArtifactDirs,
-  pruneStaleThreadAttachmentDirs
+  pruneStaleThreadAttachmentDirs,
+  wipeLegacyProductRuntimes
 } from './janitor'
 export { collectThreadPurgeTargets, purgeJobFilesystem, purgeThreadFilesystem } from './purge'
 export {

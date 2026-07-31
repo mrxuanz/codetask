@@ -67,6 +67,7 @@ export function collectPolicyReadRoots(policy: SandboxPolicy): string[] {
  *
  * `scratchRoot` is ephemeral OS-temp attestation scratch (wired as native `runtime_root`).
  * SDK/ACP identity stays on host path grants — never a CodeTask data/runtimes tree.
+ * Scratch must not become durable provider HOME/XDG storage.
  */
 export function createSandboxPolicy(input: {
   role: AgentRole

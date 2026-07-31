@@ -104,7 +104,7 @@ function isPathWithin(parent, candidate) {
   return fromParent === '' || (!fromParent.startsWith('..') && !isAbsolute(fromParent))
 }
 
-function providerAuthStatus(prod, provider, runtimeRoot, workspaceRoot) {
+function providerAuthStatus(prod, provider, _scratchRoot, workspaceRoot) {
   const profile = prod.prepareProviderRuntimeProfile(provider)
   return {
     present: profile.diagnostics.authMaterialPresent,
@@ -114,7 +114,7 @@ function providerAuthStatus(prod, provider, runtimeRoot, workspaceRoot) {
   }
 }
 
-function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
+function analyzeStaticProvider(prod, provider, scratchRoot, workspaceRoot) {
   const prepared = prod.prepareProviderRuntimeProfile(provider)
   const readRoots = prepared.hostPathGrants.map((grant) => grant.path)
   const writeRootsFromProfile = prepared.hostPathGrants
@@ -125,23 +125,26 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
   const fullHostHomeGranted = prepared.hostPathGrants.some(
     (grant) => normalizePath(grant.path) === normalizePath(host)
   )
-  const runtimeStatePrivate =
-    isPathWithin(runtimeRoot, prepared.stateRoot) &&
-    ['TMPDIR', 'TMP', 'TEMP'].every((key) => {
-      const value = prepared.environment[key]
-      return !value || isPathWithin(runtimeRoot, value)
-    })
+  // Host-identity: TMP stays on host (or unset); scratch is ephemeral OS-temp only —
+  // provider durable state must NOT be redirected under scratch.
+  const tmpKeys = ['TMPDIR', 'TMP', 'TEMP']
+  const tmpRedirectedIntoScratch = tmpKeys.some((key) => {
+    const value = prepared.environment[key]
+    return Boolean(value) && isPathWithin(scratchRoot, value)
+  })
+  const homeRedirectedIntoScratch =
+    Boolean(prepared.environment.HOME) && isPathWithin(scratchRoot, prepared.environment.HOME)
 
   const policy = prod.createSandboxPolicy
     ? prod.createSandboxPolicy({
         role: 'task-worker',
         workspaceRoot,
-        runtimeRoot,
+        scratchRoot,
         providerReadRoots: readRoots,
         providerWriteRoots: writeRootsFromProfile,
         attachmentReadRoots: []
       })
-    : sandboxPolicyForRole('task-worker', workspaceRoot, runtimeRoot)
+    : sandboxPolicyForRole('task-worker', workspaceRoot, scratchRoot)
 
   const writeRoots =
     policy.filesystem?.allowedWriteRoots ?? policy.filesystem?.allowed_write_roots ?? []
@@ -156,39 +159,36 @@ function analyzeStaticProvider(prod, provider, runtimeRoot, workspaceRoot) {
       CODEX_HOME: prepared.environment.CODEX_HOME ?? null,
       CURSOR_CONFIG_DIR: prepared.environment.CURSOR_CONFIG_DIR ?? null,
       CLAUDE_CONFIG_DIR: prepared.environment.CLAUDE_CONFIG_DIR ?? null,
-      XDG_CONFIG_HOME: prepared.environment.XDG_CONFIG_HOME ?? null
+      XDG_CONFIG_HOME: prepared.environment.XDG_CONFIG_HOME ?? null,
+      XDG_STATE_HOME: prepared.environment.XDG_STATE_HOME ?? null
     },
     hostWriteRoots: hostWrites,
     declaredHostWritesApplied: hostWrites.every((root) =>
       writeRoots.some((policyRoot) => isPathWithin(policyRoot, root))
     ),
     fullHostHomeGranted,
-    runtimeStatePrivate,
+    hostIdentityOk: !tmpRedirectedIntoScratch && !homeRedirectedIntoScratch,
     runtimeIsolated:
       prepared.schemaVersion === 1 &&
       prepared.diagnostics.mode === 'host-identity' &&
-      runtimeStatePrivate &&
+      !tmpRedirectedIntoScratch &&
+      !homeRedirectedIntoScratch &&
       !fullHostHomeGranted
   }
 }
 
-function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, provider) {
+function buildProductionSandboxEnv(prod, scratchRoot, workspaceRoot, provider) {
   const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, {
     workspaceRoot
   })
-  const dataDir =
-    typeof prod.resolveSandboxDataDir === 'function'
-      ? prod.resolveSandboxDataDir()
-      : join(process.cwd(), 'data')
   const envRecord = prod.buildSandboxEnv({
-    runtimeRoot,
-    dataDir,
+    scratchRoot,
     providerEnv: runtimeProfile.environment
   })
-  return { envRecord, runtimeProfile, dataDir }
+  return { envRecord, runtimeProfile }
 }
 
-function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, provider) {
+function buildProductionPolicy(prod, scratchRoot, workspaceRoot, provider) {
   const runtimeProfile = prod.prepareProviderRuntimeProfile(provider, {
     workspaceRoot
   })
@@ -200,13 +200,13 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, provider) {
     return prod.createSandboxPolicy({
       role: 'task-worker',
       workspaceRoot,
-      runtimeRoot,
+      scratchRoot,
       providerReadRoots,
       providerWriteRoots,
       attachmentReadRoots: []
     })
   }
-  return sandboxPolicyForRole('task-worker', workspaceRoot, runtimeRoot)
+  return sandboxPolicyForRole('task-worker', workspaceRoot, scratchRoot)
 }
 
 function ensureWindowsSetup(native) {
@@ -417,15 +417,14 @@ function startProbeMcpServer(toolName = 'report_task_result') {
   })
 }
 
-async function runProviderLiveCase(native, prod, provider, workspace, runtimeRoot) {
-  const policy = buildProductionPolicy(prod, runtimeRoot, workspace, provider)
-  const envBundle = buildProductionSandboxEnv(prod, runtimeRoot, workspace, provider)
+async function runProviderLiveCase(native, prod, provider, workspace, scratchRoot) {
+  const policy = buildProductionPolicy(prod, scratchRoot, workspace, provider)
+  const envBundle = buildProductionSandboxEnv(prod, scratchRoot, workspace, provider)
 
   const workerInput = {
     provider,
     role: 'task-worker',
     cwd: workspace,
-    runtimeRoot,
     prompt: 'Reply with exactly: pong',
     systemPrompt: 'Sandbox diagnostic agent. Follow instructions exactly.'
   }
@@ -438,15 +437,14 @@ async function runProviderLiveCase(native, prod, provider, workspace, runtimeRoo
   })
 }
 
-async function runProviderMcpCase(native, prod, provider, workspace, runtimeRoot, mcpUrl) {
-  const policy = buildProductionPolicy(prod, runtimeRoot, workspace, provider)
-  const envBundle = buildProductionSandboxEnv(prod, runtimeRoot, workspace, provider)
+async function runProviderMcpCase(native, prod, provider, workspace, scratchRoot, mcpUrl) {
+  const policy = buildProductionPolicy(prod, scratchRoot, workspace, provider)
+  const envBundle = buildProductionSandboxEnv(prod, scratchRoot, workspace, provider)
 
   const workerInput = {
     provider,
     role: 'task-worker',
     cwd: workspace,
-    runtimeRoot,
     prompt: `Call codeteam-manager report_task_result now with status "completed". Then reply: mcp-ok`,
     systemPrompt: 'Sandbox diagnostic agent. You must call MCP tools when asked.',
     mcpUrl,
@@ -461,7 +459,7 @@ async function runProviderMcpCase(native, prod, provider, workspace, runtimeRoot
   })
 }
 
-function listRuntimeStateFiles(runtimeRoot, max = 40) {
+function listScratchStateFiles(scratchRoot, max = 40) {
   const found = []
   function walk(dir, depth) {
     if (depth > 6 || found.length >= max) return
@@ -477,11 +475,11 @@ function listRuntimeStateFiles(runtimeRoot, max = 40) {
       if (entry.isDirectory()) {
         walk(full, depth + 1)
       } else if (entry.isFile() && /\.(json|toml)$/i.test(entry.name)) {
-        found.push(full.slice(runtimeRoot.length + 1))
+        found.push(full.slice(scratchRoot.length + 1))
       }
     }
   }
-  walk(runtimeRoot, 0)
+  walk(scratchRoot, 0)
   return found
 }
 
@@ -542,17 +540,17 @@ async function main() {
     if (!prod) {
       report.failures.push('Production sandbox module missing — run npm run build')
     } else {
-      const runtimeRoot = mkdtempSync(join(tmpdir(), 'codetask-provider-static-'))
+      const scratchRoot = mkdtempSync(join(tmpdir(), 'codetask-provider-static-'))
       try {
         for (const provider of providers) {
           report.static[provider] = analyzeStaticProvider(
             prod,
             provider,
-            runtimeRoot,
+            scratchRoot,
             workspacePath
           )
           if (!report.static[provider].runtimeIsolated) {
-            report.failures.push(`${provider}: static runtime isolation check failed`)
+            report.failures.push(`${provider}: static host-identity isolation check failed`)
           }
         }
         if (prod.buildCursorAcpCliArgs) {
@@ -563,7 +561,7 @@ async function main() {
         }
         log('static', 'checks done', report.static)
       } finally {
-        rmSync(runtimeRoot, { recursive: true, force: true })
+        rmSync(scratchRoot, { recursive: true, force: true })
       }
     }
   }
@@ -585,13 +583,13 @@ async function main() {
         ensureWindowsSetup(native)
 
         const base = mkdtempSync(join(tmpdir(), 'codetask-provider-live-'))
-        const runtimeRoot = join(base, 'runtime')
-        mkdirSync(runtimeRoot, { recursive: true })
+        const scratchRoot = join(base, 'scratch')
+        mkdirSync(scratchRoot, { recursive: true })
 
         for (const provider of providers) {
-          const providerRuntimeRoot = join(runtimeRoot, provider)
-          mkdirSync(providerRuntimeRoot, { recursive: true })
-          const auth = providerAuthStatus(prod, provider, providerRuntimeRoot, workspacePath)
+          const providerScratch = join(scratchRoot, provider)
+          mkdirSync(providerScratch, { recursive: true })
+          const auth = providerAuthStatus(prod, provider, providerScratch, workspacePath)
           report.live[provider] = { auth, hello: null, mcp: null }
 
           if (!auth.present) {
@@ -608,7 +606,7 @@ async function main() {
               prod,
               provider,
               workspacePath,
-              providerRuntimeRoot
+              providerScratch
             )
             report.live[provider].hello = {
               ...summarizeChunks(hello),
@@ -637,7 +635,7 @@ async function main() {
               prod,
               provider,
               workspacePath,
-              providerRuntimeRoot,
+              providerScratch,
               probe.url
             )
             report.live[provider].mcp = {
@@ -662,7 +660,7 @@ async function main() {
             await probe.close()
           }
 
-          report.live[provider].runtimeStateFiles = listRuntimeStateFiles(providerRuntimeRoot)
+          report.live[provider].scratchStateFiles = listScratchStateFiles(providerScratch)
           report.live[provider].hostPollution = detectHostPollution(provider, hostSnapshot)
           if (report.live[provider].hostPollution.length > 0) {
             report.failures.push(
@@ -671,7 +669,7 @@ async function main() {
           }
         }
 
-        report.live.runtimeRoot = runtimeRoot
+        report.live.scratchRoot = scratchRoot
       }
     }
   }

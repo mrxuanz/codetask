@@ -249,43 +249,30 @@ function loadProductionSandboxModule() {
   return null
 }
 
-function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, coreCode = 'codex') {
+function buildProductionSandboxEnv(prod, scratchRoot, workspaceRoot, coreCode = 'codex') {
   const runtimeProfile = prod.prepareProviderRuntimeProfile(coreCode, {
     workspaceRoot
   })
-  const dataDir =
-    typeof prod.resolveSandboxDataDir === 'function'
-      ? prod.resolveSandboxDataDir()
-      : join(process.cwd(), 'data')
   const envRecord = prod.buildSandboxEnv({
-    runtimeRoot,
-    dataDir,
+    scratchRoot,
     providerEnv: runtimeProfile.environment
   })
-  return { envRecord, runtimeProfile, dataDir }
+  return { envRecord, runtimeProfile }
 }
 
-function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = []) {
+function buildProductionPolicy(prod, scratchRoot, workspaceRoot, readRoots = []) {
   const runtimeProfile = prod.prepareProviderRuntimeProfile('codex', {
     workspaceRoot
   })
-  const dataDir =
-    typeof prod.resolveSandboxDataDir === 'function'
-      ? prod.resolveSandboxDataDir()
-      : join(process.cwd(), 'data')
-  const providerReadRoots =
-    typeof prod.mergeProviderReadRoots === 'function' &&
-    typeof prod.resolveProviderReadRoots === 'function'
-      ? prod.mergeProviderReadRoots(prod.resolveProviderReadRoots('codex'), [
-          ...runtimeProfile.hostPathGrants.map((grant) => grant.path),
-          dataDir
-        ])
-      : []
+  const providerReadRoots = [
+    ...runtimeProfile.hostPathGrants.map((grant) => grant.path),
+    ...readRoots
+  ]
   if (typeof prod.createSandboxPolicy === 'function') {
     return prod.createSandboxPolicy({
       role: 'task-worker',
       workspaceRoot,
-      runtimeRoot,
+      scratchRoot,
       providerReadRoots,
       providerWriteRoots: runtimeProfile.hostPathGrants
         .filter((grant) => grant.access === 'read-write')
@@ -293,21 +280,21 @@ function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = [])
       attachmentReadRoots: readRoots
     })
   }
-  return sandboxPolicyForRole('task-worker', workspaceRoot, runtimeRoot)
+  return sandboxPolicyForRole('task-worker', workspaceRoot, scratchRoot)
 }
 
-function buildMinimalSandboxEnv(runtimeRoot) {
+function buildMinimalSandboxEnv(scratchRoot) {
+  const hostProfile = process.env.USERPROFILE ?? process.env.HOME ?? ''
   const env = {
     PATH: process.env.PATH ?? '',
     LANG: process.env.LANG ?? 'C.UTF-8',
     CODETASK_OUTER_SANDBOX: '1',
-    CODETASK_RUNTIME_ROOT: runtimeRoot,
-    HOME: runtimeRoot,
-    TMPDIR: join(runtimeRoot, 'tmp'),
-    TEMP: join(runtimeRoot, 'tmp'),
-    TMP: join(runtimeRoot, 'tmp')
+    HOME: hostProfile || scratchRoot,
+    TMPDIR: join(scratchRoot, 'tmp'),
+    TEMP: join(scratchRoot, 'tmp'),
+    TMP: join(scratchRoot, 'tmp')
   }
-  const hostProfile = process.env.USERPROFILE ?? process.env.HOME
+  mkdirSync(join(scratchRoot, 'tmp'), { recursive: true })
   if (hostProfile) env.CODETASK_SANDBOX_HOST_PROFILE = hostProfile
   for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY']) {
     if (process.env[key]) env[key] = process.env[key]
@@ -315,12 +302,11 @@ function buildMinimalSandboxEnv(runtimeRoot) {
   if (process.platform === 'win32') {
     env.ELECTRON_RUN_AS_NODE = '1'
     env.ELECTRON_DISABLE_CRASH_REPORTER = '1'
-    env.USERPROFILE = hostProfile ?? runtimeRoot
-    env.APPDATA = join(hostProfile ?? runtimeRoot, 'AppData', 'Roaming')
-    env.LOCALAPPDATA = join(hostProfile ?? runtimeRoot, 'AppData', 'Local')
+    env.USERPROFILE = hostProfile || scratchRoot
+    env.APPDATA = join(hostProfile || scratchRoot, 'AppData', 'Roaming')
+    env.LOCALAPPDATA = join(hostProfile || scratchRoot, 'AppData', 'Local')
     const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')
     env.CODEX_HOME = codexHome
-    env.CODETASK_PROVIDER_AUTH_MODE = 'host-identity'
   }
   return env
 }

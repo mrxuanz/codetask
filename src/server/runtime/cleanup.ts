@@ -18,15 +18,6 @@ function legacyJobRuntimeDir(dataDir: string, threadId: string, jobId: string): 
   return join(legacyThreadRuntimeDir(dataDir, threadId), 'jobs', jobId)
 }
 
-function legacyJobTaskRuntimeDir(
-  dataDir: string,
-  threadId: string,
-  jobId: string,
-  taskId: string
-): string {
-  return join(legacyJobRuntimeDir(dataDir, threadId, jobId), 'tasks', taskId)
-}
-
 /** @deprecated Path helpers retained for tests that assert legacy wipe targets. */
 export function threadRuntimeDir(dataDir: string, threadId: string): string {
   return legacyThreadRuntimeDir(dataDir, threadId)
@@ -35,16 +26,6 @@ export function threadRuntimeDir(dataDir: string, threadId: string): string {
 /** @deprecated */
 export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string): string {
   return legacyJobRuntimeDir(dataDir, threadId, jobId)
-}
-
-/** @deprecated */
-export function jobTaskRuntimeDir(
-  dataDir: string,
-  threadId: string,
-  jobId: string,
-  taskId: string
-): string {
-  return legacyJobTaskRuntimeDir(dataDir, threadId, jobId, taskId)
 }
 
 export async function removeDirectoryIfExists(path: string): Promise<boolean> {
@@ -106,6 +87,15 @@ export function isDeferredCleanupResult(
   return result === 'deferred_active' || result === 'deferred_slot'
 }
 
+function legacyJobTaskRuntimeDir(
+  dataDir: string,
+  threadId: string,
+  jobId: string,
+  taskId: string
+): string {
+  return join(legacyJobRuntimeDir(dataDir, threadId, jobId), 'tasks', taskId)
+}
+
 export async function cleanupJobTaskRuntimeTree(
   dataDir: string,
   threadId: string,
@@ -151,33 +141,11 @@ export async function cleanupJobRuntimeTreeIfTerminal(
   return cleanupJobRuntimeTree(dataDir, threadId, jobId)
 }
 
-/** @deprecated Prefer wipeLegacyRuntimesRoot — kept for janitor/startup call sites. */
+/** Wipe leftover data/runtimes (no longer created by the product). */
 export async function pruneOrphanRuntimeTrees(
   dataDir: string
 ): Promise<{ removedPaths: string[] }> {
   const result = await wipeLegacyRuntimesRoot(dataDir)
   if (result.removed === 0) return { removedPaths: [] }
   return { removedPaths: [legacyRuntimesRoot(dataDir)] }
-}
-
-/** Durable provider state is not under data/runtimes anymore. */
-export async function estimateJobRuntimeBytes(
-  _dataDir: string,
-  _threadId: string,
-  _jobId: string
-): Promise<number> {
-  return 0
-}
-
-export interface RuntimeSummary {
-  changedFiles: string[]
-  logTail: string | null
-}
-
-export async function extractRuntimeSummary(
-  _dataDir: string,
-  _threadId: string,
-  _jobId: string
-): Promise<RuntimeSummary | null> {
-  return null
 }
