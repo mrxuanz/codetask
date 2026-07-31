@@ -7,11 +7,22 @@ import test from 'node:test'
  * Provider subsystem process.env allowlist (PRU-12-01).
  * Only the server-level host snapshot boundary may read process.env.
  * Forbidden: CodeTask Provider config keys (BIN / MODEL / Cursor endpoint / approve).
+ * Product switches live on AppConfig / RuntimeFeatures — never CODETASK_* env.
  */
 
-const SCAN_ROOTS = [join(process.cwd(), 'src/server')]
+const SCAN_ROOTS = [join(process.cwd(), 'src/server'), join(process.cwd(), 'src/sandbox')]
 
 const ALLOWED_PROCESS_ENV_FILES = new Set([
+  join(process.cwd(), 'src/server/host-environment.ts')
+])
+
+/** Files that may mention historical CODETASK_* names only as strip/denylist literals. */
+const ALLOWED_CODETASK_KEY_LITERAL_FILES = new Set([
+  join(process.cwd(), 'src/server/providers/environment.ts'),
+  join(process.cwd(), 'src/server/shell-child-environment.ts'),
+  join(process.cwd(), 'src/server/agent-runtime/env.ts'),
+  join(process.cwd(), 'src/server/providers/launch-env.ts'),
+  join(process.cwd(), 'src/server/providers/index.ts'),
   join(process.cwd(), 'src/server/host-environment.ts')
 ])
 
@@ -27,6 +38,15 @@ function collectFiles(entry: string): string[] {
   return files
 }
 
+function isCommentOrDoc(trimmed: string): boolean {
+  return (
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('/**') ||
+    trimmed.startsWith('*') ||
+    trimmed.startsWith('/*')
+  )
+}
+
 test('server runtime reads process.env only at the host environment boundary', () => {
   const offenders: Array<{ file: string; line: number; text: string }> = []
 
@@ -38,9 +58,7 @@ test('server runtime reads process.env only at the host environment boundary', (
         const trimmed = text.trim()
         if (
           /process\.env\b/.test(text) &&
-          !trimmed.startsWith('//') &&
-          !trimmed.startsWith('/**') &&
-          !trimmed.startsWith('*') &&
+          !isCommentOrDoc(trimmed) &&
           !ALLOWED_PROCESS_ENV_FILES.has(file)
         ) {
           offenders.push({ file, line: i + 1, text: trimmed })
@@ -71,6 +89,33 @@ test('Provider configuration no longer exposes CODETASK env entry points', () =>
   assert.deepEqual(offenders, [])
 })
 
+test('product code does not read CODETASK_* as project variables', () => {
+  const readPattern =
+    /(?:process\.env|snapshot\(\)|hostEnv|hostEnvironment)\s*(?:\.\s*CODETASK_[A-Z0-9_]+|\[\s*['`]CODETASK_[A-Z0-9_]+['`]\s*\])/
+  const offenders: Array<{ file: string; line: number; text: string }> = []
+
+  for (const root of SCAN_ROOTS) {
+    for (const file of collectFiles(root)) {
+      if (ALLOWED_CODETASK_KEY_LITERAL_FILES.has(file)) continue
+      const lines = readFileSync(file, 'utf8').split(/\r?\n/)
+      for (let i = 0; i < lines.length; i++) {
+        const text = lines[i] ?? ''
+        const trimmed = text.trim()
+        if (isCommentOrDoc(trimmed)) continue
+        if (readPattern.test(text)) {
+          offenders.push({ file, line: i + 1, text: trimmed })
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    offenders.map((o) => `${o.file}:${o.line}: ${o.text}`).join('\n') || 'no offenders'
+  )
+})
+
 test('role-workers do not use CODETASK_OUTER_SANDBOX as a module decision source', () => {
   for (const relative of [
     'src/sandbox/role-worker.ts',
@@ -83,6 +128,7 @@ test('role-workers do not use CODETASK_OUTER_SANDBOX as a module decision source
       /process\.env\.CODETASK_OUTER_SANDBOX/,
       `${relative} must not read CODETASK_OUTER_SANDBOX`
     )
+    assert.doesNotMatch(source, /CODETASK_WORKER_INPUT/)
     assert.match(source, /outerSandbox:\s*true/)
   }
 })

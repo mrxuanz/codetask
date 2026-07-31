@@ -77,9 +77,9 @@ export class OpenCodeDriver implements AgentDriver {
       'G4-003':
         'Complete staged collection like G4-002, then inspect draft fields via codetask_get_thread_drafts and report which required fields are present.',
       'G4-012':
-        'Complete staged collection, then codetask_confirm_draft and codetask_confirm_draft_final. Verify latest job/planning exists, then report.',
+        'Complete staged collection, then codetask_update_draft_execution_config (from Runtime context), codetask_confirm_draft, and codetask_confirm_draft_final. Verify latest job/planning exists, then report.',
       'DRAFT-MULTITURN-001':
-        'Full draft multiturn: unlock all phases one-by-one, send turns, confirm draft and confirm-final, then report.'
+        'Full draft multiturn: unlock all phases one-by-one, send turns, set draft executionConfig, confirm draft and confirm-final, then report.'
     }
 
     const prompt = [
@@ -89,6 +89,11 @@ export class OpenCodeDriver implements AgentDriver {
       `- caseId: ${input.caseId}`,
       `- workspaceRoot to use when creating project: ${input.workspaceRoot}`,
       `- conversationCore to use for every CodeTask thread: ${conversationCore}`,
+      `- draft executionConfig (per-run, NOT global settings):`,
+      `  - plannerCoreCode: ${input.executionConfig.plannerCoreCode}`,
+      `  - sliceVerifierCoreCode: ${input.executionConfig.sliceVerifierCoreCode}`,
+      `  - milestoneVerifierCoreCode: ${input.executionConfig.milestoneVerifierCoreCode}`,
+      `- Before codetask_confirm_draft_final, call codetask_update_draft_execution_config with the three cores above.`,
       input.caseId.startsWith('G4') || input.caseId.startsWith('DRAFT')
         ? '- Use case_next_fixture for user messages; do not invent later phases early.'
         : `- user message for the conversation turn: ${message}`,

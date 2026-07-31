@@ -86,8 +86,7 @@ export async function startDedicatedServer(options: {
   const baseUrl = `http://${host}:${port}`
 
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    CODETASK_SANDBOX_READY_MAX_ATTEMPTS: process.env.CODETASK_SANDBOX_READY_MAX_ATTEMPTS ?? '1'
+    ...process.env
   }
   delete env.DISPLAY
   delete env.WAYLAND_DISPLAY

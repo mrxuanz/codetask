@@ -21,17 +21,9 @@ export type HubEnvelope = {
   seq: number
 } & HubEvent
 
-/** @deprecated Use HubEnvelope */
-export type JobHubEnvelope = HubEnvelope
-
 export interface HubSubscriptionsDto {
   connectionId: string
   topics: HubTopic[]
-}
-
-/** @deprecated Use HubSubscriptionsDto */
-export interface JobHubSubscriptionsDto {
-  jobIds: string[]
 }
 
 export function jobTopic(jobId: string): HubTopic {

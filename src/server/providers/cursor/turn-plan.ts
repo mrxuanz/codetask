@@ -95,7 +95,7 @@ export function buildCursorAcpCliArgs(input: {
 }
 
 function buildCursorHostEnv(runtimeRoot: string): Record<string, string> {
-  const env = buildProviderChildEnv(runtimeRoot, { preserveHostIdentity: true })
+  const env = buildProviderChildEnv(runtimeRoot)
   stripElectronInheritedEnv(env)
   // Do not set CURSOR_DATA_DIR — Cursor ACP uses host defaults (same as t3code).
   return env

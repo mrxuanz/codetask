@@ -7,6 +7,8 @@ import type {
 } from '../server/agent-runtime/types'
 import { formatSdkTurnError } from '../server/agent-runtime/errors'
 
+const INPUT_FILE_ARG_PREFIX = '--input-file='
+
 function writeChunk(role: AgentTurnInput['role'], chunk: AgentTurnChunk): void {
   const compact = compactTurnChunkForIpc(role, chunk)
   if (!compact) return
@@ -28,14 +30,11 @@ async function runTurn(provider: AgentTurnProvider, input: AgentTurnInput): Prom
 }
 
 async function readInput(): Promise<AgentTurnInput> {
-  const inputFile = process.env.CODETASK_WORKER_INPUT_FILE?.trim()
-  const envInput = process.env.CODETASK_WORKER_INPUT?.trim()
+  const fileArg = process.argv.find((arg) => arg.startsWith(INPUT_FILE_ARG_PREFIX))
   let raw = ''
-  if (inputFile) {
+  if (fileArg) {
     const { readFile } = await import('fs/promises')
-    raw = (await readFile(inputFile, 'utf8')).trim()
-  } else if (envInput) {
-    raw = envInput
+    raw = (await readFile(fileArg.slice(INPUT_FILE_ARG_PREFIX.length), 'utf8')).trim()
   } else {
     const chunks: Buffer[] = []
     for await (const chunk of process.stdin) {
@@ -44,9 +43,7 @@ async function readInput(): Promise<AgentTurnInput> {
     raw = Buffer.concat(chunks).toString('utf8').trim()
   }
   if (!raw) {
-    throw new Error(
-      'role-worker: empty input (stdin, CODETASK_WORKER_INPUT, or CODETASK_WORKER_INPUT_FILE)'
-    )
+    throw new Error('role-worker: empty input (stdin or --input-file=)')
   }
   return JSON.parse(raw) as AgentTurnInput
 }

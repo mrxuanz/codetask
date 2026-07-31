@@ -1,12 +1,12 @@
 import { existsSync } from 'fs'
 import { spawnSync } from 'child_process'
-import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { SandboxBackend, SandboxBootstrapInfo } from './types'
 import { isOuterSandboxEnabled } from './outer-sandbox-flag'
 import { getSandboxSupervisorManager } from './supervisor-manager'
 import { tryLoadSandboxNative } from './native'
 import { fixedSandboxHome, sandboxSetupIsComplete } from './windows-bootstrap'
+import { getRuntimeFeatures } from '../config/runtime-features'
 
 export type SandboxHealthStatus = 'ready' | 'degraded' | 'unavailable' | 'disabled'
 
@@ -118,8 +118,7 @@ function checkWindowsSetup(dataDir?: string): SandboxHealthCheck {
 }
 
 function checkSupervisor(): SandboxHealthCheck {
-  const hostEnv = processHostEnvironmentSource.snapshot()
-  if (hostEnv.CODETASK_SANDBOX_SUPERVISOR === '0') {
+  if (!getRuntimeFeatures().sandbox.supervisorEnabled) {
     return { ok: true, message: 'supervisor disabled (direct native path)' }
   }
   const manager = getSandboxSupervisorManager()
@@ -156,7 +155,7 @@ export function getSandboxHealth(dataDir?: string): SandboxHealthReport {
       status: 'disabled',
       platform: process.platform,
       outerSandboxEnabled: false,
-      native: { ok: true, message: 'CODETASK_DISABLE_OUTER_SANDBOX=1 (desktop only)' },
+      native: { ok: true, message: 'outer sandbox disabled via AppConfig (desktop only)' },
       warnings: ['Outer sandbox is disabled; file-role execution will be rejected']
     }
   }

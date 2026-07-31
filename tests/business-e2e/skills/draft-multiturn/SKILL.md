@@ -19,8 +19,11 @@ Drive a **human-like collect state machine** (do not blast every fixture then co
       - `codetask_list_messages` → whether the assistant is still asking
    4. If still collecting / summary empty / gaps remain → unlock the next fixture phase that fills the gap (fixtures stay ordered; never invent later phases).
    5. If fixtures are exhausted but draft is still collecting → send at most a few propose nudges asking for `propose_task_draft`.
-4. Only when the draft is reviewable (`collecting=false` with non-empty summary, or wizard left `collect`): `codetask_confirm_draft` then `codetask_confirm_draft_final` when the case requires it.
-5. Record checkpoints: `project_created`, `thread_created`, `phase_<name>`, `draft_ready` as applicable.
+4. Only when the draft is reviewable (`collecting=false` with non-empty summary, or wizard left `collect`):
+   1. `codetask_confirm_draft`
+   2. **`codetask_update_draft_execution_config`** with the exact `plannerCoreCode` / `sliceVerifierCoreCode` / `milestoneVerifierCoreCode` from Runtime context (this is the **per-draft** run config that freezes into the execution tree — do **not** use global settings)
+   3. `codetask_confirm_draft_final` when the case requires it
+5. Record checkpoints: `project_created`, `thread_created`, `phase_<name>`, `draft_ready`, `execution_config_set` as applicable.
 
 ## Allowed tools
 
@@ -34,6 +37,7 @@ Follow the case skill/runtime prompt. Typical: project_created, thread_created, 
 
 - Do not invent later fixture phases before `case_next_fixture` unlocks them
 - Do not confirm while `collecting=true` / empty summary / wizard still in collect
+- Do not skip `codetask_update_draft_execution_config` before `codetask_confirm_draft_final`
 - Do not write workspace business files yourself
 - Do not call raw HTTP or invent Bearer tokens
 - Do not report completed if required tools were skipped

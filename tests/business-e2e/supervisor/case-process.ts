@@ -22,6 +22,12 @@ export type CaseWorkerInput = {
   resultPath: string
   /** Selected SUT conversation SDK / core used for thread creation and HTML naming. */
   conversationCore: string
+  /** Per-draft planner/verifier cores for this case (product executionConfig). */
+  executionConfig: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  }
   expectedHtmlFile?: string
   probeMcpUrl?: string
   probeMcpName?: string

@@ -3,6 +3,11 @@ import { join } from 'node:path'
 import { PublicApiClient } from '../api/client'
 import * as ops from '../api/operations'
 import { resolveProfile } from '../config/profiles'
+import {
+  draftExecutionConfigFromRoles,
+  executionProfileCoresMatch,
+  type DraftExecutionConfig
+} from '../config/execution-config'
 import { PROBE_SERVER_NAME, resolveProviderQueue } from '../config/providers'
 import { startSettingsMcpProbe } from '../probes/settings-mcp-probe'
 import { MANIFESTS, resolveCaseIds, type CaseManifest } from '../cases/catalog'
@@ -220,7 +225,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
         continue
       }
 
-      progress('supervisor', 'settings.control_plane', {
+      progress('supervisor', 'provider.slot', {
         provider: slot.alias,
         core: slot.core,
         profile: profile.name
@@ -480,25 +485,12 @@ async function executeCase(ctx: {
     await ensureAuthenticated(client, vault, server)
   }
 
-  progress(scopeLabelForCaseId(manifest.caseId), 'settings.control_plane', {
+  progress(scopeLabelForCaseId(manifest.caseId), 'draft.execution_config.prepare', {
     planner: profile.roleProviders.planner,
     slice: profile.roleProviders.sliceVerifier,
     milestone: profile.roleProviders.milestoneVerifier
   })
-  await ops.putControlPlanePolicies(client.withCase(caseRunId), {
-    plannerCoreCode: profile.roleProviders.planner,
-    sliceVerifierCoreCode: profile.roleProviders.sliceVerifier,
-    milestoneVerifierCoreCode: profile.roleProviders.milestoneVerifier
-  })
-  const controlPlane = await ops.getControlPlanePolicies(client.withCase(caseRunId))
-  ledger.record({
-    caseRunId,
-    operationId: 'settings.control_plane.verified',
-    transport: 'http',
-    routeOrTool: '/api/settings/control-plane',
-    ok: true,
-    detail: controlPlane
-  })
+  const executionConfig = draftExecutionConfigFromRoles(profile.roleProviders)
 
   const workspaceRoot = join(layout.workspaces, caseRunId)
   if (manifest.workspaceFixture) {
@@ -548,7 +540,8 @@ async function executeCase(ctx: {
     caseId: manifest.caseId,
     allowedTools: manifest.allowedTools,
     workspaceRoot,
-    fixtureState
+    fixtureState,
+    executionConfig
   })
 
   const conversationCore = profile.roleProviders.conversation
@@ -564,7 +557,8 @@ async function executeCase(ctx: {
     // <=0: unbounded case wait (business API terminal). Positive = explicit ceiling.
     timeoutMs: manifest.timeoutMs ?? 0,
     noTimeout: Boolean(noTimeout),
-    ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {})
+    ...(expectedHtmlFile ? { expectedHtmlFile, conversationCore } : {}),
+    executionConfig
   })
   const workerResult = await runCaseWorker(
     {
@@ -581,6 +575,7 @@ async function executeCase(ctx: {
       noTimeout,
       resultPath,
       conversationCore,
+      executionConfig,
       expectedHtmlFile,
       probeMcpUrl,
       probeMcpName
@@ -600,7 +595,8 @@ async function executeCase(ctx: {
     registry,
     artifacts,
     expectedHtmlFile,
-    expectedThreadCore: conversationCore
+    expectedThreadCore: conversationCore,
+    expectedExecutionConfig: executionConfig
   })
 
   const agentReportedCompleted = Boolean(
@@ -870,6 +866,7 @@ async function buildOracleResults(input: {
   artifacts: { projectId?: string; threadId?: string; turnId?: string }
   expectedHtmlFile?: string
   expectedThreadCore: string
+  expectedExecutionConfig: DraftExecutionConfig
 }): Promise<OracleResult[]> {
   const results: OracleResult[] = []
   results.push(runAgentReportOracle(input.capability))
@@ -908,6 +905,20 @@ async function buildOracleResults(input: {
     )
   }
 
+  if (
+    input.artifacts.threadId &&
+    input.manifest.allowedTools.includes('codetask_confirm_draft_final') &&
+    input.manifest.requiredOperations.includes('mcp.codetask_confirm_draft_final')
+  ) {
+    results.push(
+      await runExecutionProfileOracle({
+        client: input.client,
+        threadId: input.artifacts.threadId,
+        expected: input.expectedExecutionConfig
+      })
+    )
+  }
+
   if (input.manifest.caseId === 'G6-001' || input.manifest.caseId === 'G6-002') {
     const workspaceRoot = input.capability?.workspaceRoot
     if (workspaceRoot) {
@@ -937,6 +948,47 @@ async function buildOracleResults(input: {
   }
 
   return results
+}
+
+async function runExecutionProfileOracle(input: {
+  client: PublicApiClient
+  threadId: string
+  expected: DraftExecutionConfig
+}): Promise<OracleResult> {
+  try {
+    const job = await ops.getLatestJob(input.client, input.threadId)
+    if (!job) {
+      return {
+        name: 'execution_profile_matches',
+        passed: false,
+        detail: { reason: 'job_missing', expected: input.expected }
+      }
+    }
+    const profile = job.executionProfile
+    const passed = executionProfileCoresMatch(profile, input.expected)
+    return {
+      name: 'execution_profile_matches',
+      passed,
+      detail: {
+        expected: input.expected,
+        actual: profile
+          ? {
+              plannerCoreCode: (profile as Record<string, unknown>).plannerCoreCode,
+              sliceVerifierCoreCode: (profile as Record<string, unknown>).sliceVerifierCoreCode,
+              milestoneVerifierCoreCode: (profile as Record<string, unknown>)
+                .milestoneVerifierCoreCode
+            }
+          : null,
+        jobId: job.id ?? job.jobId
+      }
+    }
+  } catch (error) {
+    return {
+      name: 'execution_profile_matches',
+      passed: false,
+      detail: { reason: String(error), expected: input.expected }
+    }
+  }
 }
 
 async function runNotesSearchFileOracle(workspaceRoot: string): Promise<OracleResult> {

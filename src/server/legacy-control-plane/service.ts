@@ -13,8 +13,6 @@ import {
 import { isDraftEditable } from '../conversation/draft/status'
 import { saveThreadAttachment } from '../conversation/attachments'
 import { getMessage, listMessages, updateMessagePayload } from '../conversation/messages'
-import { getThreadRow } from '../threads/service'
-import type { SavedJobPlan } from '../planner/plan-types'
 import { PLAN_WORKSPACE_STATUSES, TASK_LIST_JOB_STATUSES } from './constants'
 import { getAppContext } from '../bootstrap'
 import { signAssetUrlsInValue } from '../auth/sign-asset-url'
@@ -554,34 +552,6 @@ export async function launchJobFromDraft(
   return result.job
 }
 
-/** @deprecated Prefer commitDesignPlanReady — kept as a thin facade for callers. */
-export async function commitPlanReadyFenced(
-  jobId: string,
-  runId: string,
-  savedPlan: SavedJobPlan,
-  counts: { milestones: number; slices: number; tasks: number }
-): Promise<boolean> {
-  const db = getDb()
-  const rows = await db.select().from(threadJobs).where(eq(threadJobs.id, jobId)).limit(1)
-  const job = rows[0]
-  let phaseAdvance:
-    | { username: string; threadId: string; coreCode: string; draftMessageId: string }
-    | undefined
-  if (job) {
-    const threadRow = await getThreadRow(job.username, job.threadId)
-    if (threadRow) {
-      phaseAdvance = {
-        username: job.username,
-        threadId: job.threadId,
-        coreCode: threadRow.coreCode,
-        draftMessageId: job.draftMessageId
-      }
-    }
-  }
-  const { commitDesignPlanReady } = await import('../design-session/planner')
-  return commitDesignPlanReady(jobId, runId, savedPlan, counts, phaseAdvance)
-}
-
 /** Single planning entry: always scheduleDesignSessionPlanning → runDesignPlanner. */
 export function scheduleJobPlanning(
   username: string,
@@ -599,18 +569,6 @@ export function scheduleJobPlanning(
 export async function retryJobPlanning(username: string, jobId: string): Promise<ThreadJobDto> {
   const { retryDesignSessionPlanning } = await import('../design-session/planner')
   return retryDesignSessionPlanning(username, jobId)
-}
-
-/** @deprecated Prefer pushDesignPlanningProgressFenced — thin facade. */
-export async function pushPlanningProgressFenced(
-  jobId: string,
-  runId: string,
-  done: number,
-  partialPlan: SavedJobPlan,
-  planOutline: import('../planner/plan-types').PlannerRegisteredPlan
-): Promise<void> {
-  const { pushDesignPlanningProgressFenced } = await import('../design-session/planner')
-  return pushDesignPlanningProgressFenced(jobId, runId, done, partialPlan, planOutline)
 }
 
 export async function getTaskEvidenceDetailForUser(input: {
