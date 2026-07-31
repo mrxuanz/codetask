@@ -207,7 +207,7 @@ export async function runRetentionJanitorPass(): Promise<{
     pruneCompletedTaskRuntimeTrees(ctx.dataDir, db),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
-    pruneOrphanRuntimeTrees(ctx.dataDir, db),
+    pruneOrphanRuntimeTrees(ctx.dataDir),
     pruneEmptyCreateTaskThreads(),
     pruneOrphanJobArtifactFiles(ctx.dataDir, db)
   ])

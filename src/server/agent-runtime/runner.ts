@@ -1,8 +1,6 @@
-import { join } from 'path'
 import { SandboxError } from '../sandbox/types'
 import { isOuterSandboxEnabled } from '../sandbox/outer-sandbox-flag'
 import type { SupportedCoreCode } from '../conversation/cores'
-import { dataPaths, jobTaskRuntimeDirPath } from '../data-paths'
 import { getAgentTurnProvider } from './providers'
 import { getProviderRegistry } from '../providers/access'
 import { isTestFakeProvider } from './providers/test-overrides'
@@ -27,34 +25,6 @@ import {
   type AgentCapabilityProfile
 } from './capabilities'
 import { appendWorkspaceAuthorityPrompt, resolveWorkspaceBinding } from './workspace-binding'
-
-export function ensureConversationRuntimeRoot(
-  dataDir: string,
-  threadId: string,
-  kind: 'chat' | 'create_task',
-  coreCode: string
-): string {
-  return join(dataPaths(dataDir).runtimes, threadId, kind, coreCode)
-}
-
-export function ensureJobRuntimeRoot(
-  dataDir: string,
-  threadId: string,
-  jobId: string,
-  coreCode: string
-): string {
-  return join(dataPaths(dataDir).runtimes, threadId, 'jobs', jobId, coreCode)
-}
-
-export function ensureJobTaskRuntimeRoot(
-  dataDir: string,
-  threadId: string,
-  jobId: string,
-  taskId: string,
-  coreCode: string
-): string {
-  return join(jobTaskRuntimeDirPath(dataDir, threadId, jobId, taskId), coreCode)
-}
 
 async function* withSandboxLeaseRefresh<T>(
   stream: AsyncGenerator<T>,
@@ -139,7 +109,6 @@ export async function* streamConversationTurn(input: {
   role: ConversationRole
   coreCode: SupportedCoreCode
   workspaceRoot: string
-  runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null
   model?: string
@@ -157,13 +126,11 @@ async function* streamAgentTurnOnce(
   rawInput: AgentTurnRunnerInput
 ): AsyncGenerator<AgentTurnChunk> {
   const workspaceBinding = resolveWorkspaceBinding({
-    workspaceRoot: rawInput.workspaceRoot,
-    runtimeRoot: rawInput.runtimeRoot
+    workspaceRoot: rawInput.workspaceRoot
   })
   const input: AgentTurnRunnerInput = {
     ...rawInput,
     workspaceRoot: workspaceBinding.workspaceRoot,
-    runtimeRoot: workspaceBinding.runtimeRoot,
     systemPrompt: appendWorkspaceAuthorityPrompt(
       rawInput.systemPrompt,
       workspaceBinding.workspaceRoot
@@ -238,7 +205,6 @@ async function* streamAgentTurnOnce(
       role: input.role,
       coreCode: input.provider,
       workspaceRoot: input.workspaceRoot,
-      runtimeRoot: input.runtimeRoot,
       prompt: input.prompt,
       runtimeSessionId: input.runtimeSessionId,
       model: input.model,
@@ -274,7 +240,6 @@ async function* streamAgentTurnOnce(
     provider: input.provider,
     role: input.role,
     cwd: input.workspaceRoot,
-    runtimeRoot: input.runtimeRoot,
     prompt: input.prompt,
     runtimeSessionId: input.runtimeSessionId,
     model: input.model,

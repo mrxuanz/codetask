@@ -1,4 +1,4 @@
-import { existsSync, lstatSync } from 'fs'
+import { existsSync, lstatSync, mkdirSync } from 'fs'
 import { dirname, isAbsolute, join, normalize, parse, relative, sep } from 'path'
 import { applyWindowsCrashReporterEnv } from '../../agent-runtime/env'
 import type { SupportedCoreCode } from '../../conversation/cores'
@@ -57,14 +57,12 @@ const HOST_EXECUTION_ENV_KEYS = [
 ] as const
 
 export interface ProviderRuntimePreparationOptions {
-  readonly runtimeRoot: string
   readonly workspaceRoot?: string | undefined
   readonly hostEnvironment?: HostEnvironmentSnapshot | undefined
   readonly platform?: NodeJS.Platform | undefined
 }
 
 interface RuntimePreparationContext {
-  runtimeRoot: string
   workspaceRoot: string
   hostEnvironment: HostEnvironmentSnapshot
   platform: ProviderRuntimePlatform
@@ -77,10 +75,11 @@ function runtimePreparationContext(
   if (!SUPPORTED_RUNTIME_PLATFORMS.has(platform)) {
     throw new Error(`provider_runtime.unsupported_platform: ${platform}`)
   }
+  const hostEnvironment = input.hostEnvironment ?? processHostEnvironmentSource.snapshot()
+  const hostProfile = resolveHostProfilePaths(hostEnvironment, platform as ProviderRuntimePlatform)
   return {
-    runtimeRoot: input.runtimeRoot,
-    workspaceRoot: input.workspaceRoot ?? input.runtimeRoot,
-    hostEnvironment: input.hostEnvironment ?? processHostEnvironmentSource.snapshot(),
+    workspaceRoot: input.workspaceRoot ?? hostProfile.home,
+    hostEnvironment,
     platform: platform as ProviderRuntimePlatform
   }
 }
@@ -96,12 +95,10 @@ function copySelectedHostEnv(
 }
 
 function buildRuntimeBaseEnv(
-  _runtimeRoot: string,
   hostEnvironment: HostEnvironmentSnapshot,
   platform: ProviderRuntimePlatform
 ): Record<string, string> {
   // Provider identity and SDK/ACP durable data stay on host defaults.
-  // Do not mkdir runtime trees here — outer sandbox creates scratch only when launching.
   const host = resolveHostProfilePaths(hostEnvironment, platform)
   const env: Record<string, string> = {
     HOME: host.home
@@ -190,8 +187,6 @@ function makeProfile(input: {
     provider: input.provider,
     platform: input.context.platform,
     mode: 'host-identity',
-    runtimeRoot: input.context.runtimeRoot,
-    stateRoot: input.context.runtimeRoot,
     environment: input.environment,
     hostPathGrants,
     diagnostics: input.diagnostics
@@ -205,7 +200,7 @@ export function prepareCodexRuntimeProfile(
   const hostProfile = resolveHostProfilePaths(context.hostEnvironment, context.platform)
   const hostIdentity = snapshotCodexHostAuth(hostProfile)
   const environment: Record<string, string> = {
-    ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    ...buildRuntimeBaseEnv(context.hostEnvironment, context.platform),
     HOME: hostProfile.home,
     CODEX_HOME: hostIdentity.codexHome
   }
@@ -249,7 +244,7 @@ export function prepareCursorRuntimeProfile(
   const hostIdentity = snapshotCursorHostAuth(hostProfile, context.platform)
   const configDir = resolveCursorHostConfigDir(hostProfile, context.platform)
   const environment: Record<string, string> = {
-    ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    ...buildRuntimeBaseEnv(context.hostEnvironment, context.platform),
     HOME: hostProfile.home,
     CURSOR_CONFIG_DIR: configDir
   }
@@ -332,7 +327,7 @@ export function prepareClaudeRuntimeProfile(
     identityPaths.length > 0 ||
     (context.platform === 'darwin' && keychainRoots.length > 0)
   const environment: Record<string, string> = {
-    ...buildRuntimeBaseEnv(context.runtimeRoot, context.hostEnvironment, context.platform),
+    ...buildRuntimeBaseEnv(context.hostEnvironment, context.platform),
     HOME: hostProfile.home,
     CLAUDE_CONFIG_DIR: claudeDir,
     ...settingsAuthEnv
@@ -397,15 +392,19 @@ export function prepareOpenCodeRuntimeProfile(
 ): ProviderRuntimeProfile {
   const context = runtimePreparationContext(input)
   const hostProfile = resolveHostProfilePaths(context.hostEnvironment, context.platform)
-  const hostIdentity = snapshotOpencodeHostAuth(hostProfile, context.platform)
-  const environment = buildRuntimeBaseEnv(
-    context.runtimeRoot,
-    context.hostEnvironment,
-    context.platform
+  const hostIdentity = snapshotOpencodeHostAuth(
+    hostProfile,
+    context.platform,
+    context.hostEnvironment
   )
+  // grant() skips missing paths — ensure state exists so outer-sandbox turns can
+  // create locks (otherwise remote MCP codeteam-manager fails with EPERM).
+  mkdirSync(hostIdentity.stateDir, { recursive: true })
+  const environment = buildRuntimeBaseEnv(context.hostEnvironment, context.platform)
   environment.HOME = hostProfile.home
   environment.XDG_CONFIG_HOME = dirname(hostIdentity.configDir)
   environment.XDG_DATA_HOME = dirname(hostIdentity.dataDir)
+  environment.XDG_STATE_HOME = dirname(hostIdentity.stateDir)
   if (context.platform === 'win32') {
     environment.USERPROFILE = hostProfile.home
     environment.APPDATA = dirname(hostIdentity.configDir)
@@ -437,6 +436,12 @@ export function prepareOpenCodeRuntimeProfile(
         'identity',
         'OpenCode login refresh and native durable session database'
       ),
+      grant(
+        hostIdentity.stateDir,
+        'read-write',
+        'runtime-compatibility',
+        'OpenCode XDG state (locks, kv, prompt history)'
+      ),
       ...executableGrants(resolveOpencodeInstallDirs(), 'OpenCode')
     ],
     diagnostics: {
@@ -448,7 +453,7 @@ export function prepareOpenCodeRuntimeProfile(
       ),
       warnings: hostIdentity.present
         ? [
-            'OpenCode uses native host config/data namespaces; SDK durable data is not redirected into runtime.'
+            'OpenCode uses native host config/data/state namespaces; SDK durable data is not redirected into runtime.'
           ]
         : [
             'OpenCode host login files were not found; environment-token authentication is disabled.'
@@ -459,10 +464,9 @@ export function prepareOpenCodeRuntimeProfile(
 
 export function prepareProviderRuntimeProfile(
   provider: SupportedCoreCode,
-  runtimeRoot: string,
-  options: Omit<ProviderRuntimePreparationOptions, 'runtimeRoot'> = {}
+  options: ProviderRuntimePreparationOptions = {}
 ): ProviderRuntimeProfile {
-  const input = { ...options, runtimeRoot }
+  const input = options
   switch (provider) {
     case 'codex':
       return prepareCodexRuntimeProfile(input)

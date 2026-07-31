@@ -1,11 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { join } from 'path'
 import { rootCertificates } from 'tls'
-import {
-  applyWindowsCrashReporterEnv,
-  buildSandboxAuthPassthrough,
-  ensureIsolatedProviderDirs
-} from '../agent-runtime/env'
+import { applyWindowsCrashReporterEnv, buildSandboxAuthPassthrough } from '../agent-runtime/env'
 import { snapshotHostEnv, stripCodeTaskTransientEnv } from '../providers/launch-env'
 import { augmentPathWithHostNode } from './toolchain-path'
 import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
@@ -36,8 +33,8 @@ const WINDOWS_SYSTEM_ENV_KEYS = [
   'ALLUSERSPROFILE'
 ] as const
 
-function materializeSandboxTlsCaBundle(runtimeRoot: string): string {
-  const configDir = join(runtimeRoot, 'config')
+function materializeSandboxTlsCaBundle(scratchRoot: string): string {
+  const configDir = join(scratchRoot, 'config')
   const caPath = join(configDir, 'ca-bundle.pem')
   mkdirSync(configDir, { recursive: true })
   if (!existsSync(caPath)) {
@@ -48,37 +45,53 @@ function materializeSandboxTlsCaBundle(runtimeRoot: string): string {
 
 function applyWindowsSandboxSystemEnv(
   env: Record<string, string>,
-  runtimeRoot: string,
-  hostEnvironment: HostEnvironmentSnapshot
+  hostEnvironment: HostEnvironmentSnapshot,
+  scratchRoot: string
 ): void {
   applyWindowsCrashReporterEnv(env)
-  if (!env.USERPROFILE) env.USERPROFILE = runtimeRoot
-  if (!env.APPDATA) env.APPDATA = join(runtimeRoot, 'AppData', 'Roaming')
-  if (!env.LOCALAPPDATA) env.LOCALAPPDATA = join(runtimeRoot, 'AppData', 'Local')
+  const hostHome = hostEnvironment.USERPROFILE ?? hostEnvironment.HOME ?? env.HOME
+  if (!env.USERPROFILE && hostHome) env.USERPROFILE = hostHome
+  if (!env.APPDATA && hostEnvironment.APPDATA) env.APPDATA = hostEnvironment.APPDATA
+  if (!env.LOCALAPPDATA && hostEnvironment.LOCALAPPDATA) {
+    env.LOCALAPPDATA = hostEnvironment.LOCALAPPDATA
+  }
   if (!env.BREAKPAD_DUMP_LOCATION) {
-    env.BREAKPAD_DUMP_LOCATION = join(runtimeRoot, 'tmp', 'crashpad')
+    env.BREAKPAD_DUMP_LOCATION = join(scratchRoot, 'tmp', 'crashpad')
+    mkdirSync(env.BREAKPAD_DUMP_LOCATION, { recursive: true })
   }
   for (const key of WINDOWS_SYSTEM_ENV_KEYS) {
     const value = hostEnvironment[key]
     if (value) env[key] = value
   }
-  if (!env.HOMEDRIVE && /^[A-Za-z]:/.test(env.HOME ?? runtimeRoot)) {
-    const home = env.HOME ?? runtimeRoot
-    env.HOMEDRIVE = home.slice(0, 2)
-    env.HOMEPATH = home.slice(2) || '\\'
+  if (!env.HOMEDRIVE && hostHome && /^[A-Za-z]:/.test(hostHome)) {
+    env.HOMEDRIVE = hostHome.slice(0, 2)
+    env.HOMEPATH = hostHome.slice(2) || '\\'
   }
-  env.SSL_CERT_FILE = materializeSandboxTlsCaBundle(runtimeRoot)
+  env.SSL_CERT_FILE = materializeSandboxTlsCaBundle(scratchRoot)
 }
 
+/**
+ * Sandbox child env: host identity + host TMP for SDK/ACP.
+ * `scratchRoot` is OS-temp attestation scratch only — never a durable home redirect.
+ */
 export function buildSandboxEnv(input: {
-  runtimeRoot: string
+  scratchRoot: string
   providerEnv?: Record<string, string> | undefined
   mcpToken?: string | undefined
 }): Record<string, string> {
-  ensureIsolatedProviderDirs(input.runtimeRoot)
-
   const host = snapshotHostEnv()
+  const hostEnvironment = processHostEnvironmentSource.snapshot()
   const providerEnv = stripCodeTaskTransientEnv({ ...(input.providerEnv ?? {}) })
+  const hostHome = host.HOME ?? host.USERPROFILE ?? hostEnvironment.HOME ?? hostEnvironment.USERPROFILE
+  const hostTmp =
+    host.TMPDIR?.trim() ||
+    host.TEMP?.trim() ||
+    host.TMP?.trim() ||
+    hostEnvironment.TMPDIR?.trim() ||
+    hostEnvironment.TEMP?.trim() ||
+    hostEnvironment.TMP?.trim() ||
+    tmpdir()
+
   const env: Record<string, string> = {
     PATH: host.PATH ?? '',
     LANG: host.LANG ?? 'C.UTF-8',
@@ -88,18 +101,21 @@ export function buildSandboxEnv(input: {
   }
   env.PATH = augmentPathWithHostNode(env.PATH)
 
-  if (!env.HOME) {
-    env.HOME = input.runtimeRoot
-    env.TMPDIR = join(input.runtimeRoot, 'tmp')
-    env.TEMP = join(input.runtimeRoot, 'tmp')
-    env.TMP = join(input.runtimeRoot, 'tmp')
-    env.XDG_CONFIG_HOME = join(input.runtimeRoot, 'config')
-    env.XDG_CACHE_HOME = join(input.runtimeRoot, 'cache')
-    env.XDG_DATA_HOME = join(input.runtimeRoot, 'data')
-  }
+  // SDK/ACP stay on host defaults — do not redirect HOME/XDG into CodeTask trees.
+  if (hostHome) env.HOME = hostHome
+  if (hostEnvironment.USERPROFILE) env.USERPROFILE = hostEnvironment.USERPROFILE
+  if (hostEnvironment.APPDATA) env.APPDATA = hostEnvironment.APPDATA
+  if (hostEnvironment.LOCALAPPDATA) env.LOCALAPPDATA = hostEnvironment.LOCALAPPDATA
+  env.TMPDIR = hostTmp
+  env.TEMP = hostTmp
+  env.TMP = hostTmp
+
+  mkdirSync(join(input.scratchRoot, 'tmp'), { recursive: true })
 
   if (process.platform === 'win32') {
-    applyWindowsSandboxSystemEnv(env, input.runtimeRoot, processHostEnvironmentSource.snapshot())
+    applyWindowsSandboxSystemEnv(env, hostEnvironment, input.scratchRoot)
+  } else if (!env.SSL_CERT_FILE) {
+    env.SSL_CERT_FILE = materializeSandboxTlsCaBundle(input.scratchRoot)
   }
 
   if (input.mcpToken) {

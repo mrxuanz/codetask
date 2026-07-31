@@ -45,8 +45,6 @@ function runtimeProfile(
     provider,
     platform: process.platform as ProviderRuntimeProfile['platform'],
     mode: 'host-identity',
-    runtimeRoot: '/runtime',
-    stateRoot: '/runtime',
     environment: { HOME: '/runtime' },
     hostPathGrants: [],
     diagnostics: {

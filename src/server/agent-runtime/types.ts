@@ -11,7 +11,6 @@ export interface AgentTurnInput {
   provider: SupportedCoreCode
   role: ConversationRole
   cwd: string
-  runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null | undefined
   model?: string | undefined
@@ -59,7 +58,6 @@ export interface AgentTurnRunnerInput {
   role: ConversationRole
   provider: SupportedCoreCode
   workspaceRoot: string
-  runtimeRoot: string
   prompt: string
   runtimeSessionId?: string | null | undefined
   model?: string | undefined

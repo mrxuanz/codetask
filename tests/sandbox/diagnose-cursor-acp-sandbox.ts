@@ -100,7 +100,7 @@ function wirePolicy(policy: ReturnType<typeof createSandboxPolicy>): string {
     version: 2,
     role: policy.role,
     cwd: policy.cwd,
-    runtime_root: policy.runtimeRoot,
+    runtime_root: policy.scratchRoot,
     filesystem: {
       default_access: policy.filesystem.defaultAccess,
       allowed_read_roots: policy.filesystem.allowedReadRoots,
@@ -405,7 +405,7 @@ async function main(): Promise<void> {
   log('setup', 'fixture', { workspace, runtimeRoot, projectRoot: process.cwd() })
 
   const cursorDriver = getProviderDriverForTest('cursorcli')
-  const runtimeProfile = prepareProviderRuntimeForTest('cursorcli', runtimeRoot, {
+  const runtimeProfile = prepareProviderRuntimeForTest('cursorcli', {
     workspaceRoot: workspace
   })
   let providerPreflightOk = true

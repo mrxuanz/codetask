@@ -250,7 +250,7 @@ function loadProductionSandboxModule() {
 }
 
 function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, coreCode = 'codex') {
-  const runtimeProfile = prod.prepareProviderRuntimeProfile(coreCode, runtimeRoot, {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile(coreCode, {
     workspaceRoot
   })
   const dataDir =
@@ -266,7 +266,7 @@ function buildProductionSandboxEnv(prod, runtimeRoot, workspaceRoot, coreCode = 
 }
 
 function buildProductionPolicy(prod, runtimeRoot, workspaceRoot, readRoots = []) {
-  const runtimeProfile = prod.prepareProviderRuntimeProfile('codex', runtimeRoot, {
+  const runtimeProfile = prod.prepareProviderRuntimeProfile('codex', {
     workspaceRoot
   })
   const dataDir =

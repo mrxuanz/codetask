@@ -11,7 +11,8 @@ export type AgentRole = ConversationRole
 export interface SandboxPolicy {
   role: AgentRole
   cwd: string
-  runtimeRoot: string
+  /** Ephemeral OS-temp scratch for attestation / worker IPC (native wire: runtime_root). */
+  scratchRoot: string
   filesystem: {
     defaultAccess: 'none'
     allowedReadRoots: string[]

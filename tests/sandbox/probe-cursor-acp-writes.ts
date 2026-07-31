@@ -88,7 +88,7 @@ function wirePolicy(policy: ReturnType<typeof createSandboxPolicy>): string {
     version: 2,
     role: policy.role,
     cwd: policy.cwd,
-    runtime_root: policy.runtimeRoot,
+    runtime_root: policy.scratchRoot,
     filesystem: {
       default_access: policy.filesystem.defaultAccess,
       allowed_read_roots: policy.filesystem.allowedReadRoots,
@@ -228,7 +228,7 @@ async function main(): Promise<void> {
 
   // ── Outer sandbox ─────────────────────────────────────────────────
   const sandboxEmpty = walkRel(sandboxRuntime)
-  const prepared = prepareProviderRuntimeForTest('cursorcli', sandboxRuntime, {
+  const prepared = prepareProviderRuntimeForTest('cursorcli', {
     workspaceRoot: workspace
   })
   const sandboxPlan = buildCursorTurnPlan(
@@ -243,7 +243,7 @@ async function main(): Promise<void> {
     { outerSandbox: true, approveMcps: true }
   )
   const envRecord = buildSandboxEnv({
-    runtimeRoot: sandboxRuntime,
+    scratchRoot: sandboxRuntime,
     providerEnv: { ...prepared.environment, ...sandboxPlan.env },
     mcpToken: 'probe'
   })
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
   let policy = createSandboxPolicy({
     role: 'task-worker',
     workspaceRoot: workspace,
-    runtimeRoot: sandboxRuntime
+    scratchRoot: sandboxRuntime
   })
   const runner = resolveSandboxRunner(join(process.cwd(), 'tests/sandbox/acp-bootstrap-probe.ts'))
   policy = applyProviderReadRoots(policy, [

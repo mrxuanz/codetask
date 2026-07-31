@@ -5,7 +5,7 @@ import { getDb } from '../db'
 import { saveDesignAbilities } from '../db/design-plan'
 import { threadJobs } from '../db/schema'
 import { ensureCoreAvailable, type SupportedCoreCode } from '../conversation/cores'
-import { ensureJobRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { streamAgentTurn } from '../agent-runtime/runner'
 import { resolveCoreModel } from '../conversation/models'
 import { buildPlannerUserMessage } from '../planner/prompts'
 import {
@@ -381,12 +381,6 @@ async function runDesignPlanner(
 
     const plannerCoreCode = executionProfile.plannerCoreCode
     const core = await ensureCoreAvailable(plannerCoreCode)
-    const runtimeRoot = ensureJobRuntimeRoot(
-      getAppContext().dataDir,
-      threadId,
-      designSessionId,
-      core.code as SupportedCoreCode
-    )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
 
     const mcpSessionId = `plan-mcp-${randomUUID()}`
@@ -495,7 +489,6 @@ async function runDesignPlanner(
           capabilityProfile: 'planner-read',
           provider: core.code as SupportedCoreCode,
           workspaceRoot: workspacePath,
-          runtimeRoot,
           prompt: plannerPrompt + regenerationSection,
           model,
           systemPrompt: appendBusinessSkillSnapshot(
@@ -655,7 +648,7 @@ async function runDesignPlanner(
       await finishPlanningRunLifecycle(run.runId, 'design_planning_done', runOutcome)
     } finally {
       try {
-        // Planner uses snapshot-read / runtimeRoot writes only, but clear any
+        // Planner uses snapshot-read / host-identity defaults; clear any
         // legacy lease defensively if setup reached an older compatibility path.
         const { releaseWorkspaceLeaseForOwner } =
           await import('../legacy-control-plane/workspace-lease-store')

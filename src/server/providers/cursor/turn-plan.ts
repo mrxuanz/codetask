@@ -94,8 +94,8 @@ export function buildCursorAcpCliArgs(input: {
   return appendCursorApiEndpointArgs([...args, 'acp'], input.endpoint)
 }
 
-function buildCursorHostEnv(runtimeRoot: string): Record<string, string> {
-  const env = buildProviderChildEnv(runtimeRoot)
+function buildCursorHostEnv(): Record<string, string> {
+  const env = buildProviderChildEnv()
   stripElectronInheritedEnv(env)
   // Do not set CURSOR_DATA_DIR — Cursor ACP uses host defaults (same as t3code).
   return env
@@ -128,7 +128,7 @@ export function buildCursorTurnPlan(
   const capabilityProfile = resolveInputCapabilityProfile(input)
   const env = outerSandbox
     ? buildSandboxPreparedProviderEnv()
-    : buildCursorHostEnv(input.runtimeRoot)
+    : buildCursorHostEnv()
   if (outerSandbox) {
     stripElectronInheritedEnv(env)
   }

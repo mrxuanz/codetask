@@ -45,7 +45,7 @@ export default {
     passwordMismatch: 'Passwords do not match',
     storageTitle: 'Choose data storage',
     storageDescription:
-      'Choose where CodeTask stores its database, attachments, and isolated Provider runtimes. The default folder is created automatically if missing.',
+      'Choose where CodeTask stores its database and attachments. The default folder is created automatically if missing.',
     storagePathLabel: 'Data directory',
     storagePathRequired: 'Enter a data directory',
     storageBrowse: 'Browse',

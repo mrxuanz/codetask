@@ -32,18 +32,16 @@ export async function readStorageStats(ctx: AppContext): Promise<{
     wal: number
     attachments: number
     artifacts: number
-    runtimes: number
   }
   sqlite: { freelistPages: number; pageSize: number; reclaimableBytes: number }
 }> {
   const paths = dataPaths(ctx.dataDir)
   const dbBytes = await directoryBytes(paths.dbFile)
   const walBytes = await directoryBytes(`${paths.dbFile}-wal`)
-  const [attachments, messages, jobs, runtimes, total] = await Promise.all([
+  const [attachments, messages, jobs, total] = await Promise.all([
     directoryBytes(paths.attachments),
     directoryBytes(paths.artifactsMessages),
     directoryBytes(paths.artifactsJobs),
-    directoryBytes(paths.runtimes),
     directoryBytes(ctx.dataDir)
   ])
   const sqlite = sqliteClient(ctx)
@@ -57,8 +55,7 @@ export async function readStorageStats(ctx: AppContext): Promise<{
       database: dbBytes,
       wal: walBytes,
       attachments,
-      artifacts: messages + jobs,
-      runtimes
+      artifacts: messages + jobs
     },
     sqlite: { freelistPages, pageSize, reclaimableBytes: freelistPages * pageSize }
   }

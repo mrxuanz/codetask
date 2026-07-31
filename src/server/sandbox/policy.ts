@@ -62,10 +62,17 @@ export function collectPolicyReadRoots(policy: SandboxPolicy): string[] {
   return [...policy.filesystem.allowedReadRoots]
 }
 
+/**
+ * Build OS sandbox policy.
+ *
+ * `scratchRoot` is ephemeral OS-temp attestation scratch (wired as native `runtime_root`).
+ * SDK/ACP identity stays on host path grants — never a CodeTask data/runtimes tree.
+ */
 export function createSandboxPolicy(input: {
   role: AgentRole
   workspaceRoot: string
-  runtimeRoot: string
+  /** Ephemeral OS-temp scratch for attestation / worker IPC. */
+  scratchRoot: string
   verifierOutputRoot?: string
   providerReadRoots?: string[]
   providerWriteRoots?: string[]
@@ -73,16 +80,17 @@ export function createSandboxPolicy(input: {
   workspaceAccess?: WorkspaceAccessMode
 }): SandboxPolicy {
   const workspaceRoot = canonicalizePath(input.workspaceRoot)
-  const runtimeRoot = canonicalizePath(input.runtimeRoot)
+  const scratchRoot = canonicalizePath(input.scratchRoot)
 
   const allowedReadRoots = [
     workspaceRoot,
-    runtimeRoot,
+    scratchRoot,
     ...(input.providerReadRoots ?? []),
     ...(input.attachmentReadRoots ?? [])
   ].map((root) => canonicalizePath(root))
 
-  const allowedWriteRoots: string[] = [runtimeRoot]
+  // Default: only ephemeral scratch is writable. Project writes require task/lease.
+  const allowedWriteRoots: string[] = [scratchRoot]
 
   if (input.role === 'task-worker' || input.workspaceAccess === 'exclusive-write') {
     allowedWriteRoots.push(workspaceRoot)
@@ -104,7 +112,7 @@ export function createSandboxPolicy(input: {
   return compileSandboxPolicy({
     role: input.role,
     cwd: canonicalizePath(workspaceRoot),
-    runtimeRoot: canonicalizePath(runtimeRoot),
+    scratchRoot: canonicalizePath(scratchRoot),
     filesystem: {
       defaultAccess: 'none',
       allowedReadRoots: uniqueRead,

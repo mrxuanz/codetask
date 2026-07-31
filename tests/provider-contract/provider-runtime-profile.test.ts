@@ -10,7 +10,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, normalize } from 'node:path'
+import { join, normalize, dirname } from 'node:path'
 import test from 'node:test'
 import { prepareProviderRuntimeForTest } from '../helpers/provider-runtime'
 import { prepareCodexRuntimeProfile } from '../../src/server/sandbox/provider-auth/bridge'
@@ -21,7 +21,8 @@ import {
   resolveCursorHostConfigDir,
   resolveHostProfilePaths,
   resolveOpencodeHostConfigDir,
-  resolveOpencodeHostDataDir
+  resolveOpencodeHostDataDir,
+  resolveOpencodeHostStateDir
 } from '../../src/server/sandbox/provider-auth/paths'
 import {
   PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION,
@@ -84,21 +85,28 @@ test('all Providers compile a versioned native-host runtime profile without cred
     for (const provider of PROVIDERS) {
       const runtimeRoot = join(runtimeTree, provider)
       mkdirSync(runtimeRoot)
-      const profile = prepareProviderRuntimeForTest(provider, runtimeRoot, {
+      const profile = prepareProviderRuntimeForTest(provider, {
         hostEnvironment: fixture.hostEnvironment
       })
 
       assert.equal(profile.schemaVersion, PROVIDER_RUNTIME_PROFILE_SCHEMA_VERSION)
       assert.equal(profile.provider, provider)
       assert.equal(profile.mode, 'host-identity')
-      assert.equal(profile.runtimeRoot, runtimeRoot)
-      assert.equal(profile.stateRoot, runtimeRoot)
       // Host defaults — TMPDIR is not redirected into the per-turn runtime tree.
       assert.equal(profile.environment.TMPDIR, fixture.hostEnvironment.TMPDIR)
       assert.equal(profile.environment.HOME, hostRoot)
       assert.equal('CURSOR_DATA_DIR' in profile.environment, false)
       assert.equal(profile.diagnostics.authMaterialPresent, true)
       assert.ok(profile.hostPathGrants.length > 0)
+      if (provider === 'opencode') {
+        const host = resolveHostProfilePaths(fixture.hostEnvironment)
+        assert.equal(
+          profile.environment.XDG_STATE_HOME,
+          dirname(resolveOpencodeHostStateDir(host, process.platform, fixture.hostEnvironment))
+        )
+      } else {
+        assert.equal('XDG_STATE_HOME' in profile.environment, false)
+      }
       assert.deepEqual(
         providerRuntimeReadRoots(profile),
         profile.hostPathGrants.map((item) => item.path)
@@ -133,26 +141,26 @@ test('Provider-native identity paths and private instance state are wired per SD
   const host = resolveHostProfilePaths(fixture.hostEnvironment)
 
   try {
-    const codex = prepareProviderRuntimeForTest('codex', join(runtimeTree, 'codex'), {
+    const codex = prepareProviderRuntimeForTest('codex', {
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(codex.environment.CODEX_HOME, resolveCodexHostHome(host))
     assert.ok(providerRuntimeWriteRoots(codex).includes(resolveCodexHostHome(host)))
 
-    const cursor = prepareProviderRuntimeForTest('cursorcli', join(runtimeTree, 'cursor'), {
+    const cursor = prepareProviderRuntimeForTest('cursorcli', {
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(cursor.environment.CURSOR_CONFIG_DIR, resolveCursorHostConfigDir(host))
     assert.equal('CURSOR_DATA_DIR' in cursor.environment, false)
     assert.ok(!providerRuntimeWriteRoots(cursor).includes(join(hostRoot, '.cursor')))
 
-    const claude = prepareProviderRuntimeForTest('claude-code', join(runtimeTree, 'claude'), {
+    const claude = prepareProviderRuntimeForTest('claude-code', {
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(claude.environment.CLAUDE_CONFIG_DIR, resolveClaudeHostConfigDir(host))
     assert.ok(providerRuntimeWriteRoots(claude).includes(resolveClaudeHostConfigDir(host)))
 
-    const opencode = prepareProviderRuntimeForTest('opencode', join(runtimeTree, 'opencode'), {
+    const opencode = prepareProviderRuntimeForTest('opencode', {
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(
@@ -160,10 +168,18 @@ test('Provider-native identity paths and private instance state are wired per SD
       join(resolveOpencodeHostConfigDir(host), '..')
     )
     assert.equal(opencode.environment.XDG_DATA_HOME, join(resolveOpencodeHostDataDir(host), '..'))
-    // Cache/state stay on host defaults — not redirected into the runtime tree.
+    // Cache stays on host defaults; state is pinned to the host XDG state home (not runtime).
     assert.equal('XDG_CACHE_HOME' in opencode.environment, false)
-    assert.equal('XDG_STATE_HOME' in opencode.environment, false)
+    assert.equal(
+      opencode.environment.XDG_STATE_HOME,
+      dirname(resolveOpencodeHostStateDir(host, process.platform, fixture.hostEnvironment))
+    )
     assert.ok(providerRuntimeWriteRoots(opencode).includes(resolveOpencodeHostDataDir(host)))
+    assert.ok(
+      providerRuntimeWriteRoots(opencode).includes(
+        resolveOpencodeHostStateDir(host, process.platform, fixture.hostEnvironment)
+      )
+    )
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
     rmSync(runtimeTree, { recursive: true, force: true })
@@ -179,21 +195,28 @@ test('two runtime profiles share host identity defaults, never instance-local SD
     for (const provider of PROVIDERS) {
       const firstRoot = join(runtimeTree, `${provider}-one`)
       const secondRoot = join(runtimeTree, `${provider}-two`)
-      const first = prepareProviderRuntimeForTest(provider, firstRoot, {
+      const first = prepareProviderRuntimeForTest(provider, {
         hostEnvironment: fixture.hostEnvironment
       })
-      const second = prepareProviderRuntimeForTest(provider, secondRoot, {
+      const second = prepareProviderRuntimeForTest(provider, {
         hostEnvironment: fixture.hostEnvironment
       })
 
-      assert.notEqual(first.runtimeRoot, second.runtimeRoot)
       assert.equal(first.environment.HOME, second.environment.HOME)
       assert.equal(first.environment.TMPDIR, second.environment.TMPDIR)
       assert.equal(first.environment.TMPDIR, fixture.hostEnvironment.TMPDIR)
       assert.deepEqual(first.hostPathGrants, second.hostPathGrants)
       assert.equal('CURSOR_DATA_DIR' in first.environment, false)
       assert.equal('XDG_CACHE_HOME' in first.environment, false)
-      assert.equal('XDG_STATE_HOME' in first.environment, false)
+      if (provider === 'opencode') {
+        const host = resolveHostProfilePaths(fixture.hostEnvironment)
+        assert.equal(
+          first.environment.XDG_STATE_HOME,
+          dirname(resolveOpencodeHostStateDir(host, process.platform, fixture.hostEnvironment))
+        )
+      } else {
+        assert.equal('XDG_STATE_HOME' in first.environment, false)
+      }
     }
   } finally {
     rmSync(hostRoot, { recursive: true, force: true })
@@ -214,13 +237,13 @@ test('configuration files alone are not treated as login identity', () => {
     writeFileSync(join(resolveOpencodeHostConfigDir(host), 'opencode.json'), '{}\n')
 
     assert.equal(
-      prepareProviderRuntimeForTest('cursorcli', join(runtimeTree, 'cursor'), {
+      prepareProviderRuntimeForTest('cursorcli', {
         hostEnvironment
       }).diagnostics.authMaterialPresent,
       process.platform === 'darwin'
     )
     assert.equal(
-      prepareProviderRuntimeForTest('opencode', join(runtimeTree, 'opencode'), {
+      prepareProviderRuntimeForTest('opencode', {
         hostEnvironment
       }).diagnostics.authMaterialPresent,
       false
@@ -259,5 +282,9 @@ test('Windows host profile paths use AppData namespaces, not Unix defaults', () 
   )
   assert.equal(resolveOpencodeHostConfigDir(profile, 'win32'), join(profile.appData, 'opencode'))
   assert.equal(resolveOpencodeHostDataDir(profile, 'win32'), join(profile.localAppData, 'opencode'))
+  assert.equal(
+    resolveOpencodeHostStateDir(profile, 'win32', {}),
+    join(profile.localAppData, 'state', 'opencode')
+  )
   assert.equal(resolveCursorHostConfigDir(profile, 'win32'), join(profile.appData, 'cursor'))
 })

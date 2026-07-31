@@ -7,11 +7,10 @@ const WORKSPACE_AUTHORITY_TAG = '[CODETASK_WORKSPACE_AUTHORITY]'
 
 export interface WorkspaceBinding {
   readonly workspaceRoot: string
-  readonly runtimeRoot: string
   readonly fingerprint: string
 }
 
-function canonicalDirectory(input: string, label: 'workspaceRoot' | 'runtimeRoot'): string {
+function canonicalDirectory(input: string, label: 'workspaceRoot'): string {
   const trimmed = input.trim()
   if (!trimmed || !isAbsolute(trimmed)) {
     throw createTurnError('workspace.path_invalid', {
@@ -63,13 +62,11 @@ export function assertProviderWorkspace(
 
 export function resolveWorkspaceBinding(input: {
   workspaceRoot: string
-  runtimeRoot: string
 }): WorkspaceBinding {
   const workspaceRoot = canonicalDirectory(input.workspaceRoot, 'workspaceRoot')
-  const runtimeRoot = canonicalDirectory(input.runtimeRoot, 'runtimeRoot')
   const fingerprint = createHash('sha256').update(pathComparisonKey(workspaceRoot)).digest('hex')
 
-  return { workspaceRoot, runtimeRoot, fingerprint }
+  return { workspaceRoot, fingerprint }
 }
 
 export function appendWorkspaceAuthorityPrompt(

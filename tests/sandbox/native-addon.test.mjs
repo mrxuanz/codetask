@@ -85,7 +85,7 @@ describeRuntime('launchSandboxedWorker attestation contract', () => {
         version: 2,
         role: policy.role,
         cwd: policy.cwd,
-        runtime_root: policy.runtimeRoot,
+        runtime_root: policy.scratchRoot,
         filesystem: {
           default_access: policy.filesystem.defaultAccess,
           allowed_read_roots: policy.filesystem.allowedReadRoots,

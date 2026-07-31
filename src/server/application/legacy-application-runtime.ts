@@ -94,7 +94,7 @@ export function createLegacyApplicationRuntime(
       {
         name: 'prune-runtime-trees',
         execute: async () => {
-          const result = await pruneOrphanRuntimeTrees(ctx.dataDir, ctx.db)
+          const result = await pruneOrphanRuntimeTrees(ctx.dataDir)
           if (result.removedPaths.length > 0) {
             logger.info('pruned orphan runtime trees', { count: result.removedPaths.length })
           }

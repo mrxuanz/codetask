@@ -129,17 +129,17 @@ function uniqueRoots(roots) {
   return out
 }
 
-export function sandboxPolicyForRole(role, workspaceRoot, runtimeRoot, options = {}) {
+export function sandboxPolicyForRole(role, workspaceRoot, scratchRoot, options = {}) {
   const workspace = realpathSync(workspaceRoot)
-  const runtime = realpathSync(runtimeRoot)
+  const scratch = realpathSync(scratchRoot)
   const allowedReadRoots = uniqueRoots([
     workspace,
-    runtime,
-    join(runtime, 'tmp'),
+    scratch,
+    join(scratch, 'tmp'),
     dirname(process.execPath),
     ...(options.extraReadRoots ?? [])
   ])
-  const allowedWriteRoots = uniqueRoots([runtime, join(runtime, 'tmp')])
+  const allowedWriteRoots = uniqueRoots([scratch, join(scratch, 'tmp')])
 
   if (role === 'task-worker') {
     allowedWriteRoots.push(workspace)
@@ -152,7 +152,7 @@ export function sandboxPolicyForRole(role, workspaceRoot, runtimeRoot, options =
   return {
     role,
     cwd: workspace,
-    runtimeRoot: runtime,
+    scratchRoot: scratch,
     filesystem: {
       defaultAccess: 'none',
       allowedReadRoots,
@@ -178,7 +178,7 @@ export function wirePolicy(policy) {
     version: 2,
     role: policy.role,
     cwd: policy.cwd,
-    runtime_root: policy.runtimeRoot,
+    runtime_root: policy.scratchRoot,
     filesystem: {
       default_access: policy.filesystem.defaultAccess,
       allowed_read_roots: policy.filesystem.allowedReadRoots,

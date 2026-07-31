@@ -162,7 +162,7 @@ export function buildClaudeTurnOptions(
 
   const env = outerSandbox
     ? applyClaudeSettingsAuthEnv(buildSandboxPreparedProviderEnv())
-    : buildProviderChildEnv(input.runtimeRoot)
+    : buildProviderChildEnv()
   const settingSources = resolveClaudeSettingSources(outerSandbox, capabilityProfile)
   const pinMcpConfig = settingSources.length > 0 || mcpServerNames.length > 0
   const nativeWorkspaceSandbox = !outerSandbox && !readOnly

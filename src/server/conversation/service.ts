@@ -46,7 +46,7 @@ import { buildWorkspaceSnapshot } from './workspace-snapshot'
 import type { TaskLaunchDraftPayload } from './draft/types'
 import { ensureCollectingDraft } from './draft/collecting'
 import { formatSdkTurnError, toTurnErrorDto } from '../agent-runtime/errors'
-import { ensureConversationRuntimeRoot, streamAgentTurn } from '../agent-runtime/runner'
+import { streamAgentTurn } from '../agent-runtime/runner'
 import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '../agent-runtime/delta-emit'
 import { buildConversationProviderRuntimeScopeId } from '../../shared/providers/capabilities'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
@@ -465,14 +465,7 @@ export async function* executePreparedTurn(
       RUNTIME_STATUS_RUNNING,
       null
     )
-
     const conversationKind = createTaskMode ? 'create_task' : 'chat'
-    const runtimeRoot = ensureConversationRuntimeRoot(
-      getAppContext().dataDir,
-      thread.id,
-      conversationKind,
-      core.code as SupportedCoreCode
-    )
     const model = resolveCoreModel(core.code as SupportedCoreCode)
     const turnRole: ConversationTurnRole = conversationMode.generateDraft ? 'draft' : 'chat'
     const wizardStage: WizardPhase | null = createTaskMode ? wizardPhase : null
@@ -631,7 +624,6 @@ export async function* executePreparedTurn(
         capabilityProfile,
         provider: core.code as SupportedCoreCode,
         workspaceRoot: workspacePath,
-        runtimeRoot,
         prompt: turnPrompt,
         runtimeSessionId: phaseRuntimeId,
         model,
