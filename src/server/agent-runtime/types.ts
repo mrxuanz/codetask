@@ -27,6 +27,8 @@ export interface AgentTurnInput {
   providerRuntimeScope?: ProviderRuntimeScope | undefined
   /** Stable conversation identity supplied to, but policy-wrapped by, RuntimeManager. */
   providerRuntimeScopeId?: string | undefined
+  /** Extra read-only filesystem roots granted to this turn (attachments/references). */
+  readRoots?: string[] | undefined
 
   jobId?: string | undefined
   workloadRunId?: string | undefined

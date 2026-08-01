@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { resolve } from 'node:path'
 import { describe, it } from 'node:test'
 import {
   OPENCODE_AUTO_QUESTION_GUIDANCE,
@@ -41,6 +42,35 @@ describe('OpenCode question policy', () => {
       assert.equal(tools[name], false, name)
     }
     assert.equal(permission['codeteam-manager_propose_task_draft'], 'allow')
+  })
+
+  it('allows only declared external read roots and explicitly denies edits there', () => {
+    const readRoot = resolve('/tmp/codetask attachment root')
+    const pattern = `${readRoot.replaceAll('\\', '/')}/**`
+    const permission = resolveOpencodePermissionConfig('chat-write', [readRoot]) as Record<
+      string,
+      unknown
+    >
+
+    assert.deepEqual(permission.external_directory, {
+      '*': 'deny',
+      [pattern]: 'allow'
+    })
+    assert.deepEqual(permission.edit, { [pattern]: 'deny' })
+
+    const sessionRules = resolveOpencodeSessionPermissionRules('chat-write', [readRoot])
+    assert.deepEqual(
+      sessionRules.filter((rule) => rule.permission === 'external_directory'),
+      [
+        { permission: 'external_directory', pattern: '*', action: 'deny' },
+        { permission: 'external_directory', pattern, action: 'allow' }
+      ]
+    )
+    assert.ok(
+      sessionRules.some(
+        (rule) => rule.permission === 'edit' && rule.pattern === pattern && rule.action === 'deny'
+      )
+    )
   })
 
   it('auto-replies with the first (recommended) option label', () => {

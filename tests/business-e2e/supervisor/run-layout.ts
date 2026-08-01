@@ -1,7 +1,10 @@
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
+
+export const BUSINESS_E2E_TEMP_PREFIX = 'codetask-business-e2e-'
 
 export function createRunId(): string {
   const stamp = new Date()
@@ -14,6 +17,25 @@ export function createRunId(): string {
 
 export function createCaseRunId(caseId: string): string {
   return `${caseId}-${randomBytes(4).toString('hex')}`
+}
+
+/**
+ * Keep all mutable E2E state outside the checkout. The extra run-id directory
+ * preserves the existing run identity contract used by reports and cases.
+ */
+export function createTemporaryRunRoot(runId: string): string {
+  const parent = mkdtempSync(join(tmpdir(), BUSINESS_E2E_TEMP_PREFIX))
+  const runRoot = join(parent, runId)
+  mkdirSync(runRoot, { recursive: true })
+  return runRoot
+}
+
+export function removeTemporaryRunRoot(runRoot: string): void {
+  const parent = dirname(resolve(runRoot))
+  if (!basename(parent).startsWith(BUSINESS_E2E_TEMP_PREFIX)) {
+    throw new Error(`refusing_to_remove_non_e2e_temp_root:${parent}`)
+  }
+  rmSync(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
 
 export function ensureRunLayout(runRoot: string): {

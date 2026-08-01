@@ -1,0 +1,8 @@
+{
+  "message": "请读取附件图片，并根据图片中的英文内容立即提出一个任务草案。标题或摘要中保留你看到的英文内容，不要继续追问。",
+  "language": "zh-CN",
+  "uploadFileName": "attachment.png",
+  "expect": {
+    "exactText": "Dream of 1000 Cats"
+  }
+}

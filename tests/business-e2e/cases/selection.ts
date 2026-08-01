@@ -24,9 +24,14 @@ export const CASE_ALIASES: Record<string, string> = {
   'token-redaction': 'G1-008',
   'project-thread': 'G2-001',
 
-  // Part A — normal conversation
+  // Part A — normal conversation / phase-1 attachment entry
   'chat-basic': 'G3-001',
   'chat-create-html': 'CHAT-HTML-001',
+  // legacy aliases first so preferred slugs win CASE_SLUG_BY_ID reverse map
+  'chat-image-ocr': 'CHAT-IMG-001',
+  'draft-image-ocr': 'DRAFT-CHAT-IMG-001',
+  'chat-image-attachment': 'CHAT-IMG-001',
+  'draft-chat-image-attachment': 'DRAFT-CHAT-IMG-001',
 
   // Part B — draft → execution tree → job (one chain)
   foundation: 'FOUNDATION-FAKE-001',
@@ -35,6 +40,7 @@ export const CASE_ALIASES: Record<string, string> = {
   'draft-fields': 'G4-003',
   'draft-confirm': 'G4-012',
   'draft-multiturn': 'DRAFT-MULTITURN-001',
+  'draft-reference-path-job': 'DRAFT-REF-PATH-001',
   'notes-search': 'G6-001',
   'notes-search-oracle-trap': 'G6-002',
   'job-chat-readonly': 'JOB-CHAT-RO-001',
@@ -71,6 +77,7 @@ export function labelForStep(step: string): string {
 }
 
 export function partForCaseId(caseId: string): AcceptancePart | null {
+  if (caseId.startsWith('DRAFT-CHAT')) return 'conversation'
   if (caseId.startsWith('G3') || caseId.startsWith('CHAT')) return 'conversation'
   if (caseId.startsWith('SETTINGS-MCP') || caseId.startsWith('SETTINGS')) return 'settings-mcp'
   if (caseId.startsWith('JOB-CHAT')) return 'draft-job'
@@ -111,10 +118,10 @@ export const PART_DEFAULT_CASES: Record<AcceptancePart, string[]> = {
     'G0-006',
     'G2-001'
   ],
-  // Part A: basic chat + create SDK-named HTML
-  conversation: ['G3-001', 'CHAT-HTML-001'],
-  // Part B depth: Notes Search + job-time chat readonly thicken
-  'draft-job': ['G6-001', 'JOB-CHAT-RO-001'],
+  // Part A / phase 1: chat + attachment entry (including create_task draft binding)
+  conversation: ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001', 'DRAFT-CHAT-IMG-001'],
+  // Part B / phase 2: notes-search + reference path job + job-time chat readonly
+  'draft-job': ['G6-001', 'JOB-CHAT-RO-001', 'DRAFT-REF-PATH-001'],
   // Phase 3: settings user MCP probe
   'settings-mcp': ['SETTINGS-MCP-001']
 }
@@ -306,9 +313,16 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
 }
 
 export function formatCaseList(): string {
+  const seenIds = new Set<string>()
+  const preferredEntries: Array<[string, string]> = []
+  for (const id of Object.values(CASE_ALIASES)) {
+    if (seenIds.has(id)) continue
+    seenIds.add(id)
+    preferredEntries.push([slugForCaseId(id), id])
+  }
   const lines = [
     'Cases (--case <slug>; labels follow --lang zh|en|ja):',
-    ...Object.entries(CASE_ALIASES).map(([slug, id]) => {
+    ...preferredEntries.map(([slug, id]) => {
       const label = labelForCaseId(id)
       return `  ${slug.padEnd(28)} ${label}`
     }),

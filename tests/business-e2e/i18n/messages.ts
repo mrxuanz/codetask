@@ -42,6 +42,9 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'G2-001': '项目与线程',
       'G3-001': '普通对话·单轮',
       'CHAT-HTML-001': '普通对话·创建SDK网页',
+      'CHAT-IMG-001': '普通对话·图片附件读取',
+      'DRAFT-CHAT-IMG-001': '创建草案对话·图片附件绑定',
+      'DRAFT-REF-PATH-001': '参考附件与本地目录·完整任务读取',
       'JOB-CHAT-RO-001': '双任务·Job期对话只读',
       'SETTINGS-MCP-001': '设置MCP·三角色探针',
       'FOUNDATION-FAKE-001': '基础探测',
@@ -56,18 +59,10 @@ export const MESSAGES: Record<Lang, MessageBag> = {
     },
     steps: {
       'preflight.start': '预检开始',
-      'preflight.keep_runtime': '保留运行目录提示',
-      'preflight.database_reset_begin': '开始清空测试数据库',
-      'preflight.database_cleared': '测试数据库已清空',
-      'preflight.database_clear_retry': '测试数据库二次清理',
-      'preflight.database_clear_failed': '测试数据库清理失败',
       'preflight.processes_cleared': '清理残留进程',
-      'preflight.opencode_serve_cleared': '清理残留OpenCode',
-      'preflight.runtime_cleared': '已重置运行目录',
-      'preflight.runtime_clear_failed': '运行目录清理失败',
-      'preflight.runtime_clear_retry': '运行目录清理重试',
-      'preflight.runtime_absent': '运行目录不存在',
+      'preflight.temp_roots_cleared': '清理残留临时目录',
       'run.start': '运行开始',
+      'run.temp_root_ready': '临时运行目录就绪',
       'server.ready': '服务就绪',
       'mcp.ready': '测试MCP就绪',
       'case.start': '用例开始',
@@ -119,13 +114,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'opencode.canary.ok': 'OpenCode金丝雀通过',
       'opencode.canary.failed': 'OpenCode金丝雀失败'
     },
-    notes: {
-      'preflight.keep_runtime':
-        '启动仍强制清空测试数据库与.runtime；如需留档请先自行拷贝',
-      'preflight.database_reset_begin': '开始清空业务测试数据库与运行数据',
-      'preflight.database_cleared': '测试数据库已清空',
-      'preflight.runtime_cleared': '已重置运行目录；本次将使用全新空库'
-    }
+    notes: {}
   },
   en: {
     banner: 'business-e2e',
@@ -151,6 +140,9 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'G2-001': 'Project and thread',
       'G3-001': 'Chat·single turn',
       'CHAT-HTML-001': 'Chat·create SDK html',
+      'CHAT-IMG-001': 'Chat·image attachment read',
+      'DRAFT-CHAT-IMG-001': 'Create-task chat·image draft bind',
+      'DRAFT-REF-PATH-001': 'References·image+local corpus full job read',
       'JOB-CHAT-RO-001': 'Dual-task·job-time chat readonly',
       'SETTINGS-MCP-001': 'Settings MCP·role probe',
       'FOUNDATION-FAKE-001': 'Foundation probe',
@@ -165,18 +157,10 @@ export const MESSAGES: Record<Lang, MessageBag> = {
     },
     steps: {
       'preflight.start': 'preflight start',
-      'preflight.keep_runtime': 'keep-runtime note',
-      'preflight.database_reset_begin': 'clearing test database',
-      'preflight.database_cleared': 'test database cleared',
-      'preflight.database_clear_retry': 'database clear retry',
-      'preflight.database_clear_failed': 'database clear failed',
       'preflight.processes_cleared': 'leftover processes cleared',
-      'preflight.opencode_serve_cleared': 'opencode serve cleared',
-      'preflight.runtime_cleared': 'runtime reset',
-      'preflight.runtime_clear_failed': 'runtime clear failed',
-      'preflight.runtime_clear_retry': 'runtime clear retry',
-      'preflight.runtime_absent': 'runtime absent',
+      'preflight.temp_roots_cleared': 'stale temp roots cleared',
       'run.start': 'run start',
+      'run.temp_root_ready': 'temporary run root ready',
       'server.ready': 'server ready',
       'mcp.ready': 'test MCP ready',
       'case.start': 'case start',
@@ -228,13 +212,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'opencode.canary.ok': 'OpenCode canary ok',
       'opencode.canary.failed': 'OpenCode canary failed'
     },
-    notes: {
-      'preflight.keep_runtime':
-        'Startup still wipes the test database and .runtime; copy archives before rerun if needed',
-      'preflight.database_reset_begin': 'clearing business-e2e test database and runtime data',
-      'preflight.database_cleared': 'test database cleared',
-      'preflight.runtime_cleared': 'runtime reset; this run uses a fresh empty database'
-    }
+    notes: {}
   },
   ja: {
     banner: '業務テスト',
@@ -260,6 +238,9 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'G2-001': 'プロジェクトとスレッド',
       'G3-001': '会話·単ターン',
       'CHAT-HTML-001': '会話·SDKのHTML作成',
+      'CHAT-IMG-001': '会話·画像添付の読取',
+      'DRAFT-CHAT-IMG-001': 'タスク作成会話·画像を草案へ',
+      'DRAFT-REF-PATH-001': '参照·画像とローカルディレクトリのJob読取',
       'JOB-CHAT-RO-001': '二重タスク·Job中チャット読取専用',
       'SETTINGS-MCP-001': '設定MCP·三角色プローブ',
       'FOUNDATION-FAKE-001': '基礎プローブ',
@@ -274,18 +255,10 @@ export const MESSAGES: Record<Lang, MessageBag> = {
     },
     steps: {
       'preflight.start': '事前チェック開始',
-      'preflight.keep_runtime': 'ランタイム保持メモ',
-      'preflight.database_reset_begin': 'テストDB消去開始',
-      'preflight.database_cleared': 'テストDB消去完了',
-      'preflight.database_clear_retry': 'DB消去リトライ',
-      'preflight.database_clear_failed': 'DB消去失敗',
       'preflight.processes_cleared': '残留プロセス掃除',
-      'preflight.opencode_serve_cleared': 'OpenCode掃除',
-      'preflight.runtime_cleared': 'ランタイム初期化',
-      'preflight.runtime_clear_failed': 'ランタイム消去失敗',
-      'preflight.runtime_clear_retry': 'ランタイム消去リトライ',
-      'preflight.runtime_absent': 'ランタイムなし',
+      'preflight.temp_roots_cleared': '残留一時ディレクトリ掃除',
       'run.start': '実行開始',
+      'run.temp_root_ready': '一時実行ディレクトリ準備完了',
       'server.ready': 'サーバ準備完了',
       'mcp.ready': 'テストMCP準備完了',
       'case.start': 'ケース開始',
@@ -337,12 +310,6 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'opencode.canary.ok': 'OpenCodeカナリア成功',
       'opencode.canary.failed': 'OpenCodeカナリア失敗'
     },
-    notes: {
-      'preflight.keep_runtime':
-        '起動時はテストDBと.runtimeを強制消去します；残す場合は再実行前にコピーしてください',
-      'preflight.database_reset_begin': '業務e2eのテストDBとランタイムデータを消去開始',
-      'preflight.database_cleared': 'テストDBを消去済み',
-      'preflight.runtime_cleared': 'ランタイムを初期化；今回は空の新規DBを使用'
-    }
+    notes: {}
   }
 }

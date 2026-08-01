@@ -129,7 +129,12 @@ export const TOOL_DEFS: Array<{
         threadId: { type: 'string' },
         message: { type: 'string' },
         kind: { type: 'string' },
-        createTaskMode: { type: 'boolean' }
+        createTaskMode: { type: 'boolean' },
+        attachmentIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Previously uploaded thread attachment ids to attach to this turn'
+        }
       },
       required: ['threadId', 'message']
     }
@@ -418,6 +423,52 @@ export const TOOL_DEFS: Array<{
     }
   },
   {
+    name: 'codetask_import_draft_references',
+    description:
+      'Import message attachments into a draft as references; always applies descriptions (PATCH) even when the attachment was already auto-added with an empty description',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        messageId: { type: 'string' },
+        attachmentIds: { type: 'array', items: { type: 'string' } },
+        descriptions: { type: 'object' }
+      },
+      required: ['threadId', 'messageId', 'attachmentIds']
+    }
+  },
+  {
+    name: 'codetask_update_draft_reference',
+    description:
+      'Update a draft reference description (required for image/directory before confirm-final)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        messageId: { type: 'string' },
+        referenceId: { type: 'string' },
+        description: { type: 'string' }
+      },
+      required: ['threadId', 'messageId', 'referenceId', 'description']
+    }
+  },
+  {
+    name: 'codetask_add_local_corpus_reference',
+    description: 'Add a local corpus path as a draft reference (file or directory)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        messageId: { type: 'string' },
+        localPath: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        kind: { type: 'string' }
+      },
+      required: ['threadId', 'messageId', 'localPath', 'description']
+    }
+  },
+  {
     name: 'codetask_soft_request',
     description: 'Soft HTTP probe that returns status without throwing',
     inputSchema: {
@@ -561,10 +612,14 @@ const handlers: Record<string, ToolHandler> = {
       args.kind === 'create_task' ||
       args.kind === 'draft'
     const kind = typeof args.kind === 'string' ? args.kind : createTaskMode ? 'create_task' : 'chat'
+    const attachmentIds = Array.isArray(args.attachmentIds)
+      ? args.attachmentIds.map((id) => String(id)).filter(Boolean)
+      : undefined
     return ok(
       await ops.startTurn(ctx.client, threadId, String(args.message), {
         createTaskMode,
-        kind
+        kind,
+        ...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {})
       })
     )
   },
@@ -653,7 +708,7 @@ const handlers: Record<string, ToolHandler> = {
     return ok(await ops.getLatestJob(ctx.client, String(args.threadId)))
   },
   async codetask_get_plans(args, ctx) {
-    return ok(await ops.getLatestJob(ctx.client, String(args.threadId)))
+    return ok(await ops.listThreadPlans(ctx.client, String(args.threadId)))
   },
   async codetask_confirm_plan(args, ctx) {
     return ok(await ops.confirmPlan(ctx.client, String(args.threadId), String(args.jobId)))
@@ -744,6 +799,61 @@ const handlers: Record<string, ToolHandler> = {
         String(args.threadId),
         String(args.filePath),
         String(args.fileName)
+      )
+    )
+  },
+  async codetask_import_draft_references(args, ctx) {
+    const attachmentIds = Array.isArray(args.attachmentIds)
+      ? args.attachmentIds.map((id) => String(id)).filter(Boolean)
+      : []
+    const descriptions =
+      args.descriptions &&
+      typeof args.descriptions === 'object' &&
+      !Array.isArray(args.descriptions)
+        ? Object.fromEntries(
+            Object.entries(args.descriptions as Record<string, unknown>).map(([key, value]) => [
+              key,
+              String(value ?? '')
+            ])
+          )
+        : {}
+    return ok(
+      await ops.importDraftReferences(
+        ctx.client,
+        String(args.threadId),
+        String(args.messageId),
+        attachmentIds,
+        descriptions
+      )
+    )
+  },
+  async codetask_update_draft_reference(args, ctx) {
+    return ok(
+      await ops.updateDraftReferenceDescription(
+        ctx.client,
+        String(args.threadId),
+        String(args.messageId),
+        String(args.referenceId),
+        String(args.description ?? '')
+      )
+    )
+  },
+  async codetask_add_local_corpus_reference(args, ctx) {
+    const kind =
+      args.kind === 'file' || args.kind === 'directory'
+        ? (args.kind as 'file' | 'directory')
+        : undefined
+    return ok(
+      await ops.addLocalCorpusDraftReference(
+        ctx.client,
+        String(args.threadId),
+        String(args.messageId),
+        {
+          localPath: String(args.localPath),
+          name: typeof args.name === 'string' ? args.name : '',
+          description: String(args.description ?? ''),
+          ...(kind ? { kind } : {})
+        }
       )
     )
   },

@@ -111,11 +111,14 @@ export async function startTurn(
   client: PublicApiClient,
   threadId: string,
   message: string,
-  options: { createTaskMode?: boolean; kind?: string } = {}
+  options: { createTaskMode?: boolean; kind?: string; attachmentIds?: string[] } = {}
 ): Promise<{ turnId: string }> {
   const body: Record<string, unknown> = { message }
   if (options.createTaskMode === true) body.createTaskMode = true
   if (typeof options.kind === 'string') body.kind = options.kind
+  if (Array.isArray(options.attachmentIds) && options.attachmentIds.length > 0) {
+    body.attachmentIds = options.attachmentIds
+  }
   const result = await client.request<{ turnId: string }>(
     'POST',
     `/api/threads/${threadId}/turns`,
@@ -248,6 +251,22 @@ export async function getLatestJob(
     throw new Error(`job.latest_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return unwrapJob(result.data)
+}
+
+export async function listThreadPlans(
+  client: PublicApiClient,
+  threadId: string
+): Promise<Array<Record<string, unknown>>> {
+  const result = await client.request<{ plans?: Array<Record<string, unknown>> }>(
+    'GET',
+    `/api/threads/${threadId}/plans`,
+    undefined,
+    { operationId: 'plan.list' }
+  )
+  if (result.status >= 400) {
+    throw new Error(`plan.list_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data?.plans ?? []
 }
 
 export async function getJob(
@@ -525,6 +544,106 @@ export async function uploadThreadAttachment(
   })
   if (result.status >= 400) {
     throw new Error(`attachment.upload_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data
+}
+
+export async function downloadThreadAttachment(
+  client: PublicApiClient,
+  threadId: string,
+  attachmentId: string
+): Promise<Buffer> {
+  const result = await client.requestBinary(
+    'GET',
+    `/api/threads/${threadId}/attachments/${encodeURIComponent(attachmentId)}`,
+    { operationId: 'attachment.download' }
+  )
+  if (result.status >= 400) {
+    throw new Error(`attachment.download_failed:${result.status}`)
+  }
+  return result.body
+}
+
+export async function updateDraftReferenceDescription(
+  client: PublicApiClient,
+  threadId: string,
+  messageId: string,
+  referenceId: string,
+  description: string
+): Promise<unknown> {
+  const result = await client.request(
+    'PATCH',
+    `/api/threads/${threadId}/messages/${messageId}/draft/references/${encodeURIComponent(referenceId)}`,
+    { description },
+    { operationId: 'draft.references.update_description' }
+  )
+  if (result.status >= 400) {
+    throw new Error(
+      `draft.references_update_description_failed:${result.status}:${result.raw.message ?? ''}`
+    )
+  }
+  return result.data
+}
+
+/**
+ * Import message attachments as draft references.
+ * Product auto-adds turn attachments into references with empty descriptions and
+ * skips re-import when the id already exists — so we always PATCH provided
+ * descriptions afterward.
+ */
+export async function importDraftReferences(
+  client: PublicApiClient,
+  threadId: string,
+  messageId: string,
+  attachmentIds: string[],
+  descriptions: Record<string, string> = {}
+): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/threads/${threadId}/messages/${messageId}/draft/references/import`,
+    { attachmentIds, descriptions },
+    { operationId: 'draft.references.import' }
+  )
+  if (result.status >= 400) {
+    throw new Error(`draft.references_import_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+
+  let latest: unknown = result.data
+  for (const attachmentId of attachmentIds) {
+    const description = descriptions[attachmentId]?.trim() ?? ''
+    if (!description) continue
+    latest = await updateDraftReferenceDescription(
+      client,
+      threadId,
+      messageId,
+      attachmentId,
+      description
+    )
+  }
+  return latest
+}
+
+export async function addLocalCorpusDraftReference(
+  client: PublicApiClient,
+  threadId: string,
+  messageId: string,
+  input: {
+    localPath: string
+    name: string
+    description: string
+    kind?: 'file' | 'directory'
+  }
+): Promise<unknown> {
+  const result = await client.request(
+    'POST',
+    `/api/threads/${threadId}/messages/${messageId}/draft/references/local-corpus`,
+    input,
+    { operationId: 'draft.references.local_corpus' }
+  )
+  if (result.status >= 400) {
+    throw new Error(
+      `draft.references_local_corpus_failed:${result.status}:${result.raw.message ?? ''}`
+    )
   }
   return result.data
 }

@@ -252,6 +252,7 @@ async function* streamAgentTurnOnce(
     providerSettings,
     jobId: input.jobId,
     providerRuntimeScopeId: input.providerRuntimeScopeId,
+    readRoots: input.readRoots,
     workloadRunId: input.workloadRunId,
     idempotencyKey: input.idempotencyKey
   }

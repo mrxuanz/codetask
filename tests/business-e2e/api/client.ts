@@ -145,4 +145,49 @@ export class PublicApiClient {
       clearTimeout(timer)
     }
   }
+
+  async requestBinary(
+    method: string,
+    path: string,
+    meta?: { operationId?: string; auth?: boolean }
+  ): Promise<{ status: number; body: Buffer; contentType: string | null }> {
+    const headers: Record<string, string> = {
+      Accept: '*/*',
+      'x-codetask-auth-transport': 'bearer'
+    }
+    if (meta?.auth !== false) {
+      const token = this.resolveToken()
+      if (token) headers.Authorization = `Bearer ${token}`
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.options.timeoutMs ?? TIMEOUTS.httpRequestMs
+    )
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        signal: controller.signal
+      })
+      const bytes = Buffer.from(await response.arrayBuffer())
+      this.options.ledger?.record({
+        caseRunId: this.options.caseRunId,
+        operationId: meta?.operationId ?? `http.${method}.${path}`,
+        transport: 'http',
+        method,
+        routeOrTool: path,
+        status: response.status,
+        ok: response.ok,
+        detail: { bytes: bytes.length }
+      })
+      return {
+        status: response.status,
+        body: bytes,
+        contentType: response.headers.get('content-type')
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 }

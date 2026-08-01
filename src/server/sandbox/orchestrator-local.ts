@@ -203,6 +203,7 @@ export async function* streamSandboxedConversationTurnLocal(
       providerSettings: input.providerSettings,
       jobId: input.jobId,
       providerRuntimeScopeId: input.providerRuntimeScopeId,
+      readRoots: input.readRoots,
       idempotencyKey: input.idempotencyKey
     }
 

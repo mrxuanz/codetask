@@ -1,4 +1,5 @@
 import type { Config, PermissionRuleset, QuestionAnswer } from '@opencode-ai/sdk/v2'
+import { resolve } from 'node:path'
 import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
 import { allCreateTaskMcpToolNames } from '../../wizard/tools'
 import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
@@ -49,17 +50,47 @@ const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
 export const OPENCODE_AUTO_QUESTION_GUIDANCE =
   'Make your best judgment and proceed without waiting for the user. Prefer concrete action over more questions.'
 
+function resolveOpencodeExternalReadPatterns(readRoots?: readonly string[]): string[] {
+  if (!readRoots?.length) return []
+
+  const patterns = new Set<string>()
+  for (const root of readRoots) {
+    if (!root.trim()) continue
+    const normalized = resolve(root).replaceAll('\\', '/').replace(/\/+$/, '')
+    if (!normalized) continue
+    patterns.add(`${normalized}/**`)
+  }
+  return [...patterns]
+}
+
+function resolveExternalDirectoryPermission(
+  readRoots?: readonly string[]
+): 'deny' | Record<string, 'allow' | 'deny'> {
+  const patterns = resolveOpencodeExternalReadPatterns(readRoots)
+  if (patterns.length === 0) return 'deny'
+  return {
+    '*': 'deny',
+    ...Object.fromEntries(patterns.map((pattern) => [pattern, 'allow' as const]))
+  }
+}
+
 /**
  * Prefer an explicit question deny after wildcard allow (last matching rule wins).
  * Do not rely on this alone — OpenCode may still emit `question.asked`.
  */
 export function resolveOpencodePermissionConfig(
-  capabilityProfile?: AgentCapabilityProfile
+  capabilityProfile?: AgentCapabilityProfile,
+  readRoots?: readonly string[]
 ): NonNullable<Config['permission']> {
+  const externalDirectory = resolveExternalDirectoryPermission(readRoots)
+  const externalEditDenials = Object.fromEntries(
+    resolveOpencodeExternalReadPatterns(readRoots).map((pattern) => [pattern, 'deny' as const])
+  )
   if (!capabilityProfile || !capabilityProfileIsReadOnly(capabilityProfile)) {
     return {
       '*': 'allow',
-      external_directory: 'deny',
+      ...(Object.keys(externalEditDenials).length > 0 ? { edit: externalEditDenials } : {}),
+      external_directory: externalDirectory,
       question: 'deny'
     }
   }
@@ -81,15 +112,19 @@ export function resolveOpencodePermissionConfig(
     list: 'allow',
     lsp: 'allow',
     ...auditedMcpRules,
-    external_directory: 'deny',
+    external_directory: externalDirectory,
     question: 'deny'
   }
 }
 
 export function resolveOpencodeSessionPermissionRules(
-  capabilityProfile?: AgentCapabilityProfile
+  capabilityProfile?: AgentCapabilityProfile,
+  readRoots?: readonly string[]
 ): PermissionRuleset {
-  const config = resolveOpencodePermissionConfig(capabilityProfile) as Record<string, unknown>
+  const config = resolveOpencodePermissionConfig(capabilityProfile, readRoots) as Record<
+    string,
+    unknown
+  >
   return Object.entries(config).flatMap(([permission, action]) => {
     if (typeof action === 'string') {
       return [{ permission, pattern: '*', action: action as 'allow' | 'deny' | 'ask' }]
