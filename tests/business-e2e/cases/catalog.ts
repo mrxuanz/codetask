@@ -456,6 +456,118 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     fixture: 'conversation/create-html.json',
     workspaceFixture: 'empty-project'
   },
+  'CHAT-IMG-001': {
+    caseId: 'CHAT-IMG-001',
+    gate: 'G3',
+    title: 'chat can read uploaded image attachment via selected core',
+    driver: 'fake',
+    skills: ['common-blackbox', 'project-thread', 'chat-image-attachment'],
+    allowedTools: [
+      'codetask_create_project',
+      'codetask_create_thread',
+      'codetask_get_thread',
+      'codetask_list_cores',
+      'codetask_upload_attachment',
+      'codetask_start_turn',
+      'codetask_get_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
+      'case_checkpoint',
+      'report_case_result'
+    ],
+    requiredOperations: [
+      'mcp.codetask_create_project',
+      'mcp.codetask_create_thread',
+      'mcp.codetask_upload_attachment',
+      'mcp.codetask_start_turn',
+      'case.report_result'
+    ],
+    oracle: {
+      requireProject: true,
+      requireThread: true,
+      requireAssistantMessage: true,
+      requireTurnCompleted: true
+    },
+    fixture: 'conversation/chat-image-attachment.json',
+    workspaceFixture: 'empty-project'
+  },
+  'DRAFT-CHAT-IMG-001': {
+    caseId: 'DRAFT-CHAT-IMG-001',
+    gate: 'G3',
+    title: 'create_task chat can read image and bind it on a confirmable draft',
+    driver: 'fake',
+    skills: ['common-blackbox', 'project-thread', 'draft-chat-image-attachment'],
+    allowedTools: [
+      'codetask_create_project',
+      'codetask_create_thread',
+      'codetask_get_thread',
+      'codetask_upload_attachment',
+      'codetask_start_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
+      'codetask_get_thread_drafts',
+      'codetask_soft_request',
+      'case_checkpoint',
+      'report_case_result'
+    ],
+    requiredOperations: [
+      'mcp.codetask_create_project',
+      'mcp.codetask_create_thread',
+      'mcp.codetask_upload_attachment',
+      'mcp.codetask_start_turn',
+      'case.report_result'
+    ],
+    oracle: { requireProject: true, requireThread: true },
+    fixture: 'conversation/draft-chat-image-attachment.json',
+    workspaceFixture: 'empty-project'
+  },
+  'DRAFT-REF-PATH-001': {
+    caseId: 'DRAFT-REF-PATH-001',
+    gate: 'G6',
+    title: 'image + local corpus references flow draft→planner→job with full file reads',
+    driver: 'fake',
+    skills: ['common-blackbox', 'project-thread', 'draft-reference-path-job'],
+    allowedTools: [
+      'codetask_create_project',
+      'codetask_create_thread',
+      'codetask_get_thread',
+      'codetask_upload_attachment',
+      'codetask_start_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
+      'codetask_get_thread_drafts',
+      'codetask_import_draft_references',
+      'codetask_update_draft_reference',
+      'codetask_add_local_corpus_reference',
+      'codetask_confirm_draft',
+      'codetask_update_draft_execution_config',
+      'codetask_confirm_draft_final',
+      'codetask_get_latest_job',
+      'codetask_get_plans',
+      'codetask_get_job',
+      'codetask_confirm_plan',
+      'codetask_wait_job',
+      'codetask_get_task_evidence',
+      'codetask_soft_request',
+      'case_checkpoint',
+      'report_case_result'
+    ],
+    requiredOperations: [
+      'mcp.codetask_create_project',
+      'mcp.codetask_create_thread',
+      'mcp.codetask_upload_attachment',
+      'mcp.codetask_start_turn',
+      'mcp.codetask_import_draft_references',
+      'mcp.codetask_add_local_corpus_reference',
+      'mcp.codetask_update_draft_execution_config',
+      'mcp.codetask_confirm_draft_final',
+      'mcp.codetask_confirm_plan',
+      'case.report_result'
+    ],
+    oracle: { requireProject: true, requireThread: true },
+    fixture: 'conversation/draft-reference-path-job.json',
+    workspaceFixture: 'empty-project'
+  },
   'JOB-CHAT-RO-001': {
     caseId: 'JOB-CHAT-RO-001',
     gate: 'G6',
@@ -690,16 +802,35 @@ export function resolveCaseIds(options: { gate?: string; caseId?: string }): str
   if (options.gate === 'smoke') return [...SMOKE_CASES]
   if (options.gate === 'foundation') return ['FOUNDATION-FAKE-001']
   if (options.gate === 'draft-core') return [...DRAFT_CORE_CASES]
-  if (options.gate === 'conversation' || options.gate === 'chat') return ['G3-001', 'CHAT-HTML-001']
+  if (options.gate === 'conversation' || options.gate === 'chat') {
+    return ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001', 'DRAFT-CHAT-IMG-001']
+  }
   if (options.gate === 'draft-job' || options.gate === 'draft' || options.gate === 'job') {
-    return ['G6-001', 'JOB-CHAT-RO-001']
+    return ['G6-001', 'JOB-CHAT-RO-001', 'DRAFT-REF-PATH-001']
   }
   if (options.gate === 'settings-mcp' || options.gate === 'mcp') return ['SETTINGS-MCP-001']
   if (options.gate === 'both' || options.gate === 'a-b') {
-    return ['G3-001', 'CHAT-HTML-001', 'G6-001', 'JOB-CHAT-RO-001']
+    return [
+      'G3-001',
+      'CHAT-HTML-001',
+      'CHAT-IMG-001',
+      'DRAFT-CHAT-IMG-001',
+      'G6-001',
+      'JOB-CHAT-RO-001',
+      'DRAFT-REF-PATH-001'
+    ]
   }
   if (options.gate === 'phases') {
-    return ['G3-001', 'CHAT-HTML-001', 'G6-001', 'JOB-CHAT-RO-001', 'SETTINGS-MCP-001']
+    return [
+      'G3-001',
+      'CHAT-HTML-001',
+      'CHAT-IMG-001',
+      'DRAFT-CHAT-IMG-001',
+      'G6-001',
+      'JOB-CHAT-RO-001',
+      'DRAFT-REF-PATH-001',
+      'SETTINGS-MCP-001'
+    ]
   }
   if (options.gate === 'fixed-opencode-full') {
     return [

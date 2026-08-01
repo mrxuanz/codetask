@@ -70,6 +70,12 @@ export class OpenCodeDriver implements AgentDriver {
     const caseHints: Record<string, string> = {
       'CHAT-HTML-001':
         'Create project/thread with the conversation coreCode. Ask the product agent to create the SDK-named HTML file in workspace root (opencode.html / cursor.html / …) containing BUSINESS_E2E_CHAT_HTML. Wait for turn completion, then report with expectedHtmlFile in artifacts.',
+      'CHAT-IMG-001':
+        'Upload image fixture as attachment.png only. start_turn with attachmentIds. Do not put Dream/1000/Cats into message, titles, or fileName. Report messageIdsBefore + attachmentId + turnId.',
+      'DRAFT-CHAT-IMG-001':
+        'create_task: upload as attachment.png, one turn with attachmentIds, poll drafts until confirmable (no nudge spam). Stop at draft. Report draftMessageId + attachmentId. Do not leak Dream/1000/Cats in prompts.',
+      'DRAFT-REF-PATH-001':
+        'create_task: upload attachment.png, draft turn, import draft references WITH descriptions (import tool PATCHes even if attachment was auto-added empty) + add local_corpus directory (outside workspace), confirm_draft → executionConfig → confirm_final, poll GET plans, confirm_plan, then wait_job using the returned launched Job threadId (not the original create-task thread). Report draftMessageId, attachmentId, directoryReferenceId, designSessionId, launchedJobId, launchedThreadId, localCorpusPath. Never leak Dream/1000/Cats or DESIGN_* sentinels in prompts.',
       'G4-001':
         'Only unlock and send the first fixture phase (fuzzy). Do NOT unlock later phases. After the assistant replies, list drafts; do not confirm a full draft. Report completed with observations about missing info.',
       'G4-002':

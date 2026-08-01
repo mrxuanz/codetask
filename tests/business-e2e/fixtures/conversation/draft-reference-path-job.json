@@ -1,0 +1,9 @@
+{
+  "message": "请根据附件图片创建一次性读取验证任务草案。Job 必须直接读取附件图片和稍后绑定的设计资料 Reference 中已经存在的 overview.md、api.md、nested/constraints.md，并且只生成 reference-proof.json。严禁构建通用工具，严禁编写程序、脚本、依赖、测试、fixture 或模拟设计资料，也不得用项目 workspace 中的其他文件代替引用资料。JSON 固定结构：imageText 为图片文字，designData 为包含 path 和 content 的数组，并保留上述相对路径及实际文件内容。立即提出草案，不要追问。",
+  "language": "zh-CN",
+  "uploadFileName": "attachment.png",
+  "expect": {
+    "exactText": "Dream of 1000 Cats",
+    "proofFile": "reference-proof.json"
+  }
+}

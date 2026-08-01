@@ -95,6 +95,30 @@ grows above that baseline.
   (draft aggregate removed; independent task retained) is unchanged.
 - CI handling: none; regression covered by the fixed unit test.
 
+## BUSINESS-012: OpenCode external reference read roots
+
+- Status: resolved (2026-08-02)
+- Target phase: Provider runtime / sandbox permission integration
+- Resolution: preserve `AgentTurnInput.readRoots` through the runner and sandbox
+  role-worker boundary, then project each normalized root into OpenCode's config
+  and session permission rules as an exact `<root>/**` read allowance. The
+  default external-directory rule remains deny, writable profiles explicitly
+  deny edits to those external roots, and the outer CodeTask sandbox remains the
+  authoritative filesystem boundary.
+- Locations: `src/server/agent-runtime/types.ts`,
+  `src/server/agent-runtime/runner.ts`,
+  `src/server/sandbox/orchestrator-local.ts`, and
+  `src/server/agent-runtime/providers/opencode-config.ts`.
+- Validation: real OpenCode runs passed `chat-image-attachment`
+  (`20260801-144525Z-0edc522a`), `draft-chat-image-attachment`
+  (`20260801-144547Z-1e2b8fd1`), and the full image + external local-corpus
+  Planner/Job path (`20260801-160208Z-76669d5d`). Fixtures stayed outside the
+  project workspace and expected OCR/reference content was not injected into
+  prompts.
+- CI handling: none; strict runtime, permission, and business-oracle regression
+  tests cover the repaired path.
+- Decision needed: none.
+
 ## BUSINESS-004: macOS Seatbelt tests no longer compile
 
 - Status: open

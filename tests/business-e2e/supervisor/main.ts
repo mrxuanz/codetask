@@ -29,8 +29,13 @@ import {
   runProcessOracle,
   type OracleResult
 } from '../oracles/http-state'
+import {
+  runChatImageAttachmentOracle,
+  runDraftChatImageAttachmentOracle,
+  runDraftReferencePathOracle
+} from '../oracles/image-attachment'
 import { OperationLedger } from '../reports/ledger'
-import { assertNoSecrets } from '../reports/redaction'
+import { assertNoSecrets, redactValue } from '../reports/redaction'
 import { ReportWriter, type CaseReport, type FailureClass } from '../reports/writer'
 import { CredentialVault } from './credential-vault'
 import { fixturePath, runCaseWorker, runCrashingWorker, skillPath } from './case-process'
@@ -39,14 +44,20 @@ import {
   assertExists,
   createCaseRunId,
   createRunId,
+  createTemporaryRunRoot,
   ensureRunLayout,
   randomAccount,
   readJson,
+  removeTemporaryRunRoot,
   repoRootFromHere
 } from './run-layout'
 import { startDedicatedServer, type ServerHandle } from './server-process'
 import { runPreflightCleanup } from './preflight'
-import { assertWorkspaceCopied, copyFixtureWorkspace } from './workspace-copy'
+import {
+  assertWorkspaceCopied,
+  copyFixtureWorkspace,
+  initializeWorkspaceGitBoundary
+} from './workspace-copy'
 import type { FixturePhaseState } from '../mcp/capabilities'
 import { localStamp, progress } from '../reports/progress'
 import { setLang, tFailure, tSuccess } from '../i18n'
@@ -73,7 +84,10 @@ async function main(): Promise<void> {
 Examples:
   npm run business:e2e:conversation
   npm run business:e2e:chat-html
+  npm run business:e2e:chat-image
+  npm run business:e2e:draft-chat-image
   npm run business:e2e:draft-job
+  npm run business:e2e:draft-ref-path
   npm run business:e2e:settings-mcp
   npm run business:e2e:phases
   npm run business:e2e -- --providers opencode --part conversation,draft-job,settings-mcp
@@ -117,13 +131,11 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
   if (caseIds.length === 0) {
     throw new Error('business_e2e_selection_empty:use --list for valid cases, parts, and suites')
   }
-  const keepRuntime =
-    hasFlag(argv, '--keep-runtime') || process.env.BUSINESS_E2E_KEEP_RUNTIME === '1'
   const runStartedAt = new Date().toISOString()
 
   const repoRoot = repoRootFromHere()
-  progress('supervisor', 'preflight.start', { keepRuntime })
-  runPreflightCleanup({ repoRoot, keepRuntime })
+  progress('supervisor', 'preflight.start')
+  runPreflightCleanup()
 
   progress('supervisor', 'run.start', {
     providers: providerQueue.map((p) => ({
@@ -139,7 +151,15 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
   })
 
   const runId = createRunId()
-  const runRoot = join(repoRoot, 'tests/business-e2e/.runtime/runs', runId)
+  const runRoot = createTemporaryRunRoot(runId)
+  let runRootRemoved = false
+  const cleanupRunRoot = (): void => {
+    if (runRootRemoved) return
+    removeTemporaryRunRoot(runRoot)
+    runRootRemoved = true
+  }
+  process.once('exit', cleanupRunRoot)
+  progress('supervisor', 'run.temp_root_ready', { path: runRoot })
   const layout = ensureRunLayout(runRoot)
   const ledger = new OperationLedger(layout.reports)
   const reports = new ReportWriter(layout.reports)
@@ -357,6 +377,21 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
         }
 
         reports.writeCase(report)
+        const oracleFailures = failingOracleResults(report.oracleResults)
+        if (oracleFailures.length > 0) {
+          console.error(
+            JSON.stringify(
+              redactValue({
+                event: 'case_oracle_failures',
+                caseId: id,
+                provider: slot.alias,
+                failures: oracleFailures
+              }),
+              null,
+              2
+            )
+          )
+        }
         caseSummaries.push({
           caseId: `${labelForCaseId(id)}/${slot.alias}`,
           classification: report.classification
@@ -424,6 +459,16 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
     console.log(tSuccess())
   }
   process.exitCode = failed > 0 ? 1 : 0
+  cleanupRunRoot()
+  process.removeListener('exit', cleanupRunRoot)
+}
+
+function failingOracleResults(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object' && (item as { passed?: unknown }).passed === false
+  )
 }
 
 async function executeCase(ctx: {
@@ -515,6 +560,7 @@ async function executeCase(ctx: {
     mkdirSync(workspaceRoot, { recursive: true })
     writeFileSync(join(workspaceRoot, 'README.md'), `# ${manifest.caseId}\n`, 'utf8')
   }
+  initializeWorkspaceGitBoundary(workspaceRoot)
 
   let fixtureState: FixturePhaseState | undefined
   if (manifest.stagedFixture) {
@@ -596,7 +642,8 @@ async function executeCase(ctx: {
     artifacts,
     expectedHtmlFile,
     expectedThreadCore: conversationCore,
-    expectedExecutionConfig: executionConfig
+    expectedExecutionConfig: executionConfig,
+    evidenceDir: caseDir
   })
 
   const agentReportedCompleted = Boolean(
@@ -863,10 +910,11 @@ async function buildOracleResults(input: {
   capability: Capability | undefined
   server: ServerHandle
   registry: ProcessRegistry
-  artifacts: { projectId?: string; threadId?: string; turnId?: string }
+  artifacts: ReturnType<typeof extractArtifacts>
   expectedHtmlFile?: string
   expectedThreadCore: string
   expectedExecutionConfig: DraftExecutionConfig
+  evidenceDir?: string
 }): Promise<OracleResult[]> {
   const results: OracleResult[] = []
   results.push(runAgentReportOracle(input.capability))
@@ -945,6 +993,90 @@ async function buildOracleResults(input: {
         detail: { reason: 'workspace_missing', fileName }
       })
     }
+  }
+
+  if (
+    input.manifest.caseId === 'CHAT-IMG-001' &&
+    input.artifacts.threadId &&
+    input.artifacts.turnId &&
+    input.artifacts.attachmentId
+  ) {
+    results.push(
+      ...(await runChatImageAttachmentOracle({
+        client: input.client,
+        threadId: input.artifacts.threadId,
+        turnId: input.artifacts.turnId,
+        attachmentId: input.artifacts.attachmentId,
+        expectedCoreCode: input.expectedThreadCore,
+        messageIdsBefore: new Set(input.artifacts.messageIdsBefore ?? []),
+        evidenceDir: input.evidenceDir
+      }))
+    )
+  } else if (input.manifest.caseId === 'CHAT-IMG-001') {
+    results.push({
+      name: 'chat_image_text_recognized',
+      passed: false,
+      detail: { reason: 'artifacts_incomplete', artifacts: input.artifacts }
+    })
+  }
+
+  if (
+    input.manifest.caseId === 'DRAFT-CHAT-IMG-001' &&
+    input.artifacts.threadId &&
+    input.artifacts.draftMessageId &&
+    input.artifacts.attachmentId
+  ) {
+    results.push(
+      ...(await runDraftChatImageAttachmentOracle({
+        client: input.client,
+        threadId: input.artifacts.threadId,
+        draftMessageId: input.artifacts.draftMessageId,
+        attachmentId: input.artifacts.attachmentId,
+        evidenceDir: input.evidenceDir
+      }))
+    )
+  } else if (input.manifest.caseId === 'DRAFT-CHAT-IMG-001') {
+    results.push({
+      name: 'draft_image_text_recognized',
+      passed: false,
+      detail: { reason: 'artifacts_incomplete', artifacts: input.artifacts }
+    })
+  }
+
+  if (
+    input.manifest.caseId === 'DRAFT-REF-PATH-001' &&
+    input.artifacts.threadId &&
+    input.artifacts.draftMessageId &&
+    input.artifacts.attachmentId &&
+    input.artifacts.directoryReferenceId &&
+    input.artifacts.designSessionId &&
+    input.artifacts.launchedJobId &&
+    input.artifacts.launchedThreadId &&
+    input.artifacts.localCorpusPath &&
+    input.capability?.workspaceRoot
+  ) {
+    results.push(
+      ...(await runDraftReferencePathOracle({
+        client: input.client,
+        threadId: input.artifacts.threadId,
+        draftMessageId: input.artifacts.draftMessageId,
+        attachmentId: input.artifacts.attachmentId,
+        directoryReferenceId: input.artifacts.directoryReferenceId,
+        designSessionId: input.artifacts.designSessionId,
+        launchedJobId: input.artifacts.launchedJobId,
+        launchedThreadId: input.artifacts.launchedThreadId,
+        localCorpusPath: input.artifacts.localCorpusPath,
+        workspaceRoot: input.capability.workspaceRoot,
+        evidenceDir: input.evidenceDir
+      }))
+    )
+    results.push(await runReferenceProofFileOracle(input.capability.workspaceRoot))
+  } else if (input.manifest.caseId === 'DRAFT-REF-PATH-001') {
+    results.push({
+      name: 'reference_proof_file_oracle',
+      passed: false,
+      detail: { reason: 'artifacts_incomplete', artifacts: input.artifacts }
+    })
   }
 
   return results
@@ -1039,10 +1171,41 @@ async function runChatHtmlFileOracle(
   }
 }
 
+async function runReferenceProofFileOracle(workspaceRoot: string): Promise<OracleResult> {
+  const { spawnSync } = await import('node:child_process')
+  const { join } = await import('node:path')
+  const oraclePath = join(
+    repoRootFromHere(),
+    'tests/business-e2e/fixtures/validators/reference-proof-oracle.mjs'
+  )
+  const result = spawnSync(process.execPath, [oraclePath, '--workspace', workspaceRoot], {
+    encoding: 'utf8'
+  })
+  return {
+    name: 'reference_proof_node_oracle',
+    passed: result.status === 0,
+    detail: {
+      status: result.status,
+      stdout: result.stdout?.slice(0, 500),
+      stderr: result.stderr?.slice(0, 500)
+    }
+  }
+}
+
 function extractArtifacts(report: { artifacts?: unknown } | undefined): {
   projectId?: string
   threadId?: string
   turnId?: string
+  draftMessageId?: string
+  messageId?: string
+  designSessionId?: string
+  launchedJobId?: string
+  launchedThreadId?: string
+  jobId?: string
+  attachmentId?: string
+  directoryReferenceId?: string
+  localCorpusPath?: string
+  messageIdsBefore?: string[]
 } {
   let artifacts = report?.artifacts
   if (typeof artifacts === 'string') {
@@ -1053,10 +1216,37 @@ function extractArtifacts(report: { artifacts?: unknown } | undefined): {
     }
   }
   const record = (artifacts ?? {}) as Record<string, unknown>
+  const messageIdsBefore = Array.isArray(record.messageIdsBefore)
+    ? record.messageIdsBefore.map(String)
+    : undefined
   return {
     projectId: typeof record.projectId === 'string' ? record.projectId : undefined,
     threadId: typeof record.threadId === 'string' ? record.threadId : undefined,
-    turnId: typeof record.turnId === 'string' ? record.turnId : undefined
+    turnId: typeof record.turnId === 'string' ? record.turnId : undefined,
+    draftMessageId:
+      typeof record.draftMessageId === 'string'
+        ? record.draftMessageId
+        : typeof record.messageId === 'string'
+          ? record.messageId
+          : undefined,
+    messageId: typeof record.messageId === 'string' ? record.messageId : undefined,
+    designSessionId:
+      typeof record.designSessionId === 'string' ? record.designSessionId : undefined,
+    launchedJobId:
+      typeof record.launchedJobId === 'string'
+        ? record.launchedJobId
+        : typeof record.jobId === 'string'
+          ? record.jobId
+          : undefined,
+    launchedThreadId:
+      typeof record.launchedThreadId === 'string' ? record.launchedThreadId : undefined,
+    jobId: typeof record.jobId === 'string' ? record.jobId : undefined,
+    attachmentId: typeof record.attachmentId === 'string' ? record.attachmentId : undefined,
+    directoryReferenceId:
+      typeof record.directoryReferenceId === 'string' ? record.directoryReferenceId : undefined,
+    localCorpusPath:
+      typeof record.localCorpusPath === 'string' ? record.localCorpusPath : undefined,
+    messageIdsBefore
   }
 }
 

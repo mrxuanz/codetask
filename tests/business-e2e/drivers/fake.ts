@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { McpToolClient } from '../mcp/client'
 import { progress } from '../reports/progress'
+import { findAttachmentPermissionRefusal, findImageInputUnsupported } from './attachment-permission'
+import { waitForJobTerminalViaMcp } from './job-wait'
 import {
   buildCreateHtmlUserMessage,
   CHAT_HTML_MARKER,
@@ -11,6 +13,16 @@ import {
 } from '../config/sdk-html'
 import { CLI_MCP_ROOT_KEY, PROBE_OK, PROBE_SERVER_NAME } from '../config/providers'
 import type { SutCoreCode } from '../config/profiles'
+import {
+  assertNoLeak,
+  ensureReferenceCorpus,
+  IMAGE_FIXTURE_FILE,
+  IMAGE_FORBIDDEN_LEAK_TOKENS,
+  IMAGE_UPLOAD_FILE_NAME,
+  REF_FORBIDDEN_LEAK_TOKENS,
+  referenceCorpusRootForWorkspace,
+  resolveImageFixturePath
+} from '../oracles/image-attachment'
 
 type Push = (type: string, detail?: unknown) => void
 
@@ -136,6 +148,21 @@ export class FakeDriver implements AgentDriver {
 
       if (input.caseId === 'CHAT-HTML-001') {
         await this.runCreateHtmlConversation(input, mcp, push)
+        return { ok: true, events }
+      }
+
+      if (input.caseId === 'CHAT-IMG-001') {
+        await this.runChatImageAttachment(input, mcp, push)
+        return { ok: true, events }
+      }
+
+      if (input.caseId === 'DRAFT-CHAT-IMG-001') {
+        await this.runDraftChatImageAttachment(input, mcp, push)
+        return { ok: true, events }
+      }
+
+      if (input.caseId === 'DRAFT-REF-PATH-001') {
+        await this.runDraftReferencePathJob(input, mcp, push)
         return { ok: true, events }
       }
 
@@ -891,28 +918,7 @@ export class FakeDriver implements AgentDriver {
     const summary = String(draftRow?.summary ?? '')
     const summaryEmpty = summary.trim().length === 0
 
-    let detail: Record<string, unknown> | null = null
-    if (draftMessageId) {
-      try {
-        const soft = (await mcp.callTool('codetask_soft_request', {
-          method: 'GET',
-          path: `/api/threads/${threadId}/messages/${draftMessageId}/draft`,
-          operationId: 'soft.draft.get'
-        })) as Record<string, unknown>
-        detail =
-          soft && typeof soft === 'object'
-            ? ((soft.data as Record<string, unknown> | undefined) ??
-              (soft.draft as Record<string, unknown> | undefined) ??
-              soft)
-            : null
-        push('draft.detail', {
-          messageId: draftMessageId,
-          keys: detail && typeof detail === 'object' ? Object.keys(detail).slice(0, 24) : []
-        })
-      } catch (error) {
-        push('draft.detail_error', { error: String(error) })
-      }
-    }
+    const detail = draftRow
 
     const assistant = await this.latestAssistantText(mcp, threadId)
     const assistantStillAsking = this.assistantLooksLikeFollowUp(assistant)
@@ -1797,6 +1803,512 @@ export class FakeDriver implements AgentDriver {
     push('case.reported', { depth: 'skeleton' })
   }
 
+  private async runChatImageAttachment(
+    input: DriverStartInput,
+    mcp: McpToolClient,
+    push: Push
+  ): Promise<void> {
+    const core = selectedConversationCore(input)
+    const message =
+      typeof input.fixture?.message === 'string'
+        ? input.fixture.message
+        : '请读取附件图片，只回复图片中看到的英文内容。'
+    const uploadFileName =
+      typeof input.fixture?.uploadFileName === 'string'
+        ? input.fixture.uploadFileName
+        : IMAGE_UPLOAD_FILE_NAME
+    const imagePath = resolveImageFixturePath(IMAGE_FIXTURE_FILE)
+    assertNoLeak('chat.message', message, IMAGE_FORBIDDEN_LEAK_TOKENS)
+    assertNoLeak('chat.uploadFileName', uploadFileName, IMAGE_FORBIDDEN_LEAK_TOKENS)
+
+    const projectTitle = `chat-img-probe-${core}`
+    const threadTitle = 'chat-img-probe'
+    assertNoLeak('chat.projectTitle', projectTitle, IMAGE_FORBIDDEN_LEAK_TOKENS)
+    assertNoLeak('chat.threadTitle', threadTitle, IMAGE_FORBIDDEN_LEAK_TOKENS)
+
+    const project = (await mcp.callTool('codetask_create_project', {
+      workspaceRoot: input.workspaceRoot,
+      title: projectTitle
+    })) as { id: string }
+    push('project.created', { id: project.id })
+    await mcp.callTool('case_checkpoint', { name: 'project_created' })
+
+    const thread = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: threadTitle,
+      coreCode: core,
+      threadKind: 'chat'
+    })) as { id: string }
+    push('thread.created', { id: thread.id, coreCode: core })
+    await mcp.callTool('case_checkpoint', { name: 'thread_created' })
+
+    const uploaded = (await mcp.callTool('codetask_upload_attachment', {
+      threadId: thread.id,
+      filePath: imagePath,
+      fileName: uploadFileName
+    })) as { attachment?: { id?: string }; id?: string }
+    const attachmentId = uploaded.attachment?.id ?? uploaded.id
+    if (!attachmentId) throw new Error('attachment_id_missing')
+    push('attachment.uploaded', { attachmentId, uploadFileName })
+    await mcp.callTool('case_checkpoint', { name: 'attachment_uploaded', detail: { attachmentId } })
+
+    const before = (await mcp.callTool('codetask_list_messages', {
+      threadId: thread.id
+    })) as Array<Record<string, unknown>> | { data?: Array<Record<string, unknown>> }
+    const beforeList = Array.isArray(before) ? before : (before.data ?? [])
+    const messageIdsBefore = beforeList
+      .map((item) => (typeof item.id === 'string' ? item.id : ''))
+      .filter(Boolean)
+
+    const started = (await mcp.callTool('codetask_start_turn', {
+      threadId: thread.id,
+      message,
+      attachmentIds: [attachmentId]
+    })) as { turnId: string }
+    const turn = (await mcp.callTool('codetask_wait_turn', {
+      threadId: thread.id,
+      turnId: started.turnId
+    })) as { status?: string; lastError?: unknown }
+    push('turn.done', { status: turn.status, turnId: started.turnId })
+    if (String(turn.status) !== 'completed') {
+      throw new Error(`turn_not_completed:${turn.status}:${JSON.stringify(turn.lastError ?? null)}`)
+    }
+    const afterTurnMessages = await mcp.callTool('codetask_list_messages', {
+      threadId: thread.id
+    })
+    const attachmentPermissionRefusal = findAttachmentPermissionRefusal(afterTurnMessages)
+    if (attachmentPermissionRefusal) {
+      throw new Error(
+        `attachment_read_permission_denied:${core}:${attachmentPermissionRefusal.slice(0, 240)}`
+      )
+    }
+    const imageInputUnsupported = findImageInputUnsupported(afterTurnMessages)
+    if (imageInputUnsupported) {
+      throw new Error(
+        `provider_image_input_unsupported:${core}:${imageInputUnsupported.slice(0, 240)}`
+      )
+    }
+    await mcp.callTool('case_checkpoint', { name: 'turn_completed' })
+
+    await mcp.callTool('report_case_result', {
+      caseId: input.caseId,
+      status: 'completed',
+      summary: `CHAT-IMG attachment turn completed (core=${core})`,
+      observations: [
+        { step: 'chat-image-attachment', core, attachmentId, turnStatus: turn.status }
+      ],
+      artifacts: {
+        projectId: project.id,
+        threadId: thread.id,
+        turnId: started.turnId,
+        attachmentId,
+        messageIdsBefore,
+        conversationCore: core
+      }
+    })
+    push('case.reported', { attachmentId })
+  }
+
+  private async runDraftChatImageAttachment(
+    input: DriverStartInput,
+    mcp: McpToolClient,
+    push: Push
+  ): Promise<void> {
+    const core = selectedConversationCore(input)
+    const message =
+      typeof input.fixture?.message === 'string'
+        ? input.fixture.message
+        : '请读取附件图片，并根据图片中的英文内容立即提出一个任务草案。标题或摘要中保留你看到的英文内容，不要继续追问。'
+    const uploadFileName =
+      typeof input.fixture?.uploadFileName === 'string'
+        ? input.fixture.uploadFileName
+        : IMAGE_UPLOAD_FILE_NAME
+    const imagePath = resolveImageFixturePath(IMAGE_FIXTURE_FILE)
+    assertNoLeak('draft-chat.message', message, IMAGE_FORBIDDEN_LEAK_TOKENS)
+    assertNoLeak('draft-chat.uploadFileName', uploadFileName, IMAGE_FORBIDDEN_LEAK_TOKENS)
+
+    const projectTitle = `draft-chat-img-${core}`
+    const threadTitle = 'draft-chat-img-probe'
+    assertNoLeak('draft-chat.projectTitle', projectTitle, IMAGE_FORBIDDEN_LEAK_TOKENS)
+    assertNoLeak('draft-chat.threadTitle', threadTitle, IMAGE_FORBIDDEN_LEAK_TOKENS)
+
+    const project = (await mcp.callTool('codetask_create_project', {
+      workspaceRoot: input.workspaceRoot,
+      title: projectTitle
+    })) as { id: string }
+    push('project.created', { id: project.id })
+    await mcp.callTool('case_checkpoint', { name: 'project_created' })
+
+    const thread = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: threadTitle,
+      coreCode: core,
+      threadKind: 'create_task'
+    })) as { id: string }
+    push('thread.created', { id: thread.id, coreCode: core })
+    await mcp.callTool('case_checkpoint', { name: 'thread_created' })
+
+    const uploaded = (await mcp.callTool('codetask_upload_attachment', {
+      threadId: thread.id,
+      filePath: imagePath,
+      fileName: uploadFileName
+    })) as { attachment?: { id?: string }; id?: string }
+    const attachmentId = uploaded.attachment?.id ?? uploaded.id
+    if (!attachmentId) throw new Error('attachment_id_missing')
+    push('attachment.uploaded', { attachmentId, uploadFileName })
+    await mcp.callTool('case_checkpoint', { name: 'attachment_uploaded', detail: { attachmentId } })
+
+    const started = (await mcp.callTool('codetask_start_turn', {
+      threadId: thread.id,
+      message,
+      attachmentIds: [attachmentId],
+      createTaskMode: true
+    })) as { turnId: string }
+    const turn = (await mcp.callTool('codetask_wait_turn', {
+      threadId: thread.id,
+      turnId: started.turnId
+    })) as { status?: string; lastError?: unknown }
+    push('turn.done', { status: turn.status, turnId: started.turnId })
+    if (String(turn.status) !== 'completed') {
+      throw new Error(`turn_not_completed:${turn.status}:${JSON.stringify(turn.lastError ?? null)}`)
+    }
+    await mcp.callTool('case_checkpoint', { name: 'turn_completed' })
+
+    const afterTurnMessages = await mcp.callTool('codetask_list_messages', {
+      threadId: thread.id
+    })
+    const attachmentPermissionRefusal = findAttachmentPermissionRefusal(afterTurnMessages)
+    if (attachmentPermissionRefusal) {
+      throw new Error(
+        `attachment_read_permission_denied:${core}:${attachmentPermissionRefusal.slice(0, 240)}`
+      )
+    }
+    const imageInputUnsupported = findImageInputUnsupported(afterTurnMessages)
+    if (imageInputUnsupported) {
+      throw new Error(
+        `provider_image_input_unsupported:${core}:${imageInputUnsupported.slice(0, 240)}`
+      )
+    }
+
+    let draftMessageId: string | null = null
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const snapshot = await this.inspectCollectSnapshot(mcp, thread.id, push)
+      push('collect.snapshot', {
+        attempt,
+        wizardPhase: snapshot.wizardPhase,
+        collecting: snapshot.collecting,
+        readyToConfirm: snapshot.readyToConfirm,
+        draftMessageId: snapshot.draftMessageId
+      })
+      if (snapshot.readyToConfirm && snapshot.draftMessageId) {
+        draftMessageId = snapshot.draftMessageId
+        break
+      }
+      if (
+        snapshot.draftMessageId &&
+        !snapshot.collecting &&
+        !snapshot.summaryEmpty &&
+        snapshot.wizardPhase !== 'collect'
+      ) {
+        draftMessageId = snapshot.draftMessageId
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    if (!draftMessageId) throw new Error('draft_not_confirmable_after_image_turn')
+    await mcp.callTool('case_checkpoint', {
+      name: 'draft_ready',
+      detail: { messageId: draftMessageId }
+    })
+
+    await mcp.callTool('report_case_result', {
+      caseId: input.caseId,
+      status: 'completed',
+      summary: `DRAFT-CHAT-IMG stopped at confirmable draft (core=${core})`,
+      observations: [
+        {
+          step: 'draft-chat-image-attachment',
+          core,
+          attachmentId,
+          draftMessageId,
+          turnStatus: turn.status
+        }
+      ],
+      artifacts: {
+        projectId: project.id,
+        threadId: thread.id,
+        turnId: started.turnId,
+        draftMessageId,
+        messageId: draftMessageId,
+        attachmentId,
+        conversationCore: core
+      }
+    })
+    push('case.reported', { draftMessageId, attachmentId })
+  }
+
+  private async runDraftReferencePathJob(
+    input: DriverStartInput,
+    mcp: McpToolClient,
+    push: Push
+  ): Promise<void> {
+    const core = selectedConversationCore(input)
+    const message =
+      typeof input.fixture?.message === 'string'
+        ? input.fixture.message
+        : '请根据附件图片创建任务草案。任务需要读取附件图片和稍后提供的设计资料目录，并生成 reference-proof.json，记录图片文字以及设计资料中的关键信息。立即提出草案，不要追问。'
+    const uploadFileName =
+      typeof input.fixture?.uploadFileName === 'string'
+        ? input.fixture.uploadFileName
+        : IMAGE_UPLOAD_FILE_NAME
+    const imagePath = resolveImageFixturePath(IMAGE_FIXTURE_FILE)
+    assertNoLeak('ref.message', message, REF_FORBIDDEN_LEAK_TOKENS)
+    assertNoLeak('ref.uploadFileName', uploadFileName, REF_FORBIDDEN_LEAK_TOKENS)
+
+    const corpusRoot = referenceCorpusRootForWorkspace(input.workspaceRoot)
+    const { designDocsDir } = ensureReferenceCorpus(corpusRoot)
+    push('reference.corpus', { designDocsDir, workspaceRoot: input.workspaceRoot })
+    if (designDocsDir.startsWith(input.workspaceRoot)) {
+      throw new Error('reference_corpus_inside_workspace')
+    }
+
+    const projectTitle = `ref-path-probe-${core}`
+    const threadTitle = 'ref-path-probe'
+    assertNoLeak('ref.projectTitle', projectTitle, REF_FORBIDDEN_LEAK_TOKENS)
+    assertNoLeak('ref.threadTitle', threadTitle, REF_FORBIDDEN_LEAK_TOKENS)
+
+    const project = (await mcp.callTool('codetask_create_project', {
+      workspaceRoot: input.workspaceRoot,
+      title: projectTitle
+    })) as { id: string }
+    push('project.created', { id: project.id })
+    await mcp.callTool('case_checkpoint', { name: 'project_created' })
+
+    const thread = (await mcp.callTool('codetask_create_thread', {
+      projectId: project.id,
+      title: threadTitle,
+      coreCode: core,
+      threadKind: 'create_task'
+    })) as { id: string }
+    push('thread.created', { id: thread.id, coreCode: core })
+    await mcp.callTool('case_checkpoint', { name: 'thread_created' })
+
+    const uploaded = (await mcp.callTool('codetask_upload_attachment', {
+      threadId: thread.id,
+      filePath: imagePath,
+      fileName: uploadFileName
+    })) as { attachment?: { id?: string }; id?: string }
+    const attachmentId = uploaded.attachment?.id ?? uploaded.id
+    if (!attachmentId) throw new Error('attachment_id_missing')
+    push('attachment.uploaded', { attachmentId })
+    await mcp.callTool('case_checkpoint', { name: 'attachment_uploaded', detail: { attachmentId } })
+
+    const started = (await mcp.callTool('codetask_start_turn', {
+      threadId: thread.id,
+      message,
+      attachmentIds: [attachmentId],
+      createTaskMode: true
+    })) as { turnId: string }
+    const turn = (await mcp.callTool('codetask_wait_turn', {
+      threadId: thread.id,
+      turnId: started.turnId
+    })) as { status?: string; lastError?: unknown }
+    push('turn.done', { status: turn.status, turnId: started.turnId })
+    if (String(turn.status) !== 'completed') {
+      throw new Error(`turn_not_completed:${turn.status}:${JSON.stringify(turn.lastError ?? null)}`)
+    }
+
+    const afterTurnMessages = await mcp.callTool('codetask_list_messages', {
+      threadId: thread.id
+    })
+    const attachmentPermissionRefusal = findAttachmentPermissionRefusal(afterTurnMessages)
+    if (attachmentPermissionRefusal) {
+      throw new Error(
+        `attachment_read_permission_denied:${core}:${attachmentPermissionRefusal.slice(0, 240)}`
+      )
+    }
+    const imageInputUnsupported = findImageInputUnsupported(afterTurnMessages)
+    if (imageInputUnsupported) {
+      throw new Error(
+        `provider_image_input_unsupported:${core}:${imageInputUnsupported.slice(0, 240)}`
+      )
+    }
+
+    let draftMessageId: string | null = null
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const snapshot = await this.inspectCollectSnapshot(mcp, thread.id, push)
+      push('collect.snapshot', {
+        attempt,
+        readyToConfirm: snapshot.readyToConfirm,
+        draftMessageId: snapshot.draftMessageId,
+        collecting: snapshot.collecting
+      })
+      if (snapshot.draftMessageId && !snapshot.collecting) {
+        draftMessageId = snapshot.draftMessageId
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    if (!draftMessageId) throw new Error('draft_not_editable_for_references')
+    await mcp.callTool('case_checkpoint', {
+      name: 'draft_ready',
+      detail: { messageId: draftMessageId }
+    })
+
+    const imageDescription = '任务需求图片，需要读取其中的英文内容'
+    assertNoLeak('ref.imageDescription', imageDescription, REF_FORBIDDEN_LEAK_TOKENS)
+    await mcp.callTool('codetask_import_draft_references', {
+      threadId: thread.id,
+      messageId: draftMessageId,
+      attachmentIds: [attachmentId],
+      descriptions: { [attachmentId]: imageDescription }
+    })
+    push('draft.references.import', { attachmentId })
+
+    const dirDescription =
+      '一次性读取验证必须直接读取该 Reference 目录现有的 overview.md、api.md 和 nested/constraints.md；只生成 reference-proof.json，严禁工具、程序、脚本、依赖、测试、fixture、模拟数据或 workspace 替代文件'
+    assertNoLeak('ref.dirDescription', dirDescription, REF_FORBIDDEN_LEAK_TOKENS)
+    const localAdded = (await mcp.callTool('codetask_add_local_corpus_reference', {
+      threadId: thread.id,
+      messageId: draftMessageId,
+      localPath: designDocsDir,
+      name: '设计资料目录',
+      description: dirDescription,
+      kind: 'directory'
+    })) as {
+      payload?: { references?: Array<{ id?: string; source?: string }> }
+      references?: Array<{ id?: string; source?: string }>
+    }
+    const refs = localAdded.payload?.references ?? localAdded.references ?? []
+    const directoryReferenceId =
+      [...refs].reverse().find((item) => item.source === 'local_corpus')?.id ?? ''
+    if (!directoryReferenceId) throw new Error('directory_reference_id_missing')
+    push('draft.references.local_corpus', { directoryReferenceId, designDocsDir })
+    await mcp.callTool('case_checkpoint', {
+      name: 'references_ready',
+      detail: { attachmentId, directoryReferenceId }
+    })
+
+    await mcp.callTool('codetask_confirm_draft', {
+      threadId: thread.id,
+      messageId: draftMessageId
+    })
+    await applyDraftExecutionConfig(mcp, input, thread.id, draftMessageId, push)
+    const confirmFinal = (await mcp.callTool('codetask_confirm_draft_final', {
+      threadId: thread.id,
+      messageId: draftMessageId
+    })) as Record<string, unknown>
+    push('draft.confirm_final', confirmFinal)
+
+    const jobFromConfirm = this.unwrapJobRecord(confirmFinal)
+    let designSessionId = String(jobFromConfirm?.id ?? jobFromConfirm?.jobId ?? '')
+    if (!designSessionId) {
+      const latest = await this.pollLatestJob(mcp, thread.id, push)
+      designSessionId = String(latest.id ?? latest.jobId ?? '')
+    }
+    if (!designSessionId) throw new Error('design_session_missing')
+
+    let planReady: Record<string, unknown> | null = null
+    for (let attempt = 0; ; attempt++) {
+      const plans = (await mcp.callTool('codetask_get_plans', {
+        threadId: thread.id
+      })) as unknown
+      const list = Array.isArray(plans)
+        ? plans
+        : plans && typeof plans === 'object' && Array.isArray((plans as { plans?: unknown }).plans)
+          ? ((plans as { plans: unknown[] }).plans as unknown[])
+          : []
+      const match = list.find((item) => {
+        if (!item || typeof item !== 'object') return false
+        const row = item as Record<string, unknown>
+        return String(row.id ?? row.designSessionId ?? '') === designSessionId
+      }) as Record<string, unknown> | undefined
+      if (match) {
+        const status = String(match.status ?? '')
+        const planProgress = (match.planProgress ?? {}) as { status?: string }
+        push('plan.poll', {
+          attempt,
+          status,
+          planProgressStatus: planProgress.status,
+          hasPlan: match.plan != null
+        })
+        if (status === 'failed' || status === 'cancelled') {
+          throw new Error(`plan_${status}`)
+        }
+        if (
+          String(planProgress.status ?? '') === 'completed' &&
+          match.plan != null &&
+          (status === 'plan_editing' || status === 'plan_ready')
+        ) {
+          planReady = match
+          break
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+    }
+    push('plan.ready', { designSessionId, status: planReady?.status })
+    await mcp.callTool('case_checkpoint', { name: 'planner_ready', detail: { designSessionId } })
+
+    const confirmed = (await mcp.callTool('codetask_confirm_plan', {
+      threadId: thread.id,
+      jobId: designSessionId
+    })) as Record<string, unknown>
+    const launched = this.unwrapJobRecord(confirmed)
+    const launchedJobId = String(launched?.id ?? launched?.jobId ?? designSessionId)
+    const launchedThreadId = String(launched?.threadId ?? launched?.thread_id ?? '')
+    if (!launchedJobId) throw new Error('job_not_launched:missing_id')
+    if (!launchedThreadId) throw new Error('job_not_launched:missing_thread_id')
+    const terminal = await waitForJobTerminalViaMcp(mcp, {
+      threadId: launchedThreadId,
+      jobId: launchedJobId,
+      onRetry: (retry) => push('job.wait_retry', { launchedJobId, launchedThreadId, ...retry })
+    })
+    push('job.terminal', terminal)
+    if (String(terminal.status) !== 'completed') {
+      const failureDetail =
+        terminal.lastError ?? terminal.error ?? terminal.taskMessage ?? terminal.planMessage ?? null
+      throw new Error(`job_not_completed:${terminal.status}:${JSON.stringify(failureDetail)}`)
+    }
+    await mcp.callTool('case_checkpoint', {
+      name: 'job_completed',
+      detail: { launchedJobId, launchedThreadId }
+    })
+
+    await mcp.callTool('report_case_result', {
+      caseId: input.caseId,
+      status: 'completed',
+      summary: `DRAFT-REF-PATH job completed with references (core=${core})`,
+      observations: [
+        {
+          step: 'draft-reference-path-job',
+          core,
+          attachmentId,
+          directoryReferenceId,
+          designSessionId,
+          launchedJobId,
+          launchedThreadId,
+          designDocsDir
+        }
+      ],
+      artifacts: {
+        projectId: project.id,
+        threadId: thread.id,
+        turnId: started.turnId,
+        draftMessageId,
+        messageId: draftMessageId,
+        attachmentId,
+        directoryReferenceId,
+        designSessionId,
+        launchedJobId,
+        launchedThreadId,
+        jobId: launchedJobId,
+        localCorpusPath: designDocsDir,
+        conversationCore: core
+      }
+    })
+    push('case.reported', { launchedJobId, launchedThreadId, directoryReferenceId })
+  }
+
   private async runCreateHtmlConversation(
     input: DriverStartInput,
     mcp: McpToolClient,
@@ -1919,6 +2431,7 @@ export class FakeDriver implements AgentDriver {
 
 function classifyFakeDriverError(error: unknown): string {
   const text = String(error).toLowerCase()
+  if (text.includes('provider_image_input_unsupported')) return 'provider_unavailable'
   if (text.includes('timeout:') || text.includes('_timeout')) return 'timeout'
   if (
     text.includes('mcp_') ||

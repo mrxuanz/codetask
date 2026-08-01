@@ -40,7 +40,8 @@ test('OpenCode forks a resumed session that belongs to another workspace', async
       client as never,
       expected,
       'chat-write',
-      'old-session'
+      'old-session',
+      [previous]
     )
     assert.equal(sessionId, 'forked-session')
     assert.deepEqual(calls[1], {
@@ -57,6 +58,15 @@ test('OpenCode forks a resumed session that belongs to another workspace', async
             rule.permission === 'external_directory' &&
             rule.pattern === '*' &&
             rule.action === 'deny'
+        )
+    )
+    assert.ok(
+      Array.isArray(update?.permission) &&
+        update.permission.some(
+          (rule) =>
+            rule.permission === 'external_directory' &&
+            rule.pattern === `${previous.replaceAll('\\', '/')}/**` &&
+            rule.action === 'allow'
         )
     )
   } finally {

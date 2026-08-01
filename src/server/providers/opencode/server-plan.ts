@@ -53,7 +53,7 @@ export function buildOpenCodeConfig(input: AgentTurnInput): Config {
   const mcp = Object.keys(mcpEntries).length > 0 ? (mcpEntries as Config['mcp']) : undefined
 
   return {
-    permission: resolveOpencodePermissionConfig(capabilityProfile),
+    permission: resolveOpencodePermissionConfig(capabilityProfile, input.readRoots),
     tools: resolveOpencodeToolsConfig(capabilityProfile),
     ...(readOnly ? { plugin: [], instructions: [] } : {}),
     ...(input.model !== undefined ? { model: input.model } : {}),
@@ -92,9 +92,7 @@ export function buildOpenCodeServerPlan(
   const pure = capabilityProfileIsReadOnly(capabilityProfile)
   const config = buildOpenCodeConfig(input)
   const pathOverride = resolveOpenCodePathOverride(input)
-  const env = outerSandbox
-    ? buildSandboxPreparedProviderEnv()
-    : buildProviderChildEnv()
+  const env = outerSandbox ? buildSandboxPreparedProviderEnv() : buildProviderChildEnv()
   const logLevel =
     typeof config.logLevel === 'string' && config.logLevel.trim()
       ? config.logLevel.trim()

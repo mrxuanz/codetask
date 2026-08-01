@@ -1,0 +1,8 @@
+{
+  "message": "请读取附件图片，只回复图片中看到的英文内容。",
+  "language": "zh-CN",
+  "uploadFileName": "attachment.png",
+  "expect": {
+    "exactText": "Dream of 1000 Cats"
+  }
+}

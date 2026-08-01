@@ -9,11 +9,13 @@ Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + S
 
 ## Phases
 
-| Phase | `--part`       | Cases                               | Evidence (summary)                                                                                               |
-| ----- | -------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 1     | `conversation` | `chat-basic`, `chat-create-html`    | Turn + (html) file oracle                                                                                        |
-| 2     | `draft-job`    | `notes-search`, `job-chat-readonly` | Plan/job + file oracle; readonly thicken in progress                                                             |
-| 3     | `settings-mcp` | `settings-mcp-probe`                | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
+| Phase | `--part`       | Cases                                                                                    | Evidence (summary)                                                                                               |
+| ----- | -------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 1     | `conversation` | `chat-basic`, `chat-create-html`, `chat-image-attachment`, `draft-chat-image-attachment` | Turn + (html) file oracle; image attachment read in chat and create-task draft (stops at Draft)                  |
+| 2     | `draft-job`    | `notes-search`, `job-chat-readonly`, `draft-reference-path-job`                          | Plan/job + file oracle; image + local-corpus references through Draft→Planner→Job; readonly thicken in progress  |
+| 3     | `settings-mcp` | `settings-mcp-probe`                                                                     | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
+
+Image cases upload the fixture as neutral `attachment.png`, never leak `Dream`/`1000`/`Cats` (or design sentinels) in prompts/titles, and match the contiguous phrase `Dream of 1000 Cats` (NFKC, case/whitespace insensitive). Phase-2 `draft-reference-path-job` also requires reading a local corpus directory **outside** the project workspace. Evidence: `attachment-result.json` under the case dir; job proof via `reference-proof.json`.
 
 **Two MCP surfaces:** Test MCP = outer driver. Settings Probe (`business-e2e-probe`) = user MCP registered via `PUT /api/settings/mcp`. Do not confuse them.
 
@@ -25,7 +27,10 @@ npm run business:e2e:list -- --lang en
 
 npm run business:e2e:conversation
 npm run business:e2e:chat-html
+npm run business:e2e:chat-image
+npm run business:e2e:draft-chat-image
 npm run business:e2e:draft-job
+npm run business:e2e:draft-ref-path
 npm run business:e2e:notes-search
 npm run business:e2e:settings-mcp
 npm run business:e2e:both
@@ -49,11 +54,14 @@ Planner / slice / milestone verifier cores for draft→job cases come from the *
 3. Assert probe name present; assert reserved name rejected; harness `tools/call` gets `PROBE_OK_*`.
 4. Restore settings snapshot; `report_case_result`.
 
-Artifacts: terminal `settings.mcp.*` lines + `.runtime/runs/<runId>/reports/`.
+Evidence is emitted to the terminal. Per-run reports and mutable state live only in a unique OS
+temporary directory and are removed after the final summary is printed.
 
 ## Runtime hygiene
 
-Each run kills leftover processes, clears test DBs, resets `tests/business-e2e/.runtime/`, boots Server on empty DB.
+Each run kills leftover E2E processes, removes stale E2E temp roots, then boots Server with a fresh
+database under a newly created OS temporary directory. No runtime tree is created or copied into the
+repository.
 
 UI strings: `i18n/messages.ts` (`--lang` / `BUSINESS_E2E_LANG`).
 

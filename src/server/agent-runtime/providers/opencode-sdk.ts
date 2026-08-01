@@ -324,9 +324,10 @@ export async function ensureOpencodeSession(
   client: OpencodeClient,
   cwd: string,
   capabilityProfile: ReturnType<typeof resolveInputCapabilityProfile>,
-  runtimeSessionId?: string | null
+  runtimeSessionId?: string | null,
+  readRoots?: readonly string[]
 ): Promise<string> {
-  const permission = resolveOpencodeSessionPermissionRules(capabilityProfile)
+  const permission = resolveOpencodeSessionPermissionRules(capabilityProfile, readRoots)
   if (runtimeSessionId) {
     const existing = await client.session.get({
       sessionID: runtimeSessionId,
@@ -448,7 +449,8 @@ export async function* streamOpencodeTurn(
       client,
       input.cwd,
       capabilityProfile,
-      input.runtimeSessionId
+      input.runtimeSessionId,
+      input.readRoots
     )
     reply = ''
     thinking = ''

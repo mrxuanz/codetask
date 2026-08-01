@@ -1,5 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
 
 /**
  * Copy a fixture workspace into an isolated run directory.
@@ -29,6 +30,50 @@ export function assertWorkspaceCopied(destinationRoot: string, expectedFiles: st
     if (!existsSync(full)) {
       throw new Error(`workspace_copy_missing_file:${relative}`)
     }
+  }
+}
+
+/**
+ * Keep provider-side git discovery inside the case workspace. Business E2E runs live below the
+ * product repository, so without a nested repository `git status` exposes source fixtures and
+ * oracle expectations from the parent checkout to the model under test.
+ */
+export function initializeWorkspaceGitBoundary(destinationRoot: string): void {
+  const workspaceRoot = realpathSync(resolve(destinationRoot))
+  const runGit = (args: string[], label: string): string => {
+    const result = spawnSync('git', args, {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+      windowsHide: true
+    })
+    if (result.error || result.status !== 0) {
+      throw new Error(
+        `workspace_git_${label}_failed:${result.error?.message ?? result.stderr.trim()}`
+      )
+    }
+    return result.stdout.trim()
+  }
+
+  runGit(['-c', 'init.defaultBranch=main', 'init', '--quiet'], 'init')
+  runGit(['add', '--all'], 'add')
+  runGit(
+    [
+      '-c',
+      'user.name=Business E2E',
+      '-c',
+      'user.email=business-e2e@localhost',
+      'commit',
+      '--quiet',
+      '--allow-empty',
+      '-m',
+      'Business E2E fixture baseline'
+    ],
+    'commit'
+  )
+
+  const topLevel = realpathSync(resolve(runGit(['rev-parse', '--show-toplevel'], 'verify')))
+  if (topLevel !== workspaceRoot) {
+    throw new Error(`workspace_git_boundary_mismatch:${topLevel}:${workspaceRoot}`)
   }
 }
 
