@@ -126,12 +126,7 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
       networkAccessEnabled: false,
       approvalPolicy: 'never',
       model: 'gpt-test-model',
-      mcpToolNames: [
-        'finalize_plan',
-        'register_plan_outline',
-        'register_task_context',
-        'update_task_context'
-      ].sort(),
+      mcpToolNames: null,
       sdkSandboxMode: null,
       hasSystemMcp: true,
       systemMcpRequired: true

@@ -1,7 +1,6 @@
 export const PROVIDER_CAPABILITY_PROFILES = [
   'chat-write',
   'chat-read',
-  'create-task-read',
   'planner-read',
   'task-sandbox',
   'verifier-sandbox'
@@ -23,13 +22,13 @@ export interface ProviderRuntimeScope {
   readonly reusePolicy: ProviderReusePolicy
 }
 
-export type ProviderConversationScopeKind = 'chat' | 'create_task'
+export type ProviderConversationScopeKind = 'chat'
 
 export function buildConversationProviderRuntimeScopeId(
-  threadId: string,
-  kind: ProviderConversationScopeKind
+  conversationId: string,
+  _kind: ProviderConversationScopeKind = 'chat'
 ): string {
-  return `conversation:${kind}:${threadId}`
+  return `conversation:${conversationId}`
 }
 
 export interface ProviderCapabilities {

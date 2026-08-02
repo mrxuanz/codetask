@@ -26,44 +26,6 @@ function fail(error: string): ToolResult {
   return { ok: false, content: { error }, error }
 }
 
-function readExecutionConfigArgs(args: Record<string, unknown>): {
-  plannerCoreCode: string
-  sliceVerifierCoreCode: string
-  milestoneVerifierCoreCode: string
-} | null {
-  const plannerCoreCode = String(args.plannerCoreCode ?? '').trim()
-  const sliceVerifierCoreCode = String(args.sliceVerifierCoreCode ?? '').trim()
-  const milestoneVerifierCoreCode = String(args.milestoneVerifierCoreCode ?? '').trim()
-  if (!plannerCoreCode || !sliceVerifierCoreCode || !milestoneVerifierCoreCode) return null
-  return { plannerCoreCode, sliceVerifierCoreCode, milestoneVerifierCoreCode }
-}
-
-async function ensureDraftExecutionConfig(
-  ctx: ToolContext,
-  threadId: string,
-  messageId: string,
-  override?: {
-    plannerCoreCode: string
-    sliceVerifierCoreCode: string
-    milestoneVerifierCoreCode: string
-  } | null
-): Promise<{
-  plannerCoreCode: string
-  sliceVerifierCoreCode: string
-  milestoneVerifierCoreCode: string
-}> {
-  const fromArgs = override ?? null
-  const fromCapability = ctx.capabilities.get(ctx.capabilityId)?.executionConfig
-  const config = fromArgs ?? fromCapability
-  if (!config) {
-    throw new Error(
-      'draft.execution_config_required: set codetask_update_draft_execution_config before confirm_draft_final'
-    )
-  }
-  await ops.updateDraftExecutionConfig(ctx.client, threadId, messageId, config)
-  return config
-}
-
 function normalizeArtifacts(value: unknown): unknown {
   if (typeof value === 'string') {
     try {
@@ -94,7 +56,7 @@ export const TOOL_DEFS: Array<{
   },
   {
     name: 'codetask_create_thread',
-    description: 'Create a chat or create_task thread in a project',
+    description: 'Create an ordinary chat conversation in a project (architecture 03)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -128,12 +90,10 @@ export const TOOL_DEFS: Array<{
       properties: {
         threadId: { type: 'string' },
         message: { type: 'string' },
-        kind: { type: 'string' },
-        createTaskMode: { type: 'boolean' },
         attachmentIds: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Previously uploaded thread attachment ids to attach to this turn'
+          description: 'Previously uploaded conversation attachment ids to attach to this turn'
         }
       },
       required: ['threadId', 'message']
@@ -197,55 +157,61 @@ export const TOOL_DEFS: Array<{
     }
   },
   {
-    name: 'codetask_get_thread_drafts',
-    description: 'List drafts for a thread',
-    inputSchema: {
-      type: 'object',
-      properties: { threadId: { type: 'string' } },
-      required: ['threadId']
-    }
-  },
-  {
-    name: 'codetask_confirm_draft',
-    description: 'Confirm a draft message',
+    name: 'codetask_create_draft',
+    description: 'POST /api/drafts — create a Design draft (architecture 03)',
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' }
+        projectId: { type: 'string' },
+        title: { type: 'string' },
+        summary: { type: 'string' },
+        requirementsMarkdown: { type: 'string' }
       },
-      required: ['threadId', 'messageId']
+      required: ['projectId', 'title']
     }
   },
   {
-    name: 'codetask_confirm_draft_final',
-    description:
-      'Final-confirm a draft and enter planning. Requires a per-draft executionConfig (planner + verifiers) already set or available from the case runtime.',
+    name: 'codetask_list_drafts',
+    description: 'GET /api/drafts — list Design drafts',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'codetask_get_draft',
+    description: 'GET /api/drafts/:draftId',
+    inputSchema: {
+      type: 'object',
+      properties: { draftId: { type: 'string' } },
+      required: ['draftId']
+    }
+  },
+  {
+    name: 'codetask_patch_draft_abilities',
+    description: 'PATCH /api/drafts/:draftId/abilities',
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' }
+        draftId: { type: 'string' },
+        expectedRevision: { type: 'number' },
+        abilities: { type: 'array', items: { type: 'object' } }
       },
-      required: ['threadId', 'messageId']
+      required: ['draftId', 'expectedRevision', 'abilities']
     }
   },
   {
-    name: 'codetask_update_draft_execution_config',
-    description:
-      'Set this draft’s one-shot run configuration (planner + slice/milestone verifiers). Must be called before confirm_draft_final; values are frozen into the job executionProfile.',
+    name: 'codetask_patch_draft_execution_profile',
+    description: 'PATCH /api/drafts/:draftId/execution-profile',
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
+        draftId: { type: 'string' },
+        expectedRevision: { type: 'number' },
         plannerCoreCode: { type: 'string' },
         sliceVerifierCoreCode: { type: 'string' },
         milestoneVerifierCoreCode: { type: 'string' }
       },
       required: [
-        'threadId',
-        'messageId',
+        'draftId',
+        'expectedRevision',
         'plannerCoreCode',
         'sliceVerifierCoreCode',
         'milestoneVerifierCoreCode'
@@ -253,57 +219,24 @@ export const TOOL_DEFS: Array<{
     }
   },
   {
-    name: 'codetask_get_latest_job',
-    description: 'Get the latest job for a thread',
+    name: 'codetask_confirm_design_draft',
+    description: 'POST /api/drafts/:draftId/confirm',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        draftId: { type: 'string' },
+        expectedRevision: { type: 'number' }
+      },
+      required: ['draftId', 'expectedRevision']
+    }
+  },
+  {
+    name: 'codetask_get_thread_drafts',
+    description:
+      'Deprecated alias — lists Design drafts (thread-scoped drafts removed in architecture 03)',
     inputSchema: {
       type: 'object',
       properties: { threadId: { type: 'string' } },
-      required: ['threadId']
-    }
-  },
-  {
-    name: 'codetask_get_plans',
-    description: 'Alias of get latest job/plan payload for a thread',
-    inputSchema: {
-      type: 'object',
-      properties: { threadId: { type: 'string' } },
-      required: ['threadId']
-    }
-  },
-  {
-    name: 'codetask_confirm_plan',
-    description: 'Confirm the plan for a job',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        jobId: { type: 'string' }
-      },
-      required: ['threadId', 'jobId']
-    }
-  },
-  {
-    name: 'codetask_confirm_plan_node',
-    description: 'Confirm a single plan node',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        jobId: { type: 'string' },
-        nodeRef: { type: 'string' }
-      },
-      required: ['threadId', 'jobId', 'nodeRef']
-    }
-  },
-  {
-    name: 'codetask_create_job',
-    description: 'Create a job from a draft',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        draftMessageId: { type: 'string' }
-      },
       required: ['threadId']
     }
   },
@@ -347,69 +280,6 @@ export const TOOL_DEFS: Array<{
     }
   },
   {
-    name: 'codetask_update_draft',
-    description: 'Patch draft content fields',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-        patch: { type: 'object' }
-      },
-      required: ['threadId', 'messageId', 'patch']
-    }
-  },
-  {
-    name: 'codetask_unlock_draft',
-    description: 'Unlock a draft for edit',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' }
-      },
-      required: ['threadId', 'messageId']
-    }
-  },
-  {
-    name: 'codetask_unlock_draft_contract',
-    description: 'Unlock requirements contract for edit',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' }
-      },
-      required: ['threadId', 'messageId']
-    }
-  },
-  {
-    name: 'codetask_confirm_draft_section',
-    description: 'Confirm a single draft section',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-        section: { type: 'string' }
-      },
-      required: ['threadId', 'messageId', 'section']
-    }
-  },
-  {
-    name: 'codetask_update_ability_providers',
-    description: 'Update draft ability provider selections',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-        selections: { type: 'array' }
-      },
-      required: ['threadId', 'messageId', 'selections']
-    }
-  },
-  {
     name: 'codetask_upload_attachment',
     description: 'Upload a file attachment to a thread',
     inputSchema: {
@@ -420,52 +290,6 @@ export const TOOL_DEFS: Array<{
         fileName: { type: 'string' }
       },
       required: ['threadId', 'filePath', 'fileName']
-    }
-  },
-  {
-    name: 'codetask_import_draft_references',
-    description:
-      'Import message attachments into a draft as references; always applies descriptions (PATCH) even when the attachment was already auto-added with an empty description',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-        attachmentIds: { type: 'array', items: { type: 'string' } },
-        descriptions: { type: 'object' }
-      },
-      required: ['threadId', 'messageId', 'attachmentIds']
-    }
-  },
-  {
-    name: 'codetask_update_draft_reference',
-    description:
-      'Update a draft reference description (required for image/directory before confirm-final)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-        referenceId: { type: 'string' },
-        description: { type: 'string' }
-      },
-      required: ['threadId', 'messageId', 'referenceId', 'description']
-    }
-  },
-  {
-    name: 'codetask_add_local_corpus_reference',
-    description: 'Add a local corpus path as a draft reference (file or directory)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-        localPath: { type: 'string' },
-        name: { type: 'string' },
-        description: { type: 'string' },
-        kind: { type: 'string' }
-      },
-      required: ['threadId', 'messageId', 'localPath', 'description']
     }
   },
   {
@@ -603,22 +427,21 @@ const handlers: Record<string, ToolHandler> = {
     return ok(await ops.listCores(ctx.client))
   },
   async codetask_start_turn(args, ctx) {
-    const threadId = String(args.threadId)
-    const thread = await ops.getThread(ctx.client, threadId)
-    const threadKind = String(thread.threadKind ?? 'chat')
-    const createTaskMode =
+    if (
       args.createTaskMode === true ||
-      threadKind === 'create_task' ||
       args.kind === 'create_task' ||
       args.kind === 'draft'
-    const kind = typeof args.kind === 'string' ? args.kind : createTaskMode ? 'create_task' : 'chat'
+    ) {
+      return fail(
+        'architecture_03_removed:create_task_turn:use_/api/drafts_and_/api/planning-sessions'
+      )
+    }
+    const threadId = String(args.threadId)
     const attachmentIds = Array.isArray(args.attachmentIds)
       ? args.attachmentIds.map((id) => String(id)).filter(Boolean)
       : undefined
     return ok(
       await ops.startTurn(ctx.client, threadId, String(args.message), {
-        createTaskMode,
-        kind,
         ...(attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : {})
       })
     )
@@ -672,70 +495,71 @@ const handlers: Record<string, ToolHandler> = {
       payload
     })
   },
+  async codetask_create_draft(args, ctx) {
+    return ok(
+      await ops.createDesignDraft(ctx.client, {
+        projectId: String(args.projectId),
+        title: String(args.title),
+        ...(typeof args.summary === 'string' ? { summary: args.summary } : {}),
+        ...(typeof args.requirementsMarkdown === 'string'
+          ? { requirementsMarkdown: args.requirementsMarkdown }
+          : {})
+      })
+    )
+  },
+  async codetask_list_drafts(_args, ctx) {
+    return ok(await ops.listDesignDrafts(ctx.client))
+  },
+  async codetask_get_draft(args, ctx) {
+    return ok(await ops.getDesignDraft(ctx.client, String(args.draftId)))
+  },
+  async codetask_patch_draft_abilities(args, ctx) {
+    const abilities = Array.isArray(args.abilities)
+      ? (args.abilities as Array<Record<string, unknown>>)
+      : []
+    return ok(
+      await ops.patchDesignDraftAbilities(
+        ctx.client,
+        String(args.draftId),
+        Number(args.expectedRevision),
+        abilities
+      )
+    )
+  },
+  async codetask_patch_draft_execution_profile(args, ctx) {
+    return ok(
+      await ops.patchDesignExecutionProfile(
+        ctx.client,
+        String(args.draftId),
+        Number(args.expectedRevision),
+        {
+          plannerCoreCode: String(args.plannerCoreCode),
+          sliceVerifierCoreCode: String(args.sliceVerifierCoreCode),
+          milestoneVerifierCoreCode: String(args.milestoneVerifierCoreCode)
+        }
+      )
+    )
+  },
+  async codetask_confirm_design_draft(args, ctx) {
+    return ok(
+      await ops.confirmDesignDraft(
+        ctx.client,
+        String(args.draftId),
+        Number(args.expectedRevision)
+      )
+    )
+  },
   async codetask_get_thread_drafts(args, ctx) {
     return ok(await ops.listThreadDrafts(ctx.client, String(args.threadId)))
   },
-  async codetask_confirm_draft(args, ctx) {
-    return ok(await ops.confirmDraft(ctx.client, String(args.threadId), String(args.messageId)))
-  },
-  async codetask_update_draft_execution_config(args, ctx) {
-    const config = readExecutionConfigArgs(args)
-    if (!config) {
-      return fail(
-        'plannerCoreCode, sliceVerifierCoreCode, and milestoneVerifierCoreCode are required'
-      )
-    }
-    return ok(
-      await ops.updateDraftExecutionConfig(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        config
-      )
-    )
-  },
-  async codetask_confirm_draft_final(args, ctx) {
-    const threadId = String(args.threadId)
-    const messageId = String(args.messageId)
-    // Product authority is per-draft executionConfig. Apply (or re-apply) it
-    // immediately before confirm-final so the job executionProfile freezes the
-    // case’s planner/verifier cores — never global control-plane settings.
-    const executionConfig = await ensureDraftExecutionConfig(ctx, threadId, messageId)
-    const result = await ops.confirmDraftFinal(ctx.client, threadId, messageId)
-    return ok({ ...(result as object), executionConfig })
-  },
-  async codetask_get_latest_job(args, ctx) {
-    return ok(await ops.getLatestJob(ctx.client, String(args.threadId)))
-  },
-  async codetask_get_plans(args, ctx) {
-    return ok(await ops.listThreadPlans(ctx.client, String(args.threadId)))
-  },
-  async codetask_confirm_plan(args, ctx) {
-    return ok(await ops.confirmPlan(ctx.client, String(args.threadId), String(args.jobId)))
-  },
-  async codetask_confirm_plan_node(args, ctx) {
-    return ok(
-      await ops.confirmPlanNode(
-        ctx.client,
-        String(args.threadId),
-        String(args.jobId),
-        String(args.nodeRef)
-      )
-    )
-  },
-  async codetask_create_job(args, ctx) {
-    const body: Record<string, unknown> = {}
-    if (typeof args.draftMessageId === 'string') body.draftMessageId = args.draftMessageId
-    return ok(await ops.createJob(ctx.client, String(args.threadId), body))
-  },
   async codetask_get_job(args, ctx) {
-    return ok(await ops.getJob(ctx.client, String(args.threadId), String(args.jobId)))
+    return ok(await ops.getJob(ctx.client, String(args.threadId ?? ''), String(args.jobId)))
   },
   async codetask_wait_job(args, ctx) {
     return ok(
       await ops.waitJobTerminal(
         ctx.client,
-        String(args.threadId),
+        String(args.threadId ?? ''),
         String(args.jobId),
         typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined
       )
@@ -745,50 +569,9 @@ const handlers: Record<string, ToolHandler> = {
     return ok(
       await ops.getTaskEvidence(
         ctx.client,
-        String(args.threadId),
+        String(args.threadId ?? ''),
         String(args.jobId),
         String(args.taskId)
-      )
-    )
-  },
-  async codetask_update_draft(args, ctx) {
-    return ok(
-      await ops.updateDraft(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        (args.patch as Record<string, unknown>) ?? {}
-      )
-    )
-  },
-  async codetask_unlock_draft(args, ctx) {
-    return ok(await ops.unlockDraft(ctx.client, String(args.threadId), String(args.messageId)))
-  },
-  async codetask_unlock_draft_contract(args, ctx) {
-    return ok(
-      await ops.unlockDraftContract(ctx.client, String(args.threadId), String(args.messageId))
-    )
-  },
-  async codetask_confirm_draft_section(args, ctx) {
-    return ok(
-      await ops.confirmDraftSection(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        String(args.section)
-      )
-    )
-  },
-  async codetask_update_ability_providers(args, ctx) {
-    const selections = Array.isArray(args.selections)
-      ? (args.selections as Array<{ abilityCode: string; coreCode: string }>)
-      : []
-    return ok(
-      await ops.updateDraftAbilities(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        selections
       )
     )
   },
@@ -799,61 +582,6 @@ const handlers: Record<string, ToolHandler> = {
         String(args.threadId),
         String(args.filePath),
         String(args.fileName)
-      )
-    )
-  },
-  async codetask_import_draft_references(args, ctx) {
-    const attachmentIds = Array.isArray(args.attachmentIds)
-      ? args.attachmentIds.map((id) => String(id)).filter(Boolean)
-      : []
-    const descriptions =
-      args.descriptions &&
-      typeof args.descriptions === 'object' &&
-      !Array.isArray(args.descriptions)
-        ? Object.fromEntries(
-            Object.entries(args.descriptions as Record<string, unknown>).map(([key, value]) => [
-              key,
-              String(value ?? '')
-            ])
-          )
-        : {}
-    return ok(
-      await ops.importDraftReferences(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        attachmentIds,
-        descriptions
-      )
-    )
-  },
-  async codetask_update_draft_reference(args, ctx) {
-    return ok(
-      await ops.updateDraftReferenceDescription(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        String(args.referenceId),
-        String(args.description ?? '')
-      )
-    )
-  },
-  async codetask_add_local_corpus_reference(args, ctx) {
-    const kind =
-      args.kind === 'file' || args.kind === 'directory'
-        ? (args.kind as 'file' | 'directory')
-        : undefined
-    return ok(
-      await ops.addLocalCorpusDraftReference(
-        ctx.client,
-        String(args.threadId),
-        String(args.messageId),
-        {
-          localPath: String(args.localPath),
-          name: typeof args.name === 'string' ? args.name : '',
-          description: String(args.description ?? ''),
-          ...(kind ? { kind } : {})
-        }
       )
     )
   },

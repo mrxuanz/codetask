@@ -542,8 +542,9 @@ export default {
         language: '语言',
         storage: '数据存储',
         sandbox: '沙箱',
-        controlPlane: '控制平面',
-        skills: '业务 Skills',
+        agents: '代理默认',
+        providers: 'Provider',
+        secrets: '密钥',
         mcp: 'MCP',
         prompts: '提示词'
       },
@@ -578,7 +579,7 @@ export default {
         title: '语言',
         description: '选择应用界面显示语言。'
       },
-      controlPlane: {
+      agents: {
         title: '控制平面核心',
         description: '为规划器与校验角色指定默认 CLI，与对话线程所选 CLI 相互独立。',
         planner: '规划器',
@@ -586,26 +587,26 @@ export default {
         milestoneVerifier: '里程碑校验器',
         unavailable: '不可用'
       },
-      skills: {
-        title: '业务 Skills',
-        description: '维护可复用的业务指令，并把它们绑定到对话、草案、Planner 和校验流程。',
-        hint: '可以新增任意 Skill；Job 开始规划时会把 Planner 与校验 Skill 固化进执行树。',
-        add: '添加 Skill',
-        newSkill: '新业务 Skill',
-        enabled: '启用',
-        id: 'Skill ID（小写字母、数字与连字符）',
+      providers: {
+        title: 'Provider 运行时',
+        description: '配置 Provider 可执行文件、模型与运行时选项。',
+        restartRequired: 'Provider 变更需重启应用后生效。'
+      },
+      secrets: {
+        title: '密钥',
+        description:
+          '管理 MCP 与 Provider 配置引用的加密密钥。保存后不会再次显示密钥值。',
+        empty: '尚未配置任何密钥。',
         name: '名称',
-        descriptionLabel: '说明',
-        instructions: '业务指令',
-        workflows: '使用流程',
-        workflow: {
-          conversation: '普通对话',
-          draft: '草案对话',
-          planner: 'Planner',
-          taskWorker: '任务执行',
-          sliceVerifier: '切片校验',
-          milestoneVerifier: '里程碑校验'
-        }
+        value: '值',
+        add: '添加或替换密钥',
+        delete: '删除',
+        deleteConfirm: '确定删除密钥「{name}」？此操作不可撤销。',
+        saveSuccess: '密钥已保存',
+        loadFailed: '加载密钥失败',
+        saveFailed: '保存密钥失败',
+        deleteFailed: '删除密钥失败',
+        configured: '已配置'
       },
       prompts: {
         title: '提示词策略',
@@ -625,8 +626,9 @@ export default {
           '这里只允许维护用户扩展 MCP；受控角色 MCP 由运行时按会话注入，与您填写的配置合并使用、互不暴露。',
         roles: {
           conversation: '对话',
+          planner: '规划器',
           task: '任务执行',
-          verification: '校验（规划器 / 校验器）'
+          verification: '校验'
         },
         rootKey: '根键：{key}',
         resetCli: '清空',

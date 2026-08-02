@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { AppContext } from '../context'
 import { AppError } from '../error'
-import { requireUsername } from '../auth/session'
+import { requireActorUserId } from '../auth/session'
 import {
   createProject,
   deleteProject,
@@ -15,13 +15,13 @@ export function createProjectRoutes(_ctx: AppContext): Hono {
   const projectRoutes = new Hono()
 
   projectRoutes.get('/', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const rows = await listProjects(username)
+    const actorId = requireActorUserId()
+    const rows = await listProjects(actorId)
     return c.json(ok(rows))
   })
 
   projectRoutes.post('/', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
+    const actorId = requireActorUserId()
     const body = await c.req.json<{
       workspaceRoot?: string
       title?: string
@@ -33,7 +33,7 @@ export function createProjectRoutes(_ctx: AppContext): Hono {
     }
 
     const row = await createProject(
-      username,
+      actorId,
       body.workspaceRoot.trim(),
       body.title,
       body.createIfMissing ?? true
@@ -42,14 +42,14 @@ export function createProjectRoutes(_ctx: AppContext): Hono {
   })
 
   projectRoutes.get('/:projectId/workspace-access', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const access = await getProjectWorkspaceAccess(username, c.req.param('projectId'))
+    const actorId = requireActorUserId()
+    const access = await getProjectWorkspaceAccess(actorId, c.req.param('projectId'))
     return c.json(ok(access))
   })
 
   projectRoutes.get('/:projectId', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    const row = await getProject(username, c.req.param('projectId'))
+    const actorId = requireActorUserId()
+    const row = await getProject(actorId, c.req.param('projectId'))
     if (!row) {
       throw AppError.notFound('Project not found', 'project.not_found')
     }
@@ -57,8 +57,8 @@ export function createProjectRoutes(_ctx: AppContext): Hono {
   })
 
   projectRoutes.delete('/:projectId', async (c) => {
-    const username = await requireUsername(c.req.header('Authorization'))
-    await deleteProject(username, c.req.param('projectId'))
+    const actorId = requireActorUserId()
+    await deleteProject(actorId, c.req.param('projectId'))
     return c.json(ok({ deleted: true }))
   })
 

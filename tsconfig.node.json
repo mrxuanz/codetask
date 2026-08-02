@@ -8,7 +8,8 @@
     "src/standalone/**/*",
     "src/sandbox/**/*",
     "src/shared/**/*",
-    "scripts/control-plane/**/*",
+    "packages/**/*",
+    "apps/**/*",
     "native/codeteam-sandbox/index.d.ts"
   ],
   "compilerOptions": {
@@ -21,8 +22,16 @@
     "baseUrl": ".",
     "paths": {
       "@shared/turn-errors": ["src/shared/turn-errors.ts"],
+      "@shared/job-references": ["src/shared/job-references.ts"],
       "@shared/*": ["src/shared/*"],
-      "@server/*": ["src/server/*"]
+      "@server/*": ["src/server/*"],
+      "@codetask/contracts": ["packages/contracts/src/index.ts"],
+      "@codetask/contracts/*": ["packages/contracts/src/*"],
+      "@codetask/database": ["packages/database/src/index.ts"],
+      "@codetask/database/*": ["packages/database/src/*"],
+      "@codetask/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@codetask/server-core": ["packages/server-core/src/index.ts"],
+      "@codetask/server-core/*": ["packages/server-core/src/*"]
     }
   }
 }

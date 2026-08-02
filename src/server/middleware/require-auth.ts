@@ -3,24 +3,26 @@ import type { SecurityContext } from '../context/types'
 import {
   clearSessionCookies,
   readSessionCredential,
-  requestHasValidCsrf
-} from '../auth/http-session'
-import { runWithAuthPrincipal } from '../auth/session'
+  requestHasValidCsrf,
+  runWithAuthPrincipal
+} from '@codetask/server-core/modules/auth'
 
 interface AllowlistEntry {
   method: string
   path: string
 }
 
+/** Public routes only (04 §10) — whitelist, not blacklist. */
 const PUBLIC_ALLOWLIST: AllowlistEntry[] = [
   { method: 'GET', path: '/health' },
-  { method: 'GET', path: '/bootstrap' },
-  { method: 'POST', path: '/login' },
-  { method: 'POST', path: '/setup' },
-  { method: 'POST', path: '/captcha' }
+  { method: 'GET', path: '/auth/bootstrap' },
+  { method: 'POST', path: '/auth/setup' },
+  { method: 'POST', path: '/auth/login' },
+  { method: 'POST', path: '/auth/captcha' }
 ]
 
-export const ATTACHMENT_GET_PATH = /^\/threads\/[^/]+\/attachments\/[^/]+$/
+export const ATTACHMENT_GET_PATH =
+  /^\/(?:conversations|threads)\/[^/]+\/attachments\/[^/]+$/
 const API_PREFIX = '/api'
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -38,11 +40,6 @@ export function isPublicApiRoute(method: string, path: string): boolean {
   return PUBLIC_ALLOWLIST.some((entry) => entry.method === method && entry.path === normalized)
 }
 
-export function isMcpApiRoute(path: string): boolean {
-  const normalized = normalizedApiPath(path)
-  return normalized === '/mcp' || normalized.startsWith('/mcp/')
-}
-
 export function isAttachmentAssetTokenGet(
   method: string,
   path: string,
@@ -55,13 +52,17 @@ export function isAttachmentAssetTokenGet(
   )
 }
 
-function authError(message: string, status = 401): Response {
+function authError(message: string, status = 401, errorCode = 'auth.unauthorized'): Response {
   return new Response(
     JSON.stringify({
-      data: null,
+      data: {
+        error: message,
+        code: errorCode,
+        turnErrorCode: errorCode
+      },
       status: status === 403 ? 40301 : 40101,
       extra: {},
-      message,
+      message: errorCode,
       success: false
     }),
     {
@@ -71,11 +72,16 @@ function authError(message: string, status = 401): Response {
   )
 }
 
+/**
+ * Session Auth middleware. MCP is mounted on a sibling router without this middleware
+ * (own protocol boundary — 04 §10).
+ */
 export function requireAuth(security?: SecurityContext): MiddlewareHandler {
   return async (c, next) => {
-    if (isPublicApiRoute(c.req.method, c.req.path) || isMcpApiRoute(c.req.path)) {
+    if (isPublicApiRoute(c.req.method, c.req.path)) {
       return next()
     }
+    // Asset-token GETs skip session auth; attachment route validates the resource token.
     if (
       isAttachmentAssetTokenGet(
         c.req.method,
@@ -87,19 +93,19 @@ export function requireAuth(security?: SecurityContext): MiddlewareHandler {
     }
 
     const credential = readSessionCredential(c)
-    if (!credential.token) return authError('Authentication required')
-    if (!security) return authError('Invalid or expired session')
+    if (!credential.token) return authError('Authentication required', 401, 'auth.unauthorized')
+    if (!security) return authError('Invalid or expired session', 401, 'auth.session_expired')
     const principal = security.auth.authenticateToken(credential.token)
     if (!principal) {
       if (credential.transport === 'cookie') clearSessionCookies(c)
-      return authError('Invalid or expired session')
+      return authError('Invalid or expired session', 401, 'auth.session_expired')
     }
     if (
       credential.transport === 'cookie' &&
       !SAFE_METHODS.has(c.req.method) &&
       !requestHasValidCsrf(c, security.authSecret)
     ) {
-      return authError('Invalid CSRF token', 403)
+      return authError('Invalid CSRF token', 403, 'auth.csrf_invalid')
     }
 
     return runWithAuthPrincipal(principal, next)

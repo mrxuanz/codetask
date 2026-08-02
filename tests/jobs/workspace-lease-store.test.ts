@@ -14,7 +14,7 @@ import {
   releaseWorkspaceLeaseForOwner,
   resetWorkspaceLeaseStateForTests,
   workspacePathsConflict
-} from '../../src/server/legacy-control-plane/workspace-lease-store'
+} from '../../src/server/infra/workspace-lease-store'
 
 let dataDir = ''
 let workspaceRoot = ''

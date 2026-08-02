@@ -1,8 +1,8 @@
 import type {
   BusinessSkillSnapshot,
   JobExecutionProfile
-} from '@shared/contracts/plan'
-import { isSupportedCoreCode } from '@shared/providers/codes'
+} from '../shared/contracts/plan.ts'
+import { isSupportedCoreCode } from '../shared/providers/codes.ts'
 
 const EXECUTION_PROFILE_KEYS = new Set([
   'plannerCoreCode',

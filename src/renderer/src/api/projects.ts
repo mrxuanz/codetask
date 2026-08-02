@@ -3,7 +3,7 @@ import type { ApiResponse } from './types'
 
 export interface Project {
   id: string
-  username: string
+  actorId: string
   title: string
   workspaceRoot: string
   createdAt: number

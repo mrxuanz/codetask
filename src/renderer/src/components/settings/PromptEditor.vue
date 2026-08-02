@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-import type { PromptBodySetting } from '@renderer/api/settings'
+import type { PromptEntry } from '@renderer/api/settings'
 
 import Label from '@renderer/components/ui/Label.vue'
 
@@ -9,16 +9,13 @@ import { cn } from '@renderer/lib/utils'
 
 const props = defineProps<{
   title: string
-
-  entry: PromptBodySetting
-
+  entry: PromptEntry
   defaultBody: string
-
   disabled?: boolean
 }>()
 
 const emit = defineEmits<{
-  'update:entry': [value: PromptBodySetting]
+  'update:entry': [value: PromptEntry]
 }>()
 
 const { t } = useI18n()
@@ -26,19 +23,17 @@ const { t } = useI18n()
 function toggleDefault(checked: boolean): void {
   emit('update:entry', {
     ...props.entry,
-
-    useDefault: checked,
-
+    mode: checked ? 'default' : 'custom',
     body: checked ? props.defaultBody : props.entry.body || props.defaultBody
   })
 }
 
 function updateBody(value: string): void {
-  emit('update:entry', { ...props.entry, body: value, useDefault: false })
+  emit('update:entry', { ...props.entry, body: value, mode: 'custom' })
 }
 
 function resetDefault(): void {
-  emit('update:entry', { body: props.defaultBody, useDefault: true })
+  emit('update:entry', { body: props.defaultBody, mode: 'default' })
 }
 </script>
 
@@ -50,7 +45,7 @@ function resetDefault(): void {
       <label class="flex items-center gap-2 text-xs text-muted-foreground">
         <input
           type="checkbox"
-          :checked="entry.useDefault"
+          :checked="entry.mode === 'default'"
           :disabled="disabled"
           @change="toggleDefault(($event.target as HTMLInputElement).checked)"
         />
@@ -65,14 +60,13 @@ function resetDefault(): void {
       </Label>
 
       <textarea
-        :value="entry.useDefault ? defaultBody : entry.body"
-        :readonly="entry.useDefault || disabled"
+        :value="entry.mode === 'default' ? defaultBody : entry.body"
+        :readonly="entry.mode === 'default' || disabled"
         rows="10"
         :class="
           cn(
             'w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-relaxed outline-none',
-
-            (entry.useDefault || disabled) && 'bg-muted/40 text-muted-foreground'
+            (entry.mode === 'default' || disabled) && 'bg-muted/40 text-muted-foreground'
           )
         "
         @input="updateBody(($event.target as HTMLTextAreaElement).value)"
@@ -82,7 +76,7 @@ function resetDefault(): void {
         <button
           type="button"
           class="text-xs text-primary underline disabled:opacity-50"
-          :disabled="disabled || entry.useDefault"
+          :disabled="disabled || entry.mode === 'default'"
           @click="resetDefault"
         >
           {{ t('workspace.settings.prompts.resetDefault') }}

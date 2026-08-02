@@ -41,7 +41,8 @@ describe('OpenCode question policy', () => {
     for (const name of ['bash', 'edit', 'write', 'patch', 'task', 'skill']) {
       assert.equal(tools[name], false, name)
     }
-    assert.equal(permission['codeteam-manager_propose_task_draft'], 'allow')
+    assert.equal(permission['codeteam-manager_read_reference_attachment'], 'allow')
+    assert.equal(permission['codeteam-manager_propose_task_draft'], undefined)
   })
 
   it('allows only declared external read roots and explicitly denies edits there', () => {

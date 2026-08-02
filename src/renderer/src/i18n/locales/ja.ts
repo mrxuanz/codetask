@@ -504,8 +504,9 @@ export default {
         language: '言語',
         storage: 'データストレージ',
         sandbox: 'サンドボックス',
-        controlPlane: 'Control Plane',
-        skills: 'Business Skills',
+        agents: 'エージェント既定',
+        providers: 'Providers',
+        secrets: 'シークレット',
         mcp: 'MCP',
         prompts: 'Prompts'
       },
@@ -540,7 +541,7 @@ export default {
         title: '言語',
         description: 'アプリの表示言語を選択します。'
       },
-      controlPlane: {
+      agents: {
         title: 'Control Plane Cores',
         description:
           'Planner と検証ロールのデフォルト CLI を指定します。会話スレッドの CLI とは独立です。',
@@ -549,27 +550,26 @@ export default {
         milestoneVerifier: 'Milestone Verifier',
         unavailable: '利用不可'
       },
-      skills: {
-        title: 'Business Skills',
+      providers: {
+        title: 'Provider ランタイム',
+        description: 'Provider の実行ファイル、モデル、ランタイムオプションを設定します。',
+        restartRequired: 'Provider の変更を反映するにはアプリの再起動が必要です。'
+      },
+      secrets: {
+        title: 'シークレット',
         description:
-          '再利用可能な業務指示を管理し、会話、ドラフト、Planner、検証フローに割り当てます。',
-        hint: '任意の Skill を追加できます。Planner と検証 Skill は計画開始時に実行ツリーへ保存されます。',
-        add: 'Skill を追加',
-        newSkill: '新しい Business Skill',
-        enabled: '有効',
-        id: 'Skill ID（小文字・数字・ハイフン）',
+          'MCP および Provider 設定で参照する暗号化シークレットを管理します。保存後、値は再表示されません。',
+        empty: 'シークレットはまだ設定されていません。',
         name: '名前',
-        descriptionLabel: '説明',
-        instructions: '業務指示',
-        workflows: '使用フロー',
-        workflow: {
-          conversation: '通常会話',
-          draft: 'ドラフト会話',
-          planner: 'Planner',
-          taskWorker: 'Task Worker',
-          sliceVerifier: 'Slice Verifier',
-          milestoneVerifier: 'Milestone Verifier'
-        }
+        value: '値',
+        add: 'シークレットを追加または置換',
+        delete: '削除',
+        deleteConfirm: 'シークレット「{name}」を削除しますか？この操作は元に戻せません。',
+        saveSuccess: 'シークレットを保存しました',
+        loadFailed: 'シークレットの読み込みに失敗しました',
+        saveFailed: 'シークレットの保存に失敗しました',
+        deleteFailed: 'シークレットの削除に失敗しました',
+        configured: '設定済み'
       },
       prompts: {
         title: 'プロンプトポリシー',
@@ -591,8 +591,9 @@ export default {
           'ここではユーザー拡張 MCP のみ編集できます。制御ロール MCP は実行時に注入され、双方を公開せずにマージされます。',
         roles: {
           conversation: '会話',
+          planner: 'Planner',
           task: 'タスク実行',
-          verification: '検証（Planner / Verifier）'
+          verification: '検証'
         },
         rootKey: 'ルートキー：{key}',
         resetCli: 'クリア',

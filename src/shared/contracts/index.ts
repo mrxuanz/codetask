@@ -24,10 +24,9 @@ export type {
   TaskProgressSliceDto,
   ThreadDraftSummaryDto,
   ThreadJobAbilityDto,
-  ThreadJobDto,
-  ThreadJobStatus,
   UserDraftListItemDto
 } from './jobs'
+export type { PlanningSessionViewDto, PlanningSessionStatus } from './planning-session-view'
 export type {
   FlatTaskPlan,
   PlannerRegisteredMilestone,
@@ -35,28 +34,11 @@ export type {
   PlannerRegisteredTask,
   SavedJobPlan
 } from './plan'
-export type { ChatSseEvent, JobSseEvent } from './sse'
-export type {
-  HubEnvelope,
-  HubEvent,
-  HubSubscriptionsDto,
-  HubTopic,
-  ThreadHubEvent
-} from './job-event-hub'
-export {
-  jobIdFromTopic,
-  jobTopic,
-  parseHubTopic,
-  threadIdFromTopic,
-  threadTopic,
-  turnIdFromTopic,
-  turnTopic
-} from './job-event-hub'
 export type {
   ConversationTurnDto,
   ConversationTurnKind,
   ConversationTurnStatus,
-  CreateTurnAcceptedDto,
-  TurnHubEvent
+  CreateTurnAcceptedDto
 } from './conversation-turns'
-export type { ThreadDto, ThreadKind, TitleSource, WizardPhase } from './threads'
+export type { ThreadDto, ThreadKind, TitleSource } from './threads'
+export { THREAD_KIND_CHAT } from './threads'

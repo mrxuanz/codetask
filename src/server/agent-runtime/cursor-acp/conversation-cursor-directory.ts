@@ -12,17 +12,20 @@ export interface ConversationCursorBinding {
 
 const bindings = new Map<string, ConversationCursorBinding>()
 
+/**
+ * Parse conversation Cursor scopes.
+ * Canonical (03): `conversation:{id}` or `conversation:{id}:provider:{code}`.
+ * Legacy `conversation:chat:{id}` still accepted for residual sessions.
+ */
 export function parseConversationCursorScope(
   scopeId: string
 ): { threadId: string; kind: ConversationCursorKind } | null {
+  const providerScoped = /^conversation:([^:]+):provider:[^:]+$/.exec(scopeId)
+  if (providerScoped) {
+    return { threadId: providerScoped[1]!, kind: 'chat' }
+  }
   if (scopeId.startsWith('conversation:chat:')) {
     return { threadId: scopeId.slice('conversation:chat:'.length), kind: 'chat' }
-  }
-  if (scopeId.startsWith('conversation:create_task:')) {
-    return {
-      threadId: scopeId.slice('conversation:create_task:'.length),
-      kind: 'create_task'
-    }
   }
   if (/^conversation:[^:]+$/.test(scopeId)) {
     return { threadId: scopeId.slice('conversation:'.length), kind: 'chat' }

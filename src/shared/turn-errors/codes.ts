@@ -69,6 +69,16 @@ export type TurnErrorCode =
   | 'auth.invalid_credentials'
   | 'auth.already_initialized'
   | 'auth.setup_required'
+  | 'auth.not_initialized'
+  | 'auth.invalid_setup_token'
+  | 'auth.captcha_required'
+  | 'auth.captcha_invalid'
+  | 'auth.account_locked'
+  | 'auth.rate_limited'
+  | 'auth.csrf_invalid'
+  | 'auth.origin_forbidden'
+  | 'auth.current_password_invalid'
+  | 'auth.credentials_policy_failed'
   | 'auth.username_password_required'
   | 'auth.username_length_invalid'
   | 'auth.username_format_invalid'
@@ -242,6 +252,16 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'auth.invalid_credentials': 'Invalid username or password',
   'auth.already_initialized': 'Account already initialized',
   'auth.setup_required': 'Account setup required',
+  'auth.not_initialized': 'Account is not initialized',
+  'auth.invalid_setup_token': 'Invalid or expired setup token',
+  'auth.captcha_required': 'Captcha required',
+  'auth.captcha_invalid': 'Captcha is invalid',
+  'auth.account_locked': 'Account temporarily locked',
+  'auth.rate_limited': 'Too many requests',
+  'auth.csrf_invalid': 'Invalid CSRF token',
+  'auth.origin_forbidden': 'Origin not allowed',
+  'auth.current_password_invalid': 'Current password is incorrect',
+  'auth.credentials_policy_failed': 'Credentials do not meet policy',
   'auth.username_password_required': 'Username and password are required',
   'auth.username_length_invalid': 'Username must be between {minLength} and {maxLength} characters',
   'auth.username_format_invalid':

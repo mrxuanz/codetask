@@ -1,0 +1,17 @@
+{
+  "name": "@codetask/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema/design": "./src/schema/design.ts",
+    "./schema/execution": "./src/schema/execution.ts",
+    "./migrations": "./src/migrations/index.ts",
+    "./migrations/execution": "./src/migrations/execution.ts",
+    "./migrations/conversation": "./src/migrations/conversation.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2"
+  }
+}

@@ -43,8 +43,8 @@ export function buildConversationCursorRuntimeScope(
 export function isConversationCursorScope(scopeId: string): boolean {
   return (
     scopeId.startsWith('conversation:chat:') ||
-    scopeId.startsWith('conversation:create_task:') ||
-    /^conversation:[^:]+$/.test(scopeId)
+    /^conversation:[^:]+$/.test(scopeId) ||
+    /^conversation:[^:]+:provider:[^:]+$/.test(scopeId)
   )
 }
 

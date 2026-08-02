@@ -52,6 +52,8 @@ export class OpenCodeDriver implements AgentDriver {
       }
     }
 
+    // create_task-era draft-job cases deleted from catalog (architecture 03).
+
     mkdirSync(input.agentRoot, { recursive: true })
     const skillText = input.skillPaths
       .filter((path) => existsSync(path))
@@ -72,20 +74,8 @@ export class OpenCodeDriver implements AgentDriver {
         'Create project/thread with the conversation coreCode. Ask the product agent to create the SDK-named HTML file in workspace root (opencode.html / cursor.html / …) containing BUSINESS_E2E_CHAT_HTML. Wait for turn completion, then report with expectedHtmlFile in artifacts.',
       'CHAT-IMG-001':
         'Upload image fixture as attachment.png only. start_turn with attachmentIds. Do not put Dream/1000/Cats into message, titles, or fileName. Report messageIdsBefore + attachmentId + turnId.',
-      'DRAFT-CHAT-IMG-001':
-        'create_task: upload as attachment.png, one turn with attachmentIds, poll drafts until confirmable (no nudge spam). Stop at draft. Report draftMessageId + attachmentId. Do not leak Dream/1000/Cats in prompts.',
-      'DRAFT-REF-PATH-001':
-        'create_task: upload attachment.png, draft turn, import draft references WITH descriptions (import tool PATCHes even if attachment was auto-added empty) + add local_corpus directory (outside workspace), confirm_draft → executionConfig → confirm_final, poll GET plans, confirm_plan, then wait_job using the returned launched Job threadId (not the original create-task thread). Report draftMessageId, attachmentId, directoryReferenceId, designSessionId, launchedJobId, launchedThreadId, localCorpusPath. Never leak Dream/1000/Cats or DESIGN_* sentinels in prompts.',
-      'G4-001':
-        'Only unlock and send the first fixture phase (fuzzy). Do NOT unlock later phases. After the assistant replies, list drafts; do not confirm a full draft. Report completed with observations about missing info.',
-      'G4-002':
-        'Unlock fixture phases one at a time with case_next_fixture, send each message as a turn, until all phases are unlocked. Then list drafts and report.',
-      'G4-003':
-        'Complete staged collection like G4-002, then inspect draft fields via codetask_get_thread_drafts and report which required fields are present.',
-      'G4-012':
-        'Complete staged collection, then codetask_update_draft_execution_config (from Runtime context), codetask_confirm_draft, and codetask_confirm_draft_final. Verify latest job/planning exists, then report.',
-      'DRAFT-MULTITURN-001':
-        'Full draft multiturn: unlock all phases one-by-one, send turns, set draft executionConfig, confirm draft and confirm-final, then report.'
+      'DESIGN-DRAFT-001':
+        'Use Design MCP tools only: codetask_create_draft → patch abilities → patch execution profile → codetask_confirm_design_draft. Do not use create_task turns.'
     }
 
     const prompt = [
@@ -95,14 +85,11 @@ export class OpenCodeDriver implements AgentDriver {
       `- caseId: ${input.caseId}`,
       `- workspaceRoot to use when creating project: ${input.workspaceRoot}`,
       `- conversationCore to use for every CodeTask thread: ${conversationCore}`,
-      `- draft executionConfig (per-run, NOT global settings):`,
+      `- draft executionConfig (per-run Design execution-profile, NOT global settings):`,
       `  - plannerCoreCode: ${input.executionConfig.plannerCoreCode}`,
       `  - sliceVerifierCoreCode: ${input.executionConfig.sliceVerifierCoreCode}`,
       `  - milestoneVerifierCoreCode: ${input.executionConfig.milestoneVerifierCoreCode}`,
-      `- Before codetask_confirm_draft_final, call codetask_update_draft_execution_config with the three cores above.`,
-      input.caseId.startsWith('G4') || input.caseId.startsWith('DRAFT')
-        ? '- Use case_next_fixture for user messages; do not invent later phases early.'
-        : `- user message for the conversation turn: ${message}`,
+      `- user message for the conversation turn: ${message}`,
       caseHints[input.caseId] ? `- case-specific instructions: ${caseHints[input.caseId]}` : '',
       '',
       'Execute the skill using only the allowed Test MCP tools. Call report_case_result exactly once when done.'

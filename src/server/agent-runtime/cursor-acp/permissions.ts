@@ -1,11 +1,9 @@
 import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
-import { allCreateTaskMcpToolNames } from '../../wizard/tools'
-import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
+import { allConversationMcpToolNames } from '../../conversation/mcp/tools'
 
 const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
   'codeteam-manager',
-  ...allCreateTaskMcpToolNames(),
-  ...PLANNER_ROLE_MCP_TOOLS
+  ...allConversationMcpToolNames()
 ])
 
 export type CursorPermissionRequestParams = {
@@ -47,9 +45,8 @@ function isAuditedSystemMcpTitle(title: string): boolean {
   if (!normalized.includes('codeteam-manager')) return false
 
   // Cursor ACP titles arrive in a few shapes, all of which glue server + tool:
-  //   "codeteam-manager propose_task_draft"
-  //   "codeteam-manager-register_plan_outline: register_plan_outline"
-  //   "codeteam-manager_finalize_plan"
+  //   "codeteam-manager read_reference_attachment"
+  //   "codeteam-manager-read_reference_attachment: read_reference_attachment"
   // Require an exact audited tool name after a server separator — never infer
   // safety from prose alone.
   return [...READ_ONLY_SYSTEM_MCP_TOOLS].some((toolName) => {

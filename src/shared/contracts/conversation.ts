@@ -18,7 +18,6 @@ export interface ConversationMessageDto {
   sessionId?: string | null
   conversationId?: string | null
   runtimeSessionId?: string | null
-  wizardPhase?: string | null
 
   thinking?: string | null
 

@@ -23,7 +23,7 @@ test('setup shell bootstrap requires setup token when configured for server mode
     setupTokenRequired: true
   })
 
-  const response = await app.request('/api/bootstrap')
+  const response = await app.request('/api/auth/bootstrap')
   assert.equal(response.status, 200)
   const body = (await response.json()) as {
     data?: { setupTokenRequired?: boolean; storagePhase?: string; initialized?: boolean }

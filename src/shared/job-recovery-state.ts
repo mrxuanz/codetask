@@ -1,5 +1,7 @@
 import type { TaskBlockerKind } from './contracts/evidence'
-import type { TaskProgressItemDto, ThreadJobDto, ThreadJobStatus } from './contracts/jobs'
+import type { TaskProgressItemDto } from './contracts/jobs'
+import type { PlanningSessionStatus } from './contracts/planning-session-view'
+import type { PlanningSessionViewDto } from './contracts/planning-session-view'
 
 const MAX_INFRA_RETRIES = 3
 const MAX_TASK_PREP_GENERATIONS = 3
@@ -27,7 +29,7 @@ export interface ExecutionProgressDto {
   currentTaskId: string | null
   failedTaskId: string | null
   percentage: number
-  phase: ThreadJobDto['taskProgress']['phase']
+  phase: PlanningSessionViewDto['taskProgress']['phase']
   message: string | null
 }
 
@@ -87,7 +89,7 @@ function matchesWorkflowProgressCode(
   return progressCode === WORKFLOW_PROGRESS_BY_TURN_CODE[code]
 }
 
-function resolveLifecycle(status: ThreadJobStatus): JobLifecycle {
+function resolveLifecycle(status: PlanningSessionStatus): JobLifecycle {
   if (status === 'running' || status === 'pausing') return 'running'
   if (status === 'paused') return 'paused'
   if (status === 'completed') return 'completed'
@@ -100,14 +102,14 @@ function countCompletedTasks(tasks: TaskProgressItemDto[]): number {
   return tasks.filter((task) => task.status === 'completed' || task.status === 'skipped').length
 }
 
-function isWorkflowDeadlockOnly(job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>): boolean {
+function isWorkflowDeadlockOnly(job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>): boolean {
   const tasks = job.taskProgress.tasks
   if (tasks.some((task) => task.status === 'failed')) return false
   if (matchesWorkflowCode(job.lastError, 'workflow.deadlock')) return true
   return matchesWorkflowProgressCode(job.taskProgress.progressCode, 'workflow.deadlock')
 }
 
-function readGateFailureId(job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>): string | null {
+function readGateFailureId(job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>): string | null {
   const fromParams = job.taskProgress.progressParams?.id
   if (typeof fromParams === 'string' && fromParams.trim()) return fromParams
   const lastErrorDto =
@@ -123,7 +125,7 @@ export function isGateFailureProgressCode(progressCode: string | null | undefine
   return Boolean(progressCode && GATE_FAILURE_PROGRESS_CODES.has(progressCode))
 }
 
-function isGateFailureRecoverable(job: Pick<ThreadJobDto, 'taskProgress' | 'lastError'>): boolean {
+function isGateFailureRecoverable(job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>): boolean {
   return isGateFailureProgressCode(job.taskProgress.progressCode)
 }
 
@@ -132,7 +134,7 @@ function isHumanBlockedTask(task: TaskProgressItemDto): boolean {
   return kind === 'dependency-human' || task.evidence?.recovery?.action === 'pause-human'
 }
 
-function isRecoverableTask(task: TaskProgressItemDto, job?: Pick<ThreadJobDto, 'status'>): boolean {
+function isRecoverableTask(task: TaskProgressItemDto, job?: Pick<PlanningSessionViewDto, 'status'>): boolean {
   if (job && isInterruptedFailedJobTask(job, task)) return true
   // Human blockers cannot continue from the breakpoint; restart/delete only.
   if (isHumanBlockedTask(task)) return false
@@ -147,7 +149,7 @@ function isRecoverableTask(task: TaskProgressItemDto, job?: Pick<ThreadJobDto, '
 }
 
 function isInterruptedFailedJobTask(
-  job: Pick<ThreadJobDto, 'status'>,
+  job: Pick<PlanningSessionViewDto, 'status'>,
   task: TaskProgressItemDto
 ): boolean {
   if (job.status !== 'failed') return false
@@ -159,7 +161,7 @@ function isInterruptedFailedJobTask(
 
 function findPrimaryRecoverableTask(
   tasks: TaskProgressItemDto[],
-  job?: Pick<ThreadJobDto, 'status'>
+  job?: Pick<PlanningSessionViewDto, 'status'>
 ): TaskProgressItemDto | null {
   for (const task of tasks) {
     if (!isRecoverableTask(task, job)) continue
@@ -215,12 +217,12 @@ function mapGateProgressToFailureKind(progressCode: string | null | undefined): 
   return 'gate_blocked'
 }
 
-function readTaskInfraAttempt(job: Pick<ThreadJobDto, 'taskProgress'>, taskId: string): number {
+function readTaskInfraAttempt(job: Pick<PlanningSessionViewDto, 'taskProgress'>, taskId: string): number {
   return job.taskProgress.repairGenerations?.[`task-infra:${taskId}`] ?? 0
 }
 
 function readTaskRepairAttempt(
-  job: Pick<ThreadJobDto, 'taskProgress'>,
+  job: Pick<PlanningSessionViewDto, 'taskProgress'>,
   taskId: string,
   failureKind: FailureKind | null
 ): { attempt: number; max: number } {
@@ -316,7 +318,7 @@ function resolveNextAction(input: {
 
 function deriveAvailableActions(input: {
   lifecycle: JobLifecycle
-  status: ThreadJobStatus
+  status: PlanningSessionStatus
   recoverable: boolean
 }): JobAvailableAction[] {
   const actions: JobAvailableAction[] = []
@@ -354,7 +356,7 @@ function deriveAvailableActions(input: {
   return actions
 }
 
-function isJobRecoverable(job: Pick<ThreadJobDto, 'status'>): boolean {
+function isJobRecoverable(job: Pick<PlanningSessionViewDto, 'status'>): boolean {
   if (job.status === 'paused') return true
   return job.status === 'failed'
 }
@@ -376,7 +378,7 @@ function resolveRecoveryStrategy(input: {
 }
 
 export function deriveJobRecoveryState(
-  job: Pick<ThreadJobDto, 'status' | 'lastError' | 'taskProgress'>
+  job: Pick<PlanningSessionViewDto, 'status' | 'lastError' | 'taskProgress'>
 ): JobRecoveryStateFields {
   const lifecycle = resolveLifecycle(job.status)
   const tasks = job.taskProgress.tasks
@@ -474,13 +476,13 @@ export function deriveJobRecoveryState(
   }
 }
 
-export function enrichJobWithRecoveryState<T extends ThreadJobDto>(job: T): T {
+export function enrichJobWithRecoveryState<T extends PlanningSessionViewDto>(job: T): T {
   const derived = deriveJobRecoveryState(job)
   return { ...job, ...derived }
 }
 
 export function jobHasAction(
-  job: Pick<ThreadJobDto, 'availableActions'> | null | undefined,
+  job: Pick<PlanningSessionViewDto, 'availableActions'> | null | undefined,
   action: JobAvailableAction
 ): boolean {
   return job?.availableActions?.includes(action) ?? false

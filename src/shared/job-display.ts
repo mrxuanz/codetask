@@ -1,29 +1,41 @@
-import type { ThreadJobDto, ThreadJobStatus } from './contracts/jobs'
+import type { JobState } from '@codetask/contracts'
 
 export interface JobDisplayResolved {
   badge: string
   lifecycle: 'queued' | 'running' | 'pausing' | 'paused' | 'done' | 'failed'
   executionLabel: string
-  status: ThreadJobStatus
+  status: JobState
 }
 
-const EXECUTION_DISPLAY_STATUSES = new Set<ThreadJobStatus>([
-  'pending',
+const EXECUTION_DISPLAY_STATUSES = new Set<JobState>([
+  'queued',
   'running',
   'pausing',
   'paused',
-  'completed',
+  'succeeded',
   'failed',
-  'cancelled'
+  'cancelled',
+  'cancelling'
 ])
 
-export function isExecutionDisplayStatus(status: string): status is ThreadJobStatus {
-  return EXECUTION_DISPLAY_STATUSES.has(status as ThreadJobStatus)
+/** Historical status aliases still seen in older Design plan views. */
+const LEGACY_STATUS_TO_JOB_STATE: Record<string, JobState> = {
+  pending: 'queued',
+  completed: 'succeeded'
 }
 
-function resolveLifecycle(status: ThreadJobStatus): JobDisplayResolved['lifecycle'] {
+export function normalizeJobState(status: string): JobState | null {
+  if (EXECUTION_DISPLAY_STATUSES.has(status as JobState)) return status as JobState
+  return LEGACY_STATUS_TO_JOB_STATE[status] ?? null
+}
+
+export function isExecutionDisplayStatus(status: string): boolean {
+  return normalizeJobState(status) !== null
+}
+
+function resolveLifecycle(status: JobState): JobDisplayResolved['lifecycle'] {
   switch (status) {
-    case 'pending':
+    case 'queued':
       return 'queued'
     case 'running':
       return 'running'
@@ -31,20 +43,21 @@ function resolveLifecycle(status: ThreadJobStatus): JobDisplayResolved['lifecycl
       return 'pausing'
     case 'paused':
       return 'paused'
-    case 'completed':
+    case 'succeeded':
       return 'done'
     case 'failed':
-      return 'failed'
     case 'cancelled':
+    case 'cancelling':
       return 'failed'
     default:
       return 'queued'
   }
 }
 
-export function resolveJobStatusBadgeKey(status: ThreadJobStatus): string {
-  switch (status) {
-    case 'pending':
+export function resolveJobStatusBadgeKey(status: string): string {
+  const state = normalizeJobState(status) ?? (status as JobState)
+  switch (state) {
+    case 'queued':
       return 'workspace.tasks.status.pending'
     case 'running':
       return 'workspace.tasks.status.running'
@@ -52,20 +65,21 @@ export function resolveJobStatusBadgeKey(status: ThreadJobStatus): string {
       return 'workspace.tasks.status.pausing'
     case 'paused':
       return 'workspace.tasks.status.paused'
-    case 'completed':
+    case 'succeeded':
       return 'workspace.tasks.status.completed'
     case 'failed':
       return 'workspace.tasks.status.failed'
     case 'cancelled':
+    case 'cancelling':
       return 'workspace.tasks.status.cancelled'
     default:
       return 'workspace.tasks.status.pending'
   }
 }
 
-function resolveExecutionLabel(status: ThreadJobStatus): string {
+function resolveExecutionLabel(status: JobState): string {
   switch (status) {
-    case 'pending':
+    case 'queued':
       return 'Queued'
     case 'running':
       return 'In Progress'
@@ -73,27 +87,32 @@ function resolveExecutionLabel(status: ThreadJobStatus): string {
       return 'Pausing...'
     case 'paused':
       return 'Paused'
-    case 'completed':
+    case 'succeeded':
       return 'Done'
     case 'failed':
       return 'Failed'
     case 'cancelled':
+    case 'cancelling':
       return 'Cancelled'
     default:
       return status
   }
 }
 
-export function resolveJobStatusBadgeClass(status: ThreadJobStatus): string {
-  switch (status) {
+export function resolveJobStatusBadgeClass(status: string): string {
+  const state = normalizeJobState(status) ?? status
+  switch (state) {
     case 'running':
     case 'pausing':
       return 'bg-sky-50 text-sky-700'
     case 'paused':
     case 'cancelled':
+    case 'cancelling':
       return 'bg-zinc-100 text-zinc-700'
+    case 'queued':
     case 'pending':
       return 'bg-amber-50 text-amber-700'
+    case 'succeeded':
     case 'completed':
       return 'bg-emerald-50 text-emerald-700'
     case 'failed':
@@ -103,22 +122,23 @@ export function resolveJobStatusBadgeClass(status: ThreadJobStatus): string {
   }
 }
 
-export function resolveJobStatusDisplay(status: ThreadJobStatus): JobDisplayResolved {
+export function resolveJobStatusDisplay(status: string): JobDisplayResolved {
+  const state = normalizeJobState(status) ?? 'queued'
   return {
-    badge: resolveJobStatusBadgeKey(status),
-    lifecycle: resolveLifecycle(status),
-    executionLabel: resolveExecutionLabel(status),
-    status
+    badge: resolveJobStatusBadgeKey(state),
+    lifecycle: resolveLifecycle(state),
+    executionLabel: resolveExecutionLabel(state),
+    status: state
   }
 }
 
-export function resolveJobDisplay(job: ThreadJobDto): JobDisplayResolved {
-  return resolveJobStatusDisplay(job.status)
+export function resolveJobDisplay(job: { status: string; state?: string }): JobDisplayResolved {
+  return resolveJobStatusDisplay(job.state ?? job.status)
 }
 
 export function formatExecutionQueueLabel(
   t: (key: string, params?: Record<string, unknown>) => string,
-  queue?: ThreadJobDto['queue']
+  queue?: { position: number | null; ahead: number } | null
 ): string | null {
   if (!queue?.position) return null
   if (queue.position === 1 || queue.ahead === 0) {

@@ -1,21 +1,21 @@
 import { onMounted, ref, type InjectionKey, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  createThreadTurn,
+  createConversationTurn,
   fetchConversationCores,
   fetchThreadConversationState,
-  fetchThreadMessages,
+  fetchConversationMessages,
   type ConversationCore,
   type ConversationMessage,
   type ConversationState
 } from '@renderer/api/conversation'
 import { uploadThreadAttachment } from '@renderer/api/jobs'
-import type { ThreadJobDto } from '@shared/contracts/jobs'
-import type { ChatSseEvent, ConversationTurnStatus } from '@shared/contracts'
-import { turnTopic } from '@shared/contracts/job-event-hub'
+import { conversationTopic, conversationTurnTopic } from '@codetask/contracts'
+import type { ConversationTurnDto } from '@codetask/contracts'
 import type { Thread } from '@renderer/api/threads'
-import { updateThreadCore } from '@renderer/api/threads'
-import type { JobEventHub } from '@renderer/composables/useJobEventHub'
+import { threadFromConversationPayload, updateThreadCore } from '@renderer/api/threads'
+import type { RealtimeGateway } from '@renderer/composables/useRealtimeGateway'
+import { realtimePayload } from '@renderer/composables/useRealtimeGateway'
 import {
   finalizeStreamingAssistantMessage,
   removeStreamingAssistantMessage,
@@ -25,7 +25,6 @@ import {
 import { setPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import type { TurnErrorDto } from '@shared/turn-errors'
-import { coerceTurnErrorField } from '@shared/turn-errors'
 import type { WorkspaceAccessMode } from '@shared/workspace-access'
 
 export interface HomeChatContext {
@@ -47,9 +46,6 @@ export interface HomeChatContext {
   sendMessage: (input: {
     message: string
     files?: File[]
-    generateDraft?: boolean
-    createTaskMode?: boolean
-    onPlanUpdated?: (job: ThreadJobDto) => void
   }) => Promise<Thread | null>
   updateDraftMessage: (message: ConversationMessage) => void
   clear: () => void
@@ -64,12 +60,28 @@ function isAbortError(err: unknown): boolean {
   )
 }
 
-function isTerminalTurnStatus(status: ConversationTurnStatus): boolean {
+function isTerminalTurnStatus(status: string): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled'
 }
 
+function readTurnPayload(value: unknown): ConversationTurnDto | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const turn = value as Partial<ConversationTurnDto>
+  if (typeof turn.id !== 'string' || typeof turn.state !== 'string') return null
+  if (typeof turn.workspaceAccess !== 'string') return null
+  return turn as ConversationTurnDto
+}
+
+function readMessagePayload(value: unknown): ConversationMessage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const message = value as Partial<ConversationMessage>
+  if (typeof message.id !== 'string' || typeof message.role !== 'string') return null
+  if (typeof message.content !== 'string') return null
+  return message as ConversationMessage
+}
+
 export function useHomeChat(
-  hub: JobEventHub,
+  hub: RealtimeGateway,
   syncThread: (thread: Thread) => void,
   patchThreadRuntime: (
     threadId: string,
@@ -173,10 +185,10 @@ export function useHomeChat(
     try {
       const [stateRes, historyRes] = await Promise.all([
         fetchThreadConversationState(thread.id),
-        fetchThreadMessages(thread.id, 100)
+        fetchConversationMessages(thread.id, 100)
       ])
       if (token !== openToken || activeThreadId.value !== thread.id) return
-      messages.value = historyRes.data.messages ?? []
+      messages.value = historyRes.data ?? []
       applyStatus(stateRes.data)
       activeCoreCode.value = stateRes.data.core?.code ?? thread.coreCode
     } catch (err) {
@@ -226,14 +238,10 @@ export function useHomeChat(
   async function sendMessage(input: {
     message: string
     files?: File[]
-    generateDraft?: boolean
-    createTaskMode?: boolean
-    onPlanUpdated?: (job: ThreadJobDto) => void
   }): Promise<Thread | null> {
     const threadId = activeThreadId.value
     if (!threadId) return null
 
-    const generateDraft = input.generateDraft === true
     const outbound = input.message.trim()
     if (!outbound && !(input.files?.length ?? 0)) return null
 
@@ -277,9 +285,7 @@ export function useHomeChat(
         attachmentIds.push(attachment.id)
       }
 
-      const accepted = await createThreadTurn(threadId, outbound, {
-        generateDraft,
-        createTaskMode: input.createTaskMode === true,
+      const accepted = await createConversationTurn(threadId, outbound, {
         attachmentIds
       })
       const turnId = accepted.data.turnId
@@ -297,36 +303,44 @@ export function useHomeChat(
         }
         settleActiveTurn = finish
 
-        turnUnsub = hub.watchTopic(turnTopic(turnId), (envelope) => {
+        const releases: Array<() => void> = []
+        const onEnvelope = (envelope: import('@codetask/contracts').RealtimeEnvelope): void => {
           if (generation !== streamGeneration) return
 
-          if (envelope.event === 'turn_snapshot') {
-            const snapshotAccess = envelope.data.turn.workspaceAccess
+          // Terminal durable turn events → HTTP resync
+          if (
+            envelope.type === 'turn.changed' ||
+            envelope.type === 'turn.completed' ||
+            envelope.type === 'turn.failed' ||
+            envelope.type === 'turn.cancelled'
+          ) {
+            const data = realtimePayload(envelope)
+            const turn = readTurnPayload(data.turn)
+            if (!turn) return
+            const status = turn.state
+            const snapshotAccess = turn.workspaceAccess
             activeWorkspaceAccess.value =
-              !isTerminalTurnStatus(envelope.data.turn.status) &&
+              !isTerminalTurnStatus(status) &&
               (snapshotAccess === 'exclusive-write' || snapshotAccess === 'live-read')
                 ? snapshotAccess
                 : null
-            if (isTerminalTurnStatus(envelope.data.turn.status)) {
-              const terminalTurn = envelope.data.turn
-              // POST may finish before the topic subscription is installed, and reconnect may
-              // legitimately resync with only a terminal snapshot. Re-read durable messages/state
-              // so the final answer never depends on receiving every streaming delta.
+            if (isTerminalTurnStatus(status)) {
+              const terminalTurn = turn
               void Promise.all([
-                fetchThreadMessages(threadId, 100),
+                fetchConversationMessages(threadId, 100),
                 fetchThreadConversationState(threadId)
               ])
                 .then(([historyRes, stateRes]) => {
                   if (generation !== streamGeneration || !isViewingThread(threadId)) return
-                  messages.value = historyRes.data.messages ?? []
+                  messages.value = historyRes.data ?? []
                   activeStreamingId = null
                   streamingMessageId.value = null
                   awaitingAssistantReply.value = false
                   applyStatus(stateRes.data)
-                  if (terminalTurn.status === 'failed') {
+                  if (status === 'failed' || envelope.type === 'turn.failed') {
                     runtimeStatus.value = 'error'
                     error.value = displayError(terminalTurn.lastError)
-                  } else if (terminalTurn.status === 'cancelled') {
+                  } else if (status === 'cancelled' || envelope.type === 'turn.cancelled') {
                     runtimeStatus.value = 'idle'
                   }
                 })
@@ -335,7 +349,7 @@ export function useHomeChat(
                   clearStreamingMessage()
                   activeStreamingId = null
                   awaitingAssistantReply.value = false
-                  if (terminalTurn.status === 'failed') {
+                  if (status === 'failed' || envelope.type === 'turn.failed') {
                     runtimeStatus.value = 'error'
                     error.value = displayError(terminalTurn.lastError)
                   } else {
@@ -347,126 +361,90 @@ export function useHomeChat(
             return
           }
 
-          const event = envelope as ChatSseEvent
           const viewing = isViewingThread(threadId)
+          const data = realtimePayload(envelope)
 
-          switch (event.event) {
-            case 'user_message':
+          switch (envelope.type) {
+            case 'message.committed':
               if (!viewing) break
-              messages.value = replaceOptimisticUserMessage(
-                messages.value,
-                optimisticUserId,
-                event.data.message
-              )
-              optimisticUserId = null
-              break
-            case 'draft_message': {
-              if (!viewing) break
-              const draftMessage = event.data.message
-              const exists = messages.value.some((m) => m.id === draftMessage.id)
-              messages.value = exists
-                ? messages.value.map((m) => (m.id === draftMessage.id ? draftMessage : m))
-                : [...messages.value, draftMessage]
-              break
-            }
-            case 'plan_updated':
-              input.onPlanUpdated?.(event.data.job)
-              break
-            case 'assistant_start':
-              if (!viewing) break
-              activeStreamingId = event.data.messageId
-              activeThinking = ''
-              streamingMessageId.value = event.data.messageId
-              messages.value = upsertStreamingAssistantMessage(
-                messages.value,
-                event.data.messageId,
-                '',
-                coreCode,
-                ''
-              )
-              break
-            case 'thinking_delta':
-              if (!viewing || !activeStreamingId) break
-              activeThinking += event.data.content
-              messages.value = upsertStreamingAssistantMessage(
-                messages.value,
-                activeStreamingId,
-                messages.value.find((m) => m.id === activeStreamingId)?.content ?? '',
-                coreCode,
-                activeThinking
-              )
-              break
-            case 'delta':
-              if (!viewing || !activeStreamingId) break
               {
-                const current =
-                  messages.value.find((m) => m.id === activeStreamingId)?.content ?? ''
+                const message = readMessagePayload(data.message)
+                if (!message) break
+                if (message.role === 'user') {
+                  messages.value = replaceOptimisticUserMessage(
+                    messages.value,
+                    optimisticUserId,
+                    message
+                  )
+                  optimisticUserId = null
+                } else if (message.role === 'assistant') {
+                  messages.value = finalizeStreamingAssistantMessage(messages.value, message)
+                  activeStreamingId = null
+                  streamingMessageId.value = null
+                  awaitingAssistantReply.value = false
+                }
+              }
+              break
+            case 'assistant.thinking.delta':
+              if (!viewing) break
+              {
+                const content = String(data.content ?? '')
+                if (!activeStreamingId) {
+                  activeStreamingId = `stream-${turnId}`
+                  streamingMessageId.value = activeStreamingId
+                }
+                activeThinking += content
                 messages.value = upsertStreamingAssistantMessage(
                   messages.value,
                   activeStreamingId,
-                  current + event.data.content,
+                  messages.value.find((m) => m.id === activeStreamingId)?.content ?? '',
                   coreCode,
                   activeThinking
                 )
               }
               break
-            case 'assistant_message':
+            case 'assistant.text.delta':
               if (!viewing) break
-              messages.value = finalizeStreamingAssistantMessage(messages.value, event.data.message)
-              activeStreamingId = null
-              streamingMessageId.value = null
-              awaitingAssistantReply.value = false
-              break
-            case 'done':
-              syncThread(event.data.thread)
-              patchThreadRuntime(event.data.thread.id, {
-                coreCode: event.data.thread.coreCode,
-                runtimeStatus: event.data.thread.runtimeStatus,
-                runtimeSessionId: event.data.thread.runtimeSessionId,
-                lastError: event.data.thread.lastError,
-                lastUsedAt: event.data.thread.lastUsedAt,
-                updatedAt: event.data.thread.updatedAt
-              })
-              resultThread = event.data.thread
-              if (viewing) {
-                applyStatus(event.data.state)
+              {
+                const content = String(data.content ?? '')
+                if (!activeStreamingId) {
+                  activeStreamingId = `stream-${turnId}`
+                  streamingMessageId.value = activeStreamingId
+                }
+                const current =
+                  messages.value.find((m) => m.id === activeStreamingId)?.content ?? ''
+                messages.value = upsertStreamingAssistantMessage(
+                  messages.value,
+                  activeStreamingId,
+                  current + content,
+                  coreCode,
+                  activeThinking
+                )
               }
               break
-            case 'thread_updated':
-              syncThread(event.data.thread)
-              patchThreadRuntime(event.data.thread.id, {
-                coreCode: event.data.thread.coreCode,
-                runtimeStatus: event.data.thread.runtimeStatus,
-                runtimeSessionId: event.data.thread.runtimeSessionId,
-                lastError: event.data.thread.lastError,
-                lastUsedAt: event.data.thread.lastUsedAt,
-                updatedAt: event.data.thread.updatedAt
+            case 'conversation.changed': {
+              const thread = threadFromConversationPayload(data.conversation)
+              if (!thread) break
+              syncThread(thread)
+              patchThreadRuntime(thread.id, {
+                coreCode: thread.coreCode,
+                runtimeStatus: thread.runtimeStatus,
+                runtimeSessionId: thread.runtimeSessionId,
+                lastError: thread.lastError,
+                lastUsedAt: thread.lastUsedAt,
+                updatedAt: thread.updatedAt
               })
-              if (resultThread?.id === event.data.thread.id) {
-                resultThread = event.data.thread
-              }
+              resultThread = thread
               break
-            case 'heartbeat':
-              break
-            case 'error':
-              patchThreadRuntime(threadId, {
-                coreCode: coreCode,
-                runtimeStatus: 'error',
-                runtimeSessionId: null,
-                lastError: coerceTurnErrorField(event.data.error ?? event.data.message),
-                lastUsedAt: Math.floor(Date.now() / 1000),
-                updatedAt: Math.floor(Date.now() / 1000)
-              })
-              if (viewing) {
-                clearStreamingMessage()
-                activeStreamingId = null
-                awaitingAssistantReply.value = false
-                runtimeStatus.value = 'error'
-                error.value = displayError(event.data.error ?? event.data.message)
-              }
-              break
+            }
           }
-        })
+        }
+
+        releases.push(hub.watchTopic(conversationTurnTopic(turnId), onEnvelope))
+        releases.push(hub.watchTopic(conversationTopic(threadId), onEnvelope))
+        turnUnsub = () => {
+          for (const release of releases) release()
+        }
 
         void hub.flushSubscriptionsNow()
       })

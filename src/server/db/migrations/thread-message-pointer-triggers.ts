@@ -11,47 +11,67 @@ export function dropThreadMessagePointerTriggers(db: Database.Database): void {
   `)
 }
 
+function threadsHasActiveDraftId(db: Database.Database): boolean {
+  if (!tableExists(db, 'threads')) return false
+  const cols = db.prepare(`PRAGMA table_info(threads)`).all() as Array<{ name: string }>
+  return cols.some((col) => col.name === 'active_draft_id')
+}
+
+/**
+ * Recreate draft pointer triggers when columns exist (pre-055), plus
+ * thread_jobs draft_message integrity (still required after 055).
+ */
 export function createThreadMessagePointerTriggers(db: Database.Database): void {
+  if (threadsHasActiveDraftId(db)) {
+    db.exec(`
+      DROP TRIGGER IF EXISTS threads_active_draft_insert;
+      CREATE TRIGGER threads_active_draft_insert
+      BEFORE INSERT ON threads
+      WHEN NEW.active_draft_id IS NOT NULL
+      BEGIN
+        SELECT CASE
+          WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) IS NULL
+            THEN RAISE(ABORT, 'active_draft_id must reference an existing message')
+          WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) != NEW.id
+            THEN RAISE(ABORT, 'active_draft_id must belong to the same thread')
+          WHEN (SELECT kind FROM thread_messages WHERE id = NEW.active_draft_id) != 'task-launch-draft'
+            THEN RAISE(ABORT, 'active_draft_id must reference a task-launch-draft message')
+        END;
+      END;
+
+      DROP TRIGGER IF EXISTS threads_active_draft_update;
+      CREATE TRIGGER threads_active_draft_update
+      BEFORE UPDATE OF active_draft_id ON threads
+      WHEN NEW.active_draft_id IS NOT NULL
+      BEGIN
+        SELECT CASE
+          WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) IS NULL
+            THEN RAISE(ABORT, 'active_draft_id must reference an existing message')
+          WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) != NEW.id
+            THEN RAISE(ABORT, 'active_draft_id must belong to the same thread')
+          WHEN (SELECT kind FROM thread_messages WHERE id = NEW.active_draft_id) != 'task-launch-draft'
+            THEN RAISE(ABORT, 'active_draft_id must reference a task-launch-draft message')
+        END;
+      END;
+
+      DROP TRIGGER IF EXISTS thread_messages_clear_active_draft;
+      CREATE TRIGGER thread_messages_clear_active_draft
+      AFTER DELETE ON thread_messages
+      BEGIN
+        UPDATE threads
+        SET active_draft_id = NULL
+        WHERE active_draft_id = OLD.id;
+      END;
+    `)
+  } else {
+    db.exec(`
+      DROP TRIGGER IF EXISTS threads_active_draft_insert;
+      DROP TRIGGER IF EXISTS threads_active_draft_update;
+      DROP TRIGGER IF EXISTS thread_messages_clear_active_draft;
+    `)
+  }
+
   db.exec(`
-    DROP TRIGGER IF EXISTS threads_active_draft_insert;
-    CREATE TRIGGER threads_active_draft_insert
-    BEFORE INSERT ON threads
-    WHEN NEW.active_draft_id IS NOT NULL
-    BEGIN
-      SELECT CASE
-        WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) IS NULL
-          THEN RAISE(ABORT, 'active_draft_id must reference an existing message')
-        WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) != NEW.id
-          THEN RAISE(ABORT, 'active_draft_id must belong to the same thread')
-        WHEN (SELECT kind FROM thread_messages WHERE id = NEW.active_draft_id) != 'task-launch-draft'
-          THEN RAISE(ABORT, 'active_draft_id must reference a task-launch-draft message')
-      END;
-    END;
-
-    DROP TRIGGER IF EXISTS threads_active_draft_update;
-    CREATE TRIGGER threads_active_draft_update
-    BEFORE UPDATE OF active_draft_id ON threads
-    WHEN NEW.active_draft_id IS NOT NULL
-    BEGIN
-      SELECT CASE
-        WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) IS NULL
-          THEN RAISE(ABORT, 'active_draft_id must reference an existing message')
-        WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.active_draft_id) != NEW.id
-          THEN RAISE(ABORT, 'active_draft_id must belong to the same thread')
-        WHEN (SELECT kind FROM thread_messages WHERE id = NEW.active_draft_id) != 'task-launch-draft'
-          THEN RAISE(ABORT, 'active_draft_id must reference a task-launch-draft message')
-      END;
-    END;
-
-    DROP TRIGGER IF EXISTS thread_messages_clear_active_draft;
-    CREATE TRIGGER thread_messages_clear_active_draft
-    AFTER DELETE ON thread_messages
-    BEGIN
-      UPDATE threads
-      SET active_draft_id = NULL
-      WHERE active_draft_id = OLD.id;
-    END;
-
     DROP TRIGGER IF EXISTS thread_jobs_draft_same_thread_insert;
     CREATE TRIGGER thread_jobs_draft_same_thread_insert
     BEFORE INSERT ON thread_jobs

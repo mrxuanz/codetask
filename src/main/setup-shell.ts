@@ -41,7 +41,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
   })
 
   app.get('/api/health', (c) => c.json(ok({ status: 'ok', phase: 'storage_setup' })))
-  app.get('/api/bootstrap', (c) =>
+  app.get('/api/auth/bootstrap', (c) =>
     c.json(
       ok({
         initialized: false,

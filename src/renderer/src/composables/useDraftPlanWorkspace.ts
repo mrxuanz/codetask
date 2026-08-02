@@ -9,7 +9,8 @@ import {
   type Ref
 } from 'vue'
 import type { ConversationMessageDto } from '@shared/contracts/conversation'
-import type { ThreadDraftSummaryDto, ThreadJobDto } from '@shared/contracts/jobs'
+import type { ThreadDraftSummaryDto } from '@shared/contracts/jobs'
+import type { PlanningSessionViewDto } from '@shared/contracts/planning-session-view'
 import {
   fetchThreadDrafts,
   fetchThreadPlans,
@@ -18,11 +19,9 @@ import {
   launchDesignSession,
   retryJobPlanning
 } from '@renderer/api/jobs'
-import type { JobSseEvent } from '@shared/contracts/sse'
-import { useJobEventHub } from '@renderer/composables/useJobEventHub'
-import { threadTopic } from '@shared/contracts/job-event-hub'
+import { useRealtimeGateway, realtimePayload } from '@renderer/composables/useRealtimeGateway'
+import { conversationTopic } from '@codetask/contracts'
 import { resolveDraftPlanReference } from '@shared/draft-plan-resolve'
-import { updateThreadContext } from '@renderer/api/threads'
 import {
   DRAFT_WIZARD_STEP_COUNT,
   isDraftStepComplete,
@@ -37,7 +36,7 @@ export type CenterView = 'draft' | 'plan'
 
 export interface DraftPlanWorkspaceContext {
   drafts: Ref<ThreadDraftSummaryDto[]>
-  plans: Ref<ThreadJobDto[]>
+  plans: Ref<PlanningSessionViewDto[]>
   loading: Ref<boolean>
   /** False until the first loadWorkspace for the current thread finishes (success or error). */
   workspaceReady: Ref<boolean>
@@ -47,7 +46,7 @@ export interface DraftPlanWorkspaceContext {
   centerView: Ref<CenterView>
   currentStep: Ref<number>
   selectedMessage: Ref<ConversationMessageDto | null>
-  selectedPlan: Ref<ThreadJobDto | null>
+  selectedPlan: Ref<PlanningSessionViewDto | null>
   planTree: Ref<ReturnType<typeof buildPlanTree>>
   showPlanEditor: Ref<boolean>
   confirmingPlan: Ref<boolean>
@@ -82,7 +81,7 @@ export function provideDraftPlanWorkspace(options: {
   t: TranslateFn
 }): DraftPlanWorkspaceContext {
   const drafts = ref<ThreadDraftSummaryDto[]>([])
-  const plans = ref<ThreadJobDto[]>([])
+  const plans = ref<PlanningSessionViewDto[]>([])
   const loading = ref(false)
   const workspaceReady = ref(false)
   const error = ref<string | null>(null)
@@ -97,7 +96,7 @@ export function provideDraftPlanWorkspace(options: {
   let planHubRelease: (() => void) | null = null
   let threadHubRelease: (() => void) | null = null
   let watchedPlanJobId: string | null = null
-  const jobHub = useJobEventHub()
+  const realtime = useRealtimeGateway()
 
   function stopPlanStream(): void {
     planHubRelease?.()
@@ -112,10 +111,11 @@ export function provideDraftPlanWorkspace(options: {
 
   function watchThread(threadId: string): void {
     stopThreadWatch()
-    threadHubRelease = jobHub.watchTopic(threadTopic(threadId), (envelope) => {
+    threadHubRelease = realtime.watchTopic(conversationTopic(threadId), (envelope) => {
       if (options.threadId.value !== threadId) return
-      if (envelope.event === 'draft_updated') {
-        void onDraftUpdated(envelope.data.message)
+      if (envelope.type === 'conversation.changed' || envelope.type === 'message.committed') {
+        const message = realtimePayload(envelope).message
+        if (message) void onDraftUpdated(message as Parameters<typeof onDraftUpdated>[0])
       }
     })
   }
@@ -132,13 +132,18 @@ export function provideDraftPlanWorkspace(options: {
     draft: ThreadDraftSummaryDto,
     payload?: TaskLaunchDraftPayload | null
   ): ReturnType<typeof resolveDraftPlanReference> {
+    const planningSessionId =
+      (draft as { planningSessionId?: string | null }).planningSessionId ??
+      (payload as { planningSessionId?: string | null } | null | undefined)?.planningSessionId ??
+      null
     return resolveDraftPlanReference({
-      linkedPlanId: draft.linkedPlanId,
+      linkedPlanId: draft.linkedPlanId ?? planningSessionId,
       designSessionId:
+        planningSessionId ??
         draft.designSessionId ??
         (payload as { designSessionId?: string | null } | null | undefined)?.designSessionId,
       launchedJobId: draft.launchedJobId,
-      planId: draft.plan?.id,
+      planId: draft.plan?.id ?? planningSessionId,
       planStatus: draft.plan?.status,
       planConfirmedAt: (draft.plan as { planConfirmedAt?: number | null } | null | undefined)
         ?.planConfirmedAt
@@ -148,7 +153,7 @@ export function provideDraftPlanWorkspace(options: {
   function findPlanForDraft(
     draft: ThreadDraftSummaryDto,
     payload?: TaskLaunchDraftPayload | null
-  ): ThreadJobDto | null {
+  ): PlanningSessionViewDto | null {
     const refs = draftPlanRefs(draft, payload)
     if (refs.activePlanId) {
       const byId = plans.value.find((plan) => plan.id === refs.activePlanId)
@@ -276,11 +281,6 @@ export function provideDraftPlanWorkspace(options: {
       const initialId = options.initialDraftId?.value
       if (initialId && drafts.value.some((d) => d.messageId === initialId)) {
         selectedDraftId.value = initialId
-        const draft = drafts.value.find((d) => d.messageId === initialId)
-        void updateThreadContext(threadId, {
-          activeDraftId: initialId,
-          activePlanId: draft ? draftPlanRefs(draft).activePlanId : null
-        })
       }
       if (selectedDraftId.value) {
         syncStepFromState()
@@ -306,44 +306,21 @@ export function provideDraftPlanWorkspace(options: {
     syncStepFromState()
   }
 
-  function applyPlanHubEvent(jobId: string, event: JobSseEvent, threadId: string): void {
-    if (options.threadId.value !== threadId) return
-    if (event.event === 'job_snapshot' || event.event === 'job_done') {
-      const idx = plans.value.findIndex((p) => p.id === jobId)
-      if (idx >= 0) plans.value[idx] = event.data.job
-      else plans.value.push(event.data.job)
-    }
-    if (event.event === 'plan_progress' || event.event === 'task_progress') {
-      const idx = plans.value.findIndex((p) => p.id === jobId)
-      if (idx >= 0) {
-        const job = { ...plans.value[idx] }
-        if (event.event === 'plan_progress') {
-          job.planProgress = event.data.planProgress
-          if (event.data.plan) job.plan = event.data.plan
-        }
-        if (event.event === 'task_progress') job.taskProgress = event.data.taskProgress
-        plans.value[idx] = job
-      }
-    }
-    if (
-      event.event === 'job_done' &&
-      event.data.job.status === 'plan_editing' &&
-      selectedDraftId.value
-    ) {
-      setStep(2)
-    }
-  }
-
-  function watchPlan(jobId: string): void {
+  function watchPlan(sessionId: string): void {
     const threadId = options.threadId.value
     if (!threadId) return
     stopPlanStream()
-    watchedPlanJobId = jobId
-    planHubRelease = jobHub.watchJob(jobId, (event) => {
-      applyPlanHubEvent(jobId, event, threadId)
-      if (event.event === 'job_done') {
+    watchedPlanJobId = sessionId
+    planHubRelease = realtime.watchTopic(`planning-session:${sessionId}`, (envelope) => {
+      if (options.threadId.value !== threadId) return
+      if (
+        envelope.type === 'planning.changed' ||
+        envelope.type === 'planning.progress' ||
+        envelope.type === 'planning.tree.changed' ||
+        envelope.type === 'planning.published' ||
+        envelope.type === 'planning.failed'
+      ) {
         void refreshPlansAfterWatch(threadId)
-        if (watchedPlanJobId === jobId) stopPlanStream()
       }
     })
   }
@@ -356,11 +333,52 @@ export function provideDraftPlanWorkspace(options: {
 
     selectedDraftId.value = messageId
     successMessage.value = null
+
+    // Hydrate Design draft into message list when no conversation payload exists.
+    if (!options.messages.value.some((m) => m.id === messageId)) {
+      try {
+        const { getDesignDraft } = await import('@renderer/api/design')
+        const res = await getDesignDraft(messageId)
+        const d = res.data
+        options.messages.value = [
+          ...options.messages.value,
+          {
+            id: d.id,
+            kind: 'task-launch-draft',
+            role: 'assistant',
+            content: d.title,
+            createdAt: new Date(d.createdAt).toISOString(),
+            payload: {
+              draftId: d.id,
+              title: d.title,
+              summary: d.summary,
+              userFlow: d.userFlow,
+              techStack: d.techStack,
+              nfr: d.nfr,
+              acceptance: d.acceptance,
+              verification: d.verification,
+              outOfScope: d.outOfScope,
+              assumptions: d.assumptions,
+              requirementsContract: {
+                markdown: d.requirementsMarkdown,
+                status: d.requirementsStatus
+              },
+              workspacePath: d.workspaceRoot,
+              status: d.status,
+              lockedSections: d.lockedSections,
+              abilities: d.abilities,
+              references: d.references,
+              executionConfig: d.executionProfile ?? undefined,
+              revision: d.lockRevision
+            }
+          } as ConversationMessageDto
+        ]
+      } catch {
+        // Keep selection even if hydrate fails; form may be read-only.
+      }
+    }
+
     const refs = draftPlanRefs(draft)
-    await updateThreadContext(threadId, {
-      activeDraftId: messageId,
-      activePlanId: refs.activePlanId
-    })
     if (options.threadId.value !== threadId) return
     syncStepFromState()
     if (refs.activePlanId) void watchPlan(refs.activePlanId)

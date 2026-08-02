@@ -140,7 +140,6 @@ export async function closeCursorRuntimeScope(scopeId: string): Promise<void> {
 export async function closeConversationCursorRuntime(threadId: string): Promise<void> {
   const scopes = [
     buildConversationCursorRuntimeScope(threadId, 'chat'),
-    buildConversationCursorRuntimeScope(threadId, 'create_task'),
     `conversation:${threadId}`
   ]
   const { releaseJobCursorResources } = await import('../../sandbox/orchestrator')

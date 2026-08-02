@@ -4,7 +4,6 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import test from 'node:test'
 import { eq } from 'drizzle-orm'
-import { JobEventBus } from '../../src/server/context/event-bus'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
 import {
   draftReferences,
@@ -67,7 +66,7 @@ async function seedThreadGraph(
 
   await db.insert(projects).values({
     id: 'proj-1',
-    username: 'user',
+    actorId: 'user',
     title: 'P',
     workspaceRoot: '/tmp/ws',
     createdAt: now,
@@ -298,22 +297,6 @@ test('sqlite maintenance runs incrementally and respects throttle', () => {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })
   }
-})
-
-test('JobEventBus clearJob drops SSE listeners', () => {
-  const bus = new JobEventBus()
-  let hits = 0
-  const unsubscribe = bus.subscribe('job-1', () => {
-    hits += 1
-  })
-
-  bus.emit('job-1', { event: 'task_progress', data: { taskProgress: {} as never } })
-  assert.equal(hits, 1)
-
-  unsubscribe()
-  bus.clearJob('job-1')
-  bus.emit('job-1', { event: 'task_progress', data: { taskProgress: {} as never } })
-  assert.equal(hits, 1)
 })
 
 test('deleting job row cascades artifact metadata; purgeJobFilesystem clears runtime only', async () => {

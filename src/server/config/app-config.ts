@@ -5,6 +5,10 @@ import {
   type ProvidersConfigOverrides
 } from '../../shared/providers/settings'
 import {
+  DEFAULT_RETENTION_SETTINGS,
+  type RetentionSettings
+} from '../../shared/contracts/retention.ts'
+import {
   DEFAULT_RUNTIME_FEATURES,
   type DebugRuntimeFeatures,
   type SandboxRuntimeFeatures
@@ -47,6 +51,8 @@ export interface AppConfig {
   readonly providers: ProvidersConfig
   readonly sandbox: SandboxConfig
   readonly debug: DebugConfig
+  /** Deploy/code retention policy — not a user Settings namespace (05). */
+  readonly retention: RetentionSettings
 }
 
 export interface AppConfigOverrides {
@@ -58,6 +64,7 @@ export interface AppConfigOverrides {
   providers?: ProvidersConfigOverrides
   sandbox?: Partial<SandboxConfig>
   debug?: Partial<DebugConfig>
+  retention?: Partial<RetentionSettings>
 }
 
 /**
@@ -66,7 +73,7 @@ export interface AppConfigOverrides {
  */
 export const DEFAULT_APP_CONFIG: AppConfig = {
   http: {
-    requestTimeoutMs: 300_000,
+    requestTimeoutMs: 30_000,
     maxSseClientsPerUser: 8,
     maxConcurrentTurnsPerUser: 2
   },
@@ -88,7 +95,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   },
   providers: createProvidersConfig(),
   sandbox: { ...DEFAULT_RUNTIME_FEATURES.sandbox },
-  debug: { ...DEFAULT_RUNTIME_FEATURES.debug }
+  debug: { ...DEFAULT_RUNTIME_FEATURES.debug },
+  retention: { ...DEFAULT_RETENTION_SETTINGS }
 }
 
 export function createAppConfig(overrides: AppConfigOverrides = {}): AppConfig {
@@ -117,6 +125,10 @@ export function createAppConfig(overrides: AppConfigOverrides = {}): AppConfig {
     debug: {
       ...DEFAULT_APP_CONFIG.debug,
       ...overrides.debug
+    },
+    retention: {
+      ...DEFAULT_APP_CONFIG.retention,
+      ...overrides.retention
     }
   }
 }

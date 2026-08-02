@@ -1,95 +1,54 @@
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import test from 'node:test'
-import {
-  buildChatConversationBody,
-  buildConversationSystemPrompt,
-  buildCreateTaskConversationBody
-} from '../../src/server/conversation/prompts'
-import { buildWorkspaceSnapshot } from '../../src/server/conversation/workspace-snapshot'
+import { buildConversationSystemPrompt } from '../../src/server/conversation/prompts.ts'
+import { conversationMcpToolDefinitions } from '../../src/server/conversation/mcp/tools.ts'
+import { buildPlannerSystemPrompt } from '../../src/server/planner/prompts.ts'
 
-test('buildChatConversationBody is an optional writable chat template without task workflow', () => {
-  const body = buildChatConversationBody('Test Agent')
-  assert.match(body, /coding assistant/)
-  assert.match(body, /small, targeted edits/)
-  assert.doesNotMatch(body, /propose_task_draft/)
-  assert.doesNotMatch(body, /Discussion Workflow/)
-  assert.doesNotMatch(body, /coordination assistant/)
-  assert.doesNotMatch(body, /Create Task/)
-  assert.doesNotMatch(body, /not a coding worker/)
-  assert.match(body, /do not mention REQUIREMENTS CONTRACT/)
-})
+const root = join(import.meta.dirname, '../..')
 
-test('buildCreateTaskConversationBody includes draft workflow when MCP is available', () => {
-  const body = buildCreateTaskConversationBody('Test Agent', true)
-  assert.match(body, /Discussion Workflow/)
-  assert.match(body, /propose_task_draft/)
-  assert.match(body, /workspace snapshot/)
-  assert.match(body, /REQUIREMENTS CONTRACT/)
-})
-
-test('buildConversationSystemPrompt uses chat mode by default', () => {
-  const prompt = buildConversationSystemPrompt('Agent', { mode: 'chat' })
-  assert.doesNotMatch(prompt, /propose_task_draft/)
-  assert.match(prompt, /coding assistant/)
-  assert.doesNotMatch(prompt, /Create Task/)
-})
-
-test('buildConversationSystemPrompt create_task mode includes MCP workflow', () => {
-  const prompt = buildConversationSystemPrompt('Agent', {
-    mode: 'create_task',
-    mcpToolsAvailable: true
+describe('conversation prompts (03 pure chat)', () => {
+  it('ordinary chat system prompt does not advertise propose_task_draft', () => {
+    const body = buildConversationSystemPrompt('CodeTask Conversation', {
+      mode: 'chat',
+      mcpToolsAvailable: true,
+      customBody: null
+    })
+    assert.doesNotMatch(body, /propose_task_draft/)
   })
-  assert.match(prompt, /propose_task_draft/)
-})
 
-test('ordinary chat and create-task access are resolved by separate turn-policy modules', () => {
-  const chatPolicy = readFileSync(
-    join(process.cwd(), 'src/server/conversation/turn-policy/chat.ts'),
-    'utf8'
-  )
-  const createTaskPolicy = readFileSync(
-    join(process.cwd(), 'src/server/conversation/turn-policy/create-task.ts'),
-    'utf8'
-  )
-  const service = readFileSync(join(process.cwd(), 'src/server/conversation/service.ts'), 'utf8')
-  assert.match(chatPolicy, /acquireWorkspaceLease/)
-  assert.match(chatPolicy, /'chat-write'/)
-  assert.match(chatPolicy, /resolveConversationPromptBody/)
-  assert.doesNotMatch(chatPolicy, /appendBusinessSkillSnapshot/)
-  assert.match(createTaskPolicy, /'create-task-read'/)
-  assert.match(createTaskPolicy, /appendBusinessSkillSnapshot/)
-  assert.match(service, /resolveChatAccess/)
-  assert.match(service, /resolveCreateTaskAccess/)
-  assert.doesNotMatch(service, /const capabilityProfile = createTaskMode/)
-})
+  it('conversation MCP tools are chat-only', () => {
+    const names = conversationMcpToolDefinitions().map((t) => String(t.name))
+    assert.ok(names.includes('read_reference_attachment'))
+    assert.ok(!names.includes('propose_task_draft'))
+  })
 
-test('draft and Planner required MCP setup fail explicitly', () => {
-  const conversation = readFileSync(
-    join(process.cwd(), 'src/server/conversation/service.ts'),
-    'utf8'
-  )
-  const planner = readFileSync(join(process.cwd(), 'src/server/design-session/planner.ts'), 'utf8')
-  assert.match(conversation, /conversation\.mcp_unavailable/)
-  assert.match(planner, /plan\.mcp_unavailable/)
-  assert.doesNotMatch(conversation, /catch\s*\{\s*mcpUrl = undefined/)
-  assert.doesNotMatch(planner, /catch\s*\{\s*mcpUrl = undefined/)
-})
+  it('planner default prompt does not advertise retired Planner HTTP MCP tools', () => {
+    const body = buildPlannerSystemPrompt()
+    assert.doesNotMatch(body, /register_plan_outline|finalize_plan|register_task_context/)
+    assert.match(body, /PlanningApplicationPort|retired/i)
+  })
 
-test('buildWorkspaceSnapshot lists files and reads package.json', () => {
-  const root = mkdtempSync(join(tmpdir(), 'codetask-ws-'))
-  writeFileSync(
-    join(root, 'package.json'),
-    JSON.stringify({ name: 'demo-app', private: true }, null, 2)
-  )
-  writeFileSync(join(root, 'index.html'), '<!doctype html><title>demo</title>')
-  mkdirSync(join(root, 'src'))
-
-  const snapshot = buildWorkspaceSnapshot(root)
-  assert.match(snapshot, /demo-app/)
-  assert.match(snapshot, /index\.html/)
-  assert.match(snapshot, /src\//)
-  assert.match(snapshot, /Workspace snapshot/)
+  it('create-task turn-policy and legacy wizard/draft stubs are removed', () => {
+    for (const rel of [
+      'src/server/conversation/turn-policy/create-task.ts',
+      'src/server/legacy-wizard',
+      'src/server/legacy-draft',
+      'src/server/threads',
+      'src/shared/design-session.ts',
+      'scripts/lib/seed-cli-benchmark-shared.ts',
+      'scripts/simulate-confirm-b-test.mjs',
+      'scripts/reset-jobs-to-plan-edit.mjs'
+    ]) {
+      let exists = true
+      try {
+        const st = statSync(join(root, rel))
+        exists = st.isFile() || st.isDirectory()
+      } catch {
+        exists = false
+      }
+      assert.equal(exists, false, rel)
+    }
+  })
 })

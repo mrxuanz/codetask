@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ConversationCore, ConversationMessage } from '@renderer/api/conversation'
 import { updateJobPlanNode } from '@renderer/api/jobs'
-import type { Thread } from '@renderer/api/threads'
 import TaskLaunchDraftCard from '@renderer/components/home/TaskLaunchDraftCard.vue'
 import PlanReviewAccordion from '@renderer/components/tasks/PlanReviewAccordion.vue'
 import TaskProgressTree from '@renderer/components/tasks/TaskProgressTree.vue'
@@ -19,7 +18,6 @@ import { cn } from '@renderer/lib/utils'
 
 const props = defineProps<{
   threadId: string
-  wizardPhase?: Thread['wizardPhase']
   messages: ConversationMessage[]
   cores: ConversationCore[]
 }>()

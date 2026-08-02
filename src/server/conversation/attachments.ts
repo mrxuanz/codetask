@@ -4,7 +4,7 @@ import { join, extname, basename, dirname } from 'path'
 import { getAppContext } from '../bootstrap'
 import { attachmentDir, threadAttachmentsDir } from '../data-paths'
 import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
-import { assertFrozenAttachmentId, assertFrozenThreadId } from '../../shared/frozen-ids'
+import { assertAttachmentOwnerId, assertFrozenAttachmentId } from '../../shared/frozen-ids'
 import type { MessageAttachment } from './types'
 
 export function initAttachmentStore(_dir: string): void {
@@ -75,7 +75,7 @@ export function saveThreadAttachment(input: {
   mimeType: string
   buffer: Buffer
 }): MessageAttachment {
-  const threadId = assertFrozenThreadId(input.threadId)
+  const threadId = assertAttachmentOwnerId(input.threadId)
   const id = `att-${randomUUID()}`
   const filename = safeFilename(input.name)
   const isolatedDir = isolatedAttachmentDir(threadId, id)
@@ -90,7 +90,7 @@ export function saveThreadAttachment(input: {
     sizeBytes: input.buffer.length,
     kind: inferKind(input.mimeType),
     relativePath,
-    assetUrl: `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(id)}`
+    assetUrl: `/api/conversations/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(id)}`
   }
 }
 
@@ -119,7 +119,7 @@ export function readThreadAttachment(
   attachment: MessageAttachment
   buffer: Buffer
 } | null {
-  const threadId = assertFrozenThreadId(threadIdInput)
+  const threadId = assertAttachmentOwnerId(threadIdInput)
   const attachmentId = assertFrozenAttachmentId(attachmentIdInput)
   migrateFlatAttachmentIfNeeded(threadId, attachmentId)
   const relativePath = resolveAttachmentRelativePath(threadId, attachmentId)
@@ -155,7 +155,7 @@ export function readThreadAttachment(
       sizeBytes: buffer.length,
       kind: inferKind(mimeType),
       relativePath,
-      assetUrl: `/api/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}`
+      assetUrl: `/api/conversations/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}`
     },
     buffer
   }

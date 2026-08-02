@@ -8,7 +8,6 @@ import { isDraftListEntryLaunched } from '@shared/job-lifecycle'
 
 const props = defineProps<{
   threadId: string
-  wizardPhase?: import('@renderer/api/threads').Thread['wizardPhase']
   messages: ConversationMessage[]
   cores: ConversationCore[]
   initialDraftId?: string | null
@@ -80,7 +79,6 @@ defineExpose({
   <div class="flex min-h-0 min-w-0 flex-1 flex-col border-border bg-background xl:border-l">
     <DraftStepForm
       :thread-id="threadId"
-      :wizard-phase="wizardPhase"
       :messages="messages"
       :cores="cores"
       @draft-updated="handleDraftUpdated"

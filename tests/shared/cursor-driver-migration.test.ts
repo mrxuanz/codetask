@@ -336,7 +336,11 @@ test('CursorDriver turn handle uses RuntimeManager cancel/close and manager-sele
   for await (const chunk of manager.stream(
     completingDriver,
     buildProviderTurnContext({
-      input: baseInput({ prompt: 'ok' }),
+      input: baseInput({
+        prompt: 'ok',
+        capabilityProfile: 'chat-read',
+        providerRuntimeScopeId: 'conversation:test-conv'
+      }),
       options: { outerSandbox: false },
       installation,
       authMode: 'host-identity'
@@ -350,7 +354,7 @@ test('CursorDriver turn handle uses RuntimeManager cancel/close and manager-sele
   ])
   assert.equal(manager.activeCount(), 0)
   assert.equal(scopes[0]?.reusePolicy, 'conversation-scoped')
-  assert.equal(scopes[0]?.id, 'conversation:/runtime/cursor')
+  assert.equal(scopes[0]?.id, 'conversation:test-conv')
   assert.equal(completingDriver.descriptor.capabilities.reuse.includes('conversation-scoped'), true)
 })
 

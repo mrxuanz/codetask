@@ -1,22 +1,32 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  fetchBusinessSkills,
+  fetchAgentDefaults,
   fetchMcpSettings,
   fetchPromptSettings,
-  updateBusinessSkills,
+  fetchProviderCatalog,
+  fetchProviderSettings,
+  fetchSecrets,
+  updateAgentDefaults,
   updateMcpSettings,
   updatePromptSettings,
-  type PromptSettings,
+  updateProviderSettings,
+  putSecret,
+  deleteSecret,
+  type AgentCoreOption,
+  type AgentDefaultsSettings,
+  type AgentMcpSettings,
+  type AgentPromptSettings,
   type McpSettingsConstraints,
-  type UserMcpSettings
+  type ProviderSettingsPayload,
+  type SecretMeta
 } from '@renderer/api/settings'
-import { fetchConversationCores, type ConversationCore } from '@renderer/api/conversation'
-import type { BusinessSkillsSettings } from '@shared/contracts/business-skills'
+import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
+import { SETTINGS_SELF_TOPIC } from '@codetask/contracts'
 import { fetchSandboxHealth, type SandboxHealthReport } from '@renderer/api/system'
-import BusinessSkillsEditor from '@renderer/components/settings/BusinessSkillsEditor.vue'
 import McpSettingsCard from '@renderer/components/settings/McpSettingsCard.vue'
+import AgentDefaultsCard from '@renderer/components/settings/AgentDefaultsCard.vue'
 import SandboxHealthCard from '@renderer/components/settings/SandboxHealthCard.vue'
 import LanguageSwitcher from '@renderer/components/LanguageSwitcher.vue'
 import PromptEditor from '@renderer/components/settings/PromptEditor.vue'
@@ -26,40 +36,58 @@ import CardContent from '@renderer/components/ui/CardContent.vue'
 import CardHeader from '@renderer/components/ui/CardHeader.vue'
 import CardTitle from '@renderer/components/ui/CardTitle.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
+import Input from '@renderer/components/ui/Input.vue'
+import Label from '@renderer/components/ui/Label.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
 import { toast, toastError } from '@renderer/lib/toast'
 import { fetchStorageStats, type StorageStatsData } from '@renderer/api/storage'
 
-type SettingsSection = 'language' | 'storage' | 'sandbox' | 'skills' | 'mcp' | 'prompts'
-
-/** Temporarily hide the Business Skills settings section from the UI. */
-const SHOW_BUSINESS_SKILLS_SETTINGS = false
+type SettingsSection =
+  | 'language'
+  | 'storage'
+  | 'sandbox'
+  | 'agents'
+  | 'providers'
+  | 'secrets'
+  | 'mcp'
+  | 'prompts'
 
 const { t } = useI18n()
+const realtime = useRealtimeGateway()
+let settingsHubRelease: (() => void) | null = null
 
 const section = ref<SettingsSection>('language')
 const loading = ref(true)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-const cores = ref<ConversationCore[]>([])
-const businessSkillsDraft = ref<BusinessSkillsSettings | null>(null)
-const promptDraft = ref<PromptSettings | null>(null)
-const promptDefaults = ref<PromptSettings | null>(null)
-const mcpDraft = ref<UserMcpSettings | null>(null)
+const cores = ref<AgentCoreOption[]>([])
+const agentDefaultsDraft = ref<AgentDefaultsSettings | null>(null)
+const agentDefaultsRevision = ref(0)
+const promptDraft = ref<AgentPromptSettings | null>(null)
+const promptDefaults = ref<AgentPromptSettings | null>(null)
+const promptRevision = ref(0)
+const mcpDraft = ref<AgentMcpSettings | null>(null)
 const mcpConstraints = ref<McpSettingsConstraints | null>(null)
+const mcpRevision = ref(0)
+const providerPayload = ref<ProviderSettingsPayload | null>(null)
+const providerDraft = ref<ProviderSettingsPayload['saved']['providers'] | null>(null)
 const sandboxHealth = ref<SandboxHealthReport | null>(null)
 const sandboxHealthLoading = ref(false)
 const storageStats = ref<StorageStatsData | null>(null)
 const storageLoading = ref(false)
+const secretsList = ref<SecretMeta[]>([])
+const secretNameDraft = ref('')
+const secretValueDraft = ref('')
+const secretsLoading = ref(false)
 
 const sections = [
   { key: 'language' as const, labelKey: 'workspace.settings.sections.language' },
   { key: 'storage' as const, labelKey: 'workspace.settings.sections.storage' },
   { key: 'sandbox' as const, labelKey: 'workspace.settings.sections.sandbox' },
-  ...(SHOW_BUSINESS_SKILLS_SETTINGS
-    ? [{ key: 'skills' as const, labelKey: 'workspace.settings.sections.skills' }]
-    : []),
+  { key: 'agents' as const, labelKey: 'workspace.settings.sections.agents' },
+  { key: 'providers' as const, labelKey: 'workspace.settings.sections.providers' },
+  { key: 'secrets' as const, labelKey: 'workspace.settings.sections.secrets' },
   { key: 'mcp' as const, labelKey: 'workspace.settings.sections.mcp' },
   { key: 'prompts' as const, labelKey: 'workspace.settings.sections.prompts' }
 ]
@@ -99,40 +127,62 @@ async function loadSandboxHealth(): Promise<void> {
   }
 }
 
+async function loadSecrets(): Promise<void> {
+  secretsLoading.value = true
+  try {
+    const res = await fetchSecrets()
+    secretsList.value = res.data.secrets
+  } catch (err) {
+    toastError(err, t('workspace.settings.secrets.loadFailed'))
+    secretsList.value = []
+  } finally {
+    secretsLoading.value = false
+  }
+}
+
 async function loadSettings(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const [coresRes, promptRes, mcpRes, skillsRes] = await Promise.all([
-      fetchConversationCores(),
+    const [coresRes, agentRes, promptRes, mcpRes, providersRes, secretsRes] = await Promise.all([
+      fetchProviderCatalog(),
+      fetchAgentDefaults(),
       fetchPromptSettings(),
       fetchMcpSettings(),
-      SHOW_BUSINESS_SKILLS_SETTINGS ? fetchBusinessSkills() : Promise.resolve(null)
+      fetchProviderSettings(),
+      fetchSecrets()
     ])
-    cores.value = coresRes.data.cores
-    businessSkillsDraft.value = skillsRes
-      ? structuredClone(skillsRes.data.settings)
-      : null
+    cores.value = coresRes.data.providers
+    agentDefaultsDraft.value = structuredClone(agentRes.data.settings)
+    agentDefaultsRevision.value = agentRes.data.revision
     promptDraft.value = structuredClone(promptRes.data.settings)
     promptDefaults.value = promptRes.data.defaults
+    promptRevision.value = promptRes.data.revision
     mcpDraft.value = structuredClone(mcpRes.data.settings)
     mcpConstraints.value = mcpRes.data.constraints
+    mcpRevision.value = mcpRes.data.revision
+    providerPayload.value = providersRes.data
+    providerDraft.value = structuredClone(providersRes.data.saved.providers)
+    secretsList.value = secretsRes.data.secrets
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('workspace.settings.loadFailed')
     cores.value = []
-    businessSkillsDraft.value = null
+    agentDefaultsDraft.value = null
     promptDraft.value = null
     promptDefaults.value = null
     mcpDraft.value = null
     mcpConstraints.value = null
+    providerPayload.value = null
+    providerDraft.value = null
+    secretsList.value = []
   } finally {
     loading.value = false
   }
 }
 
-function updatePromptEntry<K extends keyof PromptSettings>(
+function updatePromptEntry<K extends keyof AgentPromptSettings>(
   key: K,
-  patch: Partial<PromptSettings[K]>
+  patch: Partial<AgentPromptSettings[K]>
 ): void {
   if (!promptDraft.value) return
   promptDraft.value = {
@@ -141,12 +191,13 @@ function updatePromptEntry<K extends keyof PromptSettings>(
   }
 }
 
-async function saveBusinessSkills(): Promise<void> {
-  if (!businessSkillsDraft.value) return
+async function saveAgentDefaults(): Promise<void> {
+  if (!agentDefaultsDraft.value) return
   saving.value = true
   try {
-    const res = await updateBusinessSkills(businessSkillsDraft.value)
-    businessSkillsDraft.value = structuredClone(res.data.settings)
+    const res = await updateAgentDefaults(agentDefaultsDraft.value, agentDefaultsRevision.value)
+    agentDefaultsDraft.value = structuredClone(res.data.settings)
+    agentDefaultsRevision.value = res.data.revision
     toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
     toastError(err, t('workspace.settings.saveFailed'))
@@ -159,8 +210,9 @@ async function savePrompts(): Promise<void> {
   if (!promptDraft.value) return
   saving.value = true
   try {
-    const res = await updatePromptSettings(promptDraft.value)
+    const res = await updatePromptSettings(promptDraft.value, promptRevision.value)
     promptDraft.value = structuredClone(res.data.settings)
+    promptRevision.value = res.data.revision
     toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
     toastError(err, t('workspace.settings.saveFailed'))
@@ -173,8 +225,9 @@ async function saveMcp(): Promise<void> {
   if (!mcpDraft.value) return
   saving.value = true
   try {
-    const res = await updateMcpSettings(mcpDraft.value)
+    const res = await updateMcpSettings(mcpDraft.value, mcpRevision.value)
     mcpDraft.value = structuredClone(res.data.settings)
+    mcpRevision.value = res.data.revision
     toast.success(t('workspace.settings.saveSuccess'))
   } catch (err) {
     toastError(err, t('workspace.settings.saveFailed'))
@@ -183,9 +236,66 @@ async function saveMcp(): Promise<void> {
   }
 }
 
+async function saveProviders(): Promise<void> {
+  if (!providerDraft.value || !providerPayload.value) return
+  saving.value = true
+  try {
+    const res = await updateProviderSettings(providerDraft.value, providerPayload.value.revision)
+    providerPayload.value = {
+      ...providerPayload.value,
+      saved: res.data.settings,
+      revision: res.data.revision,
+      restartRequired: res.data.restartRequired
+    }
+    providerDraft.value = structuredClone(res.data.settings.providers)
+    toast.success(t('workspace.settings.saveSuccess'))
+  } catch (err) {
+    toastError(err, t('workspace.settings.saveFailed'))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveSecret(): Promise<void> {
+  const name = secretNameDraft.value.trim()
+  const value = secretValueDraft.value
+  if (!name || !value) return
+  saving.value = true
+  secretsLoading.value = true
+  try {
+    await putSecret(name, value)
+    await loadSecrets()
+    secretNameDraft.value = ''
+    secretValueDraft.value = ''
+    toast.success(t('workspace.settings.secrets.saveSuccess'))
+  } catch (err) {
+    toastError(err, t('workspace.settings.secrets.saveFailed'))
+  } finally {
+    saving.value = false
+    secretsLoading.value = false
+  }
+}
+
+async function removeSecret(name: string): Promise<void> {
+  if (!window.confirm(t('workspace.settings.secrets.deleteConfirm', { name }))) return
+  secretsLoading.value = true
+  try {
+    await deleteSecret(name)
+    await loadSecrets()
+  } catch (err) {
+    toastError(err, t('workspace.settings.secrets.deleteFailed'))
+  } finally {
+    secretsLoading.value = false
+  }
+}
+
 async function handleSave(): Promise<void> {
-  if (section.value === 'skills') {
-    await saveBusinessSkills()
+  if (section.value === 'agents') {
+    await saveAgentDefaults()
+  } else if (section.value === 'providers') {
+    await saveProviders()
+  } else if (section.value === 'secrets') {
+    await saveSecret()
   } else if (section.value === 'mcp') {
     await saveMcp()
   } else if (section.value === 'prompts') {
@@ -197,6 +307,17 @@ onMounted(() => {
   void loadSettings()
   void loadSandboxHealth()
   void loadStorage()
+  settingsHubRelease = realtime.watchTopic(SETTINGS_SELF_TOPIC, (envelope) => {
+    if (envelope.type !== 'settings.changed') return
+    // HTTP reload — event payload is minimal (no secrets / full config).
+    // Do not clobber in-flight local edits blindly: reload refreshes revision baselines.
+    void loadSettings()
+  })
+})
+
+onUnmounted(() => {
+  settingsHubRelease?.()
+  settingsHubRelease = null
 })
 </script>
 
@@ -329,22 +450,13 @@ onMounted(() => {
             </CardContent>
           </Card>
 
-          <Card
-            v-if="
-              SHOW_BUSINESS_SKILLS_SETTINGS &&
-              !loading &&
-              section === 'skills' &&
-              businessSkillsDraft
-            "
-          >
+          <Card v-if="!loading && section === 'agents' && agentDefaultsDraft">
             <CardHeader class="pb-3">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle class="text-lg">
-                    {{ t('workspace.settings.skills.title') }}
-                  </CardTitle>
+                  <CardTitle class="text-lg">{{ t('workspace.settings.agents.title') }}</CardTitle>
                   <p class="mt-1 text-sm text-muted-foreground">
-                    {{ t('workspace.settings.skills.description') }}
+                    {{ t('workspace.settings.agents.description') }}
                   </p>
                 </div>
                 <Button size="sm" :disabled="saving" @click="handleSave">
@@ -353,11 +465,136 @@ onMounted(() => {
               </div>
             </CardHeader>
             <CardContent>
-              <BusinessSkillsEditor
-                :settings="businessSkillsDraft"
+              <AgentDefaultsCard
+                :draft="agentDefaultsDraft"
+                :cores="cores"
                 :disabled="saving"
-                @update="businessSkillsDraft = $event"
+                @update="agentDefaultsDraft = { ...agentDefaultsDraft!, ...$event }"
               />
+            </CardContent>
+          </Card>
+
+          <Card v-if="!loading && section === 'providers' && providerDraft && providerPayload">
+            <CardHeader class="pb-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle class="text-lg">{{
+                    t('workspace.settings.providers.title')
+                  }}</CardTitle>
+                  <p class="mt-1 text-sm text-muted-foreground">
+                    {{ t('workspace.settings.providers.description') }}
+                  </p>
+                </div>
+                <Button size="sm" :disabled="saving" @click="handleSave">
+                  {{ saving ? t('workspace.settings.saving') : t('workspace.settings.save') }}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent class="space-y-4">
+              <p
+                v-if="providerPayload.restartRequired"
+                class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100"
+              >
+                {{ t('workspace.settings.providers.restartRequired') }}
+              </p>
+              <textarea
+                class="min-h-48 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs"
+                :value="JSON.stringify(providerDraft, null, 2)"
+                :disabled="saving"
+                spellcheck="false"
+                @change="
+                  (() => {
+                    try {
+                      providerDraft = JSON.parse(
+                        ($event.target as HTMLTextAreaElement).value
+                      ) as typeof providerDraft
+                    } catch {
+                      /* keep previous draft on invalid JSON */
+                    }
+                  })()
+                "
+              />
+            </CardContent>
+          </Card>
+
+          <Card v-if="!loading && section === 'secrets'">
+            <CardHeader class="pb-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle class="text-lg">{{ t('workspace.settings.secrets.title') }}</CardTitle>
+                  <p class="mt-1 text-sm text-muted-foreground">
+                    {{ t('workspace.settings.secrets.description') }}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  :disabled="saving || !secretNameDraft.trim() || !secretValueDraft"
+                  @click="handleSave"
+                >
+                  {{ saving ? t('workspace.settings.saving') : t('workspace.settings.save') }}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent class="space-y-5">
+              <div
+                v-if="secretsLoading && secretsList.length === 0"
+                class="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Spinner class="size-4" />
+                {{ t('workspace.settings.loading') }}
+              </div>
+
+              <div v-if="secretsList.length === 0 && !secretsLoading" class="text-sm text-muted-foreground">
+                {{ t('workspace.settings.secrets.empty') }}
+              </div>
+
+              <ul v-if="secretsList.length > 0" class="divide-y rounded-md border">
+                <li
+                  v-for="secret in secretsList"
+                  :key="secret.name"
+                  class="flex items-center justify-between gap-3 px-3 py-2.5"
+                >
+                  <div class="min-w-0">
+                    <p class="truncate font-mono text-sm">{{ secret.name }}</p>
+                    <p v-if="secret.configured" class="text-xs text-muted-foreground">
+                      {{ t('workspace.settings.secrets.configured') }}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    :disabled="secretsLoading"
+                    @click="removeSecret(secret.name)"
+                  >
+                    {{ t('workspace.settings.secrets.delete') }}
+                  </Button>
+                </li>
+              </ul>
+
+              <div class="space-y-3 rounded-md border p-4">
+                <p class="text-sm font-medium">{{ t('workspace.settings.secrets.add') }}</p>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="space-y-2">
+                    <Label for="secret-name">{{ t('workspace.settings.secrets.name') }}</Label>
+                    <Input
+                      id="secret-name"
+                      v-model="secretNameDraft"
+                      :disabled="saving"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="secret-value">{{ t('workspace.settings.secrets.value') }}</Label>
+                    <Input
+                      id="secret-value"
+                      v-model="secretValueDraft"
+                      type="password"
+                      :disabled="saving"
+                      autocomplete="new-password"
+                    />
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

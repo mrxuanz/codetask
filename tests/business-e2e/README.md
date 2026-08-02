@@ -11,11 +11,11 @@ Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + S
 
 | Phase | `--part`       | Cases                                                                                    | Evidence (summary)                                                                                               |
 | ----- | -------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 1     | `conversation` | `chat-basic`, `chat-create-html`, `chat-image-attachment`, `draft-chat-image-attachment` | Turn + (html) file oracle; image attachment read in chat and create-task draft (stops at Draft)                  |
-| 2     | `draft-job`    | `notes-search`, `job-chat-readonly`, `draft-reference-path-job`                          | Plan/job + file oracle; image + local-corpus references through Draft→Planner→Job; readonly thicken in progress  |
+| 1     | `conversation` | `chat-basic`, `chat-create-html`, `chat-image-attachment`                                | Turn + (html) file oracle; image attachment read in ordinary chat                                                |
+| 2     | `draft-job`    | `design-draft` (aliases: `notes-search`, …)                                              | Design `/api/drafts` smoke: create → abilities → execution profile → confirm                                     |
 | 3     | `settings-mcp` | `settings-mcp-probe`                                                                     | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
 
-Image cases upload the fixture as neutral `attachment.png`, never leak `Dream`/`1000`/`Cats` (or design sentinels) in prompts/titles, and match the contiguous phrase `Dream of 1000 Cats` (NFKC, case/whitespace insensitive). Phase-2 `draft-reference-path-job` also requires reading a local corpus directory **outside** the project workspace. Evidence: `attachment-result.json` under the case dir; job proof via `reference-proof.json`.
+Image chat cases upload the fixture as neutral `attachment.png`, never leak `Dream`/`1000`/`Cats` in prompts/titles, and match the contiguous phrase `Dream of 1000 Cats` (NFKC, case/whitespace insensitive). create_task-era draft→job e2e case IDs were removed in architecture 03; deeper Design/Execution coverage lives in unit tests.
 
 **Two MCP surfaces:** Test MCP = outer driver. Settings Probe (`business-e2e-probe`) = user MCP registered via `PUT /api/settings/mcp`. Do not confuse them.
 
@@ -45,7 +45,7 @@ npm run business:e2e -- --providers all --suite both --lang en
 
 `--providers` / `--profile` selects what to run (`all` = every supported provider). No `BUSINESS_ALLOW_*` env.
 
-Planner / slice / milestone verifier cores for draft→job cases come from the **per-draft** `executionConfig` (Test MCP `codetask_update_draft_execution_config`), not from global `/api/settings/control-plane`.
+Planner / slice / milestone verifier cores for draft→job cases come from the **per-draft** `executionConfig` (Test MCP `codetask_update_draft_execution_config`), not from global `/api/settings/agent-defaults`.
 
 ## Phase 3 registration (short)
 

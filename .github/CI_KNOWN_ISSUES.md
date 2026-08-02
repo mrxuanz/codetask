@@ -262,3 +262,19 @@ grows above that baseline.
   `plan.mcp_unavailable` or `conversation.mcp_unavailable` before the role is
   treated as healthy. The live Codex probe consumes these production settings
   directly so a regression cannot be masked by diagnostic-only overrides.
+
+## BUSINESS-013: business-e2e draft-job G4–G8 Fake/OpenCode rewrite onto Design
+
+- Status: resolved (2026-08-02)
+- Target phase: Architecture 03 follow-up
+- Exit criteria: create_task-era G4–G8 / DRAFT-* / JOB-CHAT-RO cases removed from
+  catalog; draft-job defaults to Design smoke; no ARCH03 skip stubs remain.
+- Resolution: permanently deleted retired create_task catalog entries and Fake/
+  OpenCode stubs. Friendly CLI aliases (`notes-search`, `draft-multiturn`, …)
+  resolve to `DESIGN-DRAFT-001`. Draft-job depth beyond Design smoke is covered by
+  `tests/design` + `tests/execution` unit gates, not legacy e2e case IDs.
+- Locations: `tests/business-e2e/cases/catalog.ts`,
+  `tests/business-e2e/cases/selection.ts`, `tests/business-e2e/drivers/*`
+- CI handling: `--part draft-job` / `--case design-draft`; prefer design/execution
+  unit tests for merge gates.
+- Decision needed: none.

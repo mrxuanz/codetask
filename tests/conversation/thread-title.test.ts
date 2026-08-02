@@ -4,14 +4,10 @@ import {
   buildThreadTitleSeed,
   canReplaceThreadTitle,
   canSeedThreadTitle,
+  DEFAULT_CONVERSATION_TITLE,
   isFirstUserMessage,
   sanitizeThreadTitle
 } from '../../src/server/conversation/thread-title-logic.ts'
-import {
-  DEFAULT_THREAD_TITLE,
-  THREAD_KIND_CHAT,
-  TITLE_SOURCE_MANUAL
-} from '../../src/server/threads/types.ts'
 
 test('isFirstUserMessage requires exactly one user text message', () => {
   assert.equal(
@@ -79,24 +75,24 @@ test('isFirstUserMessage requires exactly one user text message', () => {
 test('canSeedThreadTitle skips manual rename', () => {
   assert.equal(
     canSeedThreadTitle({
-      title: DEFAULT_THREAD_TITLE,
+      title: DEFAULT_CONVERSATION_TITLE,
       titleSource: 'auto',
-      threadKind: THREAD_KIND_CHAT
+      threadKind: 'chat'
     }),
     true
   )
   assert.equal(
     canSeedThreadTitle({
-      title: DEFAULT_THREAD_TITLE,
-      titleSource: TITLE_SOURCE_MANUAL,
-      threadKind: THREAD_KIND_CHAT
+      title: DEFAULT_CONVERSATION_TITLE,
+      titleSource: 'manual',
+      threadKind: 'chat'
     }),
     false
   )
 })
 
 test('canReplaceThreadTitle allows default title or matching seed', () => {
-  assert.equal(canReplaceThreadTitle(DEFAULT_THREAD_TITLE, '静态博客首页'), true)
+  assert.equal(canReplaceThreadTitle(DEFAULT_CONVERSATION_TITLE, '静态博客首页'), true)
   assert.equal(canReplaceThreadTitle('静态博客首页', '静态博客首页'), true)
   assert.equal(canReplaceThreadTitle('Custom title', '静态博客首页'), false)
 })

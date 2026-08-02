@@ -1,7 +1,6 @@
 import { serve, type ServerType } from '@hono/node-server'
 import type { ExecutionContext, Hono } from 'hono'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
-import { readSchemaGeneration } from '../server/application/cutover-state'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
 import type { DataDirResolution } from './storage-selection'
 import { createSetupShell } from './setup-shell'
@@ -100,7 +99,7 @@ async function createReadyApp(
   storage: DataDirResolution,
   platform: AppServerPlatform,
   http: { rendererDevUrl?: string; staticDir?: string }
-): Promise<{ app: Hono; dataDir: string; usesLegacyComposition: boolean }> {
+): Promise<{ app: Hono; dataDir: string }> {
   const dataDir = storage.dataDir
 
   const ctx = bootstrapRuntime({
@@ -111,9 +110,6 @@ async function createReadyApp(
       source: storage.source
     }
   })
-
-  const schemaRead = readSchemaGeneration(ctx.db)
-  const usesLegacyComposition = schemaRead !== 'v3_authoritative'
 
   await ensureRuntimeReady(ctx)
 
@@ -129,21 +125,7 @@ async function createReadyApp(
     rendererDevUrl: http.rendererDevUrl,
     staticDir: http.staticDir
   })
-  return { app, dataDir, usesLegacyComposition }
-}
-
-function scheduleLegacyQueueResume(usesLegacyComposition: boolean): void {
-  if (!usesLegacyComposition) return
-
-  // Resume persisted work only after the HTTP listener is live. setImmediate also lets startup
-  // finish reporting readiness before recovered jobs can consume executor capacity.
-  setImmediate(() => {
-    void import('../server/legacy-control-plane/job-queue')
-      .then((module) => module.resumeJobQueuesAfterServerReady())
-      .catch((error) => {
-        console.error('[jobs] failed to resume queues after HTTP startup', error)
-      })
-  })
+  return { app, dataDir }
 }
 
 export function getShutdownPromise(): Promise<void> | null {
@@ -197,7 +179,7 @@ export async function startAppServer(
           if (resolved.phase !== 'ready') {
             throw new Error(resolved.issue ?? 'Storage is not ready after initialization')
           }
-          const { app, dataDir, usesLegacyComposition } = await createReadyApp(
+          const { app, dataDir } = await createReadyApp(
             cli,
             resolved,
             platform,
@@ -209,7 +191,6 @@ export async function startAppServer(
             `[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`
           )
           console.log(`[storage] data root: ${dataDir} (source=${resolved.source})`)
-          scheduleLegacyQueueResume(usesLegacyComposition)
         })()
         try {
           await promoteInflight
@@ -261,7 +242,7 @@ export async function startAppServer(
     return info
   }
 
-  const { app, dataDir, usesLegacyComposition } = await createReadyApp(cli, storage, platform, http)
+  const { app, dataDir } = await createReadyApp(cli, storage, platform, http)
   activeApp = app
 
   const { port: startPort, changed: preflightChanged } = await resolveAvailablePort(
@@ -311,8 +292,6 @@ export async function startAppServer(
   if (cli.mode === 'server' && cli.host === '0.0.0.0') {
     console.log(`[server] External access: http://<your-ip>:${boundPort}`)
   }
-
-  scheduleLegacyQueueResume(usesLegacyComposition)
 
   return info
 }

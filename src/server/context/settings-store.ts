@@ -1,23 +1,7 @@
 import Database from 'better-sqlite3'
 import { dataPaths } from '../data-paths'
 import type { AppDatabase } from '../db'
-
-const NAMESPACE_TO_PROPERTY = {
-  control_plane: 'controlPlane',
-  prompts: 'prompts',
-  retention: 'retention',
-  business_skills: 'businessSkills',
-  mcp_json: 'userMcp',
-  provider_runtime: 'providerRuntime',
-  ui_server_preferences: 'uiServerPreferences'
-} as const
-
-type SettingsNamespace = keyof typeof NAMESPACE_TO_PROPERTY
-type SettingsProperty = (typeof NAMESPACE_TO_PROPERTY)[SettingsNamespace]
-
-const PROPERTY_TO_NAMESPACE = Object.fromEntries(
-  Object.entries(NAMESPACE_TO_PROPERTY).map(([namespace, property]) => [property, namespace])
-) as Record<SettingsProperty, SettingsNamespace>
+import { SETTING_NAMESPACES, type SettingNamespace } from '@codetask/contracts'
 
 interface SettingsRow {
   namespace: string
@@ -53,6 +37,11 @@ export class SettingsRevisionConflictError extends Error {
   }
 }
 
+/**
+ * Host-side namespace reader used at bootstrap for provider_runtime.
+ * Business Settings CRUD goes through packages/server-core Settings module.
+ * Also supports host-only `runtime_maintenance` for sqlite maintenance cursor.
+ */
 export class SettingsStore {
   private readonly sqlite: Database.Database
   private readonly ownsConnection: boolean
@@ -71,26 +60,7 @@ export class SettingsStore {
     if (this.ownsConnection && this.sqlite.open) this.sqlite.close()
   }
 
-  read(): Record<string, unknown> {
-    const rows = this.sqlite
-      .prepare(
-        `SELECT namespace, value_json, schema_version, revision, updated_at
-         FROM app_settings
-         WHERE namespace IN (${Object.keys(NAMESPACE_TO_PROPERTY)
-           .map(() => '?')
-           .join(', ')})`
-      )
-      .all(...Object.keys(NAMESPACE_TO_PROPERTY)) as SettingsRow[]
-    const result: Record<string, unknown> = {}
-    for (const row of rows) {
-      const property = NAMESPACE_TO_PROPERTY[row.namespace as SettingsNamespace]
-      if (!property) continue
-      result[property] = parseObjectJson(row.value_json, `settings namespace ${row.namespace}`)
-    }
-    return result
-  }
-
-  readNamespace(namespace: SettingsNamespace): {
+  readNamespace(namespace: SettingNamespace | 'runtime_maintenance'): {
     value: Record<string, unknown> | null
     revision: number
     schemaVersion: number
@@ -111,10 +81,16 @@ export class SettingsStore {
   }
 
   writeNamespace(
-    namespace: SettingsNamespace,
+    namespace: SettingNamespace | 'runtime_maintenance',
     value: Record<string, unknown>,
     options: { expectedRevision?: number; schemaVersion?: number } = {}
   ): number {
+    if (
+      namespace !== 'runtime_maintenance' &&
+      !(SETTING_NAMESPACES as readonly string[]).includes(namespace)
+    ) {
+      throw new Error(`Unsupported settings namespace: ${namespace}`)
+    }
     const write = this.sqlite.transaction(() => {
       const current = this.readNamespace(namespace)
       if (options.expectedRevision !== undefined && current.revision !== options.expectedRevision) {
@@ -145,38 +121,5 @@ export class SettingsStore {
       return revision
     })
     return write()
-  }
-
-  write(value: Record<string, unknown>): void {
-    const writeAll = this.sqlite.transaction(() => {
-      for (const [property, namespace] of Object.entries(PROPERTY_TO_NAMESPACE)) {
-        const next = value[property]
-        if (next && typeof next === 'object' && !Array.isArray(next)) {
-          this.writeNamespace(namespace, next as Record<string, unknown>)
-        } else {
-          this.sqlite.prepare(`DELETE FROM app_settings WHERE namespace = ?`).run(namespace)
-        }
-      }
-    })
-    writeAll()
-  }
-
-  patch(mutator: (file: Record<string, unknown>) => void): void {
-    const patchAll = this.sqlite.transaction(() => {
-      const file = this.read()
-      const before = structuredClone(file)
-      mutator(file)
-      for (const [property, namespace] of Object.entries(PROPERTY_TO_NAMESPACE)) {
-        const previous = before[property]
-        const next = file[property]
-        if (JSON.stringify(previous) === JSON.stringify(next)) continue
-        if (next && typeof next === 'object' && !Array.isArray(next)) {
-          this.writeNamespace(namespace, next as Record<string, unknown>)
-        } else {
-          this.sqlite.prepare(`DELETE FROM app_settings WHERE namespace = ?`).run(namespace)
-        }
-      }
-    })
-    patchAll()
   }
 }

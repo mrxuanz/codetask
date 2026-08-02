@@ -6,12 +6,25 @@ export interface BootstrapData {
   username?: string
   setupTokenRequired?: boolean
   storagePhase?: 'selection_required' | 'ready'
-  controlPlaneGeneration?: 'preparing' | 'copied' | 'v3_authoritative' | null
+  actor?: {
+    userId: string
+    username: string
+    sessionExpiresAt: number
+  }
 }
 
 export interface AuthData {
-  username: string
-  expires_at: number
+  actor?: {
+    userId: string
+    username: string
+    sessionExpiresAt: number
+  }
+  /** Bearer transport only */
+  token?: string
+  /** @deprecated prefer actor */
+  username?: string
+  /** @deprecated prefer actor.sessionExpiresAt */
+  expires_at?: number
 }
 
 export interface CaptchaChallenge {

@@ -1,15 +1,7 @@
-import type { JobExecutionProfile, SavedJobPlan } from './plan'
 import type { JobReferenceManifestDto } from '../job-references'
 import type { SliceVerificationRecordDto, TaskBlockerKind, TaskEvidenceDto } from './evidence'
 import type { TurnErrorDto } from './turn-errors'
-import type {
-  ExecutionProgressDto,
-  JobFailureDto,
-  JobLifecycle,
-  JobRecoveryDto
-} from '../job-recovery-state'
 import type { JobProgressCode, JobProgressParams } from '../progress-codes'
-import type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
 
 export type { SliceVerificationRecordDto, TaskEvidenceDto } from './evidence'
 export type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
@@ -86,18 +78,7 @@ export interface ThreadJobAbilityDto {
   recommendedCoreCode?: string | undefined
 }
 
-export type ThreadJobStatus =
-  | 'pending'
-  | 'planning'
-  | 'plan_editing'
-  | 'plan_confirmed'
-  | 'plan_ready'
-  | 'running'
-  | 'pausing'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
+export type { PlanningSessionStatus } from './planning-session-view'
 
 export interface ExecutionQueueDto {
   /** 1-based position in the user's pending FIFO queue; null when not queued. */
@@ -106,63 +87,7 @@ export interface ExecutionQueueDto {
   ahead: number
 }
 
-export interface ThreadJobDto {
-  id: string
-  threadId: string
-  draftMessageId: string
-  title: string
-  summary: string
-  status: ThreadJobStatus
-  planProgress: PlanProgressDto
-  taskProgress: TaskProgressDto
-  abilities: ThreadJobAbilityDto[]
-  plan?: SavedJobPlan | null | undefined
-  executionProfile?: JobExecutionProfile | undefined
-  referenceManifest?: JobReferenceManifestDto | null | undefined
-
-  referenceManifestStale?: boolean | undefined
-  workspacePath?: string | undefined
-  lastError?: TurnErrorDto | null | undefined
-
-  lifecycle?: JobLifecycle | undefined
-
-  execution?: ExecutionProgressDto | undefined
-
-  failure?: JobFailureDto | undefined
-
-  recovery?: JobRecoveryDto | undefined
-
-  /**
-   * Server-authoritative actions. Legacy recovery may emit JobAvailableAction;
-   * control-plane jobs attach V3 JobAction values from JobQueryService.
-   */
-  availableActions?: readonly string[] | undefined
-
-  /** Present when a control_jobs row exists (V3 aggregate revision). */
-  stateRevision?: number | undefined
-
-  /** Present when status is `pending` and the job is in the execution FIFO queue. */
-  queue?: ExecutionQueueDto | undefined
-
-  planRevision?: number | null | undefined
-  draftConfirmedAt?: number | null | undefined
-  planConfirmedAt?: number | null | undefined
-
-  designSessionId?: string | null | undefined
-  snapshotDraftRevision?: number | null | undefined
-  snapshotPlanRevision?: number | null | undefined
-  snapshotManifestRevision?: number | null | undefined
-
-  /** Structured pause source; null when not paused / unclassified. */
-  suspensionKind?: SuspensionKind | undefined
-  /** Continue requested while still pausing — settle then queue a fresh run. */
-  continueAfterPause?: boolean | undefined
-  /** Why recovery is waiting (e.g. uncertain_provider_outcome). */
-  recoveryReason?: JobRecoveryReason | undefined
-
-  createdAt: number
-  updatedAt: number
-}
+export type { PlanningSessionViewDto } from './planning-session-view'
 
 export interface ThreadDraftSummaryDto {
   messageId: string

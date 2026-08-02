@@ -3,15 +3,8 @@ import type { AppContext } from '../context'
 import { streamSSE } from 'hono/streaming'
 import { handleConversationMcpJsonRpc, type McpDispatchResult } from '../conversation/mcp/handler'
 import { authorizeConversationMcpRequest } from '../conversation/mcp/session'
-import { handlePlannerMcpJsonRpc } from '../planner/mcp/handler'
-import { authorizePlannerMcpRequest } from '../planner/mcp/session'
-import { handleTaskMcpJsonRpc } from '../legacy-control-plane/mcp/task-handler'
-import { authorizeTaskMcpRequest } from '../legacy-control-plane/mcp/task-session'
-import { handleSliceVerifierMcpJsonRpc } from '../legacy-control-plane/mcp/slice-handler'
-import { authorizeSliceVerifierMcpRequest } from '../legacy-control-plane/mcp/slice-session'
-import { handleMilestoneVerifierMcpJsonRpc } from '../legacy-control-plane/mcp/milestone-handler'
-import { authorizeMilestoneVerifierMcpRequest } from '../legacy-control-plane/mcp/milestone-session'
 import { requireLocalhost } from '../middleware/local-only'
+import { AppError } from '../error'
 import {
   closeAllStreamableMcpTransportsForUrlSession,
   closeStreamableMcpTransport,
@@ -28,6 +21,21 @@ function mcpForbidden(message: string): Response {
     },
     { status: 403 }
   )
+}
+
+function executionMcpGone(): McpDispatchResult {
+  return {
+    kind: 'json',
+    body: {
+      jsonrpc: '2.0',
+      id: null,
+      error: {
+        code: -32000,
+        message:
+          'Execution MCP moved to AgentRuntime binding; HTTP task/slice/milestone MCP endpoints are retired.'
+      }
+    }
+  }
 }
 
 async function readJsonBody(c: {
@@ -160,6 +168,28 @@ function registerStreamableMcpRoute(
   })
 }
 
+function registerExecutionMcpGoneRoute(mcp: Hono, path: string): void {
+  // HTTP task/slice/milestone MCP is retired; AgentRuntime binds MCP in-process.
+  // FakeAgentRuntime completes work without HTTP MCP during integration tests.
+  mcp.all(path, () => {
+    throw AppError.gone(
+      'Execution MCP is bound via AgentRuntime; HTTP task/slice/milestone MCP endpoints are retired.',
+      'execution.mcp_moved'
+    )
+  })
+}
+
+function registerPlannerMcpGoneRoute(mcp: Hono, path: string): void {
+  // Legacy thread_job Planner HTTP MCP never registers sessions after Design cutover.
+  // Planning commits via PlanningApplicationPort / SnapshotPlannerRunner.
+  mcp.all(path, () => {
+    throw AppError.gone(
+      'Planner HTTP MCP is retired; Design planning commits through PlanningApplicationPort.',
+      'planner.mcp_moved'
+    )
+  })
+}
+
 export function createMcpRoutes(_ctx: AppContext): Hono {
   const mcp = new Hono()
 
@@ -172,68 +202,23 @@ export function createMcpRoutes(_ctx: AppContext): Hono {
       authorizeConversationMcpRequest({
         sessionId,
         role: query.role,
-        wizardStage: query.wizardStage,
         threadId: query.threadId,
         capability: query.cap
       }),
     handleConversationMcpJsonRpc
   )
 
-  registerStreamableMcpRoute(
-    mcp,
-    '/task/:sessionId',
-    ({ sessionId, query }) =>
-      authorizeTaskMcpRequest({
-        sessionId,
-        role: query.role,
-        jobId: query.jobId,
-        taskId: query.taskId,
-        idempotencyKey: query.idem,
-        capability: query.cap
-      }),
-    handleTaskMcpJsonRpc
-  )
+  registerExecutionMcpGoneRoute(mcp, '/task/:sessionId')
+  registerExecutionMcpGoneRoute(mcp, '/task/:sessionId/*')
+  registerExecutionMcpGoneRoute(mcp, '/slice-verifier/:sessionId')
+  registerExecutionMcpGoneRoute(mcp, '/slice-verifier/:sessionId/*')
+  registerExecutionMcpGoneRoute(mcp, '/milestone-verifier/:sessionId')
+  registerExecutionMcpGoneRoute(mcp, '/milestone-verifier/:sessionId/*')
 
-  registerStreamableMcpRoute(
-    mcp,
-    '/slice-verifier/:sessionId',
-    ({ sessionId, query }) =>
-      authorizeSliceVerifierMcpRequest({
-        sessionId,
-        role: query.role,
-        jobId: query.jobId,
-        sliceId: query.sliceId,
-        capability: query.cap
-      }),
-    handleSliceVerifierMcpJsonRpc
-  )
-
-  registerStreamableMcpRoute(
-    mcp,
-    '/milestone-verifier/:sessionId',
-    ({ sessionId, query }) =>
-      authorizeMilestoneVerifierMcpRequest({
-        sessionId,
-        role: query.role,
-        jobId: query.jobId,
-        milestoneId: query.milestoneId,
-        capability: query.cap
-      }),
-    handleMilestoneVerifierMcpJsonRpc
-  )
-
-  registerStreamableMcpRoute(
-    mcp,
-    '/planner/:sessionId',
-    ({ sessionId, query }) =>
-      authorizePlannerMcpRequest({
-        sessionId,
-        role: query.role,
-        jobId: query.jobId,
-        capability: query.cap
-      }),
-    handlePlannerMcpJsonRpc
-  )
+  registerPlannerMcpGoneRoute(mcp, '/planner/:sessionId')
+  registerPlannerMcpGoneRoute(mcp, '/planner/:sessionId/*')
 
   return mcp
 }
+
+export { executionMcpGone }

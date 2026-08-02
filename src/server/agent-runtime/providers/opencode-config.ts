@@ -1,13 +1,11 @@
 import type { Config, PermissionRuleset, QuestionAnswer } from '@opencode-ai/sdk/v2'
 import { resolve } from 'node:path'
 import { capabilityProfileIsReadOnly, type AgentCapabilityProfile } from '../capabilities'
-import { allCreateTaskMcpToolNames } from '../../wizard/tools'
-import { PLANNER_ROLE_MCP_TOOLS } from '../roles'
+import { allConversationMcpToolNames } from '../../conversation/mcp/tools'
 
 const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
   'codeteam-manager',
-  ...allCreateTaskMcpToolNames(),
-  ...PLANNER_ROLE_MCP_TOOLS
+  ...allConversationMcpToolNames()
 ])
 
 /**

@@ -1,21 +1,21 @@
 ﻿import { randomUUID } from 'crypto'
 import { and, asc, eq } from 'drizzle-orm'
-import type { DraftReference } from '@shared/reference-corpus'
+import type { DraftReference } from '../../shared/reference-corpus.ts'
 import {
   buildJobReferenceManifest,
   collectFlatPlanReferenceIds,
   validateTaskReferenceIds,
   type JobReferenceManifest
-} from '@shared/job-references'
+} from '../../shared/job-references.ts'
 import {
   collectMissingReferenceDescriptions,
   formatReferenceDescriptionError,
   referenceDescriptionMissing,
   referenceRequiresDescription
-} from '@shared/draft-references'
-import { clearPlanConfirmedFlags } from '@shared/plan-mutations'
+} from '../../shared/draft-references.ts'
+import { clearPlanConfirmedFlags } from '../../shared/plan-mutations.ts'
 import { getAppContext } from '../bootstrap'
-import type { TaskLaunchDraftPayload, TaskLaunchDraftReference } from '../conversation/draft/types'
+import type { TaskLaunchDraftPayload, TaskLaunchDraftReference } from '../../shared/contracts/task-launch-draft.ts'
 import {
   readThreadAttachment,
   resolveAttachmentRelativePath,
@@ -29,10 +29,7 @@ import {
   type DraftReferenceRow,
   type ThreadJob
 } from '../db/schema'
-import { updateDesignSessionRow } from '../design-session/service'
 import { AppError } from '../error'
-import { serializeJobReferenceManifest } from '../legacy-control-plane/reference-manifest'
-import { emitJobEvent } from '../legacy-control-plane/service'
 import {
   assertLocalCorpusFileAllowed,
   inferReferenceKind,
@@ -41,6 +38,10 @@ import {
   resolveLocalCorpusPath
 } from './paths'
 import { findPlanReferenceIdsMissingFromCorpus } from './corpus-sync'
+
+function serializeJobReferenceManifest(manifest: JobReferenceManifest): string {
+  return JSON.stringify(manifest)
+}
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -600,11 +601,6 @@ export async function invalidatePlanOnCorpusChange(designSessionId: string): Pro
     .update(threadJobs)
     .set({ ...phasePatch, updatedAt: nowSec() })
     .where(eq(threadJobs.id, designSessionId))
-
-  const job = await updateDesignSessionRow(designSessionId, { plan: cleared, ...phasePatch })
-  if (job) {
-    emitJobEvent(designSessionId, { event: 'job_snapshot', data: { job } })
-  }
 }
 
 export async function freezeReferenceCorpus(input: {

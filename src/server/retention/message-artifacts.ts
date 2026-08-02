@@ -20,11 +20,6 @@ function hashContent(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
-/** @deprecated Prefer messageArtifactRelPath from data-paths; kept as re-export for callers. */
-export function messageArtifactFileRelPath(messageId: string, artifactId: string): string {
-  return messageArtifactRelPath(messageId, artifactId)
-}
-
 function messageArtifactFileAbsPath(
   dataDir: string,
   messageId: string,

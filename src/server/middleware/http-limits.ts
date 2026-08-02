@@ -15,11 +15,7 @@ export const REQUEST_TIMEOUT_MS = DEFAULT_APP_CONFIG.http.requestTimeoutMs
 export const MAX_SSE_CLIENTS_PER_USER = DEFAULT_APP_CONFIG.http.maxSseClientsPerUser
 export const MAX_CONCURRENT_TURNS_PER_USER = DEFAULT_APP_CONFIG.http.maxConcurrentTurnsPerUser
 
-const SSE_STREAM_PATHS = new Set([
-  '/events/stream',
-  '/events/jobs/stream',
-  '/realtime/stream'
-])
+const SSE_STREAM_PATHS = new Set(['/realtime/stream'])
 
 function requestTimedOut(): Response {
   return new Response(

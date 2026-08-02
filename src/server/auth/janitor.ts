@@ -1,5 +1,4 @@
-import { getDb } from '../db'
-import { SqliteAuthStore } from './store'
+import { getAppContext } from '../bootstrap'
 
 const INTERVAL_MS = 60_000
 let timer: ReturnType<typeof setInterval> | null = null
@@ -24,5 +23,5 @@ export function stopAuthJanitor(): void {
 }
 
 export async function runAuthJanitorPass(): Promise<void> {
-  new SqliteAuthStore(getDb()).cleanup(Date.now())
+  getAppContext().security.auth.cleanup()
 }

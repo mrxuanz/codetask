@@ -1,4 +1,4 @@
-import { DESIGN_SESSION_WORKSPACE_STATUSES } from './design-session'
+import { DESIGN_SESSION_WORKSPACE_STATUSES } from './planning-status'
 
 export const LAUNCHED_JOB_STATUSES = [
   'pending',

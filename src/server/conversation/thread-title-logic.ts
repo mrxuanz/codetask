@@ -1,5 +1,9 @@
 import type { ConversationMessageDto } from './types'
-import { DEFAULT_THREAD_TITLE, THREAD_KIND_CHAT, TITLE_SOURCE_MANUAL } from '../threads/types'
+
+/** Matches ConversationApplication DEFAULT_TITLE. */
+export const DEFAULT_CONVERSATION_TITLE = 'New thread'
+const TITLE_SOURCE_MANUAL = 'manual'
+const THREAD_KIND_CHAT = 'chat'
 
 export const MAX_THREAD_TITLE_CHARS = 48
 
@@ -12,7 +16,7 @@ export function isFirstUserMessage(messages: ConversationMessageDto[]): boolean 
 
 export function canReplaceThreadTitle(currentTitle: string, titleSeed?: string | null): boolean {
   const trimmedCurrent = currentTitle.trim()
-  if (trimmedCurrent === DEFAULT_THREAD_TITLE) {
+  if (trimmedCurrent === DEFAULT_CONVERSATION_TITLE) {
     return true
   }
   const trimmedSeed = titleSeed?.trim()
@@ -46,7 +50,7 @@ export function sanitizeThreadTitle(raw: string): string | null {
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (!title || title === DEFAULT_THREAD_TITLE) return null
+  if (!title || title === DEFAULT_CONVERSATION_TITLE) return null
   if (title.length > MAX_THREAD_TITLE_CHARS) {
     title = title.slice(0, MAX_THREAD_TITLE_CHARS).trim()
   }

@@ -131,7 +131,7 @@ async function onSubmit(payload: {
       return
     }
 
-    // Recovered installs may already have an account — skip /api/setup.
+    // Recovered installs may already have an account — skip /api/auth/setup.
     if (bootstrapData.value?.initialized) {
       await router.replace(bootstrapData.value.authenticated ? '/home' : '/login')
       return

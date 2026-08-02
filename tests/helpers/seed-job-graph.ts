@@ -22,7 +22,7 @@ export async function seedJobGraph(
 
   await db.insert(projects).values({
     id: projectId,
-    username: input.username,
+    actorId: input.username,
     title: 'P',
     workspaceRoot: input.workspacePath ?? '/tmp/ws',
     createdAt: now,

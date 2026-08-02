@@ -62,5 +62,5 @@ export interface StorageStatsData {
 }
 
 export function fetchStorageStats(): Promise<ApiResponse<StorageStatsData>> {
-  return api<StorageStatsData>('/api/settings/storage')
+  return api<StorageStatsData>('/api/system/storage')
 }

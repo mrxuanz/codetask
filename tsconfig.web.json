@@ -5,7 +5,8 @@
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.vue",
     "src/preload/*.d.ts",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "packages/contracts/src/**/*"
   ],
   "compilerOptions": {
     "composite": true,
@@ -21,7 +22,9 @@
       "@shared/turn-errors": ["src/shared/turn-errors.ts"],
       "@shared/*": [
         "src/shared/*"
-      ]
+      ],
+      "@codetask/contracts": ["packages/contracts/src/index.ts"],
+      "@codetask/contracts/*": ["packages/contracts/src/*"]
     }
   }
 }

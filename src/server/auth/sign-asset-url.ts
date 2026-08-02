@@ -1,6 +1,7 @@
 import { generateAssetToken } from './asset-token'
 
-const ASSET_URL_PATTERN = /\/api\/threads\/([^/?#]+)\/attachments\/([^/?#]+)/
+const ASSET_URL_PATTERN =
+  /\/api\/(?:conversations|threads)\/([^/?#]+)\/attachments\/([^/?#]+)/
 const AUTH_QUERY_KEYS = ['asset_token', 'access_token'] as const
 const AUTH_QUERY_PATTERN = /[?&](?:asset_token|access_token)(?:=|&|$)/
 

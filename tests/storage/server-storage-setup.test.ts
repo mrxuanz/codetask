@@ -41,7 +41,7 @@ test('server mode storage setup prints setup token and requires it on bootstrap'
       platform
     )
 
-    const response = await fetch(`${server.url}/api/bootstrap`)
+    const response = await fetch(`${server.url}/api/auth/bootstrap`)
     assert.equal(response.ok, true)
     const body = (await response.json()) as {
       data?: { setupTokenRequired?: boolean; storagePhase?: string }

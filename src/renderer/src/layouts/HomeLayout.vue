@@ -9,12 +9,12 @@ import Button from '@renderer/components/ui/Button.vue'
 import { useHomeChat, HomeChatKey } from '@renderer/composables/useHomeChat'
 import { provideHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 
-import { provideJobEventHub } from '@renderer/composables/useJobEventHub'
+import { provideRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 
-const hub = provideJobEventHub()
-const workspace = provideHomeWorkspace(hub)
+const realtime = provideRealtimeGateway()
+const workspace = provideHomeWorkspace(realtime)
 const chat = useHomeChat(
-  hub,
+  realtime,
   (thread) => workspace.syncThread(thread),
   (threadId, patch) => workspace.patchThreadRuntime(threadId, patch)
 )

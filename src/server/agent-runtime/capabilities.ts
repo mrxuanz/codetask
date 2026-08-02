@@ -11,7 +11,6 @@ export type AgentCapabilityProfile = ProviderCapabilityProfile
 
 export const READ_ONLY_CAPABILITY_PROFILES: readonly AgentCapabilityProfile[] = [
   'chat-read',
-  'create-task-read',
   'planner-read'
 ]
 
@@ -25,7 +24,6 @@ export function capabilityProfileRequiresOuterSandbox(profile: AgentCapabilityPr
 
 export function resolveAgentCapabilityProfile(input: {
   role: ConversationRole
-  conversationKind?: 'chat' | 'create_task'
   workspaceAccess?: WorkspaceAccessMode
 }): AgentCapabilityProfile {
   switch (input.role) {
@@ -37,7 +35,6 @@ export function resolveAgentCapabilityProfile(input: {
     case 'planner':
       return 'planner-read'
     case 'conversation':
-      if (input.conversationKind === 'create_task') return 'create-task-read'
       return input.workspaceAccess === 'exclusive-write' ? 'chat-write' : 'chat-read'
   }
 }
@@ -61,9 +58,7 @@ export function assertCapabilityProfileMatchesRole(
 ): void {
   const valid =
     role === 'conversation'
-      ? profile === 'chat-write' ||
-        profile === 'chat-read' ||
-        profile === 'create-task-read'
+      ? profile === 'chat-write' || profile === 'chat-read'
       : role === 'planner'
         ? profile === 'planner-read'
         : role === 'task-worker'
@@ -80,7 +75,6 @@ export function providerSupportsCapability(
   provider: SupportedCoreCode,
   profile: AgentCapabilityProfile
 ): boolean {
-  // Production drivers mirror descriptor.supportedProfiles via ProviderDriver.supports.
   return getProviderDescriptor(provider).capabilities.supportedProfiles.includes(profile)
 }
 

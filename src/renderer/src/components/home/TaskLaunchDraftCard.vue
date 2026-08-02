@@ -17,7 +17,7 @@ import {
   updateDraftReferenceDescription,
   uploadDraftReferences
 } from '@renderer/api/jobs'
-import { fetchThreadMessages } from '@renderer/api/conversation'
+import { fetchConversationMessages } from '@renderer/api/conversation'
 import AttachmentPickerButton from '@renderer/components/home/AttachmentPickerButton.vue'
 import LocalCorpusPickerDialog from '@renderer/components/create/LocalCorpusPickerDialog.vue'
 import Button from '@renderer/components/ui/Button.vue'
@@ -189,8 +189,8 @@ async function syncLinkedJob(): Promise<void> {
 
 async function handleLocalCorpusAdded(): Promise<void> {
   try {
-    const res = await fetchThreadMessages(props.threadId)
-    const updated = res.data.messages.find((item) => item.id === props.message.id)
+    const res = await fetchConversationMessages(props.threadId)
+    const updated = (res.data ?? []).find((item) => item.id === props.message.id)
     if (updated) emit('updated', updated)
   } catch {
     // parent may refresh on next action
@@ -827,7 +827,7 @@ async function handleUnlockDraft(): Promise<void> {
     <LocalCorpusPickerDialog
       v-model:open="localCorpusDialogOpen"
       :thread-id="threadId"
-      :message-id="message.id"
+      :draft-id="message.id"
       @added="handleLocalCorpusAdded"
     />
 

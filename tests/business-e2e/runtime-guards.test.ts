@@ -128,25 +128,21 @@ test('unknown --case values fail instead of reporting a skipped SUCCESS', () => 
 test('image attachment case aliases resolve into phase 1/2 defaults', () => {
   assert.deepEqual(resolveSelection({ caseId: 'chat-image-attachment' }).caseIds, ['CHAT-IMG-001'])
   assert.deepEqual(resolveSelection({ caseId: 'draft-chat-image-attachment' }).caseIds, [
-    'DRAFT-CHAT-IMG-001'
+    'DESIGN-DRAFT-001'
   ])
   assert.deepEqual(resolveSelection({ caseId: 'draft-reference-path-job' }).caseIds, [
-    'DRAFT-REF-PATH-001'
+    'DESIGN-DRAFT-001'
   ])
+  assert.deepEqual(resolveSelection({ caseId: 'notes-search' }).caseIds, ['DESIGN-DRAFT-001'])
   // legacy aliases
   assert.deepEqual(resolveSelection({ caseId: 'chat-image-ocr' }).caseIds, ['CHAT-IMG-001'])
-  assert.deepEqual(resolveSelection({ caseId: 'draft-image-ocr' }).caseIds, ['DRAFT-CHAT-IMG-001'])
+  assert.deepEqual(resolveSelection({ caseId: 'draft-image-ocr' }).caseIds, ['DESIGN-DRAFT-001'])
   assert.deepEqual(resolveSelection({ part: 'conversation' }).caseIds, [
     'G3-001',
     'CHAT-HTML-001',
-    'CHAT-IMG-001',
-    'DRAFT-CHAT-IMG-001'
+    'CHAT-IMG-001'
   ])
-  assert.deepEqual(resolveSelection({ part: 'draft-job' }).caseIds, [
-    'G6-001',
-    'JOB-CHAT-RO-001',
-    'DRAFT-REF-PATH-001'
-  ])
+  assert.deepEqual(resolveSelection({ part: 'draft-job' }).caseIds, ['DESIGN-DRAFT-001'])
 })
 
 test('image attachment matcher requires contiguous phrase, not scattered tokens', async () => {
@@ -272,9 +268,12 @@ test('E2E source has no model, executable-path, HOME, or HTML-simulation switche
     supervisorSource,
     /tests\/business-e2e\/\.runtime|BUSINESS_E2E_KEEP_RUNTIME|--keep-runtime/
   )
-  // Draft→job authority is per-draft executionConfig, not global control-plane settings.
+  // Draft→job authority is Design execution-profile (architecture 03), not global control-plane.
   assert.doesNotMatch(supervisorSource, /putControlPlanePolicies/)
   assert.match(supervisorSource, /draftExecutionConfigFromRoles/)
-  assert.match(fakeSource, /codetask_update_draft_execution_config/)
-  assert.match(driverSource, /codetask_update_draft_execution_config/)
+  assert.match(fakeSource, /codetask_patch_draft_execution_profile/)
+  assert.match(fakeSource, /codetask_confirm_design_draft/)
+  assert.doesNotMatch(fakeSource, /codetask_update_draft_execution_config/)
+  assert.doesNotMatch(driverSource, /codetask_confirm_draft_final/)
+  assert.match(driverSource, /DESIGN-DRAFT-001/)
 })

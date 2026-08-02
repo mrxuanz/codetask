@@ -16,8 +16,10 @@ import {
   renameThread,
   type Thread
 } from '@renderer/api/threads'
-import type { JobEventHub } from '@renderer/composables/useJobEventHub'
-import { threadTopic } from '@shared/contracts/job-event-hub'
+import type { RealtimeGateway } from '@renderer/composables/useRealtimeGateway'
+import { realtimePayload } from '@renderer/composables/useRealtimeGateway'
+import { threadFromConversationPayload } from '@renderer/api/threads'
+import { conversationTopic } from '@codetask/contracts'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { workspaceRootsMatch } from '@renderer/lib/workspace'
 
@@ -26,14 +28,9 @@ export type HomeThread = Thread
 export type ThreadKind = NonNullable<Thread['threadKind']>
 
 export const THREAD_KIND_CHAT: ThreadKind = 'chat'
-export const THREAD_KIND_CREATE_TASK: ThreadKind = 'create_task'
 
 export function isChatThread(thread: HomeThread): boolean {
   return (thread.threadKind ?? THREAD_KIND_CHAT) === THREAD_KIND_CHAT
-}
-
-export function isCreateTaskThread(thread: HomeThread): boolean {
-  return thread.threadKind === THREAD_KIND_CREATE_TASK
 }
 
 export interface HomeWorkspaceContext {
@@ -96,7 +93,7 @@ function createThreadInput(): { coreCode?: string } {
   return coreCode ? { coreCode } : {}
 }
 
-export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
+export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext {
   const projects = ref<HomeProject[]>([])
   const threads = ref<HomeThread[]>([])
   const activeProjectId = ref<string | null>(null)
@@ -221,9 +218,9 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
 
   async function createNewThread(
     projectId: string,
-    threadKind: ThreadKind = THREAD_KIND_CHAT
+    _threadKind: ThreadKind = THREAD_KIND_CHAT
   ): Promise<HomeThread> {
-    const res = await createThread(projectId, { ...createThreadInput(), threadKind })
+    const res = await createThread(projectId, { ...createThreadInput(), threadKind: THREAD_KIND_CHAT })
     const thread = res.data
     threads.value = [thread, ...threads.value.filter((item) => item.id !== thread.id)]
     activeProjectId.value = projectId
@@ -286,10 +283,10 @@ export function provideHomeWorkspace(hub: JobEventHub): HomeWorkspaceContext {
       threadHubRelease?.()
       threadHubRelease = null
       if (!threadId) return
-      threadHubRelease = hub.watchTopic(threadTopic(threadId), (envelope) => {
-        if (envelope.event === 'thread_updated' || envelope.event === 'thread_snapshot') {
-          syncThread(envelope.data.thread)
-        }
+      threadHubRelease = hub.watchTopic(conversationTopic(threadId), (envelope) => {
+        if (envelope.type !== 'conversation.changed') return
+        const thread = threadFromConversationPayload(realtimePayload(envelope).conversation)
+        if (thread) syncThread(thread)
       })
     },
     { immediate: true }

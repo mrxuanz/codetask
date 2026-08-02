@@ -1,0 +1,26 @@
+{
+  "name": "@codetask/server-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./create-app": "./src/create-app.ts",
+    "./modules/design": "./src/modules/design/index.ts",
+    "./modules/execution": "./src/modules/execution/index.ts",
+    "./modules/conversation": "./src/modules/conversation/index.ts",
+    "./modules/auth": "./src/modules/auth/index.ts",
+    "./modules/settings": "./src/modules/settings/index.ts",
+    "./modules/realtime": "./src/modules/realtime/index.ts"
+  },
+  "dependencies": {
+    "@codetask/agent-runtime": "*",
+    "@codetask/contracts": "*",
+    "@codetask/database": "*",
+    "@hono/node-server": "^2.0.5",
+    "@sinclair/typebox": "^0.34.52",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.26"
+  }
+}

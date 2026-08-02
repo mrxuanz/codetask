@@ -104,13 +104,13 @@ export const projects = sqliteTable(
   'projects',
   {
     id: text('id').primaryKey(),
-    username: text('username').notNull(),
+    actorId: text('actor_id').notNull(),
     title: text('title').notNull(),
     workspaceRoot: text('workspace_root').notNull(),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
   },
-  (table) => [uniqueIndex('idx_projects_user_workspace').on(table.username, table.workspaceRoot)]
+  (table) => [uniqueIndex('idx_projects_actor_workspace').on(table.actorId, table.workspaceRoot)]
 )
 
 export const threads = sqliteTable('threads', {
@@ -129,9 +129,7 @@ export const threads = sqliteTable('threads', {
   lastError: text('last_error'),
   lastUsedAt: integer('last_used_at'),
   titleSource: text('title_source').notNull().default('auto'),
-  activeDraftId: text('active_draft_id'),
-  activePlanId: text('active_plan_id'),
-  wizardPhase: text('wizard_phase').notNull().default('collect'),
+  /** Historical kind CHECK may still include create_task on upgraded DBs. */
   threadKind: text('thread_kind').notNull().default('chat'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull()
@@ -152,32 +150,30 @@ export const threadMessages = sqliteTable('thread_messages', {
   payloadJson: text('payload_json'),
   payloadArtifactId: text('payload_artifact_id'),
   attachmentsJson: text('attachments_json'),
-  wizardPhase: text('wizard_phase'),
   createdAt: text('created_at').notNull()
 })
 
+/** Conversation-module turns (migration 048+). Host drizzle mirror for cross-module reads. */
 export const conversationTurns = sqliteTable('conversation_turns', {
   id: text('id').primaryKey(),
-  threadId: text('thread_id')
-    .notNull()
-    .references(() => threads.id, { onDelete: 'cascade' }),
-  username: text('username').notNull(),
-  kind: text('kind').notNull(),
-  status: text('status').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  actorId: text('actor_id').notNull(),
+  state: text('state').notNull(),
+  inputText: text('input_text').notNull().default(''),
+  providerCode: text('provider_code').notNull(),
   workspaceAccess: text('workspace_access').notNull().default('live-read'),
-  provider: text('provider'),
-  messageText: text('message_text').notNull().default(''),
-  generateDraft: integer('generate_draft').notNull().default(0),
-  createTaskMode: integer('create_task_mode').notNull().default(0),
-  attachmentIdsJson: text('attachment_ids_json').notNull().default('[]'),
-  selectedDraftSection: text('selected_draft_section'),
-  selectedPlanNodeRef: text('selected_plan_node_ref'),
+  settingsSnapshotJson: text('settings_snapshot_json').notNull().default('{}'),
+  settingsHash: text('settings_hash').notNull().default(''),
   idempotencyKey: text('idempotency_key'),
+  requestHash: text('request_hash').notNull().default(''),
   stateRevision: integer('state_revision').notNull().default(1),
+  userMessageId: text('user_message_id'),
+  assistantMessageId: text('assistant_message_id'),
   lastErrorJson: text('last_error_json'),
-  createdAt: integer('created_at').notNull(),
-  startedAt: integer('started_at'),
-  completedAt: integer('completed_at')
+  createdAt: text('created_at').notNull(),
+  admittedAt: text('admitted_at'),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at')
 })
 
 export const threadJobs = sqliteTable(
@@ -512,23 +508,23 @@ export const workloadSlots = sqliteTable(
   (table) => [uniqueIndex('idx_workload_slots_run_id').on(table.runId)]
 )
 
-/** FIX-PLAN F4-A (§9.1): exclusive workspace write lease. */
+/** FIX-PLAN F4-A / 02 §15.11: exclusive workspace write lease (Execution-unified schema). */
 export const workspaceLeases = sqliteTable(
   'workspace_leases',
   {
     id: text('id').primaryKey(),
-    canonicalPath: text('canonical_path').notNull(),
-    ownerKind: text('owner_kind').notNull(),
+    canonicalWorkspaceRoot: text('canonical_workspace_root').notNull(),
+    ownerType: text('owner_type').notNull(),
     ownerId: text('owner_id').notNull(),
     runId: text('run_id'),
-    bootId: text('boot_id').notNull(),
     status: text('status').notNull(),
+    leaseOwner: text('lease_owner').notNull(),
     leaseExpiresAt: integer('lease_expires_at').notNull(),
     createdAt: integer('created_at').notNull(),
     releasedAt: integer('released_at')
   },
   (table) => [
-    index('idx_workspace_leases_active_owner').on(table.ownerKind, table.ownerId, table.status)
+    index('idx_workspace_leases_active_owner').on(table.ownerType, table.ownerId, table.status)
   ]
 )
 

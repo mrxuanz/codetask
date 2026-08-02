@@ -1,12 +1,10 @@
 export type {
   ChatAccessInput,
   ConversationAccessDecision,
-  ConversationWorkspaceLease,
-  CreateTaskAccessInput
+  ConversationWorkspaceLease
 } from './types'
 export {
   releaseChatWorkspaceLease,
-  resolveChatAccess,
-  resolveChatSystemPrompt
+  resolveChatAccess
 } from './chat'
-export { resolveCreateTaskAccess, resolveCreateTaskSystemPrompt } from './create-task'
+

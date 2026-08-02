@@ -8,70 +8,160 @@ import { requestGuard } from '../middleware/request-guard'
 import { bodySizeLimit } from '../middleware/body-limiter'
 import { requestTimeout } from '../middleware/http-limits'
 import { createAuthRoutes } from './auth'
-import { createAgentRoutes, createThreadAgentRoutes } from './conversation'
 import { createAttachmentRoutes } from './attachments'
 import { createFsRoutes } from './fs'
-import { createJobRoutes, createUserJobRoutes } from './jobs'
-import { createDraftListRoutes } from './drafts'
-import { createDesignSessionRoutes } from './design-sessions'
 import { createMcpRoutes } from './mcp'
 import { createProjectRoutes } from './projects'
 import { createSettingsRoutes } from './settings'
 import { createSystemRoutes } from './system'
-import { createEventsRoutes } from './events'
-import { createProjectThreadRoutes, createThreadRoutes } from './threads'
-import { createTurnRoutes } from './turns'
-import { isV3Authoritative } from '../application/cutover-state'
-import { mountV3Routes } from '../http/v3/mount'
+import { createRealtimeRoutes } from './realtime'
+import type { ConversationModule, DesignModule, Actor } from '@codetask/server-core'
+import {
+  currentAuthPrincipal,
+  toModuleActor,
+  principalToActor
+} from '@codetask/server-core/modules/auth'
+import {
+  getOrComposeConversation,
+  getOrComposeExecution,
+  type ExecutionModule
+} from '../design-module'
+import { AppError } from '../error'
 
-export function createApiRoutes(ctx: AppContext): Hono {
+function moduleActorFromPrincipal(): Actor | undefined {
+  const principal = currentAuthPrincipal()
+  if (!principal) return undefined
+  return toModuleActor(principalToActor(principal))
+}
+
+function executionActorMiddleware() {
+  return async (
+    c: {
+      set: (key: never, value: unknown) => void
+    },
+    next: () => Promise<void>
+  ) => {
+    const actor = moduleActorFromPrincipal()
+    if (actor) {
+      c.set('actor' as never, actor)
+    }
+    c.set('requestId' as never, crypto.randomUUID())
+    await next()
+  }
+}
+
+function conversationActorMiddleware() {
+  return async (
+    c: {
+      set: (key: never, value: unknown) => void
+    },
+    next: () => Promise<void>
+  ) => {
+    const actor = moduleActorFromPrincipal()
+    if (actor) {
+      c.set('actor' as never, actor)
+    }
+    c.set('requestId' as never, crypto.randomUUID())
+    await next()
+  }
+}
+
+function designActorMiddleware() {
+  return async (
+    c: {
+      set: (key: never, value: unknown) => void
+    },
+    next: () => Promise<void>
+  ) => {
+    const actor = moduleActorFromPrincipal()
+    if (actor) {
+      c.set('actor' as never, actor)
+    }
+    await next()
+  }
+}
+
+/** Gone stub for removed /api/threads surface (03/06 — no forwarding or alias layer). */
+function createRemovedThreadsStub(): Hono {
+  const routes = new Hono()
+  const gone = () => {
+    throw AppError.gone(
+      'Thread APIs removed; use /api/conversations, /api/drafts, /api/planning-sessions, and /api/jobs',
+      'conversation.moved'
+    )
+  }
+  routes.all('/*', gone)
+  routes.all('/', gone)
+  return routes
+}
+
+export function createApiRoutes(
+  ctx: AppContext,
+  design?: DesignModule,
+  execution?: ExecutionModule,
+  conversation?: ConversationModule
+): Hono {
   const api = new Hono()
+  const exec = execution ?? getOrComposeExecution(ctx)
+  const conv = conversation ?? getOrComposeConversation(ctx)
 
-  api.use('*', requireAuth(ctx.security))
-  api.use('*', requestGuard(ctx.security))
-  api.use('*', requestTimeout(ctx.config.http.requestTimeoutMs))
-  api.use('*', bodySizeLimit())
+  // MCP uses its own protocol auth boundary (localhost + capability tokens) — not session Auth.
+  api.route('/mcp', createMcpRoutes(ctx))
 
-  api.get('/health', (c) => {
+  const secured = new Hono()
+  secured.use('*', requireAuth(ctx.security))
+  secured.use('*', requestGuard(ctx.security))
+  secured.use('*', requestTimeout(ctx.config.http.requestTimeoutMs))
+  secured.use('*', bodySizeLimit())
+
+  if (design) {
+    const designActor = designActorMiddleware()
+    secured.use('/drafts/*', designActor)
+    secured.use('/planning-sessions/*', designActor)
+    secured.use('/drafts', designActor)
+    secured.use('/planning-sessions', designActor)
+    secured.route('/', design.routes)
+  }
+
+  secured.get('/health', (c) => {
     return c.json(ok({ status: 'ok' }))
   })
 
-  api.route('/system', createSystemRoutes(ctx))
-  api.route('/events', createEventsRoutes(ctx))
-  // Canonical realtime gateway (same hub as /events; prefer this path going forward).
-  api.route('/realtime', createEventsRoutes(ctx))
+  secured.route('/system', createSystemRoutes(ctx))
+  secured.route('/realtime', createRealtimeRoutes(ctx))
 
-  api.route('/', createAuthRoutes(ctx))
-  api.route('/fs', createFsRoutes(ctx))
-  api.route('/settings', createSettingsRoutes(ctx))
-  api.route('/mcp', createMcpRoutes(ctx))
-  api.route('/projects', createProjectRoutes(ctx))
-  api.route('/projects', createProjectThreadRoutes(ctx))
-  api.route('/agent', createAgentRoutes(ctx))
-  api.route('/threads', createThreadRoutes(ctx))
-  api.route('/threads', createThreadAgentRoutes(ctx))
-  api.route('/threads', createTurnRoutes(ctx))
-  api.route('/threads', createAttachmentRoutes(ctx))
-  api.route('/threads', createJobRoutes(ctx))
-  api.route('/threads', createDesignSessionRoutes(ctx))
-  api.route('/jobs', createUserJobRoutes(ctx))
-  api.route('/drafts', createDraftListRoutes(ctx))
+  secured.route('/auth', createAuthRoutes(ctx))
+  secured.route('/fs', createFsRoutes(ctx))
+  secured.route('/settings', createSettingsRoutes(ctx))
+  secured.route('/projects', createProjectRoutes(ctx))
 
-  // V3 Job API only when process generation is authoritative. Legacy roots must not
-  // initialize control-plane services (FIX-PLAN F0/F1).
-  if (isV3Authoritative(ctx.db)) {
-    api.route('/v3', mountV3Routes(ctx))
-  }
+  const convActor = conversationActorMiddleware()
+  secured.use('/conversations', convActor)
+  secured.use('/conversations/*', convActor)
+  secured.use('/projects/:projectId/conversations', convActor)
+  secured.use('/projects/:projectId/conversations/*', convActor)
+  secured.route('/', conv.routes)
+  secured.route('/', createAttachmentRoutes(ctx))
 
-  api.onError((error, c) => {
+  secured.route('/threads', createRemovedThreadsStub())
+
+  const actorMw = executionActorMiddleware()
+  secured.use('/jobs', actorMw)
+  secured.use('/jobs/*', actorMw)
+  secured.use('/execution-queue', actorMw)
+  secured.use('/execution-queue/*', actorMw)
+  secured.route('/', exec.routes)
+
+  secured.onError((error, c) => {
     console.error('[api] unhandled error:', error)
     const { body, status } = toErrorHttpResult(error)
     return c.json(body, status as ContentfulStatusCode)
   })
 
-  api.notFound((c) => {
+  secured.notFound((c) => {
     return c.json(fail(code.NOT_FOUND, 'Not Found', { error: 'Not Found' }), 404)
   })
 
+  api.route('/', secured)
   return api
 }

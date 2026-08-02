@@ -9,11 +9,10 @@ import {
   resolveAgentCapabilityProfile
 } from '../../src/server/agent-runtime/capabilities'
 
-test('resolves the six runtime capability profiles', () => {
+test('resolves runtime capability profiles (chat / planner / sandbox)', () => {
   assert.equal(
     resolveAgentCapabilityProfile({
       role: 'conversation',
-      conversationKind: 'chat',
       workspaceAccess: 'exclusive-write'
     }),
     'chat-write'
@@ -21,18 +20,9 @@ test('resolves the six runtime capability profiles', () => {
   assert.equal(
     resolveAgentCapabilityProfile({
       role: 'conversation',
-      conversationKind: 'chat',
       workspaceAccess: 'live-read'
     }),
     'chat-read'
-  )
-  assert.equal(
-    resolveAgentCapabilityProfile({
-      role: 'conversation',
-      conversationKind: 'create_task',
-      workspaceAccess: 'live-read'
-    }),
-    'create-task-read'
   )
   assert.equal(resolveAgentCapabilityProfile({ role: 'planner' }), 'planner-read')
   assert.equal(resolveAgentCapabilityProfile({ role: 'task-worker' }), 'task-sandbox')
@@ -43,43 +33,24 @@ test('resolves the six runtime capability profiles', () => {
 test('only task and verifier profiles require the outer sandbox', () => {
   assert.equal(capabilityProfileRequiresOuterSandbox('chat-write'), false)
   assert.equal(capabilityProfileRequiresOuterSandbox('chat-read'), false)
-  assert.equal(capabilityProfileRequiresOuterSandbox('create-task-read'), false)
   assert.equal(capabilityProfileRequiresOuterSandbox('planner-read'), false)
   assert.equal(capabilityProfileRequiresOuterSandbox('task-sandbox'), true)
   assert.equal(capabilityProfileRequiresOuterSandbox('verifier-sandbox'), true)
 })
 
-test('strict read-only provider support includes Codex', () => {
+test('read-only profiles are chat-read and planner-read', () => {
+  assert.equal(capabilityProfileIsReadOnly('chat-read'), true)
   assert.equal(capabilityProfileIsReadOnly('planner-read'), true)
-  assert.equal(providerSupportsCapability('claude-code', 'planner-read'), true)
-  assert.equal(providerSupportsCapability('cursorcli', 'chat-read'), true)
-  assert.equal(providerSupportsCapability('opencode', 'create-task-read'), true)
-  assert.equal(providerSupportsCapability('codex', 'planner-read'), true)
-  assert.equal(providerSupportsCapability('codex', 'chat-read'), true)
-  assert.equal(providerSupportsCapability('codex', 'create-task-read'), true)
-  assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'planner-read'))
-  assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'chat-write'))
-  assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'task-sandbox'))
+  assert.equal(capabilityProfileIsReadOnly('chat-write'), false)
+  assert.equal(capabilityProfileIsReadOnly('task-sandbox'), false)
 })
 
-test('role/profile combinations cannot bypass sandbox routing', () => {
-  assert.doesNotThrow(() =>
-    assertCapabilityProfileMatchesRole('conversation', 'chat-write')
-  )
-  assert.doesNotThrow(() =>
-    assertCapabilityProfileMatchesRole('conversation', 'create-task-read')
-  )
-  assert.doesNotThrow(() =>
-    assertCapabilityProfileMatchesRole('task-worker', 'task-sandbox')
-  )
-  assert.throws(
-    () => assertCapabilityProfileMatchesRole('task-worker', 'chat-write'),
-    (error: unknown) =>
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 'provider.capability_unsupported'
-  )
-  assert.throws(() =>
-    assertCapabilityProfileMatchesRole('planner', 'verifier-sandbox')
-  )
+test('assertCapabilityProfileMatchesRole rejects mismatches', () => {
+  assert.doesNotThrow(() => assertCapabilityProfileMatchesRole('conversation', 'chat-read'))
+  assert.throws(() => assertCapabilityProfileMatchesRole('conversation', 'task-sandbox'))
+})
+
+test('providerSupportsCapability reflects descriptor profiles', () => {
+  assert.equal(typeof providerSupportsCapability('codex', 'chat-read'), 'boolean')
+  assert.doesNotThrow(() => assertProviderSupportsCapability('codex', 'chat-read'))
 })

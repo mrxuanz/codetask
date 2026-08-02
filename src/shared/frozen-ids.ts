@@ -3,9 +3,12 @@ const MAX_FROZEN_ID_LEN = 128
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+/** Conversation module ids: `conv_` + uuid hex without dashes. */
+const CONVERSATION_ID_RE = /^conv_[0-9a-f]{32}$/i
+
 const ATTACHMENT_ID_RE = /^att-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-export type FrozenIdKind = 'thread' | 'attachment'
+export type FrozenIdKind = 'thread' | 'attachment' | 'conversation'
 
 export class FrozenIdError extends Error {
   constructor(
@@ -64,6 +67,26 @@ function assertFrozenIdShape(raw: string, kind: FrozenIdKind, pattern: RegExp): 
 
 export function assertFrozenThreadId(threadId: string): string {
   return assertFrozenIdShape(threadId, 'thread', UUID_RE)
+}
+
+/** Attachment filesystem owner: legacy UUID thread ids or conversation `conv_*` ids. */
+export function assertAttachmentOwnerId(ownerId: string): string {
+  const trimmed = ownerId.trim()
+  if (!trimmed) {
+    throw new FrozenIdError('conversation', 'conversation.id_required', 'conversation id is required')
+  }
+  if (trimmed.length > MAX_FROZEN_ID_LEN) {
+    throw new FrozenIdError('conversation', 'conversation.id_invalid', 'conversation id is too long')
+  }
+  assertNoTraversalSegments(trimmed, 'conversation')
+  if (UUID_RE.test(trimmed) || CONVERSATION_ID_RE.test(trimmed)) {
+    return trimmed
+  }
+  throw new FrozenIdError(
+    'conversation',
+    'conversation.id_invalid',
+    'conversation id has invalid format'
+  )
 }
 
 export function assertFrozenAttachmentId(attachmentId: string): string {
