@@ -55,28 +55,27 @@ test('Cursor ACP turns have a bounded no-update wait', () => {
   assert.match(source, /waitForCursorUpdate/)
 })
 
-test('legacy queues resume only after the normal HTTP listener is ready', () => {
+test('HTTP listen path initializes Conversation MCP after the port is bound', () => {
   const source = readFileSync(join(process.cwd(), 'src/main/server.ts'), 'utf8')
-  const createReadyStart = source.indexOf('async function createReadyApp(')
-  const createReadyEnd = source.indexOf('function scheduleLegacyQueueResume')
-  const listeningLog = source.indexOf('mode listening on')
-  const finalResume = source.lastIndexOf('scheduleLegacyQueueResume(usesLegacyComposition)')
-
-  assert.ok(createReadyStart >= 0 && createReadyEnd > createReadyStart)
-  assert.doesNotMatch(
-    source.slice(createReadyStart, createReadyEnd),
-    /resumeJobQueuesAfterServerReady/
-  )
-  assert.ok(finalResume > listeningLog)
+  assert.match(source, /initConversationMcpBackend/)
+  assert.match(source, /async function createReadyApp\(/)
+  assert.doesNotMatch(source, /scheduleLegacyQueueResume|resumeJobQueuesAfterServerReady/)
 })
 
-test('permission-changing ordinary chat turns do not reuse Provider sessions', () => {
-  const conversation = readFileSync(
-    join(process.cwd(), 'src/server/conversation/service.ts'),
+test('application runtime starts Conversation + Execution modules on ready', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/server/application/host-application-runtime.ts'),
     'utf8'
   )
+  assert.match(source, /getOrComposeConversation\(.*\)\.startup\(\)/)
+  assert.match(source, /getOrComposeExecution\(.*\)\.startup\(\)/)
+})
+
+test('ordinary chat write turns use one-shot Provider reuse (03)', () => {
   const lifecycle = readFileSync(join(process.cwd(), 'src/server/providers/lifecycle.ts'), 'utf8')
-  assert.match(conversation, /const phaseRuntimeId = createTaskMode[\s\S]*?: null/)
-  assert.match(conversation, /providerRuntimeScopeId/)
+  const runtime = readFileSync(join(process.cwd(), 'packages/agent-runtime/src/index.ts'), 'utf8')
   assert.match(lifecycle, /capabilityProfile === 'chat-write'/)
+  assert.match(runtime, /capabilityProfile === 'chat-write'/)
+  assert.match(runtime, /buildConversationScopeId/)
+  assert.doesNotMatch(runtime, /create_task|createTaskMode/)
 })

@@ -37,6 +37,19 @@ import { migration039PromoteRestartInterruptedPaused } from './039_promote_resta
 import { migration040DestructiveAuthCurrent } from './040_destructive_auth_current'
 import { migration041AuthSecretSqlite } from './041_auth_secret_sqlite'
 import { migration042ExecutionProfile } from './042_execution_profile'
+import { migration043DesignModule } from './043_design_module_tables'
+import { migration044DesignDataBackfill } from './044_design_data_backfill'
+import { migration045ExecutionModule } from './045_execution_module_tables'
+import { migration046ExecutionData } from './046_execution_data_migrate'
+import { migration047DropControlPlane } from './047_drop_control_plane_tables'
+import { migration048ConversationModule } from './048_conversation_module_tables'
+import { migration049ConversationData } from './049_conversation_data_migrate'
+import { migration050ConversationCleanupTables } from './050_conversation_cleanup'
+import { migration051ActorIdUsernameToUserId } from './051_actor_id_username_to_user_id'
+import { migration052ProjectsUsernameToActorId } from './052_projects_username_to_actor_id'
+import { migration053SettingsNamespaces } from './053_settings_namespaces'
+import { migration054RealtimeEvents } from './054_realtime_events'
+import { migration055DropWizardColumnsTables } from './055_drop_wizard_columns'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -79,9 +92,37 @@ export const allMigrations = [
   migration039PromoteRestartInterruptedPaused,
   migration040DestructiveAuthCurrent,
   migration041AuthSecretSqlite,
-  migration042ExecutionProfile
+  migration042ExecutionProfile,
+  migration043DesignModule,
+  migration044DesignDataBackfill,
+  migration045ExecutionModule,
+  migration046ExecutionData,
+  migration047DropControlPlane,
+  migration048ConversationModule,
+  migration049ConversationData,
+  migration050ConversationCleanupTables,
+  migration051ActorIdUsernameToUserId,
+  migration052ProjectsUsernameToActorId,
+  migration053SettingsNamespaces,
+  migration054RealtimeEvents,
+  migration055DropWizardColumnsTables
 ]
 
 export function applyMigrations(db: Database.Database): void {
   runMigrations(db, allMigrations)
+  try {
+    const failures = db
+      .prepare(`SELECT COUNT(*) AS c FROM migration_failures`)
+      .get() as { c: number }
+    if (failures.c > 0) {
+      throw new Error(
+        `Design migration recorded ${failures.c} failure(s); resolve migration_failures before starting`
+      )
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Design migration recorded')) {
+      throw error
+    }
+    // Table may not exist on unexpected partial upgrade paths.
+  }
 }

@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { type ThreadJob } from '@renderer/api/jobs'
+import { type ExecutionJob } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import TaskParameterPanel from '@renderer/components/tasks/TaskParameterPanel.vue'
@@ -64,8 +64,8 @@ const statusFilters = computed(() => [
   { value: 'cancelled', label: t('workspace.tasks.filters.cancelled') }
 ])
 
-const listProgress = (job: ThreadJob): JobProgressSnapshot => getJobProgressSnapshot(job, t)
-const listStatusBadge = (job: ThreadJob): { label: string; className: string } =>
+const listProgress = (job: ExecutionJob): JobProgressSnapshot => getJobProgressSnapshot(job, t)
+const listStatusBadge = (job: ExecutionJob): { label: string; className: string } =>
   resolveJobListStatusBadge(job.status, t, job)
 
 const executionProgress = computed(() => getExecutionProgressSnapshot(selectedJob.value, t))
@@ -114,11 +114,11 @@ function closeTaskParameters(): void {
 
 onMounted(() => {
   void store.loadJobs()
-  store.startHubPolling()
+  store.startRealtimePolling()
 })
 
 onUnmounted(() => {
-  store.stopHubPolling()
+  store.stopRealtimePolling()
 })
 </script>
 

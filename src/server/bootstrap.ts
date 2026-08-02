@@ -1,14 +1,11 @@
 import { randomUUID } from 'crypto'
-import { JobEventBus, RuntimeRegistry, SettingsStore, type AppContext } from './context'
+import { RuntimeRegistry, SettingsStore, type AppContext } from './context'
 import { JobExecutionRuntimeRegistry } from './context/job-execution-runtime'
 import { createDatabase, closeDatabaseForTests } from './db'
 import { runRetentionJanitorPass, startRetentionJanitor, stopRetentionJanitor } from './retention'
 import { loadDatabaseAuthSecret } from './auth/secret'
 import { startAuthJanitor, stopAuthJanitor, runAuthJanitorPass } from './auth/janitor'
 import { SafeLoggerImpl } from './application/safe-logger'
-import { LEGACY_RESUME_RUNNING_DISABLED } from './application/legacy-resume-running-disabled'
-import { StartupError } from './application/startup-error'
-import { readSchemaGeneration } from './application/cutover-state'
 import {
   startApplicationRuntime,
   shutdownApplicationRuntime,
@@ -42,6 +39,9 @@ import {
   configureShellChildEnvironment,
   resetShellChildEnvironment
 } from './shell-child-environment'
+import { composeRealtimeModule } from '@codetask/server-core'
+import type Database from 'better-sqlite3'
+import type { AppDatabase } from './db'
 
 export type { AppContext } from './context'
 
@@ -97,17 +97,8 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
     return appContext
   }
 
-  void LEGACY_RESUME_RUNNING_DISABLED
-
   const db = createDatabase(options.dataDir)
   try {
-    const schemaRead = readSchemaGeneration(db)
-
-    // FIX-PLAN F1 / R6: fail closed before publishing global context or starting janitors.
-    if (schemaRead === 'v3_authoritative') {
-      throw new StartupError('control_plane.v3_not_release_ready')
-    }
-
     const mode = options.mode ?? 'desktop'
     configureRuntimeMode(mode)
     configureShellChildEnvironment(options.shellChildEnvironment)
@@ -140,7 +131,9 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
         authSecret,
         auth: new SecureAuthService(db, authSecret)
       },
-      eventBus: new JobEventBus(),
+      realtime: composeRealtimeModule({
+        db: (db as AppDatabase & { $client?: Database.Database }).$client!
+      }),
       runtimeRegistry: new RuntimeRegistry(),
       executionRuntime: new JobExecutionRuntimeRegistry(),
       providerRegistry: createProviderRegistry(config.providers),

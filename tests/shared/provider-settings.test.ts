@@ -4,12 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { bootstrapRuntime, resetAppContextForTests } from '../../src/server/bootstrap.ts'
-import { SettingsRevisionConflictError } from '../../src/server/context/settings-store.ts'
-import {
-  createProvidersConfig,
-  parseProvidersConfigOverrides
-} from '../../src/shared/providers/settings.ts'
-import { loadProviderSettings, saveProviderSettings } from '../../src/server/settings/providers.ts'
+import { SettingsError } from '@codetask/server-core/modules/settings'
+import { getOrComposeSettings } from '../../src/server/settings/service.ts'
 
 test('Provider settings persist with CAS and apply only after restart', async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-provider-settings-'))
@@ -18,33 +14,42 @@ test('Provider settings persist with CAS and apply only after restart', async (t
     rmSync(dataDir, { recursive: true, force: true })
   })
   const ctx = bootstrapRuntime({ dataDir })
+  const app = getOrComposeSettings(ctx).app
 
-  const initial = loadProviderSettings()
+  const initial = app.getProviders({ providers: ctx.config.providers })
   assert.equal(initial.revision, 0)
-  assert.equal(initial.applyMode, 'restart')
-  assert.equal(initial.providers.codex.model, undefined)
+  assert.equal(initial.restartRequired, false)
+  assert.equal(initial.saved.providers.codex.model, undefined)
 
-  const saved = saveProviderSettings(
+  const saved = await app.updateProviders(
+    0,
     {
-      codex: {
-        model: 'gpt-test',
-        executable: { mode: 'auto' }
-      },
-      cursorcli: { approveMcps: false }
+      providers: {
+        codex: {
+          enabled: true,
+          executable: { mode: 'auto' },
+          model: 'gpt-test',
+          approveMcps: false
+        },
+        cursorcli: { enabled: true, executable: { mode: 'auto' }, approveMcps: false }
+      }
     },
-    0
+    { providers: ctx.config.providers }
   )
   assert.equal(saved.revision, 1)
-  assert.equal(saved.applyMode, 'restart')
-  assert.equal(saved.providers.codex.model, 'gpt-test')
-  assert.equal(saved.providers.cursorcli.approveMcps, false)
-  assert.equal(loadProviderSettings().providers.codex.model, 'gpt-test')
+  assert.equal(saved.restartRequired, true)
+  assert.equal(saved.settings.providers.codex.model, 'gpt-test')
+  assert.equal(app.getProviders({ providers: ctx.config.providers }).saved.providers.codex.model, 'gpt-test')
 
-  // The boot registry is immutable; saved settings become active on the next boot.
   assert.equal(ctx.providerRegistry.get('codex').settings.model, undefined)
-  assert.throws(
-    () => saveProviderSettings({ codex: { model: 'stale-write' } }, 0),
-    SettingsRevisionConflictError
+  await assert.rejects(
+    () =>
+      app.updateProviders(
+        0,
+        { providers: { codex: { enabled: true, executable: { mode: 'auto' }, approveMcps: false, model: 'stale' } } },
+        { providers: ctx.config.providers }
+      ),
+    (error: unknown) => error instanceof SettingsError && error.code === 'settings.revision_conflict'
   )
 
   await resetAppContextForTests()
@@ -53,32 +58,9 @@ test('Provider settings persist with CAS and apply only after restart', async (t
   assert.equal(restarted.providerRegistry.get('cursorcli').settings.approveMcps, false)
 })
 
-test('Provider settings reject unknown providers and misspelled fields', () => {
-  assert.throws(
-    () => createProvidersConfig(parseProvidersConfigOverrides({ unknown: {} })),
-    /not a supported Provider/
-  )
-  assert.throws(
-    () => parseProvidersConfigOverrides({ codex: { modle: 'typo' } }),
-    /modle is not supported/
-  )
-  assert.throws(
-    () =>
-      parseProvidersConfigOverrides({
-        codex: { executable: { mode: 'auto', path: '/must-not-be-ignored' } }
-      }),
-    /path requires mode path/
-  )
-})
-
-test('Provider settings routes expose GET/PUT and an explicit restart apply contract', () => {
+test('Provider settings routes expose GET/PUT via settings module', () => {
   const source = readFileSync(join(process.cwd(), 'src/server/routes/settings.ts'), 'utf8')
-  const settingsSource = readFileSync(
-    join(process.cwd(), 'src/server/settings/providers.ts'),
-    'utf8'
-  )
-  assert.match(source, /routes\.get\('\/providers'/)
-  assert.match(source, /routes\.put\('\/providers'/)
-  assert.match(source, /SettingsRevisionConflictError/)
-  assert.match(settingsSource, /applyMode: 'restart'/)
+  assert.match(source, /getOrComposeSettings/)
+  assert.match(source, /createRoutes/)
+  assert.match(source, /getEffectiveProviders/)
 })

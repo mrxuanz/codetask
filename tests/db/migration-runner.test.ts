@@ -12,8 +12,10 @@ if (latestMigrationVersion === undefined) {
 function seedProjectThreadMessage(db: Database.Database, opts?: { messageId?: string }): void {
   const now = Math.floor(Date.now() / 1000)
   const messageId = opts?.messageId ?? 'msg-1'
+  const projectCols = db.prepare(`PRAGMA table_info(projects)`).all() as Array<{ name: string }>
+  const ownerCol = projectCols.some((c) => c.name === 'actor_id') ? 'actor_id' : 'username'
   db.prepare(
-    `INSERT INTO projects (id, username, title, workspace_root, created_at, updated_at)
+    `INSERT INTO projects (id, ${ownerCol}, title, workspace_root, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).run('proj-1', 'alice', 'Demo', '/tmp/demo', now, now)
   db.prepare(
@@ -234,10 +236,26 @@ test('migration 017 succeeds when design_sessions references threads (FK on)', (
 
   runMigrations(db, allMigrations)
   assert.equal(currentMigrationVersion(db), latestMigrationVersion)
-  const wizardPhase = db
+  const threadsSql = db
     .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'`)
     .get() as { sql: string }
-  assert.match(wizardPhase.sql, /plan_generating/)
+  assert.doesNotMatch(threadsSql.sql, /wizard_phase|active_draft_id|active_plan_id/)
+  const threadCols = db.prepare(`PRAGMA table_info(threads)`).all() as Array<{ name: string }>
+  const threadColNames = new Set(threadCols.map((c) => c.name))
+  assert.equal(threadColNames.has('wizard_phase'), false)
+  assert.equal(threadColNames.has('active_draft_id'), false)
+  assert.equal(threadColNames.has('active_plan_id'), false)
+  const messageCols = db.prepare(`PRAGMA table_info(thread_messages)`).all() as Array<{
+    name: string
+  }>
+  assert.equal(
+    messageCols.some((c) => c.name === 'wizard_phase'),
+    false
+  )
+  const archive = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'threads_legacy_archive'`)
+    .get()
+  assert.equal(archive, undefined)
   db.close()
 })
 
@@ -310,6 +328,15 @@ test('migration 026 enriches launched job and rewrites plan pointers', () => {
   runMigrations(db, through25)
 
   seedLaunchedDesignSessionPair(db)
+  const through26 = allMigrations.filter((m) => m.version <= 26)
+  runMigrations(db, through26)
+  assert.equal(currentMigrationVersion(db), 26)
+
+  const threadAfter26 = db
+    .prepare(`SELECT active_plan_id FROM threads WHERE id = ?`)
+    .get('thread-1') as { active_plan_id: string | null }
+  assert.equal(threadAfter26.active_plan_id, 'job-launched')
+
   runMigrations(db, allMigrations)
   assert.equal(currentMigrationVersion(db), latestMigrationVersion)
 
@@ -322,10 +349,11 @@ test('migration 026 enriches launched job and rewrites plan pointers', () => {
   assert.equal(job.plan_revision, 3)
   assert.equal(job.design_session_id, 'ds-launched')
 
-  const thread = db.prepare(`SELECT active_plan_id FROM threads WHERE id = ?`).get('thread-1') as {
-    active_plan_id: string | null
-  }
-  assert.equal(thread.active_plan_id, 'job-launched')
+  const threadCols = db.prepare(`PRAGMA table_info(threads)`).all() as Array<{ name: string }>
+  assert.equal(
+    threadCols.some((c) => c.name === 'active_plan_id'),
+    false
+  )
 
   const msg = db
     .prepare(

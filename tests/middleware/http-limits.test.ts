@@ -10,8 +10,8 @@ import {
 import { getCurrentRequestAbortSignal } from '../../src/server/context/request-abort'
 
 test('isSseStreamRoute recognizes known SSE stream paths', () => {
-  assert.equal(isSseStreamRoute('/api/events/stream'), true)
-  assert.equal(isSseStreamRoute('/api/events/jobs/stream'), true)
+  assert.equal(isSseStreamRoute('/api/realtime/stream'), true)
+  assert.equal(isSseStreamRoute('/api/events/stream'), false)
   assert.equal(isSseStreamRoute('/api/threads/thread-1/messages'), false)
 })
 
@@ -50,7 +50,7 @@ test('requestTimeout skips long-lived SSE and conversation message routes', asyn
   try {
     const app = new Hono()
     app.use('*', requestTimeout())
-    app.get('/api/events/stream', async (c) => {
+    app.get('/api/realtime/stream', async (c) => {
       await new Promise<void>((resolve) => {
         setTimeout(resolve, REQUEST_TIMEOUT_MS + 1_000)
       })
@@ -63,7 +63,7 @@ test('requestTimeout skips long-lived SSE and conversation message routes', asyn
       return c.text('messages')
     })
 
-    const streamResponsePromise = app.fetch(new Request('http://localhost/api/events/stream'))
+    const streamResponsePromise = app.fetch(new Request('http://localhost/api/realtime/stream'))
     const messagesResponsePromise = app.fetch(
       new Request('http://localhost/api/threads/thread-1/messages')
     )

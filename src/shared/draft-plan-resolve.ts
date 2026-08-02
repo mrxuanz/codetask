@@ -1,4 +1,4 @@
-import { isPlanningWorkspaceStatus } from './design-session'
+import { isPlanningWorkspaceStatus } from './planning-status'
 import { isLaunchedJobStatus } from './job-lifecycle'
 
 export interface DraftPlanReference {

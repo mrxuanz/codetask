@@ -559,8 +559,9 @@ export default {
         language: 'Language',
         storage: 'Data Storage',
         sandbox: 'Sandbox',
-        controlPlane: 'Control Plane',
-        skills: 'Business Skills',
+        agents: 'Agent Defaults',
+        providers: 'Providers',
+        secrets: 'Secrets',
         mcp: 'MCP',
         prompts: 'Prompts'
       },
@@ -595,7 +596,7 @@ export default {
         title: 'Language',
         description: 'Choose the display language for the application.'
       },
-      controlPlane: {
+      agents: {
         title: 'Control Plane Cores',
         description:
           'Assign default CLIs for planner and verifier roles, separate from the conversation thread CLI.',
@@ -604,27 +605,26 @@ export default {
         milestoneVerifier: 'Milestone Verifier',
         unavailable: 'unavailable'
       },
-      skills: {
-        title: 'Business Skills',
+      providers: {
+        title: 'Provider Runtime',
+        description: 'Configure provider executables, models, and runtime options.',
+        restartRequired: 'Restart the application for provider changes to take effect.'
+      },
+      secrets: {
+        title: 'Secrets',
         description:
-          'Maintain reusable business instructions and assign them to conversation, draft, Planner, and verification workflows.',
-        hint: 'Add any Skill you need. Planner and verifier Skills are captured in the execution tree when planning starts.',
-        add: 'Add Skill',
-        newSkill: 'New business Skill',
-        enabled: 'Enabled',
-        id: 'Skill ID (lowercase, digits, hyphens)',
+          'Manage encrypted secrets referenced by MCP and provider configurations. Values are never displayed after saving.',
+        empty: 'No secrets configured yet.',
         name: 'Name',
-        descriptionLabel: 'Description',
-        instructions: 'Business instructions',
-        workflows: 'Assigned workflows',
-        workflow: {
-          conversation: 'Conversation',
-          draft: 'Draft conversation',
-          planner: 'Planner',
-          taskWorker: 'Task worker',
-          sliceVerifier: 'Slice verifier',
-          milestoneVerifier: 'Milestone verifier'
-        }
+        value: 'Value',
+        add: 'Add or replace secret',
+        delete: 'Delete',
+        deleteConfirm: 'Delete secret "{name}"? This cannot be undone.',
+        saveSuccess: 'Secret saved',
+        loadFailed: 'Failed to load secrets',
+        saveFailed: 'Failed to save secret',
+        deleteFailed: 'Failed to delete secret',
+        configured: 'Configured'
       },
       prompts: {
         title: 'Prompt Policies',
@@ -646,8 +646,9 @@ export default {
           'Only user extension MCP belongs here. Controlled role MCP is injected per session at runtime and merged without exposing either side.',
         roles: {
           conversation: 'Conversation',
+          planner: 'Planner',
           task: 'Task execution',
-          verification: 'Verification (Planner / Verifier)'
+          verification: 'Verification'
         },
         rootKey: 'Root key: {key}',
         resetCli: 'Clear',

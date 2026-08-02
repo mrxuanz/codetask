@@ -56,12 +56,9 @@ export default defineConfig(
   },
   {
     files: [
-      'src/shared/contracts/control-plane/**/*.{ts,tsx}',
-      'src/server/{domain,application}/**/*.{ts,tsx}',
-      'src/server/infra/sqlite/control-plane/**/*.{ts,tsx}',
-      'src/server/http/v3/**/*.{ts,tsx}',
-      'src/renderer/src/stores/**/*.{ts,tsx}',
-      'tests/control-plane/**/*.{ts,tsx}'
+      'src/server/application/**/*.{ts,tsx}',
+      'packages/server-core/src/modules/execution/**/*.{ts,tsx}',
+      'src/renderer/src/stores/**/*.{ts,tsx}'
     ],
     rules: {
       '@typescript-eslint/ban-ts-comment': [

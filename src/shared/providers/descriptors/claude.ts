@@ -23,7 +23,6 @@ export const CLAUDE_DESCRIPTOR = Object.freeze({
     supportedProfiles: [
       'chat-write',
       'chat-read',
-      'create-task-read',
       'planner-read',
       'task-sandbox',
       'verifier-sandbox'

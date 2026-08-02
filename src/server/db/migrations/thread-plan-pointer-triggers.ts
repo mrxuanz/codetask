@@ -7,6 +7,12 @@ function tableExists(db: Database.Database, table: string): boolean {
   return Boolean(row)
 }
 
+function columnExists(db: Database.Database, table: string, column: string): boolean {
+  if (!tableExists(db, table)) return false
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  return cols.some((col) => col.name === column)
+}
+
 export function dropThreadPlanPointerTriggers(db: Database.Database): void {
   db.exec(`
     DROP TRIGGER IF EXISTS threads_active_plan_insert;
@@ -17,6 +23,12 @@ export function dropThreadPlanPointerTriggers(db: Database.Database): void {
 }
 
 export function createThreadPlanPointerTriggers(db: Database.Database): void {
+  // Migration 055 drops threads.active_plan_id; skip recreate after that.
+  if (!columnExists(db, 'threads', 'active_plan_id')) {
+    dropThreadPlanPointerTriggers(db)
+    return
+  }
+
   const hasDesignSessions = tableExists(db, 'design_sessions')
 
   if (hasDesignSessions) {

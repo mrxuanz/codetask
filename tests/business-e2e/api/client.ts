@@ -102,7 +102,7 @@ export class PublicApiClient {
   }
 
   async bootstrap(auth = false): Promise<Record<string, unknown>> {
-    const result = await this.request<Record<string, unknown>>('GET', '/api/bootstrap', undefined, {
+    const result = await this.request<Record<string, unknown>>('GET', '/api/auth/bootstrap', undefined, {
       operationId: 'auth.bootstrap',
       auth
     })

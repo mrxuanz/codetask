@@ -29,28 +29,29 @@ export const CASE_ALIASES: Record<string, string> = {
   'chat-create-html': 'CHAT-HTML-001',
   // legacy aliases first so preferred slugs win CASE_SLUG_BY_ID reverse map
   'chat-image-ocr': 'CHAT-IMG-001',
-  'draft-image-ocr': 'DRAFT-CHAT-IMG-001',
   'chat-image-attachment': 'CHAT-IMG-001',
-  'draft-chat-image-attachment': 'DRAFT-CHAT-IMG-001',
 
-  // Part B — draft → execution tree → job (one chain)
+  // Part B — Design draft smoke (architecture 03)
   foundation: 'FOUNDATION-FAKE-001',
-  'draft-fuzzy': 'G4-001',
-  'draft-staged': 'G4-002',
-  'draft-fields': 'G4-003',
-  'draft-confirm': 'G4-012',
-  'draft-multiturn': 'DRAFT-MULTITURN-001',
-  'draft-reference-path-job': 'DRAFT-REF-PATH-001',
-  'notes-search': 'G6-001',
-  'notes-search-oracle-trap': 'G6-002',
-  'job-chat-readonly': 'JOB-CHAT-RO-001',
+  // Friendly aliases → Design smoke (create_task-era cases deleted)
+  'draft-fuzzy': 'DESIGN-DRAFT-001',
+  'draft-staged': 'DESIGN-DRAFT-001',
+  'draft-fields': 'DESIGN-DRAFT-001',
+  'draft-confirm': 'DESIGN-DRAFT-001',
+  'draft-multiturn': 'DESIGN-DRAFT-001',
+  'draft-reference-path-job': 'DESIGN-DRAFT-001',
+  'draft-chat-image-attachment': 'DESIGN-DRAFT-001',
+  'draft-image-ocr': 'DESIGN-DRAFT-001',
+  'notes-search': 'DESIGN-DRAFT-001',
+  'notes-search-oracle-trap': 'DESIGN-DRAFT-001',
+  'job-chat-readonly': 'DESIGN-DRAFT-001',
+  'fixed-opencode-chain': 'DESIGN-DRAFT-001',
+  'full-chain': 'DESIGN-DRAFT-001',
+  // preferred slug last so CASE_SLUG_BY_ID wins
+  'design-draft': 'DESIGN-DRAFT-001',
 
   // Phase 3 — settings user MCP (conversation / task / verification)
-  'settings-mcp-probe': 'SETTINGS-MCP-001',
-
-  // full scripted probe (`fixed-opencode-chain` retained as a legacy alias)
-  'fixed-opencode-chain': 'G8-001',
-  'full-chain': 'G8-001'
+  'settings-mcp-probe': 'SETTINGS-MCP-001'
 }
 
 /** Internal id → preferred slug (for CLI / machine logs) */
@@ -77,17 +78,9 @@ export function labelForStep(step: string): string {
 }
 
 export function partForCaseId(caseId: string): AcceptancePart | null {
-  if (caseId.startsWith('DRAFT-CHAT')) return 'conversation'
   if (caseId.startsWith('G3') || caseId.startsWith('CHAT')) return 'conversation'
   if (caseId.startsWith('SETTINGS-MCP') || caseId.startsWith('SETTINGS')) return 'settings-mcp'
-  if (caseId.startsWith('JOB-CHAT')) return 'draft-job'
-  if (
-    caseId.startsWith('G4') ||
-    caseId.startsWith('G5') ||
-    caseId.startsWith('G6') ||
-    caseId.startsWith('DRAFT') ||
-    caseId.startsWith('FOUNDATION')
-  ) {
+  if (caseId.startsWith('DESIGN') || caseId.startsWith('FOUNDATION') || caseId.startsWith('DRAFT')) {
     return 'draft-job'
   }
   if (caseId.startsWith('G0') || caseId.startsWith('G1') || caseId.startsWith('G2')) {
@@ -118,10 +111,10 @@ export const PART_DEFAULT_CASES: Record<AcceptancePart, string[]> = {
     'G0-006',
     'G2-001'
   ],
-  // Part A / phase 1: chat + attachment entry (including create_task draft binding)
-  conversation: ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001', 'DRAFT-CHAT-IMG-001'],
-  // Part B / phase 2: notes-search + reference path job + job-time chat readonly
-  'draft-job': ['G6-001', 'JOB-CHAT-RO-001', 'DRAFT-REF-PATH-001'],
+  // Part A / phase 1: ordinary chat (+ attachment when Asset Store lands)
+  conversation: ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001'],
+  // Part B: Design draft smoke
+  'draft-job': ['DESIGN-DRAFT-001'],
   // Phase 3: settings user MCP probe
   'settings-mcp': ['SETTINGS-MCP-001']
 }
@@ -160,11 +153,11 @@ const LEGACY_GATE_HINT: Record<string, string> = {
   G1: 'bootstrap (prefer --part bootstrap)',
   G2: 'bootstrap (prefer --part bootstrap)',
   G3: 'conversation (prefer --part conversation)',
-  G4: 'draft-job surface (prefer --part draft-job or --case notes-search)',
-  G5: 'draft-job surface (prefer --part draft-job or --case notes-search)',
-  G6: 'draft-job (prefer --part draft-job or --case notes-search)',
-  G7: 'post / realtime (no friendly suite yet)',
-  G8: 'post / full (prefer --suite both then expand)'
+  G4: 'draft-job (prefer --part draft-job or --case design-draft)',
+  G5: 'draft-job (prefer --part draft-job or --case design-draft)',
+  G6: 'draft-job (prefer --part draft-job or --case design-draft)',
+  G7: 'draft-job (prefer --part draft-job or --case design-draft)',
+  G8: 'draft-job (prefer --part draft-job or --case design-draft)'
 }
 
 export function resolveInternalCaseId(raw: string): string {

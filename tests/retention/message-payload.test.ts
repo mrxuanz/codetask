@@ -23,7 +23,7 @@ async function seedThread(db: ReturnType<typeof getDb>): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
   await db.insert(projects).values({
     id: 'proj-1',
-    username: 'user',
+    actorId: 'user',
     title: 'P',
     workspaceRoot: '/tmp/ws',
     createdAt: now,

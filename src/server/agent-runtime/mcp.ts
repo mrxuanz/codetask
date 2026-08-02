@@ -3,8 +3,8 @@ import { getProviderDescriptor } from '../../shared/providers/descriptors'
 import {
   CODETEAM_MANAGER_MCP_SERVER,
   MCP_HTTP_ACCEPT_HEADER_VALUE
-} from '../conversation/draft/types'
-import { allCreateTaskMcpToolNames } from '../wizard/tools'
+} from '@codetask/agent-runtime'
+import { allConversationMcpToolNames } from '../conversation/mcp/tools'
 
 export function buildHttpMcpServerConfig(url: string): {
   type: 'http'
@@ -23,7 +23,7 @@ export function buildHttpMcpServerConfig(url: string): {
 function buildCodexMcpToolApprovals(
   toolNames?: readonly string[]
 ): Record<string, { approval_mode: 'approve' }> {
-  const names = toolNames ?? allCreateTaskMcpToolNames()
+  const names = toolNames ?? allConversationMcpToolNames()
   return Object.fromEntries(names.map((name) => [name, { approval_mode: 'approve' as const }]))
 }
 

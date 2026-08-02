@@ -4,12 +4,6 @@
 // first non-protected element from the front. If every element is protected it
 // drops the head as a fallback, so the buffer never exceeds `max`.
 //
-// This differs from `event-bus.ts:trimJobSseQueue` which skips eviction when
-// every element is protected and allows the queue to grow past its limit.
-// The two implementations are intentionally separate; if event-bus ever reuses
-// this module, a deliberate choice should be made about whether to adopt the
-// "never exceed max" semantics or keep the existing "allow overflow" behaviour.
-//
 // `close` is designed for request-response transports (e.g. MCP SSE). Overflow
 // means the consumer cannot keep up; instead of silently dropping events the
 // buffer signals `overflow` so the transport can tear down the stream. Callers

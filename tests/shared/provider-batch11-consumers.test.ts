@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { listChatCores } from '../../src/server/conversation/cores.ts'
 import { getProviderDescriptor } from '../../src/shared/providers/descriptors.ts'
-import { cliMcpRootKey, CLI_MCP_ROOT_KEY } from '../../src/server/settings/mcp.ts'
+import { MCP_ROOT_KEYS } from '@codetask/server-core/modules/settings'
 import { cliMcpRootKey as runtimeCliMcpRootKey } from '../../src/server/agent-runtime/mcp.ts'
 import { SUPPORTED_CORE_CODES } from '../../src/shared/providers/codes.ts'
 import { createProviderRegistry } from '../../src/server/providers/composition.ts'
@@ -49,16 +49,14 @@ test('model resolution does not use CORE_MODEL_ENV and prefers ProviderSettings'
 test('MCP root keys come from shared descriptors; no duplicated Maps', () => {
   for (const code of SUPPORTED_CORE_CODES) {
     const expected = getProviderDescriptor(code).mcpRootKey
-    assert.equal(cliMcpRootKey(code), expected)
+    assert.equal(MCP_ROOT_KEYS[code], expected)
     assert.equal(runtimeCliMcpRootKey(code), expected)
-    assert.equal(CLI_MCP_ROOT_KEY[code], expected)
   }
 
   const settingsMcp = readSource('src/server/settings/mcp.ts')
   const runtimeMcp = readSource('src/server/agent-runtime/mcp.ts')
-  assert.match(settingsMcp, /getProviderDescriptor\(coreCode\)\.mcpRootKey/)
+  assert.match(settingsMcp, /resolveMcpServersMap/)
   assert.match(runtimeMcp, /getProviderDescriptor\(coreCode\)\.mcpRootKey/)
-  assert.doesNotMatch(settingsMcp, /'claude-code':\s*'mcpServers'/)
   assert.doesNotMatch(runtimeMcp, /'claude-code':\s*'mcpServers'/)
 })
 

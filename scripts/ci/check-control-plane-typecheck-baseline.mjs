@@ -18,12 +18,6 @@ const knownDiagnostics = [
     code: 'TS2379',
     sourceLine: 'yield* withSandboxLeaseRefresh(sandboxStream, {',
     count: 1
-  },
-  {
-    file: 'src/server/conversation/service.ts',
-    code: 'TS2379',
-    sourceLine: 'const prepared = await prepareConversationTurn({',
-    count: 1
   }
 ]
 

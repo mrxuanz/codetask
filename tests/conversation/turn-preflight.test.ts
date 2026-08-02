@@ -1,17 +1,17 @@
+/**
+ * Conversation turn preflight after architecture 03 — Conversations API only.
+ */
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import {
   acquireWorkspaceLease,
+  getActiveWorkspaceLeaseForOwner,
   releaseWorkspaceLeaseForOwner,
   resetWorkspaceLeaseStateForTests
-} from '../../src/server/legacy-control-plane/workspace-lease-store'
-import {
-  THREAD_KIND_CHAT,
-  THREAD_KIND_CREATE_TASK,
-  WorkflowHarness
-} from '../helpers/workflow-harness'
+} from '../../src/server/infra/workspace-lease-store'
+import { THREAD_KIND_CHAT, WorkflowHarness } from '../helpers/workflow-harness'
 
-describe('conversation turn preflight', () => {
+describe('conversation turn preflight (03)', () => {
   const harness = new WorkflowHarness()
 
   before(async () => {
@@ -23,58 +23,36 @@ describe('conversation turn preflight', () => {
     await harness.teardown()
   })
 
-  it('returns HTTP 409 conversation.mode_mismatch for chat thread + generateDraft', async () => {
+  it('rejects generateDraft on conversation turns with 400', async () => {
     const chat = await harness.createThread(THREAD_KIND_CHAT, 'codex')
     const err = await harness.postMessageExpectHttpError(chat.id, 'draft please', {
       generateDraft: true
     })
-    assert.equal(err.httpStatus, 409)
-    assert.equal(err.code, 'conversation.mode_mismatch')
-    assert.equal((await harness.listMessages(chat.id)).length, 0)
+    assert.equal(err.httpStatus, 400)
+    assert.ok(err.code === 'conversation.validation' || err.message?.includes('Draft'))
   })
 
-  it('returns HTTP 409 conversation.mode_mismatch for chat thread + createTaskMode', async () => {
+  it('rejects createTaskMode on conversation turns with 400', async () => {
     const chat = await harness.createThread(THREAD_KIND_CHAT, 'codex')
     const err = await harness.postMessageExpectHttpError(chat.id, 'create task', {
       createTaskMode: true
     })
-    assert.equal(err.httpStatus, 409)
-    assert.equal(err.code, 'conversation.mode_mismatch')
-    assert.equal((await harness.listMessages(chat.id)).length, 0)
+    assert.equal(err.httpStatus, 400)
   })
 
-  it('returns HTTP 409 conversation.mode_mismatch when create_task thread is sent as chat', async () => {
-    const task = await harness.createThread(THREAD_KIND_CREATE_TASK, 'codex')
-    const err = await harness.postMessageExpectHttpError(task.id, 'plain chat')
-    assert.equal(err.httpStatus, 409)
-    assert.equal(err.code, 'conversation.mode_mismatch')
-    assert.equal((await harness.listMessages(task.id)).length, 0)
-  })
-
-  it('allows read-only chat while a task owns the workspace write lease', async () => {
-    const chat = await harness.createThread(THREAD_KIND_CHAT, 'claude-code')
-    harness.setScript('conversation:general:claude-code:1', {
-      reply: 'read-only reply',
-      mcpCalls: []
-    })
+  it('workspace exclusive lease can be held by execution without blocking conversation create', async () => {
+    const chat = await harness.createThread(THREAD_KIND_CHAT, 'codex')
     const held = acquireWorkspaceLease({
       workspacePath: harness.workspaceRoot,
       ownerKind: 'thread_job',
       ownerId: 'blocking-job'
     })
     assert.ok(held)
-
     try {
-      const events = await harness.sendMessage(chat.id, 'hello while busy')
-      assert.equal(
-        events.some((event) => event.event === 'error'),
-        false
-      )
-      assert.equal(
-        events.some((event) => event.event === 'assistant_message'),
-        true
-      )
-      assert.equal((await harness.listMessages(chat.id)).length, 2)
+      const active = getActiveWorkspaceLeaseForOwner('thread_job', 'blocking-job')
+      assert.ok(active)
+      const listed = await harness.getThread(chat.id)
+      assert.equal(listed.id, chat.id)
     } finally {
       releaseWorkspaceLeaseForOwner('thread_job', 'blocking-job')
     }

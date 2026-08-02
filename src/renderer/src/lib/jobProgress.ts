@@ -1,4 +1,4 @@
-import type { ThreadJobDto } from '@shared/contracts/jobs'
+import type { PlanningSessionViewDto } from '@shared/contracts/planning-session-view'
 import {
   buildUnifiedProgressTree,
   type UnifiedMilestoneNode,
@@ -88,7 +88,7 @@ export function resolveTaskCli(
   return resolveAbilityCli(task.abilityCode, abilities)
 }
 
-export function jobCliSummary(job: Pick<ThreadJobDto, 'abilities'>): string {
+export function jobCliSummary(job: Pick<PlanningSessionViewDto, 'abilities'>): string {
   const codes = Array.from(
     new Set(
       (job.abilities ?? []).map((item) => item.recommendedCoreCode?.trim() ?? '').filter(Boolean)
@@ -98,11 +98,22 @@ export function jobCliSummary(job: Pick<ThreadJobDto, 'abilities'>): string {
 }
 
 function isExecutionPhase(status: string): boolean {
-  return ['pending', 'running', 'pausing', 'paused', 'completed', 'failed'].includes(status)
+  return [
+    'pending',
+    'queued',
+    'running',
+    'pausing',
+    'paused',
+    'completed',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'cancelling'
+  ].includes(status)
 }
 
 function resolvePendingExecutionSummary(
-  job: ThreadJobDto,
+  job: PlanningSessionViewDto,
   t: TranslateFn,
   fallback?: string | null
 ): string {
@@ -110,7 +121,7 @@ function resolvePendingExecutionSummary(
 }
 
 export function getPlanProgressSnapshot(
-  job: ThreadJobDto | null | undefined,
+  job: PlanningSessionViewDto | null | undefined,
   t: TranslateFn
 ): JobProgressSnapshot {
   const status = job?.status ?? ''
@@ -224,7 +235,7 @@ export function getPlanProgressSnapshot(
 }
 
 export function getExecutionProgressSnapshot(
-  job: ThreadJobDto | null | undefined,
+  job: PlanningSessionViewDto | null | undefined,
   t: TranslateFn
 ): JobProgressSnapshot {
   const status = job?.status ?? ''
@@ -247,7 +258,7 @@ export function getExecutionProgressSnapshot(
     (item) => item.status === 'completed' || item.status === 'skipped'
   ).length
 
-  if (status === 'pending') {
+  if (status === 'pending' || status === 'queued') {
     return {
       kind: 'execution',
       status,
@@ -259,7 +270,7 @@ export function getExecutionProgressSnapshot(
     }
   }
 
-  if (status === 'completed' || progress.phase === 'completed') {
+  if (status === 'completed' || status === 'succeeded' || progress.phase === 'completed') {
     return {
       kind: 'execution',
       status,
@@ -326,7 +337,7 @@ export function getExecutionProgressSnapshot(
 }
 
 export function getJobProgressSnapshot(
-  job: ThreadJobDto | null | undefined,
+  job: PlanningSessionViewDto | null | undefined,
   t: TranslateFn
 ): JobProgressSnapshot {
   const execution = getExecutionProgressSnapshot(job, t)
@@ -334,16 +345,19 @@ export function getJobProgressSnapshot(
   const plan = getPlanProgressSnapshot(job, t)
   if (
     plan.kind === 'plan' &&
-    (plan.stepsTotal > 0 || job?.status === 'planning' || job?.status === 'pending')
+    (plan.stepsTotal > 0 ||
+      job?.status === 'planning' ||
+      job?.status === 'pending' ||
+      job?.status === 'queued')
   )
     return plan
   return plan.kind !== 'idle' ? plan : execution
 }
 
-export function jobStatusLabel(status: string, t: TranslateFn, job?: ThreadJobDto | null): string {
+export function jobStatusLabel(status: string, t: TranslateFn, job?: PlanningSessionViewDto | null): string {
   if (isExecutionDisplayStatus(status)) {
     const queueLabel = job ? formatExecutionQueueLabel(t, job.queue) : null
-    if (queueLabel && status === 'pending') return queueLabel
+    if (queueLabel && (status === 'pending' || status === 'queued')) return queueLabel
     return t(resolveJobStatusBadgeKey(status))
   }
   const key = `workspace.tasks.status.${status}` as const
@@ -392,7 +406,7 @@ export function formatSliceTitle(title: string, order: number, t: TranslateFn): 
 }
 
 export function buildPlanTree(
-  job: ThreadJobDto | null | undefined,
+  job: PlanningSessionViewDto | null | undefined,
   _t: TranslateFn
 ): UnifiedMilestoneNode[] {
   if (!job) return []
@@ -516,7 +530,7 @@ const LIFECYCLE_ONLY_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 export function resolveJobListStatusBadge(
   status: string,
   t: TranslateFn,
-  job?: ThreadJobDto | null
+  job?: PlanningSessionViewDto | null
 ): { label: string; className: string } {
   if (LIFECYCLE_ONLY_STATUSES.has(status)) {
     const bucket = resolveJobLifecycleBucket(status)
@@ -527,7 +541,10 @@ export function resolveJobListStatusBadge(
   }
   if (isExecutionDisplayStatus(status)) {
     const display = resolveJobStatusDisplay(status)
-    const queueLabel = status === 'pending' ? formatExecutionQueueLabel(t, job?.queue) : null
+    const queueLabel =
+      status === 'pending' || status === 'queued'
+        ? formatExecutionQueueLabel(t, job?.queue)
+        : null
     return {
       label: queueLabel ?? t(display.badge),
       className: resolveJobStatusBadgeClass(status)

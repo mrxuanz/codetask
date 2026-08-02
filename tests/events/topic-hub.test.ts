@@ -1,97 +1,91 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import test from 'node:test'
 import {
-  jobIdFromTopic,
+  jobIdFromRealtimeTopic,
   jobTopic,
-  parseHubTopic,
-  threadIdFromTopic,
-  threadTopic,
-  turnIdFromTopic,
-  turnTopic
-} from '../../src/shared/contracts/job-event-hub'
+  parseRealtimeTopic,
+  conversationIdFromRealtimeTopic,
+  conversationTopic,
+  turnIdFromRealtimeTopic,
+  conversationTurnTopic,
+  SETTINGS_SELF_TOPIC
+} from '../../packages/contracts/src/events.ts'
 import { parseSseBlock } from '../../src/shared/sse'
-import { JobEventBus, enqueueHubEvent } from '../../src/server/context/event-bus'
-import type { HubEvent } from '../../src/shared/contracts/job-event-hub'
-import { registerJobHubConnection } from '../../src/server/events/job-event-hub'
+import { LiveFanout } from '../../packages/server-core/src/modules/realtime/live-fanout.ts'
 
-test('parseHubTopic accepts job, thread, and turn topics', () => {
-  assert.equal(parseHubTopic('job:abc'), 'job:abc')
-  assert.equal(parseHubTopic('thread:t1'), 'thread:t1')
-  assert.equal(parseHubTopic('turn:u1'), 'turn:u1')
-  assert.equal(parseHubTopic('other:x'), null)
-  assert.equal(parseHubTopic('job:'), null)
+test('parseRealtimeTopic accepts canonical topics only', () => {
+  assert.equal(parseRealtimeTopic('job:abc'), 'job:abc')
+  assert.equal(parseRealtimeTopic('conversation:t1'), 'conversation:t1')
+  assert.equal(parseRealtimeTopic('conversation-turn:u1'), 'conversation-turn:u1')
+  assert.equal(parseRealtimeTopic(SETTINGS_SELF_TOPIC), SETTINGS_SELF_TOPIC)
+  assert.equal(parseRealtimeTopic('thread:t1'), null)
+  assert.equal(parseRealtimeTopic('turn:u1'), null)
+  assert.equal(parseRealtimeTopic('other:x'), null)
+  assert.equal(parseRealtimeTopic('job:'), null)
 })
 
 test('topic helpers round-trip ids', () => {
-  assert.equal(jobIdFromTopic(jobTopic('j1')), 'j1')
-  assert.equal(threadIdFromTopic(threadTopic('t1')), 't1')
-  assert.equal(turnIdFromTopic(turnTopic('x')), 'x')
-  assert.equal(jobIdFromTopic(threadTopic('t1')), null)
+  assert.equal(jobIdFromRealtimeTopic(jobTopic('j1')), 'j1')
+  assert.equal(conversationIdFromRealtimeTopic(conversationTopic('t1')), 't1')
+  assert.equal(turnIdFromRealtimeTopic(conversationTurnTopic('x')), 'x')
+  assert.equal(jobIdFromRealtimeTopic(conversationTopic('t1')), null)
 })
 
 test('parseSseBlock reads id field', () => {
-  const parsed = parseSseBlock('id: 42\nevent: hub\ndata: {"seq":42}')
+  const parsed = parseSseBlock('id: 42\nevent: domain\ndata: {"eventId":42}')
   assert.ok(parsed)
   assert.equal(parsed?.id, '42')
-  assert.equal(parsed?.event, 'hub')
+  assert.equal(parsed?.event, 'domain')
 })
 
-test('JobEventBus fans out by topic', () => {
-  const bus = new JobEventBus()
-  const seen: HubEvent[] = []
-  const unsub = bus.subscribe(jobTopic('j1'), (event) => {
-    seen.push(event)
-  })
-  bus.emit(jobTopic('j1'), {
-    event: 'error',
-    data: { message: 'x' }
-  })
-  bus.emit(jobTopic('other'), {
-    event: 'error',
-    data: { message: 'y' }
-  })
-  assert.equal(seen.length, 1)
-  assert.equal(seen[0].event, 'error')
-  unsub()
-})
-
-test('enqueueHubEvent coalesces task_progress', () => {
-  const queue: HubEvent[] = []
-  enqueueHubEvent(queue, {
-    event: 'task_progress',
-    data: {
-      taskProgress: { phase: 'running', status: 'running', currentIndex: 0, total: 1, tasks: [] }
-    }
-  })
-  enqueueHubEvent(queue, {
-    event: 'task_progress',
-    data: {
-      taskProgress: { phase: 'running', status: 'running', currentIndex: 2, total: 1, tasks: [] }
-    }
-  })
-  assert.equal(queue.length, 1)
-  if (queue[0].event === 'task_progress') {
-    assert.equal(queue[0].data.taskProgress.currentIndex, 2)
+test('LiveFanout coalesces progress events and broadcasts settings:self', () => {
+  const fanout = new LiveFanout()
+  const conn = {
+    actorId: 'a1',
+    sessionId: 's1',
+    connectionId: 'c1',
+    topics: new Set<string>(['job:j1', SETTINGS_SELF_TOPIC]),
+    queue: [] as import('@codetask/contracts').RealtimeEnvelope[],
+    queuedBytes: 0,
+    lastDeliveredEventId: 0,
+    resolveWait: null as (() => void) | null,
+    closed: false,
+    overflow: false
   }
-})
+  fanout.register(conn)
 
-test('connection hub coalesces snapshots and rate-limits overflow warnings', () => {
-  const source = readFileSync(join(process.cwd(), 'src/server/events/job-event-hub.ts'), 'utf8')
-  assert.match(source, /replaceQueuedSnapshot/)
-  assert.match(source, /OVERFLOW_WARN_INTERVAL_MS/)
-  assert.match(source, /droppedSinceOverflowWarn/)
-})
+  fanout.publish('a1', {
+    eventId: null,
+    ephemeral: true,
+    topic: 'job:j1',
+    type: 'assistant.text.delta',
+    entityId: 'j1',
+    occurredAt: 1,
+    payload: { content: 'a' }
+  })
+  fanout.publish('a1', {
+    eventId: null,
+    ephemeral: true,
+    topic: 'job:j1',
+    type: 'assistant.text.delta',
+    entityId: 'j1',
+    occurredAt: 2,
+    payload: { content: 'b' }
+  })
+  assert.equal(conn.queue.length, 1)
+  assert.deepEqual(conn.queue[0]?.payload, { content: 'b' })
 
-test('hub reconnect with unknown Last-Event-ID emits resync', async () => {
-  const first = registerJobHubConnection('u-resync', 'conn-resync')
-  first.close()
-
-  const second = registerJobHubConnection('u-resync', 'conn-resync', { lastEventId: 99 })
-  const iter = second.stream[Symbol.asyncIterator]()
-  const firstChunk = await iter.next()
-  assert.equal(firstChunk.done, false)
-  assert.equal(firstChunk.value?.event, 'resync')
-  second.close()
+  fanout.publish('other-actor', {
+    eventId: 1,
+    ephemeral: false,
+    topic: SETTINGS_SELF_TOPIC,
+    type: 'settings.changed',
+    entityId: 'agent_defaults',
+    entityRevision: 3,
+    occurredAt: 3,
+    payload: { namespace: 'agent_defaults', revision: 3 }
+  })
+  assert.equal(conn.queue.some((item) => item.type === 'settings.changed'), true)
+  conn.closed = true
+  fanout.unregister(LiveFanout.connectionKey('a1', 's1', 'c1'))
 })

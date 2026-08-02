@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import type { TaskProgressSliceDto } from '../legacy-control-plane/types'
+import type { TaskProgressSliceDto } from '../infra/job-progress-types'
 import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
 import { getDb } from '../db'
 import { threadJobs } from '../db/schema'
@@ -19,7 +19,6 @@ import {
   pruneStaleThreadAttachmentDirs,
   wipeLegacyProductRuntimes
 } from './janitor'
-import { pruneEmptyCreateTaskThreads } from '../threads/service'
 import {
   deleteExpiredDesignPlanRevisions,
   finalizeDesignPlanRevisions
@@ -60,7 +59,7 @@ export async function onJobStatusTransition(input: {
         getDb(),
         input.jobId,
         revision,
-        artifactExpirySec(readRetentionSettings(ctx.settings), 'working')
+        artifactExpirySec(readRetentionSettings(ctx.config), 'working')
       )
     }
   }
@@ -76,7 +75,7 @@ export async function onJobReachedTerminal(
 ): Promise<void> {
   const ctx = getAppContext()
   const db = getDb()
-  const settings = readRetentionSettings(ctx.settings)
+  const settings = readRetentionSettings(ctx.config)
   const now = nowSec()
 
   await db
@@ -148,21 +147,20 @@ export async function runRetentionJanitorPass(): Promise<{
   legacyRuntimesRemoved: number
   orphanMessageArtifacts: number
   staleAttachmentDirs: number
-  emptyCreateTaskThreads: number
   sqliteMaintenance: { ran: boolean; vacuumedPages: number }
   expiredDesignRevisions: number
   orphanJobArtifactFiles: number
+  expiredRealtimeEvents: number
 }> {
   const ctx = getAppContext()
   const db = getDb()
-  const settings = readRetentionSettings(ctx.settings)
+  const settings = readRetentionSettings(ctx.config)
   const [
     artifacts,
     attachments,
     legacyRuntimes,
     messageArtifacts,
     staleAttachmentDirs,
-    emptyCreateTaskThreads,
     orphanJobArtifactFiles
   ] = await Promise.all([
     deleteExpiredArtifacts(db, ctx.dataDir),
@@ -170,11 +168,11 @@ export async function runRetentionJanitorPass(): Promise<{
     wipeLegacyProductRuntimes(ctx.dataDir),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
-    pruneEmptyCreateTaskThreads(),
     pruneOrphanJobArtifactFiles(ctx.dataDir, db)
   ])
 
   const expiredDesignRevisions = deleteExpiredDesignPlanRevisions(db)
+  const expiredRealtimeEvents = ctx.realtime.janitorOnce()
 
   const sqliteMaintenance = runSqliteMaintenanceIfDue({
     db,
@@ -188,13 +186,13 @@ export async function runRetentionJanitorPass(): Promise<{
     legacyRuntimesRemoved: legacyRuntimes.removed,
     orphanMessageArtifacts: messageArtifacts.removed,
     staleAttachmentDirs: staleAttachmentDirs.removed,
-    emptyCreateTaskThreads: emptyCreateTaskThreads.removed,
     sqliteMaintenance: {
       ran: sqliteMaintenance.ran,
       vacuumedPages: sqliteMaintenance.vacuumedPages
     },
     expiredDesignRevisions: expiredDesignRevisions.deleted,
-    orphanJobArtifactFiles: orphanJobArtifactFiles.removed
+    orphanJobArtifactFiles: orphanJobArtifactFiles.removed,
+    expiredRealtimeEvents
   }
 }
 
@@ -202,7 +200,7 @@ let janitorTimer: NodeJS.Timeout | null = null
 
 export function startRetentionJanitor(): void {
   if (janitorTimer) return
-  const settings = readRetentionSettings(getAppContext().settings)
+  const settings = readRetentionSettings(getAppContext().config)
   const intervalMs = Math.max(1, settings.pruneIntervalHours) * 3_600_000
 
   void runRetentionJanitorPass().catch((error) => {

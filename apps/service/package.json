@@ -1,0 +1,13 @@
+{
+  "name": "@codetask/service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --import ../../tests/tsx-tsconfig.mjs src/main.ts",
+    "start": "tsx --import ../../tests/tsx-tsconfig.mjs src/main.ts"
+  },
+  "dependencies": {
+    "@codetask/server-core": "*"
+  }
+}

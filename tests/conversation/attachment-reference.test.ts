@@ -60,3 +60,31 @@ test('attachment reference paths', async (t) => {
   assert.notEqual(roots[0], join(dataDir, 'assets', 'attachments', threadId))
   assert.notEqual(roots[0], dataDir)
 })
+
+test('conversation conv_* ids can own attachment files', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-attachment-conv-'))
+  bootstrapRuntime({ dataDir })
+
+  t.after(async () => {
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  const conversationId = `conv_${'a'.repeat(32)}`
+  const attachment = saveThreadAttachment({
+    threadId: conversationId,
+    name: 'shot.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('png')
+  })
+  assert.match(attachment.id, /^att-/)
+  assert.match(attachment.assetUrl, /\/api\/conversations\//)
+  assert.ok(attachment.assetUrl.includes(conversationId))
+
+  const roots = resolveTurnAttachmentReadRoots({
+    threadId: conversationId,
+    attachments: [attachment]
+  })
+  assert.equal(roots.length, 1)
+  assert.ok(roots[0]!.includes(conversationId))
+})

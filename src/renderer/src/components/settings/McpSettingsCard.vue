@@ -6,18 +6,18 @@ import type {
   CliMcpConfigFragment,
   McpSettingsConstraints,
   UserMcpRoleKey,
-  UserMcpSettings
+  AgentMcpSettings
 } from '@renderer/api/settings'
 
 const props = defineProps<{
-  draft: UserMcpSettings
+  draft: AgentMcpSettings
   cores: AgentCoreOption[]
   constraints: McpSettingsConstraints
   disabled?: boolean
 }>()
 
 const emit = defineEmits<{
-  update: [settings: UserMcpSettings]
+  update: [settings: AgentMcpSettings]
 }>()
 
 const { t } = useI18n()
@@ -27,6 +27,7 @@ const parseErrors = ref<Record<string, string>>({})
 
 const roles = computed(() => [
   { key: 'conversation' as const, label: t('workspace.settings.mcp.roles.conversation') },
+  { key: 'planner' as const, label: t('workspace.settings.mcp.roles.planner') },
   { key: 'task' as const, label: t('workspace.settings.mcp.roles.task') },
   { key: 'verification' as const, label: t('workspace.settings.mcp.roles.verification') }
 ])
@@ -46,7 +47,7 @@ function editorKey(role: UserMcpRoleKey, code: string): string {
 }
 
 function fragmentText(role: UserMcpRoleKey, code: string): string {
-  const fragment = props.draft[role]?.[code]
+  const fragment = props.draft.roles[role]?.[code]
   return JSON.stringify(fragment ?? { [rootKey(code)]: {} }, null, 2)
 }
 
@@ -56,10 +57,12 @@ function updateFragment(role: UserMcpRoleKey, code: string, raw: string): void {
     const parsed = JSON.parse(raw) as CliMcpConfigFragment
     parseErrors.value = { ...parseErrors.value, [key]: '' }
     emit('update', {
-      ...props.draft,
-      [role]: {
-        ...props.draft[role],
-        [code]: parsed
+      roles: {
+        ...props.draft.roles,
+        [role]: {
+          ...props.draft.roles[role],
+          [code]: parsed
+        }
       }
     })
   } catch (error) {

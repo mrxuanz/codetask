@@ -1,6 +1,6 @@
-import type { ApiResponse } from '@shared/contracts/api'
+import type { ApiResponse } from '../shared/contracts/api.ts'
 
-export type { ApiResponse } from '@shared/contracts/api'
+export type { ApiResponse } from '../shared/contracts/api.ts'
 
 export function ok<T>(
   data: T,

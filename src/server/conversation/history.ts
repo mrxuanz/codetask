@@ -1,6 +1,4 @@
 import type { ConversationMessageDto } from './types'
-import type { WizardPhase } from '../wizard/types'
-import { WIZARD_PHASE_COLLECT } from '../wizard/types'
 
 const DEFAULT_HISTORY_LIMIT = 30
 const MAX_HISTORY_CHARS = 32_000
@@ -18,14 +16,11 @@ function isHistoryEligible(message: ConversationMessageDto): boolean {
   if (message.role !== 'user' && message.role !== 'assistant') {
     return false
   }
-  return message.kind === 'text' || message.kind === 'task-launch-draft'
+  return message.kind === 'text'
 }
 
 function formatHistoryMessage(message: ConversationMessageDto): string | null {
-  let content = message.content.trim()
-  if (message.kind === 'task-launch-draft') {
-    content = `[Task launch draft] ${content}`
-  }
+  const content = message.content.trim()
   if (!content) {
     return null
   }
@@ -38,46 +33,12 @@ function formatHistoryMessage(message: ConversationMessageDto): string | null {
   return `**${role}${coreNote}:** ${content}`
 }
 
-export function findLatestHandoff(
-  messages: ConversationMessageDto[]
-): ConversationMessageDto | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i]
-    if (message !== undefined && message.kind === 'wizard-handoff') return message
-  }
-  return null
-}
-
-function filterMessagesForWizardPhase(
-  messages: ConversationMessageDto[],
-  wizardPhase: WizardPhase
-): ConversationMessageDto[] {
-  return messages.filter((message) => {
-    if (message.kind === 'wizard-handoff') return false
-    if (!message.wizardPhase) return wizardPhase === WIZARD_PHASE_COLLECT
-    return message.wizardPhase === wizardPhase
-  })
-}
-
-export function buildHandoffHistoryBlock(handoff: ConversationMessageDto | null): string | null {
-  if (!handoff) return null
-  const payload = handoff.payload as { requirementsSummary?: string; reason?: string } | undefined
-  const lines = [
-    '## Phase handoff',
-    handoff.content.trim(),
-    payload?.reason ? `Rollback reason: ${payload.reason}` : ''
-  ].filter(Boolean)
-  return lines.join('\n\n')
-}
-
 export function shouldSeedConversationHistory(
   runtimeSessionId: string | null | undefined,
   currentCoreCode: string,
   priorMessages: ConversationMessageDto[],
   options?: {
     excludeMessageId?: string
-    wizardPhase?: WizardPhase | undefined
-    createTaskMode?: boolean
   }
 ): boolean {
   const prior = priorMessages
@@ -90,14 +51,6 @@ export function shouldSeedConversationHistory(
 
   if (ALWAYS_SEED_HISTORY_CORES.has(currentCoreCode)) {
     return true
-  }
-
-  if (options?.createTaskMode) {
-    if (!runtimeSessionId) return true
-    const hasCurrentCoreMessages = prior.some((message) => message.coreCode === currentCoreCode)
-    if (!hasCurrentCoreMessages) return true
-    const last = prior.at(-1)
-    return Boolean(last && last.coreCode !== currentCoreCode)
   }
 
   if (!runtimeSessionId) {
@@ -118,38 +71,20 @@ export function buildConversationHistoryBlock(
   options?: {
     excludeMessageId?: string
     limit?: number
-    wizardPhase?: WizardPhase | undefined
-    createTaskMode?: boolean
   }
 ): string | null {
   const limit = options?.limit ?? DEFAULT_HISTORY_LIMIT
-  const handoff = findLatestHandoff(messages)
-  const handoffBlock = buildHandoffHistoryBlock(handoff)
 
-  let scoped = messages.filter((message) => message.id !== options?.excludeMessageId)
-
-  if (options?.createTaskMode && options.wizardPhase) {
-    if (handoff) {
-      const handoffAt = handoff.createdAt
-      scoped = scoped.filter(
-        (message) =>
-          message.createdAt >= handoffAt &&
-          (message.wizardPhase === options.wizardPhase || !message.wizardPhase)
-      )
-    } else {
-      scoped = filterMessagesForWizardPhase(scoped, options.wizardPhase)
-    }
-    scoped = scoped.filter(isHistoryEligible)
-  } else {
-    scoped = scoped.filter(isHistoryEligible)
-  }
+  const scoped = messages
+    .filter((message) => message.id !== options?.excludeMessageId)
+    .filter(isHistoryEligible)
 
   const lines = scoped
     .slice(-limit)
     .map(formatHistoryMessage)
     .filter((line): line is string => Boolean(line))
 
-  if (lines.length === 0 && !handoffBlock) {
+  if (lines.length === 0) {
     return null
   }
 
@@ -158,39 +93,13 @@ export function buildConversationHistoryBlock(
     body = `…(earlier messages truncated)\n\n${body.slice(-MAX_HISTORY_CHARS)}`
   }
 
-  const sections: string[] = []
-  if (handoffBlock && options?.createTaskMode) {
-    sections.push(handoffBlock)
-  }
-  if (body) {
-    sections.push(
-      [
-        '## Prior conversation',
-        options?.createTaskMode
-          ? 'Messages from the current wizard phase only.'
-          : 'These messages were exchanged earlier in this thread (possibly with another CLI).',
-        'Use them as established context for the current turn.',
-        '',
-        body
-      ].join('\n')
-    )
-  }
-
-  return sections.join('\n\n')
-}
-
-export function isFirstWizardPhaseTurn(
-  messages: ConversationMessageDto[],
-  options: {
-    excludeMessageId?: string
-    wizardPhase: WizardPhase
-  }
-): boolean {
-  const prior = messages
-    .filter((message) => message.id !== options.excludeMessageId)
-    .filter(isHistoryEligible)
-  const scoped = filterMessagesForWizardPhase(prior, options.wizardPhase)
-  return scoped.length === 0
+  return [
+    '## Prior conversation',
+    'These messages were exchanged earlier in this thread (possibly with another CLI).',
+    'Use them as established context for the current turn.',
+    '',
+    body
+  ].join('\n')
 }
 
 export function augmentPromptWithHistory(prompt: string, historyBlock: string | null): string {

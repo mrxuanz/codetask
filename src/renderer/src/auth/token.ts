@@ -1,3 +1,4 @@
+/** Remove only deprecated renderer credentials; the session itself is HttpOnly. */
 const LEGACY_TOKEN_KEY = 'task_token'
 const LEGACY_EXPIRES_KEY = 'task_token_expires'
 const CSRF_COOKIE = 'codetask_csrf'
@@ -14,7 +15,7 @@ function readCookie(name: string): string | null {
   return null
 }
 
-/** Remove only deprecated renderer credentials; the session itself is HttpOnly. */
+/** One-shot cleanup of pre-04 localStorage tokens; never write session tokens here. */
 export function clearToken(): void {
   localStorage.removeItem(LEGACY_TOKEN_KEY)
   localStorage.removeItem(LEGACY_EXPIRES_KEY)

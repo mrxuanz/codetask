@@ -2,8 +2,8 @@ import { existsSync, realpathSync } from 'fs'
 import { dirname } from 'path'
 import { getAppContext } from '../bootstrap'
 import { threadAttachmentsDir } from '../data-paths'
-import type { JobReferenceManifest } from '@shared/job-references'
-import type { TaskLaunchDraftPayload } from '../conversation/draft/types'
+import type { JobReferenceManifest } from '../../shared/job-references.ts'
+import type { TaskLaunchDraftPayload } from '../../shared/contracts/task-launch-draft.ts'
 import {
   resolveAttachmentRelativePath,
   resolveTurnAttachmentReadRoots

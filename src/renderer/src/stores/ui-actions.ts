@@ -11,12 +11,7 @@ export interface JobAction {
   readonly enabled: boolean
 }
 
-const ACTIVE_JOB_STATES = new Set([
-  'planning_running',
-  'execution_running',
-  'pausing',
-  'applying_changes'
-])
+const ACTIVE_JOB_STATES = new Set(['running', 'pausing', 'cancelling'])
 
 export function getAvailableActions(job: { availableActions: readonly string[] }): readonly JobAction[] {
   return job.availableActions.map(action => ({
@@ -31,7 +26,9 @@ function getActionLabel(action: string): string {
     case 'pause': return 'Pause'
     case 'continue': return 'Continue'
     case 'cancel': return 'Cancel'
-    case 'restart_execution': return 'Restart'
+    case 'restart':
+    case 'restart_execution':
+      return 'Restart'
     case 'replan': return 'Replan'
     case 'confirm_plan': return 'Confirm Plan'
     case 'edit_plan': return 'Edit Plan'

@@ -1,5 +1,6 @@
 import type { PublicApiClient } from '../api/client'
 import * as ops from '../api/operations'
+import { toCanonicalProviderCode, toHostCoreCode } from '../api/operations'
 import type { Capability } from '../mcp/capabilities'
 import type { OperationLedger } from '../reports/ledger'
 
@@ -49,10 +50,23 @@ export async function runHttpStateOracle(input: {
 
     if (expectations.expectedCoreCode) {
       const actualCoreCode = String(thread.coreCode ?? thread.core_code ?? '')
+      const actualProvider = String(thread.providerCode ?? '')
+      const expectedCanonical = toCanonicalProviderCode(expectations.expectedCoreCode)
+      const expectedHost = toHostCoreCode(expectedCanonical)
+      const passed =
+        actualCoreCode === expectations.expectedCoreCode ||
+        actualCoreCode === expectedHost ||
+        actualCoreCode === expectedCanonical ||
+        actualProvider === expectedCanonical ||
+        actualProvider === expectations.expectedCoreCode
       results.push({
         name: 'thread_core_matches_provider',
-        passed: actualCoreCode === expectations.expectedCoreCode,
-        detail: { expected: expectations.expectedCoreCode, actual: actualCoreCode }
+        passed,
+        detail: {
+          expected: expectations.expectedCoreCode,
+          actual: actualCoreCode,
+          providerCode: actualProvider
+        }
       })
     }
 

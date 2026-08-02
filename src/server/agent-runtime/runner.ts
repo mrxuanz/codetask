@@ -7,16 +7,15 @@ import { isTestFakeProvider } from './providers/test-overrides'
 import { resolveRoleMcpToolNames, type ConversationRole } from './roles'
 import { compactTurnChunkForIpc } from './chunk-ipc'
 import { resolveTurnMaxRetries, streamWithTurnRetry } from './retry'
-import { resolveUserMcpServersMap } from '../settings/mcp'
 import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './types'
 import { resolveDownstreamAbortSignal } from '../context/request-abort'
 import { getAppConfig } from '../bootstrap'
-import { getWorkspaceLeaseContext } from '../legacy-control-plane/workspace-lease-context'
+import { getWorkspaceLeaseContext } from '../infra/workspace-lease-context'
 import {
   isWorkspaceLeaseActive,
   refreshWorkspaceLease
-} from '../legacy-control-plane/workspace-lease-store'
-import { getExecutionRunContext } from '../legacy-control-plane/execution-run-context'
+} from '../infra/workspace-lease-store'
+import { getExecutionRunContext } from '../infra/execution-run-context'
 import {
   assertCapabilityProfileMatchesRole,
   assertProviderSupportsCapability,
@@ -36,7 +35,7 @@ async function* withSandboxLeaseRefresh<T>(
   }
 ): AsyncGenerator<T> {
   const KEEPALIVE_INTERVAL_MS = 60_000
-  const { refreshWorkloadLease } = await import('../legacy-control-plane/workload-slot-store')
+  const { refreshWorkloadLease } = await import('../infra/workload-lease-stub')
   let refreshPending = false
   const abortForLeaseLoss = (error: unknown): void => {
     const cause =
@@ -151,9 +150,10 @@ async function* streamAgentTurnOnce(
     throw new Error(`${driver.descriptor.label} is disabled or no executable was found`)
   }
   const providerSettings = driver?.settings
+  // Frozen SettingsSnapshot only — never re-read live app_settings mid-turn (05 DoD).
   const userMcpServers = capabilityProfileIsReadOnly(input.capabilityProfile)
     ? {}
-    : (input.userMcpServers ?? resolveUserMcpServersMap(input.provider, input.role))
+    : (input.userMcpServers ?? {})
 
   if (input.capabilityProfile === 'chat-write' && input.workspaceAccess !== 'exclusive-write') {
     throw new SandboxError(

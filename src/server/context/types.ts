@@ -1,5 +1,4 @@
 import type { AppDatabase } from '../db'
-import type { JobEventBus } from './event-bus'
 import type { JobExecutionRuntimeRegistry } from './job-execution-runtime'
 import type { RuntimeRegistry } from './runtime-registry'
 import type { SettingsStore } from './settings-store'
@@ -8,6 +7,7 @@ import type { AppConfig } from '../config/app-config'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderRuntimeManager } from '../providers/lifecycle'
 import type { SecureAuthService } from '../auth/service'
+import type { RealtimeModule } from '@codetask/server-core'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
@@ -21,7 +21,8 @@ export interface AppContext {
   dataDir: string
   db: AppDatabase
   settings: SettingsStore
-  eventBus: JobEventBus
+  /** Unified durable + ephemeral browser realtime gateway (06). */
+  realtime: RealtimeModule
   runtimeRegistry: RuntimeRegistry
   executionRuntime: JobExecutionRuntimeRegistry
   providerRegistry: ProviderRegistry

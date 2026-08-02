@@ -1,11 +1,34 @@
 import { randomUUID } from 'crypto'
 import { and, desc, eq } from 'drizzle-orm'
+import type Database from 'better-sqlite3'
 import { AppError } from '../error'
-import { getDb } from '../db'
+import { getDb, type AppDatabase } from '../db'
 import { conversationTurns, projects, threadJobs, type Project } from '../db/schema'
-import { controlJobs } from '../infra/sqlite/control-plane/schema'
-import { findWorkspaceLeaseConflictSnapshot } from '../legacy-control-plane/workspace-lease-store'
+import { findWorkspaceLeaseConflictSnapshot } from '../infra/workspace-lease-store'
 import { cleanDisplayPath, inferTitleFromPath, normalizeWorkspacePath } from '../fs'
+
+function getSqliteClient(db: AppDatabase): Database.Database | null {
+  return (db as AppDatabase & { $client?: Database.Database }).$client ?? null
+}
+
+function readExecutionJobConflict(
+  ownerId: string,
+  projectId: string,
+  actorId: string
+): { title: string; state: string } | null {
+  const client = getSqliteClient(getDb())
+  if (!client) return null
+  try {
+    const row = client
+      .prepare(
+        `SELECT title, state FROM jobs WHERE id = ? AND project_id = ? AND actor_id = ? LIMIT 1`
+      )
+      .get(ownerId, projectId, actorId) as { title: string; state: string } | undefined
+    return row ?? null
+  } catch {
+    return null
+  }
+}
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -31,19 +54,19 @@ function isUniqueConstraintError(error: unknown): boolean {
   )
 }
 
-export async function listProjects(username: string): Promise<Project[]> {
+export async function listProjects(actorId: string): Promise<Project[]> {
   const db = getDb()
   const rows = await db
     .select()
     .from(projects)
-    .where(eq(projects.username, username))
+    .where(eq(projects.actorId, actorId))
     .orderBy(desc(projects.updatedAt), projects.title)
 
   return rows.map(sanitizeProject)
 }
 
 export async function findProjectByWorkspaceRoot(
-  username: string,
+  actorId: string,
   workspaceRootInput: string,
   createIfMissing = false
 ): Promise<Project | null> {
@@ -53,23 +76,23 @@ export async function findProjectByWorkspaceRoot(
   const exact = await db
     .select()
     .from(projects)
-    .where(and(eq(projects.username, username), eq(projects.workspaceRoot, workspaceRoot)))
+    .where(and(eq(projects.actorId, actorId), eq(projects.workspaceRoot, workspaceRoot)))
     .limit(1)
 
   if (exact[0]) return sanitizeProject(exact[0])
 
-  const rows = await listProjects(username)
+  const rows = await listProjects(actorId)
   return rows.find((row) => pathsEqual(row.workspaceRoot, workspaceRoot)) ?? null
 }
 
 export async function createProject(
-  username: string,
+  actorId: string,
   workspaceRootInput: string,
   title?: string,
   createIfMissing = true
 ): Promise<Project> {
   const workspaceRoot = normalizeWorkspacePath(workspaceRootInput, createIfMissing)
-  const existing = await findProjectByWorkspaceRoot(username, workspaceRoot, createIfMissing)
+  const existing = await findProjectByWorkspaceRoot(actorId, workspaceRoot, createIfMissing)
   if (existing) return existing
 
   const resolvedTitle = title?.trim() || inferTitleFromPath(workspaceRoot)
@@ -80,7 +103,7 @@ export async function createProject(
   try {
     await db.insert(projects).values({
       id,
-      username,
+      actorId,
       title: resolvedTitle,
       workspaceRoot,
       createdAt: now,
@@ -88,25 +111,25 @@ export async function createProject(
     })
   } catch (error) {
     if (isUniqueConstraintError(error)) {
-      const raced = await findProjectByWorkspaceRoot(username, workspaceRoot, createIfMissing)
+      const raced = await findProjectByWorkspaceRoot(actorId, workspaceRoot, createIfMissing)
       if (raced) return raced
     }
     throw error
   }
 
-  const row = await getProject(username, id)
+  const row = await getProject(actorId, id)
   if (!row) {
     throw AppError.internal('Failed to read project after creation', 'turn.unknown')
   }
   return row
 }
 
-export async function getProject(username: string, projectId: string): Promise<Project | null> {
+export async function getProject(actorId: string, projectId: string): Promise<Project | null> {
   const db = getDb()
   const rows = await db
     .select()
     .from(projects)
-    .where(and(eq(projects.username, username), eq(projects.id, projectId)))
+    .where(and(eq(projects.actorId, actorId), eq(projects.id, projectId)))
     .limit(1)
 
   const row = rows[0]
@@ -132,10 +155,10 @@ export interface ProjectWorkspaceAccess {
 
 /** Read-only UI snapshot. The lease acquisition path remains the concurrency authority. */
 export async function getProjectWorkspaceAccess(
-  username: string,
+  actorId: string,
   projectId: string
 ): Promise<ProjectWorkspaceAccess> {
-  const project = await getProject(username, projectId)
+  const project = await getProject(actorId, projectId)
   if (!project) throw AppError.notFound('Project not found', 'project.not_found')
 
   const conflict = findWorkspaceLeaseConflictSnapshot(project.workspaceRoot)
@@ -144,7 +167,7 @@ export async function getProjectWorkspaceAccess(
   }
   if (conflict.ownerKind === 'conversation') {
     const turn = getDb()
-      .select({ threadId: conversationTurns.threadId })
+      .select({ conversationId: conversationTurns.conversationId })
       .from(conversationTurns)
       .where(eq(conversationTurns.id, conflict.ownerId))
       .limit(1)
@@ -154,7 +177,8 @@ export async function getProjectWorkspaceAccess(
       blocker: {
         kind: 'conversation',
         turnId: conflict.ownerId,
-        threadId: turn?.threadId ?? null
+        // API field remains threadId; value is conversation_threads.id.
+        threadId: turn?.conversationId ?? null
       }
     }
   }
@@ -165,7 +189,7 @@ export async function getProjectWorkspaceAccess(
   const legacyJob = getDb()
     .select({ title: threadJobs.title, status: threadJobs.status })
     .from(threadJobs)
-    .where(and(eq(threadJobs.id, conflict.ownerId), eq(threadJobs.username, username)))
+    .where(and(eq(threadJobs.id, conflict.ownerId), eq(threadJobs.username, actorId)))
     .limit(1)
     .all()[0]
   if (legacyJob) {
@@ -180,33 +204,28 @@ export async function getProjectWorkspaceAccess(
     }
   }
 
-  const controlJob = getDb()
-    .select({ title: controlJobs.title, state: controlJobs.state })
-    .from(controlJobs)
-    .where(and(eq(controlJobs.id, conflict.ownerId), eq(controlJobs.projectId, projectId)))
-    .limit(1)
-    .all()[0]
+  const executionJob = readExecutionJobConflict(conflict.ownerId, projectId, actorId)
 
   return {
     mode: 'read_only',
     blocker: {
       kind: 'task',
       taskId: conflict.ownerId,
-      taskTitle: controlJob?.title ?? '正在执行的任务',
-      status: controlJob?.state ?? 'running'
+      taskTitle: executionJob?.title ?? '正在执行的任务',
+      status: executionJob?.state ?? 'running'
     }
   }
 }
 
-export async function touchProject(username: string, projectId: string): Promise<void> {
+export async function touchProject(actorId: string, projectId: string): Promise<void> {
   const db = getDb()
   await db
     .update(projects)
     .set({ updatedAt: nowSec() })
-    .where(and(eq(projects.username, username), eq(projects.id, projectId)))
+    .where(and(eq(projects.actorId, actorId), eq(projects.id, projectId)))
 }
 
-export async function deleteProject(username: string, projectId: string): Promise<void> {
-  const { drainAndDeleteProject } = await import('../legacy-control-plane/deletion-coordinator')
-  await drainAndDeleteProject(username, projectId)
+export async function deleteProject(actorId: string, projectId: string): Promise<void> {
+  const { drainAndDeleteProject } = await import('../infra/deletion-coordinator')
+  await drainAndDeleteProject(actorId, projectId)
 }

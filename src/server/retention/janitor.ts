@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { readdir, rm } from 'fs/promises'
 import { join } from 'path'
 import { eq } from 'drizzle-orm'
-import { parseJobReferenceManifest } from '@shared/job-references'
+import { parseJobReferenceManifest } from '../../shared/job-references.ts'
 import type { getDb } from '../db'
 import {
   draftReferences,

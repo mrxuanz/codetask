@@ -4,10 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   fetchConversationCores,
-  fetchThreadMessages,
+  fetchConversationMessages,
   type ConversationMessage
 } from '@renderer/api/conversation'
-import { fetchJob, fetchThreadPlans, type ThreadJob } from '@renderer/api/jobs'
+import { fetchJob, fetchThreadPlans, type PlanningSessionViewDto } from '@renderer/api/jobs'
 import TaskLaunchDraftCard from '@renderer/components/home/TaskLaunchDraftCard.vue'
 import PlanReviewAccordion from '@renderer/components/tasks/PlanReviewAccordion.vue'
 import Button from '@renderer/components/ui/Button.vue'
@@ -30,7 +30,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const draftMessage = ref<ConversationMessage | null>(null)
 const threadMessages = ref<ConversationMessage[]>([])
-const plan = ref<ThreadJob | null>(null)
+const plan = ref<PlanningSessionViewDto | null>(null)
 const cores = ref<Awaited<ReturnType<typeof fetchConversationCores>>['data']['cores']>([])
 const expanded = ref({ draft: true, plan: true })
 
@@ -49,16 +49,23 @@ onMounted(async () => {
   error.value = null
   try {
     const [messagesRes, plansRes, coresRes, jobRes] = await Promise.all([
-      fetchThreadMessages(props.threadId, 200),
+      fetchConversationMessages(props.threadId, 200),
       fetchThreadPlans(props.threadId),
       fetchConversationCores(),
       fetchJob(props.jobId)
     ])
-    threadMessages.value = messagesRes.data.messages
+    threadMessages.value = messagesRes.data ?? []
     draftMessage.value =
-      messagesRes.data.messages.find((msg) => msg.id === props.draftMessageId) ?? null
+      (messagesRes.data ?? []).find((msg) => msg.id === props.draftMessageId) ?? null
+    const plans = plansRes.data.plans
     plan.value =
-      jobRes.data.job ?? plansRes.data.plans.find((item) => item.id === props.jobId) ?? null
+      plans.find((item) => item.id === props.jobId) ??
+      plans.find((item) => item.designSessionId === props.jobId) ??
+      null
+    if (!plan.value && jobRes.data.job) {
+      // Execution job loaded; plan tree may be empty until Design plan DTO is linked.
+      plan.value = null
+    }
     cores.value = coresRes.data.cores
     if (!draftMessage.value) {
       error.value = t('workspace.create.completedDraftMissing')

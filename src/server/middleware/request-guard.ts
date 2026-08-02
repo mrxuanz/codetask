@@ -1,6 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
 import type { SecurityContext } from '../context/types'
-import { isMcpApiRoute } from './require-auth'
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
@@ -14,12 +13,12 @@ function isLoopbackHost(host: string): boolean {
   )
 }
 
+/**
+ * Host / Origin guard for session-authenticated API routes.
+ * MCP is mounted outside this middleware (own protocol boundary).
+ */
 export function requestGuard(security: SecurityContext): MiddlewareHandler {
   return async (c, next) => {
-    if (isMcpApiRoute(c.req.path)) {
-      return next()
-    }
-
     const hostHeader = c.req.header('Host') ?? ''
     const host = hostHeader.split(':')[0]?.toLowerCase() ?? ''
 
@@ -27,10 +26,14 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
       if (host && !isLoopbackHost(host)) {
         return new Response(
           JSON.stringify({
-            data: null,
+            data: {
+              error: 'External host not allowed in desktop mode',
+              code: 'auth.origin_forbidden',
+              turnErrorCode: 'auth.origin_forbidden'
+            },
             status: 40301,
             extra: {},
-            message: 'External host not allowed in desktop mode',
+            message: 'auth.origin_forbidden',
             success: false
           }),
           {
@@ -56,10 +59,14 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
           if (!isLoopbackHost(originHost)) {
             return new Response(
               JSON.stringify({
-                data: null,
+                data: {
+                  error: 'Cross-origin write requests not allowed',
+                  code: 'auth.origin_forbidden',
+                  turnErrorCode: 'auth.origin_forbidden'
+                },
                 status: 40301,
                 extra: {},
-                message: 'Cross-origin write requests not allowed',
+                message: 'auth.origin_forbidden',
                 success: false
               }),
               {
@@ -75,10 +82,14 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
           if (!sameOriginAsHost) {
             return new Response(
               JSON.stringify({
-                data: null,
+                data: {
+                  error: 'Cross-origin write requests not allowed',
+                  code: 'auth.origin_forbidden',
+                  turnErrorCode: 'auth.origin_forbidden'
+                },
                 status: 40301,
                 extra: {},
-                message: 'Cross-origin write requests not allowed',
+                message: 'auth.origin_forbidden',
                 success: false
               }),
               {

@@ -77,7 +77,6 @@ async function mapMessage(
     sessionId: row.conversationId,
     conversationId: row.conversationId,
     runtimeSessionId: row.runtimeSessionId,
-    wizardPhase: row.wizardPhase ?? null,
     thinking,
     thinkingDurationMs,
     payload: signAssets ? signAssetUrlsInValue(ctx.security.authSecret, payload, row.username) : payload,
@@ -97,12 +96,11 @@ export async function insertMessage(input: {
   runtimeSessionId?: string | null
   payload?: unknown
   attachments?: MessageAttachment[]
-  wizardPhase?: string | null
 }): Promise<ConversationMessageDto> {
   const id = input.id ?? `msg-${randomUUID()}`
   const db = getDb()
   const ctx = getAppContext()
-  const settings = readRetentionSettings(ctx.settings)
+  const settings = readRetentionSettings(ctx.config)
   const payload = input.payload != null ? stripAssetUrlAuthTokensInValue(input.payload) : undefined
   const attachments = cleanAttachments(input.attachments)
   const externalizePayload =
@@ -122,7 +120,6 @@ export async function insertMessage(input: {
     payloadJson: payload != null && !externalizePayload ? JSON.stringify(payload) : null,
     payloadArtifactId: null,
     attachmentsJson: attachments?.length ? JSON.stringify(attachments) : null,
-    wizardPhase: input.wizardPhase ?? null,
     createdAt: nowIso()
   })
 
@@ -184,7 +181,7 @@ export async function prepareMessagePayloadColumns(
   payload: unknown
 ): Promise<{ payloadJson: string | null; payloadArtifactId: string | null }> {
   const ctx = getAppContext()
-  const settings = readRetentionSettings(ctx.settings)
+  const settings = readRetentionSettings(ctx.config)
   const cleanPayload = stripAssetUrlAuthTokensInValue(payload)
   return prepareMessagePayloadForStorage({
     messageId,
@@ -203,7 +200,7 @@ export async function updateMessagePayload(
 ): Promise<ConversationMessageDto | null> {
   const db = getDb()
   const ctx = getAppContext()
-  const settings = readRetentionSettings(ctx.settings)
+  const settings = readRetentionSettings(ctx.config)
   const cleanPayload = stripAssetUrlAuthTokensInValue(payload)
   const stored = await prepareMessagePayloadForStorage({
     messageId,

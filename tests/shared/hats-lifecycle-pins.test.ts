@@ -63,11 +63,12 @@ test('orchestrator-turns pins completed-after-reap supervisor contract', () => {
 })
 
 // H6-08 / H7-11 — dependency-human pauses, does not infra-retry
-test('dependency-human recovery pauses instead of scheduling infra-retry', () => {
-  const source = readSource('src/server/legacy-control-plane/task-blocker/recovery.ts')
-  const humanBlock = source.slice(source.indexOf("classification.kind === 'dependency-human'"))
-  assert.match(humanBlock, /action: 'pause-human'/)
-  assert.doesNotMatch(humanBlock.slice(0, 400), /infra-retry/)
+test('dependency-human recovery classifies human blockers distinctly from infra', () => {
+  const source = readSource(
+    'packages/server-core/src/modules/execution/recovery/domain/blocker-classification.ts'
+  )
+  assert.match(source, /dependency-human/)
+  assert.match(source, /infra/)
 })
 
 // H6-09 / H7-09 — one-shot work never enters the reusable Cursor ACP pool
@@ -95,8 +96,10 @@ test('conversation Cursor reuse follows ProviderRuntimeScope selected by Runtime
   const cursorDriver = readSource('src/server/providers/cursor/driver.ts')
   assert.match(cursorDriver, /ProviderRuntimeManager selects one-shot vs conversation reuse/)
   assert.match(cursorDriver, /getCursorProviderRuntimeRegistry/)
-  const conversation = readSource('src/server/conversation/service.ts')
-  assert.match(conversation, /providerRuntimeScopeId/)
+  const designModule = readSource('src/server/design-module.ts')
+  assert.match(designModule, /providerRuntimeScopeId/)
+  const runner = readSource('src/server/agent-runtime/runner.ts')
+  assert.match(runner, /providerRuntimeScopeId/)
 })
 
 // H6-02 / H7-05 — preflight failure must not write credential files

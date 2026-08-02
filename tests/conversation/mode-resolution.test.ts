@@ -1,63 +1,22 @@
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import test from 'node:test'
-import {
-  assertConversationMode,
-  resolveConversationMode
-} from '../../src/server/conversation/service.ts'
-import { AppError } from '../../src/server/error.ts'
-import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types.ts'
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 
-function expectModeMismatch(fn: () => void): void {
-  assert.throws(fn, (error: unknown) => {
-    assert.ok(error instanceof AppError)
-    assert.equal(error.httpStatus, 409)
-    assert.equal(error.status, 40901)
-    assert.equal(error.data.turnErrorCode, 'conversation.mode_mismatch')
-    return true
+const root = join(import.meta.dirname, '../..')
+
+describe('conversation mode resolution (03)', () => {
+  it('turn enqueue API rejects create_task / draft kinds', () => {
+    const routes = readFileSync(
+      join(root, 'packages/server-core/src/modules/conversation/http/conversation-routes.ts'),
+      'utf8'
+    )
+    assert.match(routes, /Draft\/Plan fields are not accepted/)
   })
-}
 
-test('chat thread + generateDraft=true is rejected with 409 conversation.mode_mismatch', () => {
-  expectModeMismatch(() =>
-    resolveConversationMode({ threadKind: THREAD_KIND_CHAT, requestedDraft: true })
-  )
-})
-
-test('chat thread + createTaskMode is rejected with 409 conversation.mode_mismatch', () => {
-  expectModeMismatch(() =>
-    assertConversationMode({
-      threadKind: THREAD_KIND_CHAT,
-      requestedCreateTaskMode: true,
-      requestedDraft: false
-    })
-  )
-})
-
-test('create_task thread without create-task request is rejected with 409 conversation.mode_mismatch', () => {
-  expectModeMismatch(() =>
-    assertConversationMode({
-      threadKind: THREAD_KIND_CREATE_TASK,
-      requestedCreateTaskMode: false,
-      requestedDraft: false
-    })
-  )
-})
-
-test('chat thread without generateDraft resolves to a non-draft chat mode', () => {
-  const mode = resolveConversationMode({ threadKind: THREAD_KIND_CHAT, requestedDraft: false })
-  assert.deepEqual(mode, { kind: THREAD_KIND_CHAT, generateDraft: false })
-})
-
-test('create_task thread honors the requested draft flag either way', () => {
-  const draftMode = resolveConversationMode({
-    threadKind: THREAD_KIND_CREATE_TASK,
-    requestedDraft: true
+  it('legacy threads route file is gone; stub returns conversation.moved', () => {
+    assert.equal(existsSync(join(root, 'src/server/routes/threads.ts')), false)
+    const api = readFileSync(join(root, 'src/server/routes/api.ts'), 'utf8')
+    assert.match(api, /createRemovedThreadsStub|conversation\.moved/)
   })
-  assert.deepEqual(draftMode, { kind: THREAD_KIND_CREATE_TASK, generateDraft: true })
-
-  const chatLikeMode = resolveConversationMode({
-    threadKind: THREAD_KIND_CREATE_TASK,
-    requestedDraft: false
-  })
-  assert.deepEqual(chatLikeMode, { kind: THREAD_KIND_CREATE_TASK, generateDraft: false })
 })

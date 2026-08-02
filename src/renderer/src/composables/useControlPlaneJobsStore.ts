@@ -1,22 +1,20 @@
 /**
  * Production Tasks store (C10–C13).
  *
- * - List/detail load `/api/v3/jobs` snapshots.
+ * - List/detail load `/api/jobs` Execution snapshots.
  * - Server `availableActions` is authoritative (no recovery补算).
- * - Commands always use `/api/v3`; the API is never selected per job.
- * - Realtime: single window JobEventHub (`/api/realtime`); no second `/api/v3/events`.
+ * - Commands use `/api/jobs` with expectedRevision + idempotencyKey.
+ * - Realtime: single window RealtimeGateway (`/api/realtime`).
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
-import type { ThreadJob } from '@renderer/api/jobs'
+import type { ExecutionJob } from '@renderer/api/jobs'
 import {
-  createV3JobsApi,
   newIdempotencyKey,
   resolveJobsApi,
   type JobsApi
 } from '@renderer/api/jobs-api'
-import { fetchControlPlaneGeneration } from '@renderer/api/control-plane-generation'
 import { ApiError } from '@renderer/api/client'
 import { JobsStore } from '@renderer/stores/jobs-store'
 import {
@@ -26,72 +24,48 @@ import {
   getPauseButtonText
 } from '@renderer/stores/ui-actions'
 import { toast, toastError } from '@renderer/lib/toast'
-import { useJobEventHub } from '@renderer/composables/useJobEventHub'
-import type { JobSseEvent } from '@shared/contracts/sse'
+import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
+import type { RealtimeEnvelope } from '@codetask/contracts'
 import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
 
 export interface UseControlPlaneJobsStoreOptions {
   selectedJobId: Ref<string | null>
 }
 
-function actionsFor(job: ThreadJob | null): readonly string[] {
+function actionsFor(job: ExecutionJob | null): readonly string[] {
   if (!job?.availableActions) return []
   return filterActions(job.availableActions, { state: jobState(job) })
 }
 
-function mapLegacyStatusToState(status: string): string {
-  switch (status) {
-    case 'planning':
-      return 'planning_running'
-    case 'plan_ready':
-    case 'plan_editing':
-      return 'plan_review'
-    case 'pending':
-      return 'execution_queued'
-    case 'running':
-      return 'execution_running'
-    case 'pausing':
-      return 'pausing'
-    case 'paused':
-      return 'paused'
-    case 'completed':
-      return 'succeeded'
-    case 'failed':
-      return 'failed'
-    case 'cancelled':
-      return 'cancelled'
-    default:
-      return status
-  }
-}
-
-function jobState(job: ThreadJob): string {
-  return (job as ThreadJob & { state?: string }).state ?? mapLegacyStatusToState(job.status)
+function jobState(job: ExecutionJob): string {
+  return job.state
 }
 
 function isRevisionConflict(error: unknown): boolean {
   return (
-    error instanceof ApiError && error.httpStatus === 409 && error.code === 'job.revision_conflict'
+    error instanceof ApiError &&
+    error.httpStatus === 409 &&
+    (error.code === 'job.revision_conflict' || error.code === 'execution.conflict')
   )
 }
 
 export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOptions): {
   statusFilter: Ref<string>
   searchQuery: Ref<string>
-  jobs: Ref<ThreadJob[]>
+  jobs: Ref<ExecutionJob[]>
   total: Ref<number>
   loadingList: Ref<boolean>
   loadingDetail: Ref<boolean>
   error: Ref<string | null>
   actionError: Ref<string | null>
   runningAction: Ref<string | null>
-  detail: Ref<ThreadJob | null>
-  selectedJob: ComputedRef<ThreadJob | null>
+  detail: Ref<ExecutionJob | null>
+  selectedJob: ComputedRef<ExecutionJob | null>
   loadJobs: () => Promise<void>
   loadDetail: (id: string) => Promise<void>
-  applyJobPatch: (job: ThreadJob) => void
-  startHubPolling: () => void
-  stopHubPolling: () => void
+  applyJobPatch: (job: ExecutionJob) => void
+  startRealtimePolling: () => void
+  stopRealtimePolling: () => void
   handlePause: () => Promise<void>
   handleContinue: () => Promise<void>
   handleRestart: () => Promise<void>
@@ -107,45 +81,31 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 } {
   const { selectedJobId } = options
   const router = useRouter()
-  const hub = useJobEventHub()
+  const realtime = useRealtimeGateway()
   const v3Store = new JobsStore()
-  let jobsApi: JobsApi = createV3JobsApi()
-  let isAuthoritative = false
-  const apiReady = (async () => {
-    const generation = await fetchControlPlaneGeneration()
-    isAuthoritative = generation === 'v3_authoritative'
-    jobsApi = await resolveJobsApi()
-    return jobsApi
-  })()
+  const jobsApi: JobsApi = resolveJobsApi()
 
-  function requireV3Revision(job: ThreadJob): number {
+  function requireRevision(job: ExecutionJob): number {
     if (typeof job.stateRevision !== 'number') {
-      throw new Error('Control-plane job is missing its state revision')
+      throw new Error('Execution job is missing its state revision')
     }
     return job.stateRevision
   }
 
-  function requireCommandRevision(job: ThreadJob): number {
-    if (!isAuthoritative) {
-      return typeof job.stateRevision === 'number' ? job.stateRevision : 0
-    }
-    return requireV3Revision(job)
-  }
-
   const statusFilter = ref('all')
   const searchQuery = ref('')
-  const jobs = ref<ThreadJob[]>([])
+  const jobs = ref<ExecutionJob[]>([])
   const total = ref(0)
   const loadingList = ref(true)
   const loadingDetail = ref(false)
   const error = ref<string | null>(null)
   const actionError = ref<string | null>(null)
   const runningAction = ref<string | null>(null)
-  const detail = ref<ThreadJob | null>(null)
+  const detail = ref<ExecutionJob | null>(null)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
-  let hubRelease: (() => void) | null = null
-  const hubListReleases = new Map<string, () => void>()
+  let selectedJobWatchRelease: (() => void) | null = null
+  const jobWatchReleases = new Map<string, () => void>()
   let loadDetailToken = 0
   let loadJobsToken = 0
 
@@ -159,22 +119,21 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   const canPause = computed(() => selectedActions.value.includes('pause'))
   const canContinue = computed(() => selectedActions.value.includes('continue'))
-  const canRestart = computed(() => selectedActions.value.includes('restart_execution'))
+  const canRestart = computed(() => selectedActions.value.includes('restart'))
   const canCancelAction = computed(() => canCancel(selectedActions.value))
   const canDeleteAction = computed(() => {
     const job = selectedJob.value
     if (!job) return false
     return (
-      canDelete(selectedActions.value) && !['running', 'planning', 'pausing'].includes(job.status)
+      canDelete(selectedActions.value) &&
+      !['running', 'pausing', 'cancelling', 'queued'].includes(job.state)
     )
   })
   const pauseButtonText = computed(() =>
-    selectedJob.value
-      ? getPauseButtonText({ state: mapLegacyStatusToState(selectedJob.value.status) })
-      : null
+    selectedJob.value ? getPauseButtonText({ state: selectedJob.value.state }) : null
   )
 
-  function mergeJobPatch(existing: ThreadJob | null | undefined, job: ThreadJob): ThreadJob {
+  function mergeJobPatch(existing: ExecutionJob | null | undefined, job: ExecutionJob): ExecutionJob {
     const has = (key: string): boolean => key in job
     return {
       ...(existing ?? {}),
@@ -185,7 +144,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       taskProgress: has('taskProgress') ? job.taskProgress : existing?.taskProgress,
       availableActions: has('availableActions') ? job.availableActions : existing?.availableActions,
       stateRevision: has('stateRevision') ? job.stateRevision : existing?.stateRevision
-    } as ThreadJob
+    } as ExecutionJob
   }
 
   const debouncedRefreshJobs = useDebounceFn(() => void loadJobs({ silent: true }), 150)
@@ -207,13 +166,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   }
 
   function mergeIncomingJob(
-    existing: ThreadJob | null | undefined,
-    job: ThreadJob
-  ): ThreadJob | null {
-    if (!isAuthoritative) {
-      return mergeJobPatch(existing, job)
-    }
-    const stateRevision = requireV3Revision(job)
+    existing: ExecutionJob | null | undefined,
+    job: ExecutionJob
+  ): ExecutionJob | null {
+    const stateRevision = requireRevision(job)
     const decision = v3Store.mergeJob(
       {
         id: job.id,
@@ -233,7 +189,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     return mergeJobPatch(existing, job)
   }
 
-  function applyJobPatch(job: ThreadJob): void {
+  function applyJobPatch(job: ExecutionJob): void {
     const idx = jobs.value.findIndex((item) => item.id === job.id)
     const existing = detail.value?.id === job.id ? detail.value : idx >= 0 ? jobs.value[idx] : null
     const merged = mergeIncomingJob(existing, job)
@@ -253,15 +209,14 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     if (!silent) loadingList.value = true
     error.value = null
     try {
-      await apiReady
       const res = await jobsApi.fetchJobs(statusFilter.value, 1, 50, searchQuery.value)
       if (token !== loadJobsToken) return
       const currentById = new Map(jobs.value.map((job) => [job.id, job] as const))
       jobs.value = res.data.jobs
         .map((job) => mergeIncomingJob(currentById.get(job.id), job))
-        .filter((job): job is ThreadJob => job !== null)
+        .filter((job): job is ExecutionJob => job !== null)
       total.value = res.data.total
-      syncListHubWatches()
+      syncListRealtimeWatches()
       const currentId = selectedJobId.value
       const stillExists = currentId ? res.data.jobs.some((job) => job.id === currentId) : false
       if (currentId && !stillExists) {
@@ -281,11 +236,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     const silent = options?.silent ?? false
     if (!silent) loadingDetail.value = true
     try {
-      await apiReady
       const res = await jobsApi.fetchJob(jobId)
       if (token !== loadDetailToken) return
       applyJobPatch(res.data.job)
-      syncHubWatch()
+      syncRealtimeWatch()
     } catch (err) {
       if (token !== loadDetailToken) return
       if (!silent) {
@@ -297,52 +251,48 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
-  function syncHubWatch(): void {
-    hubRelease?.()
-    hubRelease = null
+  function syncRealtimeWatch(): void {
+    selectedJobWatchRelease?.()
+    selectedJobWatchRelease = null
     const jobId = selectedJobId.value
-    const status = selectedJob.value?.status
-    if (!jobId || !status || !jobNeedsRealtimeWatch(status)) return
-    hubRelease = hub.watchJob(jobId, (event) => handleHubEvent(jobId, event))
+    const state = selectedJob.value?.state
+    if (!jobId || !state || !jobNeedsRealtimeWatch(state)) return
+    selectedJobWatchRelease = realtime.watchJob(jobId, (event) => handleRealtimeEvent(jobId, event))
   }
 
-  function handleHubEvent(_jobId: string, event: JobSseEvent): void {
-    if (event.event === 'job_snapshot' || event.event === 'job_done') {
-      applyJobPatch(event.data.job as ThreadJob)
-      if (event.event === 'job_done') {
-        syncHubWatch()
-        debouncedRefreshJobs()
+  function handleRealtimeEvent(_jobId: string, event: RealtimeEnvelope): void {
+    // Minimal durable events no longer carry full JobDetail — always HTTP resync.
+    if (
+      event.type === 'job.changed' ||
+      event.type === 'job.completed' ||
+      event.type === 'job.queue.changed' ||
+      event.type === 'job.run.changed' ||
+      event.type === 'work.changed' ||
+      event.type === 'verification.changed' ||
+      event.type === 'repair.created' ||
+      event.type === 'job.deleted'
+    ) {
+      scheduleResync(_jobId)
+      if (event.type === 'job.completed' || event.type === 'job.deleted') {
+        syncRealtimeWatch()
       }
-      return
-    }
-    if (event.event === 'plan_progress' && selectedJob.value) {
-      applyJobPatch({
-        ...selectedJob.value,
-        planProgress: event.data.planProgress
-      } as ThreadJob)
-    }
-    if (event.event === 'task_progress' && selectedJob.value) {
-      applyJobPatch({
-        ...selectedJob.value,
-        taskProgress: event.data.taskProgress
-      } as ThreadJob)
     }
   }
 
-  function syncListHubWatches(): void {
+  function syncListRealtimeWatches(): void {
     const desired = new Set(
-      jobs.value.filter((job) => jobNeedsRealtimeWatch(job.status)).map((job) => job.id)
+      jobs.value.filter((job) => jobNeedsRealtimeWatch(job.state)).map((job) => job.id)
     )
-    for (const [jobId, release] of hubListReleases) {
+    for (const [jobId, release] of jobWatchReleases) {
       if (desired.has(jobId)) continue
       release()
-      hubListReleases.delete(jobId)
+      jobWatchReleases.delete(jobId)
     }
     for (const jobId of desired) {
-      if (hubListReleases.has(jobId)) continue
-      hubListReleases.set(
+      if (jobWatchReleases.has(jobId)) continue
+      jobWatchReleases.set(
         jobId,
-        hub.watchJob(jobId, () => {
+        realtime.watchJob(jobId, () => {
           debouncedRefreshJobs()
           if (selectedJobId.value === jobId) {
             debouncedRefreshSelectedDetail(jobId)
@@ -352,24 +302,22 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
-  function startHubPolling(): void {
-    void apiReady.then(() => {
-      syncListHubWatches()
-      pollTimer = setInterval(() => {
-        if (!hub.connected.value) {
-          void loadJobs({ silent: true })
-          const jobId = selectedJobId.value
-          if (jobId) void loadDetail(jobId, { silent: true })
-        }
-      }, 30_000)
-    })
+  function startRealtimePolling(): void {
+    syncListRealtimeWatches()
+    pollTimer = setInterval(() => {
+      if (!realtime.connected.value) {
+        void loadJobs({ silent: true })
+        const jobId = selectedJobId.value
+        if (jobId) void loadDetail(jobId, { silent: true })
+      }
+    }, 30_000)
   }
 
-  function stopHubPolling(): void {
-    for (const release of hubListReleases.values()) release()
-    hubListReleases.clear()
-    hubRelease?.()
-    hubRelease = null
+  function stopRealtimePolling(): void {
+    for (const release of jobWatchReleases.values()) release()
+    jobWatchReleases.clear()
+    selectedJobWatchRelease?.()
+    selectedJobWatchRelease = null
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
@@ -384,8 +332,8 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     selectedJobId,
     (jobId, prevJobId) => {
       if (jobId !== prevJobId) {
-        hubRelease?.()
-        hubRelease = null
+        selectedJobWatchRelease?.()
+        selectedJobWatchRelease = null
       }
       if (!jobId) {
         detail.value = null
@@ -397,13 +345,13 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   )
 
   watch(
-    () => selectedJob.value?.status,
-    () => syncHubWatch()
+    () => selectedJob.value?.state,
+    () => syncRealtimeWatch()
   )
 
   async function runAction(
     action: string,
-    fn: (job: ThreadJob, idempotencyKey: string) => Promise<unknown>
+    fn: (job: ExecutionJob, idempotencyKey: string) => Promise<unknown>
   ): Promise<void> {
     const job = selectedJob.value
     if (!job) return
@@ -427,42 +375,36 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   async function handlePause(): Promise<void> {
     await runAction('pause', (job, idempotencyKey) =>
-      jobsApi.pause(job.id, requireCommandRevision(job), idempotencyKey)
+      jobsApi.pause(job.id, requireRevision(job), idempotencyKey)
     )
   }
 
   async function handleContinue(): Promise<void> {
     await runAction('continue', (job, idempotencyKey) =>
-      jobsApi.continue(job.id, requireCommandRevision(job), idempotencyKey)
+      jobsApi.continue(job.id, requireRevision(job), idempotencyKey)
     )
   }
 
   async function handleRestart(): Promise<void> {
-    await runAction('restart_execution', (job, idempotencyKey) =>
-      jobsApi.restartExecution(job.id, requireCommandRevision(job), idempotencyKey)
+    await runAction('restart', (job, idempotencyKey) =>
+      jobsApi.restartExecution(job.id, requireRevision(job), idempotencyKey)
     )
   }
 
   async function handleCancel(): Promise<void> {
     await runAction('cancel', (job, idempotencyKey) =>
-      jobsApi.cancel(job.id, requireCommandRevision(job), 'user_cancelled', idempotencyKey)
+      jobsApi.cancel(job.id, requireRevision(job), 'user_cancelled', idempotencyKey)
     )
   }
 
   async function handleDelete(): Promise<void> {
     const job = selectedJob.value
-    if (!job) return
-    if (!jobsApi.delete) {
-      toast.error('Deleting V3 jobs is not supported by the control-plane API')
-      return
-    }
-    // Skip runAction — it reloads detail after success and 404s on a deleted job.
+    if (!job || !jobsApi.delete) return
     runningAction.value = 'delete'
     actionError.value = null
     error.value = null
     try {
-      await apiReady
-      await jobsApi.delete(job.id)
+      await jobsApi.delete(job.id, requireRevision(job), newIdempotencyKey())
       detail.value = null
       jobs.value = jobs.value.filter((item) => item.id !== job.id)
       total.value = Math.max(0, total.value - 1)
@@ -490,8 +432,8 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     loadJobs,
     loadDetail,
     applyJobPatch,
-    startHubPolling,
-    stopHubPolling,
+    startRealtimePolling,
+    stopRealtimePolling,
     handlePause,
     handleContinue,
     handleRestart,

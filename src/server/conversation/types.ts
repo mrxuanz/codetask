@@ -3,7 +3,6 @@ export type {
   ConversationMessageDto,
   ConversationStateDto,
   MessageAttachment
-} from '@shared/contracts/conversation'
-export type { ChatSseEvent } from '@shared/contracts/sse'
+} from '../../shared/contracts/conversation.ts'
 
 export type { ConversationRole } from '../agent-runtime/roles'

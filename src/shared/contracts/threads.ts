@@ -1,23 +1,17 @@
 export type TitleSource = 'auto' | 'manual'
-export type ThreadKind = 'chat' | 'create_task' | 'task_snapshot'
-export type WizardPhase =
-  | 'collect'
-  | 'draft_review'
-  | 'plan_generating'
-  | 'plan_edit'
-  | 'ready_to_launch'
+/** Ordinary chat only after architecture 03. */
+export type ThreadKind = 'chat'
+export const THREAD_KIND_CHAT: ThreadKind = 'chat'
 
 import type { TurnErrorDto } from './turn-errors'
 
+/** UI-facing conversation shape used by the renderer façade. */
 export interface ThreadDto {
   id: string
   projectId: string
   username: string
   title: string
   titleSource: TitleSource
-  activeDraftId: string | null
-  activePlanId: string | null
-  wizardPhase: WizardPhase
   threadKind: ThreadKind
   status: string
   conversationId: string

@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { addLocalCorpusDraftReference } from '@renderer/api/jobs'
-import { addDesignSessionLocalCorpus } from '@renderer/api/design-sessions'
 import { useFolderBrowse } from '@renderer/composables/useFolderBrowse'
 import FolderBrowsePanel from '@renderer/components/shared/FolderBrowsePanel.vue'
 import Button from '@renderer/components/ui/Button.vue'
@@ -12,8 +11,8 @@ import Input from '@renderer/components/ui/Input.vue'
 const props = defineProps<{
   open: boolean
   threadId: string
-  messageId?: string
-  designSessionId?: string
+  /** Design draft id. */
+  draftId?: string
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +25,10 @@ const openModel = computed({
   get: () => props.open,
   set: (value: boolean) => emit('update:open', value)
 })
+
+function resolveDraftId(): string | null {
+  return props.draftId ?? null
+}
 
 const step = ref<'browse' | 'details'>('browse')
 const selectedPath = ref('')
@@ -89,28 +92,20 @@ async function submitReference(): Promise<void> {
     formError.value = t('workspace.draft.localCorpusDescriptionRequired')
     return
   }
-  if (!props.designSessionId && !props.messageId) {
+  const draftId = resolveDraftId()
+  if (!draftId) {
     formError.value = t('workspace.draft.localCorpusAddFailed')
     return
   }
   submitting.value = true
   formError.value = null
   try {
-    if (props.designSessionId) {
-      await addDesignSessionLocalCorpus(props.threadId, props.designSessionId, {
-        localPath: selectedPath.value,
-        name: name.value.trim() || basename(selectedPath.value),
-        description: desc,
-        kind: 'directory'
-      })
-    } else {
-      await addLocalCorpusDraftReference(props.threadId, props.messageId!, {
-        localPath: selectedPath.value,
-        name: name.value.trim() || basename(selectedPath.value),
-        description: desc,
-        kind: 'directory'
-      })
-    }
+    await addLocalCorpusDraftReference(props.threadId, draftId, {
+      localPath: selectedPath.value,
+      name: name.value.trim() || basename(selectedPath.value),
+      description: desc,
+      kind: 'directory'
+    })
     emit('added')
     close()
   } catch (err) {

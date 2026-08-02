@@ -9,7 +9,8 @@ Exercise the allowlisted Draft mutation tools for the case, including `codetask_
 ## Forbidden behavior
 - raw HTTP
 - writing workspace business files directly
-- treating `/api/settings/control-plane` as the run authority for planner/verifiers
+- treating `/api/settings/agent-defaults` as the run authority for planner/verifiers
+  (draft execution-profile is authoritative at publish time)
 
 ## Completion
 Call `report_case_result` once with probe observations.

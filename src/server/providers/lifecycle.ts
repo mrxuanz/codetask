@@ -27,8 +27,12 @@ export class ProviderRuntimeManager {
     if (reusePolicy === 'one-shot') {
       return Object.freeze({ id: `turn:${id}`, reusePolicy })
     }
-    const scopeId =
-      context.input.providerRuntimeScopeId?.trim() || `conversation:${context.input.cwd}`
+    const scopeId = context.input.providerRuntimeScopeId?.trim()
+    if (!scopeId) {
+      throw new Error(
+        'providerRuntimeScopeId is required for conversation-scoped reuse (must not use cwd)'
+      )
+    }
     return Object.freeze({ id: scopeId, reusePolicy })
   }
 

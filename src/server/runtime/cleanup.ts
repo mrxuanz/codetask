@@ -18,12 +18,11 @@ function legacyJobRuntimeDir(dataDir: string, threadId: string, jobId: string): 
   return join(legacyThreadRuntimeDir(dataDir, threadId), 'jobs', jobId)
 }
 
-/** @deprecated Path helpers retained for tests that assert legacy wipe targets. */
+/** Historical data/runtimes path helpers — used by retention wipe + tests. */
 export function threadRuntimeDir(dataDir: string, threadId: string): string {
   return legacyThreadRuntimeDir(dataDir, threadId)
 }
 
-/** @deprecated */
 export function jobRuntimeDir(dataDir: string, threadId: string, jobId: string): string {
   return legacyJobRuntimeDir(dataDir, threadId, jobId)
 }
@@ -70,7 +69,7 @@ export async function cleanupJobRuntimeTree(
     if (ctx.executionRuntime.isLoopActive(jobId)) {
       return 'deferred_active'
     }
-    const { listActiveWorkloadSlots } = await import('../legacy-control-plane/workload-slot-store')
+    const { listActiveWorkloadSlots } = await import('../infra/workload-lease-stub')
     if ((await listActiveWorkloadSlots()).some((slot) => slot.ownerId === jobId)) {
       return 'deferred_slot'
     }

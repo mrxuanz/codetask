@@ -16,21 +16,22 @@ function nowSec(): number {
 }
 
 function readLastSqliteMaintenanceAt(store: SettingsStore): number {
-  const retention = store.read().retention
-  if (!retention || typeof retention !== 'object') return 0
-  const value = (retention as Record<string, unknown>)[LAST_SQLITE_MAINTENANCE_KEY]
-  return typeof value === 'number' ? value : 0
+  const value = store.readNamespace('runtime_maintenance').value
+  if (!value) return 0
+  const at = value[LAST_SQLITE_MAINTENANCE_KEY]
+  return typeof at === 'number' ? at : 0
 }
 
 function writeLastSqliteMaintenanceAt(store: SettingsStore, at: number): void {
-  store.patch((file) => {
-    const retention =
-      file.retention && typeof file.retention === 'object'
-        ? { ...(file.retention as Record<string, unknown>) }
-        : {}
-    retention[LAST_SQLITE_MAINTENANCE_KEY] = at
-    file.retention = retention
-  })
+  const current = store.readNamespace('runtime_maintenance')
+  store.writeNamespace(
+    'runtime_maintenance',
+    {
+      ...(current.value ?? {}),
+      [LAST_SQLITE_MAINTENANCE_KEY]: at
+    },
+    { expectedRevision: current.revision }
+  )
 }
 
 export function shouldRunSqliteMaintenance(

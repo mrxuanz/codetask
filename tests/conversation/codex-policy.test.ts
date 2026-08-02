@@ -44,12 +44,7 @@ test('resolveCodexMcpToolNamesForTurn picks role defaults', () => {
   assert.deepEqual(resolveCodexMcpToolNamesForTurn(baseInput('task-worker')), [
     'report_task_result'
   ])
-  assert.deepEqual(resolveCodexMcpToolNamesForTurn(baseInput('planner')), [
-    'register_plan_outline',
-    'register_task_context',
-    'update_task_context',
-    'finalize_plan'
-  ])
+  assert.equal(resolveCodexMcpToolNamesForTurn(baseInput('planner')), undefined)
   assert.equal(resolveCodexMcpToolNamesForTurn(baseInput('conversation')), undefined)
 })
 
@@ -89,8 +84,7 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.equal(planner.outerSandbox, false)
   assert.equal(planner.threadOptions.sandboxMode, 'read-only')
   assert.equal(planner.threadOptions.networkAccessEnabled, false)
-  assert.ok(planner.mcpToolNames?.includes('register_plan_outline'))
-  assert.ok(planner.mcpToolNames?.includes('finalize_plan'))
+  assert.equal(planner.mcpToolNames, undefined)
 
   const task = buildCodexTurnPlan(
     {
@@ -164,11 +158,11 @@ test('Codex config failures are classified from the SDK runtime that actually la
   assert.equal(resolveCodexConfigTurnError(new Error('model overloaded')), null)
 })
 
-test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {
+test('buildCodexTurnPlan conversation MCP exposes chat attachment tools only (03)', () => {
   const conversation = buildCodexTurnPlan(
     {
       ...baseInput('conversation'),
-      capabilityProfile: 'create-task-read',
+      capabilityProfile: 'chat-read',
       mcpUrl: 'http://127.0.0.1:9/mcp'
     },
     { outerSandbox: false }
@@ -182,7 +176,7 @@ test('buildCodexTurnPlan conversation fallback uses wizard tool union', () => {
         ).tools
       : undefined
   assert.ok(tools)
-  assert.ok('rename_thread' in tools)
-  assert.ok('list_reference_corpus' in tools)
-  assert.ok('propose_task_draft' in tools)
+  assert.ok('read_reference_attachment' in tools)
+  assert.equal('propose_task_draft' in tools, false)
+  assert.equal('list_reference_corpus' in tools, false)
 })

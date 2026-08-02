@@ -15,17 +15,13 @@ export function roleRequiresOuterSandbox(role: ConversationRole): boolean {
   return OUTER_SANDBOX_ROLES.includes(role)
 }
 
-export const PLANNER_ROLE_MCP_TOOLS = [
-  'register_plan_outline',
-  'register_task_context',
-  'update_task_context',
-  'finalize_plan'
-] as const
-
+/**
+ * System MCP tool allowlists per role.
+ * Planner has no HTTP system MCP after Design cutover (PlanningApplicationPort).
+ * Conversation exposes attachment read via Conversation MCP.
+ */
 export function resolveRoleMcpToolNames(role: ConversationRole): readonly string[] | undefined {
   switch (role) {
-    case 'planner':
-      return PLANNER_ROLE_MCP_TOOLS
     case 'task-worker':
       return ['report_task_result']
     case 'slice-verifier':

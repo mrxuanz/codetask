@@ -12,10 +12,8 @@ import ChatMessages from '@renderer/components/home/ChatMessages.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import { HomeChatKey } from '@renderer/composables/useHomeChat'
-import { discardEmptyCreateTaskThread } from '@renderer/api/threads'
 import {
-  THREAD_KIND_CREATE_TASK,
-  isCreateTaskThread,
+  THREAD_KIND_CHAT,
   useHomeWorkspace
 } from '@renderer/composables/useHomeWorkspace'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
@@ -125,19 +123,6 @@ watch(
 )
 
 watch(
-  () => workspace.activeThreadId.value,
-  (threadId) => {
-    if (!threadId || phase.value === 'completed') return
-    const thread = workspace.threads.value.find((item) => item.id === threadId)
-    if (!thread || !isCreateTaskThread(thread)) return
-    resumeDraftId.value = thread.activeDraftId ?? null
-    compactPane.value = thread.activeDraftId ? 'draft' : 'chat'
-    completedContext.value = null
-    phase.value = 'workspace'
-  }
-)
-
-watch(
   () => phase.value,
   (currentPhase, previousPhase) => {
     if (previousPhase === 'workspace' && currentPhase !== 'workspace') {
@@ -174,27 +159,14 @@ function stopWorkspaceStreams(): void {
 
 function goToList(): void {
   stopWorkspaceStreams()
-  const thread = activeThread.value
-  const hadMessages = messages.value.length > 0
   resumeDraftId.value = null
   compactPane.value = 'chat'
   completedContext.value = null
   phase.value = 'list'
-  void (async () => {
-    if (thread && isCreateTaskThread(thread) && !hadMessages) {
-      try {
-        const res = await discardEmptyCreateTaskThread(thread.id)
-        if (res.data.discarded) {
-          workspace.threads.value = workspace.threads.value.filter((item) => item.id !== thread.id)
-        }
-      } catch {
-        // best-effort cleanup; janitor will retry
-      }
-    }
-    workspace.setActiveThreadId(null)
-    await nextTick()
+  workspace.setActiveThreadId(null)
+  void nextTick().then(() => {
     void draftListRef.value?.reload()
-  })()
+  })
 }
 
 function openCompleted(entry: DraftListEntry): void {
@@ -243,7 +215,7 @@ async function handleSelectProject(projectId: string): Promise<void> {
   pickingProject.value = true
   try {
     workspace.setActiveProjectId(projectId)
-    await workspace.createNewThread(projectId, THREAD_KIND_CREATE_TASK)
+    await workspace.createNewThread(projectId, THREAD_KIND_CHAT)
     resumeDraftId.value = null
     compactPane.value = 'chat'
     completedContext.value = null
@@ -257,7 +229,7 @@ async function handleSelectProject(projectId: string): Promise<void> {
 async function handleAddProject(workspaceRoot: string): Promise<void> {
   pickingProject.value = true
   try {
-    await workspace.addLocalProject(workspaceRoot, { threadKind: THREAD_KIND_CREATE_TASK })
+    await workspace.addLocalProject(workspaceRoot, { threadKind: THREAD_KIND_CHAT })
     resumeDraftId.value = null
     compactPane.value = 'chat'
     completedContext.value = null
@@ -278,11 +250,8 @@ async function handleCoreChange(code: string): Promise<void> {
 async function handleSend(payload: { message: string; files: File[] }): Promise<void> {
   if (composerDisabled.value) return
   const updated = await chat.sendMessage({
-    ...payload,
-    createTaskMode: true,
-    onPlanUpdated: () => {
-      void draftWorkspaceRef.value?.loadWorkspace?.()
-    }
+    message: payload.message,
+    files: payload.files
   })
   if (updated) workspace.syncThread(updated)
 }
@@ -420,7 +389,6 @@ function handlePlanConfirmed(payload: {
         <DraftPlanWorkspace
           ref="draftWorkspaceRef"
           :thread-id="activeThread.id"
-          :wizard-phase="activeThread.wizardPhase"
           :messages="messages"
           :cores="cores"
           :initial-draft-id="resumeDraftId"

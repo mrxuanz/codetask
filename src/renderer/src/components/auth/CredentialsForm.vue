@@ -127,16 +127,25 @@ async function handleSubmit(): Promise<void> {
   } catch (err: unknown) {
     const apiErr = err as {
       message?: string
-      data?: { captchaRequired?: boolean; lockedUntil?: number; retryAfterSec?: number }
+      code?: string
+      data?: {
+        captchaRequired?: boolean
+        lockedUntil?: number
+        retryAfterSec?: number
+        code?: string
+      }
     }
-    if (apiErr.data?.captchaRequired) {
+    const errCode = typeof apiErr.code === 'string' ? apiErr.code : apiErr.data?.code
+    if (apiErr.data?.captchaRequired || errCode === 'auth.captcha_required') {
       captchaAnswer.value = ''
       await loadCaptcha()
       props.onCaptchaRequired?.()
-      if (apiErr.data.lockedUntil) {
-        const until = new Date(apiErr.data.lockedUntil * 1000).toLocaleTimeString()
-        error.value = `${t('login.accountLocked')} ${until}`
-      } else if (apiErr.data.retryAfterSec) {
+      if (apiErr.data?.lockedUntil || errCode === 'auth.account_locked') {
+        const until = apiErr.data?.lockedUntil
+          ? new Date(apiErr.data.lockedUntil * 1000).toLocaleTimeString()
+          : ''
+        error.value = until ? `${t('login.accountLocked')} ${until}` : t('login.accountLocked')
+      } else if (apiErr.data?.retryAfterSec) {
         error.value = `${t('errors.invalidCredentials')} (${apiErr.data.retryAfterSec}s)`
       } else {
         error.value = t('login.captchaRequired')
@@ -144,7 +153,10 @@ async function handleSubmit(): Promise<void> {
       return
     }
     const message = apiErr.message ?? t('common.operationFailed')
-    error.value = translateApiError(message, t)
+    error.value = translateApiError(
+      errCode && String(errCode).startsWith('auth.') ? String(errCode) : message,
+      t
+    )
   } finally {
     submitting.value = false
   }

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import type { TaskProgressDto } from '../legacy-control-plane/types'
+import type { TaskProgressDto } from '../infra/job-progress-types'
 import type { getDb } from '../db'
 import { jobCounters } from '../db/schema'
 

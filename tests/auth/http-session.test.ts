@@ -9,7 +9,7 @@ import {
   issueSessionCookies,
   verifyCsrfToken
 } from '../../src/server/auth/http-session'
-import { requireUsername } from '../../src/server/auth/session'
+import { requireAuthPrincipal } from '../../src/server/auth/session'
 import { requireAuth } from '../../src/server/middleware/require-auth'
 import type { SecurityContext } from '../../src/server/context/types'
 
@@ -37,7 +37,7 @@ function security(): SecurityContext {
 function app(): Hono {
   const app = new Hono()
   app.use('*', requireAuth(security()))
-  app.post('/projects', async (c) => c.json({ username: await requireUsername() }))
+  app.post('/projects', async (c) => c.json({ username: requireAuthPrincipal().username }))
   return app
 }
 

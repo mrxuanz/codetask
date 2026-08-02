@@ -1,6 +1,29 @@
 import type { PublicApiClient } from './client'
 import { TIMEOUTS } from '../config/timeouts'
 
+/** Map host CLI codes ↔ canonical Conversation provider codes (architecture 03). */
+export function toCanonicalProviderCode(coreCode: string): string {
+  const value = coreCode.trim().toLowerCase()
+  if (value === 'claude-code' || value === 'claude' || value === 'claudecode') return 'claude'
+  if (value === 'cursorcli' || value === 'cursor' || value === 'cursor-cli' || value === 'cursor-agent') {
+    return 'cursor'
+  }
+  return value
+}
+
+export function toHostCoreCode(providerCode: string): string {
+  const value = providerCode.trim().toLowerCase()
+  if (value === 'claude') return 'claude-code'
+  if (value === 'cursor') return 'cursorcli'
+  return value
+}
+
+function architecture03Removed(surface: string): never {
+  throw new Error(
+    `architecture_03_removed:${surface}:use_/api/drafts_/api/planning-sessions_/api/jobs_/api/conversations`
+  )
+}
+
 /** Public job routes wrap payloads as `{ job: ... }`. */
 function unwrapJob(data: unknown): Record<string, unknown> | null {
   if (!data || typeof data !== 'object') return null
@@ -18,36 +41,40 @@ export async function setupAccount(
   client: PublicApiClient,
   input: { username: string; password: string; setupToken: string }
 ): Promise<{ token: string; username: string }> {
-  const result = await client.request<{ token: string; username: string }>(
-    'POST',
-    '/api/setup',
-    input,
-    { operationId: 'auth.setup', auth: false }
-  )
+  const result = await client.request<{
+    token?: string
+    actor?: { username: string }
+    username?: string
+  }>('POST', '/api/auth/setup', input, { operationId: 'auth.setup', auth: false })
   if (result.status >= 400 || !result.data?.token) {
     throw new Error(`auth.setup_failed:${result.status}:${result.raw.message ?? ''}`)
   }
-  return result.data
+  return {
+    token: result.data.token,
+    username: result.data.actor?.username ?? result.data.username ?? input.username
+  }
 }
 
 export async function login(
   client: PublicApiClient,
   input: { username: string; password: string }
 ): Promise<{ token: string; username: string }> {
-  const result = await client.request<{ token: string; username: string }>(
-    'POST',
-    '/api/login',
-    input,
-    { operationId: 'auth.login', auth: false }
-  )
+  const result = await client.request<{
+    token?: string
+    actor?: { username: string }
+    username?: string
+  }>('POST', '/api/auth/login', input, { operationId: 'auth.login', auth: false })
   if (result.status >= 400 || !result.data?.token) {
     throw new Error(`auth.login_failed:${result.status}:${result.raw.message ?? ''}`)
   }
-  return result.data
+  return {
+    token: result.data.token,
+    username: result.data.actor?.username ?? result.data.username ?? input.username
+  }
 }
 
 export async function logout(client: PublicApiClient): Promise<void> {
-  await client.request('POST', '/api/logout', undefined, { operationId: 'auth.logout' })
+  await client.request('POST', '/api/auth/logout', undefined, { operationId: 'auth.logout' })
 }
 
 export async function createProject(
@@ -66,25 +93,39 @@ export async function createProject(
   return result.data
 }
 
+/**
+ * Create an ordinary Chat conversation (architecture 03).
+ * `threadKind: create_task` is rejected — Design owns drafts via /api/drafts.
+ * Returns both `coreCode` (host alias) and `providerCode` (canonical) for oracles.
+ */
 export async function createThread(
   client: PublicApiClient,
   projectId: string,
   input: { title?: string; coreCode: string; threadKind?: string }
-): Promise<{ id: string; coreCode?: string }> {
-  const result = await client.request<{ id: string; coreCode?: string }>(
+): Promise<{ id: string; coreCode?: string; providerCode?: string; threadKind?: string }> {
+  if (input.threadKind === 'create_task' || input.threadKind === 'task_snapshot') {
+    architecture03Removed('create_task_thread')
+  }
+  const providerCode = toCanonicalProviderCode(input.coreCode)
+  const result = await client.request<{ id: string; providerCode?: string }>(
     'POST',
-    `/api/projects/${projectId}/threads`,
+    `/api/projects/${projectId}/conversations`,
     {
       title: input.title ?? 'Business E2E Chat',
-      coreCode: input.coreCode,
-      threadKind: input.threadKind ?? 'chat'
+      providerCode
     },
-    { operationId: 'thread.create' }
+    { operationId: 'conversation.create' }
   )
   if (result.status >= 400 || !result.data?.id) {
-    throw new Error(`thread.create_failed:${result.status}:${result.raw.message ?? ''}`)
+    throw new Error(`conversation.create_failed:${result.status}:${result.raw.message ?? ''}`)
   }
-  return result.data
+  const code = result.data.providerCode ?? providerCode
+  return {
+    id: result.data.id,
+    providerCode: code,
+    coreCode: toHostCoreCode(code),
+    threadKind: 'chat'
+  }
 }
 
 export async function getThread(
@@ -93,16 +134,23 @@ export async function getThread(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/threads/${threadId}`,
+    `/api/conversations/${threadId}`,
     undefined,
-    { operationId: 'thread.get' }
+    { operationId: 'conversation.get' }
   )
-  return (result.data ?? {}) as Record<string, unknown>
+  const data = (result.data ?? {}) as Record<string, unknown>
+  const providerCode = String(data.providerCode ?? data.coreCode ?? '')
+  return {
+    ...data,
+    providerCode,
+    coreCode: toHostCoreCode(providerCode),
+    threadKind: 'chat'
+  }
 }
 
 export async function listCores(client: PublicApiClient): Promise<unknown> {
-  const result = await client.request('GET', '/api/agent/cores', undefined, {
-    operationId: 'cores.list'
+  const result = await client.request('GET', '/api/conversations/providers', undefined, {
+    operationId: 'providers.list'
   })
   return result.data
 }
@@ -113,15 +161,21 @@ export async function startTurn(
   message: string,
   options: { createTaskMode?: boolean; kind?: string; attachmentIds?: string[] } = {}
 ): Promise<{ turnId: string }> {
-  const body: Record<string, unknown> = { message }
-  if (options.createTaskMode === true) body.createTaskMode = true
-  if (typeof options.kind === 'string') body.kind = options.kind
-  if (Array.isArray(options.attachmentIds) && options.attachmentIds.length > 0) {
-    body.attachmentIds = options.attachmentIds
+  if (
+    options.createTaskMode === true ||
+    options.kind === 'create_task' ||
+    options.kind === 'draft'
+  ) {
+    architecture03Removed('create_task_turn')
+  }
+  const body: Record<string, unknown> = {
+    message,
+    attachmentIds: options.attachmentIds ?? [],
+    idempotencyKey: `e2e-${Date.now()}-${Math.random().toString(16).slice(2)}`
   }
   const result = await client.request<{ turnId: string }>(
     'POST',
-    `/api/threads/${threadId}/turns`,
+    `/api/conversations/${threadId}/turns`,
     body,
     { operationId: 'conversation.start_turn' }
   )
@@ -136,16 +190,21 @@ export async function getTurn(
   threadId: string,
   turnId: string
 ): Promise<{ turn: Record<string, unknown> }> {
-  const result = await client.request<{ turn: Record<string, unknown> }>(
+  const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/threads/${threadId}/turns/${turnId}`,
+    `/api/conversations/${threadId}/turns/${turnId}`,
     undefined,
     { operationId: 'conversation.get_turn' }
   )
   if (result.status >= 400) {
     throw new Error(`turn.get_failed:${result.status}:${result.raw.message ?? ''}`)
   }
-  return { turn: (result.data?.turn ?? {}) as Record<string, unknown> }
+  const data = (result.data ?? {}) as Record<string, unknown>
+  const turn =
+    data.turn && typeof data.turn === 'object'
+      ? (data.turn as Record<string, unknown>)
+      : data
+  return { turn }
 }
 
 /**
@@ -170,13 +229,14 @@ export async function listMessages(
   client: PublicApiClient,
   threadId: string
 ): Promise<Array<Record<string, unknown>>> {
-  const result = await client.request<{ messages?: Array<Record<string, unknown>> }>(
-    'GET',
-    `/api/threads/${threadId}/messages?limit=100`,
-    undefined,
-    { operationId: 'conversation.list_messages' }
-  )
-  return result.data?.messages ?? []
+  const result = await client.request<
+    Array<Record<string, unknown>> | { messages?: Array<Record<string, unknown>> }
+  >('GET', `/api/conversations/${threadId}/messages`, undefined, {
+    operationId: 'conversation.list_messages'
+  })
+  const data = result.data
+  if (Array.isArray(data)) return data
+  return data?.messages ?? []
 }
 
 export async function cancelTurn(
@@ -186,19 +246,35 @@ export async function cancelTurn(
 ): Promise<unknown> {
   const result = await client.request(
     'POST',
-    `/api/threads/${threadId}/turns/${turnId}/cancel`,
+    `/api/conversations/${threadId}/turns/${turnId}/cancel`,
     undefined,
     { operationId: 'conversation.cancel_turn' }
   )
   return result.data
 }
 
-export async function listThreadDrafts(
+/** Design module — create a draft (replaces create_task collecting draft). */
+export async function createDesignDraft(
   client: PublicApiClient,
-  threadId: string
-): Promise<unknown> {
-  const result = await client.request('GET', `/api/threads/${threadId}/drafts`, undefined, {
-    operationId: 'draft.list_thread'
+  input: {
+    projectId: string
+    title: string
+    summary?: string
+    requirementsMarkdown?: string
+  }
+): Promise<Record<string, unknown>> {
+  const result = await client.request<Record<string, unknown>>('POST', '/api/drafts', input, {
+    operationId: 'draft.create'
+  })
+  if (result.status >= 400 || !result.data) {
+    throw new Error(`draft.create_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data
+}
+
+export async function listDesignDrafts(client: PublicApiClient): Promise<unknown> {
+  const result = await client.request('GET', '/api/drafts', undefined, {
+    operationId: 'draft.list'
   })
   if (result.status >= 400) {
     throw new Error(`draft.list_failed:${result.status}:${result.raw.message ?? ''}`)
@@ -206,77 +282,142 @@ export async function listThreadDrafts(
   return result.data
 }
 
-export async function confirmDraft(
+export async function getDesignDraft(
   client: PublicApiClient,
-  threadId: string,
-  messageId: string
-): Promise<unknown> {
-  const result = await client.request(
+  draftId: string
+): Promise<Record<string, unknown>> {
+  const result = await client.request<Record<string, unknown>>(
+    'GET',
+    `/api/drafts/${draftId}`,
+    undefined,
+    { operationId: 'draft.get' }
+  )
+  if (result.status >= 400 || !result.data) {
+    throw new Error(`draft.get_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data
+}
+
+export async function patchDesignDraftAbilities(
+  client: PublicApiClient,
+  draftId: string,
+  expectedRevision: number,
+  abilities: Array<Record<string, unknown>>
+): Promise<Record<string, unknown>> {
+  const result = await client.request<Record<string, unknown>>(
+    'PATCH',
+    `/api/drafts/${draftId}/abilities`,
+    { expectedRevision, abilities },
+    { operationId: 'draft.patch_abilities' }
+  )
+  if (result.status >= 400 || !result.data) {
+    throw new Error(`draft.abilities_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data
+}
+
+export async function patchDesignExecutionProfile(
+  client: PublicApiClient,
+  draftId: string,
+  expectedRevision: number,
+  executionProfile: {
+    plannerCoreCode: string
+    sliceVerifierCoreCode: string
+    milestoneVerifierCoreCode: string
+  }
+): Promise<Record<string, unknown>> {
+  const result = await client.request<Record<string, unknown>>(
+    'PATCH',
+    `/api/drafts/${draftId}/execution-profile`,
+    { expectedRevision, executionProfile },
+    { operationId: 'draft.patch_execution_profile' }
+  )
+  if (result.status >= 400 || !result.data) {
+    throw new Error(`draft.execution_profile_failed:${result.status}:${result.raw.message ?? ''}`)
+  }
+  return result.data
+}
+
+export async function confirmDesignDraft(
+  client: PublicApiClient,
+  draftId: string,
+  expectedRevision: number
+): Promise<Record<string, unknown>> {
+  const result = await client.request<Record<string, unknown>>(
     'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/confirm`,
-    {},
+    `/api/drafts/${draftId}/confirm`,
+    { expectedRevision },
     { operationId: 'draft.confirm' }
   )
-  if (result.status >= 400) {
+  if (result.status >= 400 || !result.data) {
     throw new Error(`draft.confirm_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
-export async function confirmDraftFinal(
+export async function createDesignPlanningSession(
   client: PublicApiClient,
-  threadId: string,
-  messageId: string
-): Promise<unknown> {
-  const result = await client.request(
+  draftId: string,
+  expectedRevision: number
+): Promise<Record<string, unknown>> {
+  const result = await client.request<Record<string, unknown>>(
     'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/confirm-final`,
-    {},
-    { operationId: 'draft.confirm_final' }
+    `/api/drafts/${draftId}/planning-session`,
+    { expectedRevision },
+    { operationId: 'draft.planning_session' }
   )
-  if (result.status >= 400) {
-    throw new Error(`draft.confirm_final_failed:${result.status}:${result.raw.message ?? ''}`)
+  if (result.status >= 400 || !result.data) {
+    throw new Error(`draft.planning_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
-export async function getLatestJob(
+export async function listThreadDrafts(
   client: PublicApiClient,
-  threadId: string
+  _threadId: string
+): Promise<unknown> {
+  // Thread-scoped drafts removed — return Design draft list for soft probes.
+  return listDesignDrafts(client)
+}
+
+export async function confirmDraft(
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string
+): Promise<unknown> {
+  architecture03Removed('thread_draft_confirm')
+}
+
+export async function confirmDraftFinal(
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string
+): Promise<unknown> {
+  architecture03Removed('thread_draft_confirm_final')
+}
+
+export async function getLatestJob(
+  _client: PublicApiClient,
+  _threadId: string
 ): Promise<Record<string, unknown> | null> {
-  const result = await client.request('GET', `/api/threads/${threadId}/jobs/latest`, undefined, {
-    operationId: 'job.latest'
-  })
-  if (result.status >= 400) {
-    throw new Error(`job.latest_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return unwrapJob(result.data)
+  architecture03Removed('thread_job_latest')
 }
 
 export async function listThreadPlans(
-  client: PublicApiClient,
-  threadId: string
+  _client: PublicApiClient,
+  _threadId: string
 ): Promise<Array<Record<string, unknown>>> {
-  const result = await client.request<{ plans?: Array<Record<string, unknown>> }>(
-    'GET',
-    `/api/threads/${threadId}/plans`,
-    undefined,
-    { operationId: 'plan.list' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`plan.list_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data?.plans ?? []
+  architecture03Removed('thread_plans')
 }
 
 export async function getJob(
   client: PublicApiClient,
-  threadId: string,
+  _threadId: string,
   jobId: string
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/threads/${threadId}/jobs/${jobId}`,
+    `/api/jobs/${jobId}`,
     undefined,
     { operationId: 'job.get' }
   )
@@ -289,68 +430,39 @@ export async function getJob(
 }
 
 export async function confirmPlan(
-  client: PublicApiClient,
-  threadId: string,
-  jobId: string
+  _client: PublicApiClient,
+  _threadId: string,
+  _jobId: string
 ): Promise<unknown> {
-  const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/jobs/${jobId}/confirm-plan`,
-    {},
-    { operationId: 'plan.confirm' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`plan.confirm_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return unwrapJob(result.data) ?? result.data
+  architecture03Removed('thread_plan_confirm')
 }
 
 export async function confirmPlanNode(
-  client: PublicApiClient,
-  threadId: string,
-  jobId: string,
-  nodeRef: string
+  _client: PublicApiClient,
+  _threadId: string,
+  _jobId: string,
+  _nodeRef: string
 ): Promise<unknown> {
-  const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/jobs/${jobId}/plan/nodes/${encodeURIComponent(nodeRef)}/confirm`,
-    {},
-    { operationId: 'plan.node_confirm' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`plan.node_confirm_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_plan_node_confirm')
 }
 
 export async function createJob(
-  client: PublicApiClient,
-  threadId: string,
-  body: Record<string, unknown> = {}
+  _client: PublicApiClient,
+  _threadId: string,
+  _body: Record<string, unknown> = {}
 ): Promise<Record<string, unknown>> {
-  const result = await client.request<Record<string, unknown>>(
-    'POST',
-    `/api/threads/${threadId}/jobs`,
-    body,
-    { operationId: 'job.create' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`job.create_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  const job = unwrapJob(result.data)
-  if (!job) throw new Error('job.create_empty')
-  return job
+  architecture03Removed('thread_job_create')
 }
 
 export async function getTaskEvidence(
   client: PublicApiClient,
-  threadId: string,
+  _threadId: string,
   jobId: string,
   taskId: string
 ): Promise<unknown> {
   const result = await client.request(
     'GET',
-    `/api/threads/${threadId}/jobs/${jobId}/tasks/${taskId}/evidence`,
+    `/api/jobs/${jobId}/work/${encodeURIComponent(taskId)}/evidence`,
     undefined,
     { operationId: 'job.task_evidence' }
   )
@@ -386,7 +498,7 @@ async function pollTerminal(
     try {
       const entity = await load()
       const status = String(entity.status ?? '')
-      if (['completed', 'failed', 'cancelled'].includes(status)) return entity
+      if (['completed', 'failed', 'cancelled', 'succeeded'].includes(status)) return entity
       lastTransientError = undefined
     } catch (error) {
       if (!isTransientPollError(error)) throw error
@@ -420,113 +532,59 @@ function formatPollError(error: unknown): string {
 }
 
 export async function updateDraft(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  patch: Record<string, unknown>
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _patch: Record<string, unknown>
 ): Promise<unknown> {
-  const result = await client.request(
-    'PATCH',
-    `/api/threads/${threadId}/messages/${messageId}/draft`,
-    patch,
-    { operationId: 'draft.update' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.update_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_draft_update')
 }
 
 export async function unlockDraft(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string
 ): Promise<unknown> {
-  const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/unlock`,
-    {},
-    { operationId: 'draft.unlock' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.unlock_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_draft_unlock')
 }
 
 export async function unlockDraftContract(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string
 ): Promise<unknown> {
-  const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/unlock-contract`,
-    {},
-    { operationId: 'draft.unlock_contract' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.unlock_contract_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_draft_unlock_contract')
 }
 
 export async function confirmDraftSection(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  section: string
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _section: string
 ): Promise<unknown> {
-  const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/sections/${encodeURIComponent(section)}/confirm`,
-    {},
-    { operationId: 'draft.section_confirm' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.section_confirm_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_draft_section_confirm')
 }
 
 export async function updateDraftAbilities(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  selections: Array<{ abilityCode: string; coreCode: string }>
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _selections: Array<{ abilityCode: string; coreCode: string }>
 ): Promise<unknown> {
-  const result = await client.request(
-    'PATCH',
-    `/api/threads/${threadId}/messages/${messageId}/draft/abilities`,
-    { selections },
-    { operationId: 'draft.abilities' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.abilities_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_draft_abilities')
 }
 
 export async function updateDraftExecutionConfig(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  config: {
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _config: {
     plannerCoreCode: string
     sliceVerifierCoreCode: string
     milestoneVerifierCoreCode: string
   }
 ): Promise<unknown> {
-  const result = await client.request(
-    'PATCH',
-    `/api/threads/${threadId}/messages/${messageId}/draft/execution-config`,
-    config,
-    { operationId: 'draft.execution_config' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.execution_config_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-  return result.data
+  architecture03Removed('thread_draft_execution_config')
 }
 
 export async function uploadThreadAttachment(
@@ -539,9 +597,13 @@ export async function uploadThreadAttachment(
   const bytes = readFileSync(filePath)
   const form = new FormData()
   form.append('file', new Blob([bytes]), fileName)
-  const result = await client.uploadMultipart(`/api/threads/${threadId}/attachments`, form, {
-    operationId: 'attachment.upload'
-  })
+  const result = await client.uploadMultipart(
+    `/api/conversations/${threadId}/attachments`,
+    form,
+    {
+      operationId: 'attachment.upload'
+    }
+  )
   if (result.status >= 400) {
     throw new Error(`attachment.upload_failed:${result.status}:${result.raw.message ?? ''}`)
   }
@@ -555,7 +617,7 @@ export async function downloadThreadAttachment(
 ): Promise<Buffer> {
   const result = await client.requestBinary(
     'GET',
-    `/api/threads/${threadId}/attachments/${encodeURIComponent(attachmentId)}`,
+    `/api/conversations/${threadId}/attachments/${encodeURIComponent(attachmentId)}`,
     { operationId: 'attachment.download' }
   )
   if (result.status >= 400) {
@@ -565,89 +627,68 @@ export async function downloadThreadAttachment(
 }
 
 export async function updateDraftReferenceDescription(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  referenceId: string,
-  description: string
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _referenceId: string,
+  _description: string
 ): Promise<unknown> {
-  const result = await client.request(
-    'PATCH',
-    `/api/threads/${threadId}/messages/${messageId}/draft/references/${encodeURIComponent(referenceId)}`,
-    { description },
-    { operationId: 'draft.references.update_description' }
-  )
-  if (result.status >= 400) {
-    throw new Error(
-      `draft.references_update_description_failed:${result.status}:${result.raw.message ?? ''}`
-    )
-  }
-  return result.data
+  architecture03Removed('thread_draft_reference_description')
 }
 
-/**
- * Import message attachments as draft references.
- * Product auto-adds turn attachments into references with empty descriptions and
- * skips re-import when the id already exists — so we always PATCH provided
- * descriptions afterward.
- */
 export async function importDraftReferences(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  attachmentIds: string[],
-  descriptions: Record<string, string> = {}
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _attachmentIds: string[],
+  _descriptions: Record<string, string> = {}
 ): Promise<unknown> {
-  const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/references/import`,
-    { attachmentIds, descriptions },
-    { operationId: 'draft.references.import' }
-  )
-  if (result.status >= 400) {
-    throw new Error(`draft.references_import_failed:${result.status}:${result.raw.message ?? ''}`)
-  }
-
-  let latest: unknown = result.data
-  for (const attachmentId of attachmentIds) {
-    const description = descriptions[attachmentId]?.trim() ?? ''
-    if (!description) continue
-    latest = await updateDraftReferenceDescription(
-      client,
-      threadId,
-      messageId,
-      attachmentId,
-      description
-    )
-  }
-  return latest
+  architecture03Removed('thread_draft_reference_import')
 }
 
 export async function addLocalCorpusDraftReference(
-  client: PublicApiClient,
-  threadId: string,
-  messageId: string,
-  input: {
+  _client: PublicApiClient,
+  _threadId: string,
+  _messageId: string,
+  _input: {
     localPath: string
     name: string
     description: string
     kind?: 'file' | 'directory'
   }
 ): Promise<unknown> {
+  architecture03Removed('thread_draft_local_corpus')
+}
+
+export async function putAgentDefaults(
+  client: PublicApiClient,
+  input: {
+    plannerProvider: string
+    sliceVerifierProvider: string
+    milestoneVerifierProvider: string
+  }
+): Promise<unknown> {
+  const current = await getAgentDefaults(client)
+  const revision =
+    typeof current === 'object' &&
+    current !== null &&
+    'revision' in current &&
+    typeof (current as { revision: unknown }).revision === 'number'
+      ? (current as { revision: number }).revision
+      : 0
   const result = await client.request(
-    'POST',
-    `/api/threads/${threadId}/messages/${messageId}/draft/references/local-corpus`,
-    input,
-    { operationId: 'draft.references.local_corpus' }
+    'PUT',
+    '/api/settings/agent-defaults',
+    { ...input, expectedRevision: revision },
+    { operationId: 'settings.agent_defaults.put' }
   )
   if (result.status >= 400) {
-    throw new Error(
-      `draft.references_local_corpus_failed:${result.status}:${result.raw.message ?? ''}`
-    )
+    throw new Error(`settings.agent_defaults_failed:${result.status}:${result.raw.message ?? ''}`)
   }
   return result.data
 }
 
+/** @deprecated Use {@link putAgentDefaults} */
 export async function putControlPlanePolicies(
   client: PublicApiClient,
   input: {
@@ -656,25 +697,28 @@ export async function putControlPlanePolicies(
     milestoneVerifierCoreCode: string
   }
 ): Promise<unknown> {
-  const result = await client.request('PUT', '/api/settings/control-plane', input, {
-    operationId: 'settings.control_plane.put'
+  return putAgentDefaults(client, {
+    plannerProvider: input.plannerCoreCode,
+    sliceVerifierProvider: input.sliceVerifierCoreCode,
+    milestoneVerifierProvider: input.milestoneVerifierCoreCode
+  })
+}
+
+export async function getAgentDefaults(client: PublicApiClient): Promise<unknown> {
+  const result = await client.request('GET', '/api/settings/agent-defaults', undefined, {
+    operationId: 'settings.agent_defaults.get'
   })
   if (result.status >= 400) {
-    throw new Error(`settings.control_plane_failed:${result.status}:${result.raw.message ?? ''}`)
+    throw new Error(
+      `settings.agent_defaults_get_failed:${result.status}:${result.raw.message ?? ''}`
+    )
   }
   return result.data
 }
 
+/** @deprecated Use {@link getAgentDefaults} */
 export async function getControlPlanePolicies(client: PublicApiClient): Promise<unknown> {
-  const result = await client.request('GET', '/api/settings/control-plane', undefined, {
-    operationId: 'settings.control_plane.get'
-  })
-  if (result.status >= 400) {
-    throw new Error(
-      `settings.control_plane_get_failed:${result.status}:${result.raw.message ?? ''}`
-    )
-  }
-  return result.data
+  return getAgentDefaults(client)
 }
 
 export async function getMcpSettings(client: PublicApiClient): Promise<{
@@ -695,12 +739,13 @@ export async function getMcpSettings(client: PublicApiClient): Promise<{
 
 export async function putMcpSettings(
   client: PublicApiClient,
-  settings: unknown
+  settings: unknown,
+  expectedRevision = 0
 ): Promise<{ settings: unknown }> {
   const result = await client.request<{ settings: unknown }>(
     'PUT',
     '/api/settings/mcp',
-    { settings },
+    { settings, expectedRevision },
     { operationId: 'settings.mcp.put' }
   )
   if (result.status >= 400) {

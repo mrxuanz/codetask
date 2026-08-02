@@ -19,7 +19,6 @@ import ContextMenu from '@renderer/components/ui/ContextMenu.vue'
 import RenameDialog from '@renderer/components/ui/RenameDialog.vue'
 import {
   threadsForProject,
-  isCreateTaskThread,
   useHomeWorkspace
 } from '@renderer/composables/useHomeWorkspace'
 import { toastError } from '@renderer/lib/toast'
@@ -361,7 +360,7 @@ const confirmDeleteMessage = computed(() => {
               @select="
                 () => {
                   workspace.setActiveThreadId(thread.id)
-                  router.push(isCreateTaskThread(thread) ? '/home/create' : '/home')
+                  router.push('/home')
                   emit('close')
                 }
               "

@@ -117,7 +117,7 @@ test('Hono browser auth returns HttpOnly cookies while Bearer tokens require opt
   await withAuth(async (auth, _client, authSecret) => {
     const app = new Hono()
     app.route(
-      '/api',
+      '/api/auth',
       createAuthRoutes({
         security: {
           mode: 'desktop',
@@ -127,23 +127,27 @@ test('Hono browser auth returns HttpOnly cookies while Bearer tokens require opt
       } as AppContext)
     )
 
-    const setup = await app.request('/api/setup', {
+    const setup = await app.request('/api/auth/setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: USERNAME, password: PASSWORD })
     })
     assert.equal(setup.status, 200)
     const setupBody = (await setup.json()) as {
-      data: { username: string; expires_at: number; token?: string }
+      data: {
+        actor?: { userId: string; username: string; sessionExpiresAt: number }
+        token?: string
+      }
     }
-    assert.equal(setupBody.data.username, USERNAME)
+    assert.equal(setupBody.data.actor?.username, USERNAME)
+    assert.ok(setupBody.data.actor?.userId)
     assert.equal(setupBody.data.token, undefined)
     const cookies = setup.headers.get('set-cookie') ?? ''
     assert.match(cookies, /codetask_session=/)
     assert.match(cookies, /HttpOnly/i)
     assert.match(cookies, /codetask_csrf=/)
 
-    const login = await app.request('/api/login', {
+    const login = await app.request('/api/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -152,7 +156,10 @@ test('Hono browser auth returns HttpOnly cookies while Bearer tokens require opt
       body: JSON.stringify({ username: USERNAME, password: PASSWORD })
     })
     assert.equal(login.status, 200)
-    const loginBody = (await login.json()) as { data: { token?: string } }
+    const loginBody = (await login.json()) as {
+      data: { token?: string; actor?: { username: string } }
+    }
     assert.ok(loginBody.data.token)
+    assert.equal(loginBody.data.actor?.username, USERNAME)
   })
 })

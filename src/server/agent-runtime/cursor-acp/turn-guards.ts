@@ -15,8 +15,8 @@ export function isEmptyAcpReply(reply: string): boolean {
 function isConversationCursorScope(scopeId: string): boolean {
   return (
     scopeId.startsWith('conversation:chat:') ||
-    scopeId.startsWith('conversation:create_task:') ||
-    /^conversation:[^:]+$/.test(scopeId)
+    /^conversation:[^:]+$/.test(scopeId) ||
+    /^conversation:[^:]+:provider:[^:]+$/.test(scopeId)
   )
 }
 
@@ -78,7 +78,7 @@ const ROLES_REQUIRING_NONEMPTY_REPLY: ReadonlySet<ConversationRole> = new Set([
 /**
  * Cursor ACP may report a clean stop while stderr shows a cloud disconnect.
  * Task/verifier roles also treat empty replies as incomplete turns.
- * Planner success is MCP-side (finalize_plan); empty assistant text is normal.
+ * Planner / conversation may finish with empty assistant text (server commits plan).
  */
 export function assertCursorAcpCompletion(input: {
   role: ConversationRole
@@ -108,6 +108,3 @@ export function assertCursorAcpCompletion(input: {
 
   return {}
 }
-
-/** @deprecated Prefer assertCursorAcpCompletion — kept for call-site compatibility. */
-export const assertTaskWorkerAcpCompletion = assertCursorAcpCompletion

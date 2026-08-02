@@ -3,8 +3,7 @@ import type { SupportedCoreCode } from '../cores'
 import {
   acquireWorkspaceLease,
   releaseWorkspaceLease
-} from '../../legacy-control-plane/workspace-lease-store'
-import { resolveConversationPromptBody } from '../../settings/prompts'
+} from '../../infra/workspace-lease-store'
 import type { ChatAccessInput, ConversationAccessDecision, ConversationWorkspaceLease } from './types'
 
 /**
@@ -65,13 +64,4 @@ export function resolveChatAccess(input: ChatAccessInput): ConversationAccessDec
 export function releaseChatWorkspaceLease(lease: ConversationWorkspaceLease | null): void {
   if (!lease) return
   releaseWorkspaceLease({ leaseId: lease.leaseId })
-}
-
-/**
- * Ordinary chat prompts: default inject nothing.
- * Settings may supply a custom conversation body; business skills are not part of chat.
- * User MCP is attached by agent-runtime for non-read-only profiles (chat-write).
- */
-export function resolveChatSystemPrompt(): string {
-  return resolveConversationPromptBody()?.trim() ?? ''
 }

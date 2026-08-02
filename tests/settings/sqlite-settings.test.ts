@@ -26,7 +26,7 @@ test('settings.json is ignored because SQLite is the only settings authority', (
   t.after(() => closeIsolatedTestDatabase(db))
 
   const store = new SettingsStore(dataDir, db)
-  assert.deepEqual(store.read(), {})
+  assert.equal(store.readNamespace('agent_defaults').revision, 0)
   assert.equal(existsSync(oldSettingsPath), true)
 })
 
@@ -38,35 +38,29 @@ test('settings namespaces use independent CAS revisions', (t) => {
   const store = new SettingsStore(dataDir, db)
 
   assert.equal(
-    store.writeNamespace('retention', { workingArtifactDays: 14 }, { expectedRevision: 0 }),
+    store.writeNamespace('agent_prompts', { conversation: { mode: 'default', body: '' } }, {
+      expectedRevision: 0
+    }),
     1
   )
-  assert.equal(store.writeNamespace('prompts', { planner: {} }, { expectedRevision: 0 }), 1)
   assert.equal(
-    store.writeNamespace('retention', { workingArtifactDays: 7 }, { expectedRevision: 1 }),
+    store.writeNamespace('agent_defaults', { plannerProvider: 'codex' }, { expectedRevision: 0 }),
+    1
+  )
+  assert.equal(
+    store.writeNamespace('agent_prompts', { conversation: { mode: 'custom', body: 'x' } }, {
+      expectedRevision: 1
+    }),
     2
   )
   assert.throws(
-    () => store.writeNamespace('retention', { workingArtifactDays: 1 }, { expectedRevision: 1 }),
+    () =>
+      store.writeNamespace('agent_prompts', { conversation: { mode: 'custom', body: 'y' } }, {
+        expectedRevision: 1
+      }),
     SettingsRevisionConflictError
   )
-  assert.deepEqual(store.readNamespace('retention').value, { workingArtifactDays: 7 })
-  assert.deepEqual(store.readNamespace('prompts').value, { planner: {} })
-})
-
-test('patch updates only the changed namespace revision', (t) => {
-  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-settings-patch-'))
-  t.after(() => rmSync(dataDir, { recursive: true, force: true }))
-  const db = createIsolatedTestDatabase(dataDir)
-  t.after(() => closeIsolatedTestDatabase(db))
-  const store = new SettingsStore(dataDir, db)
-  store.writeNamespace('prompts', { planner: 'before' })
-  store.writeNamespace('retention', { workingArtifactDays: 14 })
-
-  store.patch((settings) => {
-    settings.prompts = { planner: 'after' }
+  assert.deepEqual(store.readNamespace('agent_prompts').value, {
+    conversation: { mode: 'custom', body: 'x' }
   })
-
-  assert.equal(store.readNamespace('prompts').revision, 2)
-  assert.equal(store.readNamespace('retention').revision, 1)
 })

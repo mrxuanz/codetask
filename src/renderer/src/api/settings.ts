@@ -1,6 +1,5 @@
 import { api } from './client'
 import type { ApiResponse } from './types'
-import type { BusinessSkillsSettings } from '@shared/contracts/business-skills'
 
 export interface AgentCoreOption {
   code: string
@@ -11,47 +10,99 @@ export interface AgentCoreOption {
   reason?: string | null
 }
 
-export interface ControlPlanePolicies {
-  plannerCoreCode: string
-  sliceVerifierCoreCode: string
-  milestoneVerifierCoreCode: string
+export interface AgentDefaultsSettings {
+  plannerProvider: string
+  sliceVerifierProvider: string
+  milestoneVerifierProvider: string
+}
+
+export interface AgentDefaultsPayload {
+  settings: AgentDefaultsSettings
+  revision: number
   updatedAt: number
 }
 
-export interface ControlPlaneSettingsPayload {
-  policies: ControlPlanePolicies
-  cores: AgentCoreOption[]
-}
-
-export interface PromptBodySetting {
+export interface PromptEntry {
+  mode: 'default' | 'custom'
   body: string
-  useDefault: boolean
 }
 
-export interface PromptSettings {
-  conversation: PromptBodySetting
-  planner: PromptBodySetting
-  sliceVerifier: PromptBodySetting
-  milestoneVerifier: PromptBodySetting
+export interface AgentPromptSettings {
+  conversation: PromptEntry
+  planner: PromptEntry
+  sliceVerifier: PromptEntry
+  milestoneVerifier: PromptEntry
 }
 
 export interface PromptSettingsPayload {
-  settings: PromptSettings
-  defaults: PromptSettings
+  settings: AgentPromptSettings
+  defaults: AgentPromptSettings
+  revision: number
+  updatedAt: number
 }
 
-export function fetchControlPlaneSettings(): Promise<ApiResponse<ControlPlaneSettingsPayload>> {
-  return api<ControlPlaneSettingsPayload>('/api/settings/control-plane')
+export type UserMcpRoleKey = 'conversation' | 'planner' | 'task' | 'verification'
+
+export type CliMcpConfigFragment = Record<string, Record<string, unknown>>
+
+export type RoleCliMcpSettings = Record<string, CliMcpConfigFragment>
+
+export type AgentMcpSettings = {
+  roles: Record<UserMcpRoleKey, RoleCliMcpSettings>
 }
 
-export function updateControlPlanePolicies(input: {
-  plannerCoreCode: string
-  sliceVerifierCoreCode: string
-  milestoneVerifierCoreCode: string
-}): Promise<ApiResponse<{ policies: ControlPlanePolicies }>> {
-  return api<{ policies: ControlPlanePolicies }>('/api/settings/control-plane', {
+export interface McpSettingsConstraints {
+  reservedServerNames: string[]
+  rootKeys: Record<string, string>
+}
+
+export interface McpSettingsPayload {
+  settings: AgentMcpSettings
+  constraints: McpSettingsConstraints
+  revision: number
+  updatedAt: number
+}
+
+export interface ProviderRuntimeSetting {
+  enabled: boolean
+  executable: { mode: 'auto' } | { mode: 'path'; path: string }
+  model?: string
+  endpoint?: string
+  approveMcps: boolean
+}
+
+export interface ProviderSettingsPayload {
+  saved: { providers: Record<string, ProviderRuntimeSetting> }
+  effective: { providers: Record<string, ProviderRuntimeSetting> }
+  revision: number
+  updatedAt: number
+  restartRequired: boolean
+}
+
+export interface SettingsWriteResult<T> {
+  settings: T
+  revision: number
+  effect: 'new-operations' | 'restart-required'
+  restartRequired: boolean
+}
+
+export interface SecretMeta {
+  name: string
+  backend: 'encrypted'
+  configured: boolean
+}
+
+export function fetchAgentDefaults(): Promise<ApiResponse<AgentDefaultsPayload>> {
+  return api<AgentDefaultsPayload>('/api/settings/agent-defaults')
+}
+
+export function updateAgentDefaults(
+  settings: AgentDefaultsSettings,
+  expectedRevision: number
+): Promise<ApiResponse<SettingsWriteResult<AgentDefaultsSettings>>> {
+  return api<SettingsWriteResult<AgentDefaultsSettings>>('/api/settings/agent-defaults', {
     method: 'PUT',
-    body: JSON.stringify(input)
+    body: JSON.stringify({ ...settings, expectedRevision })
   })
 }
 
@@ -60,43 +111,13 @@ export function fetchPromptSettings(): Promise<ApiResponse<PromptSettingsPayload
 }
 
 export function updatePromptSettings(
-  settings: PromptSettings
-): Promise<ApiResponse<{ settings: PromptSettings }>> {
-  return api<{ settings: PromptSettings }>('/api/settings/prompts', {
+  settings: AgentPromptSettings,
+  expectedRevision: number
+): Promise<ApiResponse<SettingsWriteResult<AgentPromptSettings>>> {
+  return api<SettingsWriteResult<AgentPromptSettings>>('/api/settings/prompts', {
     method: 'PUT',
-    body: JSON.stringify({ settings })
+    body: JSON.stringify({ settings, expectedRevision })
   })
-}
-
-export function fetchBusinessSkills(): Promise<ApiResponse<{ settings: BusinessSkillsSettings }>> {
-  return api<{ settings: BusinessSkillsSettings }>('/api/settings/business-skills')
-}
-
-export function updateBusinessSkills(
-  settings: BusinessSkillsSettings
-): Promise<ApiResponse<{ settings: BusinessSkillsSettings }>> {
-  return api<{ settings: BusinessSkillsSettings }>('/api/settings/business-skills', {
-    method: 'PUT',
-    body: JSON.stringify({ settings })
-  })
-}
-
-export type UserMcpRoleKey = 'conversation' | 'task' | 'verification'
-
-export type CliMcpConfigFragment = Record<string, Record<string, unknown>>
-
-export type RoleCliMcpSettings = Record<string, CliMcpConfigFragment>
-
-export type UserMcpSettings = Record<UserMcpRoleKey, RoleCliMcpSettings>
-
-export interface McpSettingsConstraints {
-  reservedServerNames: string[]
-  rootKeys: Record<string, string>
-}
-
-export interface McpSettingsPayload {
-  settings: UserMcpSettings
-  constraints: McpSettingsConstraints
 }
 
 export function fetchMcpSettings(): Promise<ApiResponse<McpSettingsPayload>> {
@@ -104,10 +125,52 @@ export function fetchMcpSettings(): Promise<ApiResponse<McpSettingsPayload>> {
 }
 
 export function updateMcpSettings(
-  settings: UserMcpSettings
-): Promise<ApiResponse<{ settings: UserMcpSettings }>> {
-  return api<{ settings: UserMcpSettings }>('/api/settings/mcp', {
+  settings: AgentMcpSettings,
+  expectedRevision: number
+): Promise<ApiResponse<SettingsWriteResult<AgentMcpSettings>>> {
+  return api<SettingsWriteResult<AgentMcpSettings>>('/api/settings/mcp', {
     method: 'PUT',
-    body: JSON.stringify({ settings })
+    body: JSON.stringify({ settings, expectedRevision })
   })
+}
+
+export function fetchProviderSettings(): Promise<ApiResponse<ProviderSettingsPayload>> {
+  return api<ProviderSettingsPayload>('/api/settings/providers')
+}
+
+export function updateProviderSettings(
+  providers: Record<string, ProviderRuntimeSetting>,
+  expectedRevision: number
+): Promise<ApiResponse<SettingsWriteResult<{ providers: Record<string, ProviderRuntimeSetting> }>>> {
+  return api<SettingsWriteResult<{ providers: Record<string, ProviderRuntimeSetting> }>>(
+    '/api/settings/providers',
+    {
+      method: 'PUT',
+      body: JSON.stringify({ providers, expectedRevision })
+    }
+  )
+}
+
+export function fetchProviderCatalog(): Promise<
+  ApiResponse<{ providers: AgentCoreOption[] }>
+> {
+  return api<{ providers: AgentCoreOption[] }>('/api/settings/provider-catalog')
+}
+
+export function fetchSecrets(): Promise<ApiResponse<{ secrets: SecretMeta[] }>> {
+  return api<{ secrets: SecretMeta[] }>('/api/settings/secrets')
+}
+
+export function putSecret(name: string, value: string): Promise<ApiResponse<{ secret: SecretMeta }>> {
+  return api<{ secret: SecretMeta }>(`/api/settings/secrets/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value })
+  })
+}
+
+export function deleteSecret(name: string): Promise<ApiResponse<{ deleted: boolean; name: string }>> {
+  return api<{ deleted: boolean; name: string }>(
+    `/api/settings/secrets/${encodeURIComponent(name)}`,
+    { method: 'DELETE' }
+  )
 }

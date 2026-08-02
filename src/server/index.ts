@@ -1,12 +1,7 @@
-import { readFileSync } from 'fs'
-import { join } from 'path'
-import { Hono } from 'hono'
-import { serveStatic } from '@hono/node-server/serve-static'
-import { proxy } from 'hono/proxy'
+import { createHonoApp } from '@codetask/server-core'
+import type { Hono } from 'hono'
 import type { AppContext } from './bootstrap'
-import { code } from './error'
-import { shouldServeSpaIndex } from './http/spa-fallback'
-import { fail } from './response'
+import { getOrComposeConversation, getOrComposeDesign, getOrComposeExecution } from './design-module'
 import { createApiRoutes } from './routes/api'
 
 export {
@@ -25,46 +20,22 @@ export interface CreateAppHttpOptions {
   staticDir?: string
 }
 
+export {
+  getOrComposeConversation,
+  getOrComposeDesign,
+  getOrComposeExecution
+} from './design-module'
+
 export function createApp(ctx: AppContext, options: CreateAppHttpOptions): Hono {
-  const app = new Hono()
+  const design = getOrComposeDesign(ctx)
+  const execution = getOrComposeExecution(ctx)
+  const conversation = getOrComposeConversation(ctx)
+  const api = createApiRoutes(ctx, design, execution, conversation)
 
-  app.route('/api', createApiRoutes(ctx))
-
-  if (options.isDev && options.rendererDevUrl) {
-    const devOrigin = options.rendererDevUrl.replace(/\/$/, '')
-
-    app.all('*', async (c) => {
-      const target = `${devOrigin}${c.req.path}${new URL(c.req.url).search}`
-      return proxy(target, c.req.raw)
-    })
-  } else if (options.staticDir) {
-    const staticDir = options.staticDir
-
-    app.use('*', async (c, next) => {
-      if (c.req.path.startsWith('/api/')) {
-        await next()
-        return
-      }
-
-      return serveStatic({ root: staticDir })(c, next)
-    })
-
-    app.notFound((c) => {
-      if (c.req.path.startsWith('/api/')) {
-        return c.json(fail(code.NOT_FOUND, 'Not Found', { error: 'Not Found' }), 404)
-      }
-      if (!shouldServeSpaIndex(c.req.raw, c.req.path)) {
-        return c.json(fail(code.NOT_FOUND, 'Not Found', { error: 'Not Found' }), 404)
-      }
-
-      const html = readFileSync(join(staticDir, 'index.html'), 'utf-8')
-      return c.html(html)
-    })
-  }
-
-  return app
+  return createHonoApp({
+    isDev: options.isDev,
+    rendererDevUrl: options.rendererDevUrl,
+    staticDir: options.staticDir,
+    api
+  })
 }
-
-export type { ApiResponse } from './response'
-export { ok, fail, okWithExtra } from './response'
-export { AppError, code, toErrorResponse } from './error'

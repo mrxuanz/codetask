@@ -86,7 +86,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
   const systemMcp = await handler({
     params: {
       options,
-      toolCall: { kind: 'other', title: 'codeteam-manager propose_task_draft' }
+      toolCall: { kind: 'other', title: 'codeteam-manager read_reference_attachment' }
     }
   })
   assert.deepEqual(systemMcp, {
@@ -95,15 +95,15 @@ test('permission handler denies shell/write for read-only profiles and permits r
 
   // Real Cursor ACP title: server and tool are hyphen-joined, then repeated after ":".
   for (const title of [
-    'codeteam-manager-register_plan_outline: register_plan_outline',
-    'codeteam-manager-finalize_plan: finalize_plan',
-    'codeteam-manager_register_task_context'
+    'codeteam-manager-read_reference_attachment: read_reference_attachment',
+    'codeteam-manager_read_reference_attachment',
+    'codeteam-manager read_reference_attachment'
   ] as const) {
-    const plannerMcp = await handler({
+    const conversationMcp = await handler({
       params: { options, toolCall: { kind: 'other', title } }
     })
     assert.deepEqual(
-      plannerMcp,
+      conversationMcp,
       { outcome: { outcome: 'selected', optionId: 'allow-once' } },
       title
     )
@@ -112,10 +112,23 @@ test('permission handler denies shell/write for read-only profiles and permits r
   const toolNameWithoutServer = await handler({
     params: {
       options,
-      toolCall: { kind: 'other', title: 'register_plan_outline' }
+      toolCall: { kind: 'other', title: 'read_reference_attachment' }
     }
   })
   assert.deepEqual(toolNameWithoutServer, {
+    outcome: { outcome: 'selected', optionId: 'deny-once' }
+  })
+
+  const retiredPlannerTool = await handler({
+    params: {
+      options,
+      toolCall: {
+        kind: 'other',
+        title: 'codeteam-manager-register_plan_outline: register_plan_outline'
+      }
+    }
+  })
+  assert.deepEqual(retiredPlannerTool, {
     outcome: { outcome: 'selected', optionId: 'deny-once' }
   })
 
@@ -134,7 +147,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
       options,
       toolCall: {
         kind: 'execute',
-        title: 'codeteam-manager-register_plan_outline: register_plan_outline'
+        title: 'codeteam-manager-read_reference_attachment: read_reference_attachment'
       }
     }
   })
@@ -145,7 +158,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
 
 test('buildCursorTurnPlan: conversation/planner run directly with scoped MCP', () => {
   for (const [role, capabilityProfile] of [
-    ['conversation', 'create-task-read'],
+    ['conversation', 'chat-read'],
     ['planner', 'planner-read']
   ] as const) {
     const plan = buildCursorTurnPlan(

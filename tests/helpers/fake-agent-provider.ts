@@ -108,7 +108,8 @@ export class FakeScriptRegistry {
         return 'planner:0'
       }
       if (input.role === 'conversation') {
-        const stage = url.searchParams.get('wizardStage') ?? 'general'
+        // Conversation MCP no longer binds wizardStage (architecture 03).
+        const stage = url.searchParams.get('wizardStage') ?? 'chat'
         const turn = this.bumpCounter(`conversation:${stage}:${input.provider}`)
         return `conversation:${stage}:${input.provider}:${turn}`
       }

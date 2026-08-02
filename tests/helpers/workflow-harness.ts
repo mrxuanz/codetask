@@ -22,22 +22,12 @@ import {
   setTaskEvidenceWaitTimeoutForTests,
   setTestAgentTurnProviders
 } from '../../src/server/agent-runtime/providers/test-overrides'
-import { eq, or } from 'drizzle-orm'
-import { getDb } from '../../src/server/db'
-import { threadJobs } from '../../src/server/db/schema'
-import { clearExecutionLease } from '../../src/server/legacy-control-plane/repository'
-import { abortActiveTurn } from '../../src/server/legacy-control-plane/controls'
-import {
-  reconcileOrphanRunningJobsOnStartup,
-  resetJobReconcileForTests
-} from '../../src/server/legacy-control-plane/reconcile'
-import { saveControlPlanePolicies } from '../../src/server/settings/control-plane'
-import { THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK } from '../../src/server/threads/types'
+import { getOrComposeExecution } from '../../src/server/design-module'
+import { getOrComposeSettings } from '../../src/server/settings/service'
+import { THREAD_KIND_CHAT } from '../../src/shared/contracts/threads.ts'
 import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
 import {
   buildProposeTaskDraftArgs,
-  buildPlanOutlineArgs,
-  FIXTURE_TASK_CONTEXTS,
   FIXTURE_TASK_EVIDENCE,
   FIXTURE_SLICE_VERDICT_PASSED,
   FIXTURE_MILESTONE_VERDICT_PASSED
@@ -83,14 +73,13 @@ export class WorkflowHarness {
       this.workspaceRoot = realpathSync(this.workspaceRoot)
     }
 
-    this.ctx = bootstrapRuntime({ dataDir: this.dataDir })
-    this.ctx.settings.patch((file) => {
-      file.retention = {
-        ...DEFAULT_RETENTION_SETTINGS,
-        ...(typeof file.retention === 'object' && file.retention !== null
-          ? (file.retention as Record<string, unknown>)
-          : {}),
-        compactCountersOnTerminal: false
+    this.ctx = bootstrapRuntime({
+      dataDir: this.dataDir,
+      config: {
+        retention: {
+          ...DEFAULT_RETENTION_SETTINGS,
+          compactCountersOnTerminal: false
+        }
       }
     })
     const app = createApp(this.ctx, { isDev: false })
@@ -114,10 +103,12 @@ export class WorkflowHarness {
     this.wireFakeAgents()
     setTaskEvidenceWaitTimeoutForTests(3_000)
 
-    await saveControlPlanePolicies({
-      plannerCoreCode: 'codex',
-      sliceVerifierCoreCode: 'codex',
-      milestoneVerifierCoreCode: 'opencode'
+    const settingsApp = getOrComposeSettings(this.ctx).app
+    const agentDefaults = settingsApp.getAgentDefaults()
+    await settingsApp.updateAgentDefaults(agentDefaults.revision, {
+      plannerProvider: 'codex',
+      sliceVerifierProvider: 'codex',
+      milestoneVerifierProvider: 'opencode'
     })
 
     await this.setupAccount()
@@ -164,35 +155,12 @@ export class WorkflowHarness {
         : 0
 
     const ctx = getAppContext()
-    const db = getDb()
-    const activeJobs = db
-      .select({ id: threadJobs.id })
-      .from(threadJobs)
-      .where(or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing')))
-      .all()
-    for (const row of activeJobs) {
-      ctx.executionRuntime.setControl(row.id, 'paused')
-      abortActiveTurn(row.id)
-    }
-    const drainDeadline = Date.now() + 10_000
-    while (Date.now() < drainDeadline) {
-      const stillRunning = activeJobs.some((row) => ctx.executionRuntime.isLoopActive(row.id))
-      if (!stillRunning) break
-      await sleep(50)
-    }
+    ctx.executionRuntime.dropAll()
+    const execution = getOrComposeExecution(ctx)
+    execution.drain()
 
-    resetJobReconcileForTests()
     await resetAppContextForTests()
     this.ctx = bootstrapRuntime({ dataDir: this.dataDir })
-    const restartedDb = getDb()
-    const runningJobs = restartedDb
-      .select({ id: threadJobs.id })
-      .from(threadJobs)
-      .where(or(eq(threadJobs.status, 'running'), eq(threadJobs.status, 'pausing')))
-      .all()
-    for (const row of runningJobs) {
-      await clearExecutionLease(row.id)
-    }
     // Wire test doubles before startup reconcile: running jobs may auto-resume
     // immediately, and must not execute against unbound agent providers.
     initConversationMcpBackend(port)
@@ -207,7 +175,7 @@ export class WorkflowHarness {
     }))
     this.wireFakeAgents()
     setTaskEvidenceWaitTimeoutForTests(3_000)
-    await reconcileOrphanRunningJobsOnStartup()
+    getOrComposeExecution(getAppContext()).startup()
   }
 
   private wireFakeAgents(): void {
@@ -268,14 +236,13 @@ export class WorkflowHarness {
     }
     try {
       const { releaseAllActiveWorkspaceLeases } =
-        await import('../../src/server/legacy-control-plane/workspace-lease-store')
+        await import('../../src/server/infra/workspace-lease-store')
       releaseAllActiveWorkspaceLeases()
     } catch {
       /* best-effort */
     }
     try {
-      const { endDraining } = await import('../../src/server/legacy-control-plane/shutdown-state')
-      endDraining()
+      getOrComposeExecution(getAppContext()).drain()
     } catch {
       /* best-effort */
     }
@@ -338,16 +305,8 @@ export class WorkflowHarness {
     ])
     draftReview(4, [{ tool: 'confirm_requirements_contract', args: {} }])
 
-    const outline = buildPlanOutlineArgs()
-    const plannerCalls = [
-      { tool: 'register_plan_outline', args: outline },
-      ...FIXTURE_TASK_CONTEXTS.map((ctx) => ({
-        tool: 'register_task_context',
-        args: { ...ctx }
-      })),
-      { tool: 'finalize_plan', args: {} }
-    ]
-    this.registry.set('planner:0', { reply: 'plan registered', mcpCalls: plannerCalls })
+    // Design planning commits via PlanningApplicationPort; no Planner HTTP MCP.
+    this.registry.set('planner:0', { reply: 'plan registered', mcpCalls: [] })
   }
 
   installDefaultExecutionScripts(): void {
@@ -381,12 +340,16 @@ export class WorkflowHarness {
   }
 
   private async setupAccount(): Promise<void> {
-    const setup = await this.json<{ token: string; username: string }>('POST', '/api/setup', {
+    const setup = await this.json<{
+      token: string
+      actor?: { username: string }
+      username?: string
+    }>('POST', '/api/auth/setup', {
       username: TEST_USERNAME,
       password: TEST_PASSWORD
     })
     this.token = setup.token
-    this.username = setup.username
+    this.username = setup.actor?.username ?? setup.username ?? TEST_USERNAME
   }
 
   async json<T>(method: string, path: string, body?: unknown, init?: RequestInit): Promise<T> {
@@ -403,7 +366,13 @@ export class WorkflowHarness {
       error?: string
     }
     if (!response.ok || payload.success === false) {
-      throw new Error(payload.message ?? payload.error ?? `HTTP ${response.status} ${path}`)
+      const detail =
+        typeof payload.message === 'string'
+          ? payload.message
+          : typeof payload.error === 'string'
+            ? payload.error
+            : JSON.stringify(payload.error ?? payload)
+      throw new Error(detail || `HTTP ${response.status} ${path}`)
     }
     return payload.data as T
   }
@@ -421,34 +390,54 @@ export class WorkflowHarness {
   }
 
   async createThread(
-    kind: typeof THREAD_KIND_CHAT | typeof THREAD_KIND_CREATE_TASK,
+    kind: typeof THREAD_KIND_CHAT = THREAD_KIND_CHAT,
     coreCode: SupportedCoreCode = 'codex',
     title?: string
   ): Promise<{ id: string; coreCode: string; threadKind: string }> {
     if (!this.projectId) {
       await this.createProject()
     }
-    return this.json('POST', `/api/projects/${this.projectId}/threads`, {
-      title: title ?? (kind === THREAD_KIND_CREATE_TASK ? 'Create Task' : 'Chat'),
-      coreCode,
-      threadKind: kind
-    })
+    const providerCode =
+      coreCode === 'claude-code'
+        ? 'claude'
+        : coreCode === 'cursorcli'
+          ? 'cursor'
+          : coreCode
+    const created = await this.json<{ id: string; providerCode: string }>(
+      'POST',
+      `/api/projects/${this.projectId}/conversations`,
+      {
+        title: title ?? 'Chat',
+        providerCode
+      }
+    )
+    return {
+      id: created.id,
+      coreCode: created.providerCode,
+      threadKind: THREAD_KIND_CHAT
+    }
   }
 
   async getThread(threadId: string): Promise<Record<string, unknown>> {
-    return this.json('GET', `/api/threads/${threadId}`)
+    return this.json('GET', `/api/conversations/${threadId}`)
   }
 
   async listMessages(threadId: string): Promise<Array<Record<string, unknown>>> {
-    const data = await this.json<{ messages: Array<Record<string, unknown>> }>(
+    const data = await this.json<Array<Record<string, unknown>> | { messages: Array<Record<string, unknown>> }>(
       'GET',
-      `/api/threads/${threadId}/messages?limit=200`
+      `/api/conversations/${threadId}/messages`
     )
-    return data.messages
+    return Array.isArray(data) ? data : data.messages
   }
 
   async switchCore(threadId: string, coreCode: SupportedCoreCode): Promise<void> {
-    await this.json('PATCH', `/api/threads/${threadId}/core`, { coreCode })
+    const providerCode =
+      coreCode === 'claude-code'
+        ? 'claude'
+        : coreCode === 'cursorcli'
+          ? 'cursor'
+          : coreCode
+    await this.json('PATCH', `/api/conversations/${threadId}/provider`, { providerCode })
   }
 
   private async enqueueTurnAndWait(
@@ -456,25 +445,69 @@ export class WorkflowHarness {
     message: string,
     options?: { createTaskMode?: boolean; generateDraft?: boolean; attachmentIds?: string[] }
   ): Promise<Record<string, unknown>> {
-    const accepted = await this.json<{ turnId: string }>('POST', `/api/threads/${threadId}/turns`, {
-      message,
-      createTaskMode: options?.createTaskMode === true,
-      generateDraft: options?.generateDraft === true,
-      attachmentIds: options?.attachmentIds
-    })
+    if (options?.createTaskMode || options?.generateDraft) {
+      const response = await fetch(`${this.baseUrl}/api/conversations/${threadId}/turns`, {
+        method: 'POST',
+        headers: this.authHeaders(),
+        body: JSON.stringify({
+          message,
+          createTaskMode: options.createTaskMode === true,
+          generateDraft: options.generateDraft === true,
+          attachmentIds: options.attachmentIds ?? [],
+          idempotencyKey: `wf-${Date.now()}-${Math.random()}`
+        })
+      })
+      const payload = (await response.json()) as {
+        success?: boolean
+        error?: { code?: string; message?: string }
+        message?: string
+      }
+      const code = payload.error?.code ?? null
+      throw Object.assign(new Error(payload.error?.message ?? payload.message ?? 'rejected'), {
+        httpStatus: response.status,
+        code
+      })
+    }
+    const accepted = await this.json<{ turnId: string }>(
+      'POST',
+      `/api/conversations/${threadId}/turns`,
+      {
+        message,
+        attachmentIds: options?.attachmentIds ?? [],
+        idempotencyKey: `wf-${Date.now()}-${Math.random()}`
+      }
+    )
     const deadline = Date.now() + 30_000
     while (Date.now() < deadline) {
-      const result = await this.json<{ turn: Record<string, unknown> }>(
+      const turn = await this.json<Record<string, unknown>>(
         'GET',
-        `/api/threads/${threadId}/turns/${accepted.turnId}`
+        `/api/conversations/${threadId}/turns/${accepted.turnId}`
       )
-      const status = String(result.turn.status ?? '')
+      const status = String(turn.status ?? '')
       if (status === 'completed' || status === 'failed' || status === 'cancelled') {
-        return result.turn
+        return { ...turn, id: turn.id ?? accepted.turnId }
       }
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
     throw new Error(`Turn ${accepted.turnId} did not settle`)
+  }
+
+  async postMessageExpectHttpError(
+    threadId: string,
+    message: string,
+    options?: { createTaskMode?: boolean; generateDraft?: boolean }
+  ): Promise<{ httpStatus: number; code: string | null; message?: string }> {
+    try {
+      await this.enqueueTurnAndWait(threadId, message, options)
+      return { httpStatus: 200, code: null }
+    } catch (error) {
+      const err = error as { httpStatus?: number; code?: string | null; message?: string }
+      return {
+        httpStatus: err.httpStatus ?? 500,
+        code: err.code ?? null,
+        message: err.message
+      }
+    }
   }
 
   async sendMessage(
@@ -485,13 +518,23 @@ export class WorkflowHarness {
     const beforeIds = new Set((await this.listMessages(threadId)).map((item) => String(item.id)))
     const turn = await this.enqueueTurnAndWait(threadId, message, options)
     if (turn.status === 'failed' || turn.status === 'cancelled') {
-      const error = (turn.lastError ?? {}) as Record<string, unknown>
+      const error = (turn.lastError ?? turn.lastErrorJson ?? {}) as Record<string, unknown>
+      const parsed =
+        typeof error === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(error) as Record<string, unknown>
+              } catch {
+                return { message: error }
+              }
+            })()
+          : error
       return [
         {
           event: 'error',
           data: {
-            message: String(error.message ?? 'turn failed'),
-            error
+            message: String(parsed.message ?? 'turn failed'),
+            error: parsed
           }
         }
       ]
@@ -524,20 +567,6 @@ export class WorkflowHarness {
     }
   }
 
-  async postMessageExpectHttpError(
-    threadId: string,
-    message: string,
-    options?: { createTaskMode?: boolean; generateDraft?: boolean }
-  ): Promise<{ httpStatus: number; code: string | null }> {
-    const turn = await this.enqueueTurnAndWait(threadId, message, options)
-    const lastError = (turn.lastError ?? {}) as Record<string, unknown>
-    const code = typeof lastError.code === 'string' ? lastError.code : null
-    return {
-      httpStatus: code === 'conversation.mode_mismatch' ? 409 : 500,
-      code
-    }
-  }
-
   async jsonExpectError(
     method: string,
     path: string,
@@ -563,77 +592,11 @@ export class WorkflowHarness {
     return messages.find((msg) => msg.kind === 'task-launch-draft')
   }
 
-  async confirmDraftFinal(
-    threadId: string,
-    draftMessageId: string
-  ): Promise<{ job: Record<string, unknown> }> {
-    return this.json(
-      'POST',
-      `/api/threads/${threadId}/messages/${draftMessageId}/draft/confirm-final`,
-      {}
-    )
-  }
-
-  async confirmPlan(threadId: string, jobId: string): Promise<{ job: Record<string, unknown> }> {
-    return this.json('POST', `/api/threads/${threadId}/jobs/${jobId}/confirm-plan`, {})
-  }
-
-  async confirmAllPlanNodes(threadId: string, designSessionId: string): Promise<void> {
-    const job = await this.getThreadJob(threadId, designSessionId)
-    const plan = job.plan as
-      | {
-          milestones?: Array<{ slices?: Array<{ tasks?: unknown[] }> }>
-        }
-      | undefined
-    const milestones = plan?.milestones ?? []
-    for (let mi = 0; mi < milestones.length; mi++) {
-      const mRef = `m${mi + 1}`
-      const slices = milestones[mi]?.slices ?? []
-      for (let si = 0; si < slices.length; si++) {
-        const sRef = `${mRef}-s${si + 1}`
-        const tasks = slices[si]?.tasks ?? []
-        for (let ti = 0; ti < tasks.length; ti++) {
-          const nodeRef = `${sRef}-t${ti + 1}`
-          await this.json(
-            'POST',
-            `/api/threads/${threadId}/jobs/${designSessionId}/plan/nodes/${encodeURIComponent(nodeRef)}/confirm`,
-            {}
-          )
-        }
-        await this.json(
-          'POST',
-          `/api/threads/${threadId}/jobs/${designSessionId}/plan/nodes/${encodeURIComponent(sRef)}/confirm`,
-          {}
-        )
-      }
-      await this.json(
-        'POST',
-        `/api/threads/${threadId}/jobs/${designSessionId}/plan/nodes/${encodeURIComponent(mRef)}/confirm`,
-        {}
-      )
-    }
-  }
-
   async getJob(jobId: string): Promise<Record<string, unknown>> {
     const data = await this.json<{ job: Record<string, unknown> }>('GET', `/api/jobs/${jobId}`)
     return data.job
   }
 
-  async getThreadJob(threadId: string, jobId: string): Promise<Record<string, unknown>> {
-    const data = await this.json<{ job: Record<string, unknown> }>(
-      'GET',
-      `/api/threads/${threadId}/jobs/${jobId}`
-    )
-    return data.job
-  }
-
-  async listThreadPlans(threadId: string): Promise<Array<Record<string, unknown>>> {
-    const data = await this.json<{ plans: Array<Record<string, unknown>> }>(
-      'GET',
-      `/api/threads/${threadId}/plans`
-    )
-    return data.plans
-  }
 
   async pauseJob(jobId: string): Promise<Record<string, unknown>> {
     const data = await this.json<{ job: Record<string, unknown> }>(
@@ -670,7 +633,7 @@ export class WorkflowHarness {
   ): Promise<{ id: string; name: string }> {
     const form = new FormData()
     form.append('file', new Blob([content], { type: mimeType }), name)
-    const response = await fetch(`${this.baseUrl}/api/threads/${threadId}/attachments`, {
+    const response = await fetch(`${this.baseUrl}/api/conversations/${threadId}/attachments`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.token}` },
       body: form
@@ -703,69 +666,10 @@ export class WorkflowHarness {
     )
   }
 
-  async seedDraftReady(): Promise<{ threadId: string; draftMessageId: string }> {
-    this.installDefaultCollectToPlanScripts()
-    const thread = await this.createThread(THREAD_KIND_CREATE_TASK, 'codex')
-    await this.sendMessage(thread.id, '我要做一个小型功能', { createTaskMode: true })
-    await this.sendMessage(thread.id, '验收标准是 typecheck 通过', { createTaskMode: true })
-
-    const messages = await this.listMessages(thread.id)
-    const draft = this.findDraftMessage(messages)
-    if (!draft?.id) throw new Error('draft not created')
-    this.setDraftMessageId(String(draft.id))
-
-    await this.sendMessage(thread.id, 'review draft', { createTaskMode: true })
-    await this.sendMessage(thread.id, 'update draft', { createTaskMode: true })
-    await this.sendMessage(thread.id, 'revise contract', { createTaskMode: true })
-    await this.sendMessage(thread.id, 'confirm contract', { createTaskMode: true })
-
-    return { threadId: thread.id, draftMessageId: this.draftMessageId }
-  }
-
-  async startPlanningJob(options?: { plannerScript?: FakeTurnScript }): Promise<{
-    threadId: string
-    draftMessageId: string
-    jobId: string
-  }> {
-    if (options?.plannerScript) {
-      this.registry.set('planner:0', options.plannerScript)
-    }
-    const draft = await this.seedDraftReady()
-    const { job } = await this.confirmDraftFinal(draft.threadId, draft.draftMessageId)
-    return { threadId: draft.threadId, draftMessageId: draft.draftMessageId, jobId: String(job.id) }
-  }
-
-  async seedPlanReady(options?: { plannerScript?: FakeTurnScript }): Promise<{
-    threadId: string
-    draftMessageId: string
-    jobId: string
-  }> {
-    const started = await this.startPlanningJob(options)
-    await this.waitForJob(started.jobId, (j) => j.status === 'plan_editing', 60_000)
-    await this.confirmAllPlanNodes(started.threadId, started.jobId)
-    return started
-  }
-
-  async seedConfirmedPlan(): Promise<{
-    threadId: string
-    draftMessageId: string
-    jobId: string
-  }> {
-    const seeded = await this.seedPlanReady()
-    const { job } = await this.confirmPlan(seeded.threadId, seeded.jobId)
-    return { ...seeded, jobId: String(job.id) }
-  }
-
-  async runHappyPathExecution(): Promise<Record<string, unknown>> {
-    this.installDefaultExecutionScripts()
-    const seeded = await this.seedPlanReady()
-    const { job } = await this.confirmPlan(seeded.threadId, seeded.jobId)
-    return this.waitForJob(String(job.id), (job) => job.status === 'completed', 120_000)
-  }
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export { SUPPORTED_CORE_CODES, THREAD_KIND_CHAT, THREAD_KIND_CREATE_TASK }
+export { SUPPORTED_CORE_CODES, THREAD_KIND_CHAT }
