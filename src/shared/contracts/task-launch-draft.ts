@@ -76,15 +76,15 @@ export interface TaskLaunchDraftAcceptance {
 
 export interface TaskLaunchDraftAbility {
   abilityCode: string
-  label: string
-  description: string
-  reason: string
-  recommendedCoreCode: SupportedCoreCode
+  label?: string
+  description?: string
+  reason?: string
+  recommendedCoreCode?: SupportedCoreCode | string
 }
 
 export interface TaskLaunchDraftRequirementsContract {
-  markdown: string
-  status: 'pending' | 'confirmed'
+  markdown?: string
+  status?: 'pending' | 'confirmed' | string
   confirmedAt?: string | null
 }
 
@@ -97,6 +97,7 @@ export interface TaskLaunchDraftLockedSections {
   acceptance?: boolean
   userFlow?: boolean
   techStack?: boolean
+  [section: string]: boolean | undefined
 }
 
 export interface TaskLaunchDraftReference {
@@ -111,35 +112,39 @@ export interface TaskLaunchDraftReference {
 }
 
 export interface DraftExecutionConfig {
-  plannerCoreCode: SupportedCoreCode
-  sliceVerifierCoreCode: SupportedCoreCode
-  milestoneVerifierCoreCode: SupportedCoreCode
+  plannerCoreCode: string
+  sliceVerifierCoreCode: string
+  milestoneVerifierCoreCode: string
 }
 
+/**
+ * Shared create-task / Design draft form payload.
+ * Fields are optional so UI hydration and partial updates share one type.
+ */
 export interface TaskLaunchDraftPayload {
-  draftId: string
-  sourceMessageId: string
-  title: string
-  summary: string
-  userFlow: string
-  techStack: string
-  nfr: string[]
-  acceptance: TaskLaunchDraftAcceptance[]
-  verification: Array<{ command: string; appliesTo: string }>
-  outOfScope: string[]
-  assumptions: string[]
-  requirementsContract: TaskLaunchDraftRequirementsContract
-  workspacePath: string
-  status: DraftLifecycleStatus
+  draftId?: string
+  sourceMessageId?: string
+  title?: string
+  summary?: string
+  userFlow?: string
+  techStack?: string
+  nfr?: string[]
+  acceptance?: TaskLaunchDraftAcceptance[]
+  verification?: Array<{ command: string; appliesTo: string }>
+  outOfScope?: string[]
+  assumptions?: string[]
+  requirementsContract?: TaskLaunchDraftRequirementsContract
+  workspacePath?: string
+  status?: DraftLifecycleStatus | 'pending' | 'launched' | string
   linkedPlanId?: string | null
   /** Immutable execution Job produced from this draft, if it has been published. */
   launchedJobId?: string | null
   /** Draft-owned planning session retained independently from the published Job. */
   designSessionId?: string | null
-  lockedSections: TaskLaunchDraftLockedSections
-  abilities: TaskLaunchDraftAbility[]
-  references: TaskLaunchDraftReference[]
-  sourceAttachments: MessageAttachment[]
+  lockedSections?: TaskLaunchDraftLockedSections
+  abilities?: TaskLaunchDraftAbility[]
+  references?: TaskLaunchDraftReference[]
+  sourceAttachments?: MessageAttachment[]
   /** Per-launch CLI choices; captured with role Skills in the Job's separate execution profile. */
   executionConfig?: DraftExecutionConfig
   revision?: number
@@ -157,5 +162,5 @@ export interface ProposedTaskDraft {
   verification: Array<{ command: string; appliesTo: string }>
   outOfScope: string[]
   assumptions: string[]
-  abilities: TaskLaunchDraftAbility[]
+  abilities: Array<TaskLaunchDraftAbility & { abilityCode: string }>
 }

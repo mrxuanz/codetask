@@ -8,10 +8,9 @@ export interface DraftPlanReference {
 }
 
 /**
- * Resolve draft→plan references for the single-row model.
- * `activePlanId` is the thread_jobs id (linkedPlanId / plan.id).
- * `launchedJobId` is the same id once the plan has left the planning workspace
- * (planConfirmedAt set / status pending|running|terminal).
+ * Resolve draft→plan references for create-task UI.
+ * `activePlanId` is the planning-session id (linkedPlanId / plan.id).
+ * `launchedJobId` is the Execution job id once published from planning.
  */
 export function resolveDraftPlanReference(input: {
   linkedPlanId?: string | null

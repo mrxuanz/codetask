@@ -25,6 +25,14 @@ function standaloneRendererAssetBasePlugin(): Plugin {
   }
 }
 
+/** Workspace packages export raw `.ts`; Node strip-only cannot run them as externals. */
+const workspacePackages = [
+  '@codetask/server-core',
+  '@codetask/contracts',
+  '@codetask/database',
+  '@codetask/agent-runtime'
+]
+
 export default defineConfig({
   main: {
     resolve: {
@@ -33,6 +41,10 @@ export default defineConfig({
       }
     },
     build: {
+      // Bundle monorepo sources into main/standalone so `node out/main/standalone.js` is self-contained.
+      externalizeDeps: {
+        exclude: workspacePackages
+      },
       rollupOptions: {
         input: {
           ...(!standaloneOnly ? { index: resolve('src/main/index.ts') } : {}),

@@ -25,13 +25,6 @@ import { workspaceRootsMatch } from '@renderer/lib/workspace'
 
 export type HomeProject = Pick<Project, 'id' | 'title' | 'workspaceRoot' | 'updatedAt'>
 export type HomeThread = Thread
-export type ThreadKind = NonNullable<Thread['threadKind']>
-
-export const THREAD_KIND_CHAT: ThreadKind = 'chat'
-
-export function isChatThread(thread: HomeThread): boolean {
-  return (thread.threadKind ?? THREAD_KIND_CHAT) === THREAD_KIND_CHAT
-}
 
 export interface HomeWorkspaceContext {
   projects: Ref<HomeProject[]>
@@ -48,11 +41,8 @@ export interface HomeWorkspaceContext {
   loadWorkspace: () => Promise<void>
   loadError: Ref<string | null>
   retryLoadWorkspace: () => Promise<void>
-  addLocalProject: (
-    workspaceRoot: string,
-    options?: { threadKind?: ThreadKind }
-  ) => Promise<HomeProject>
-  createNewThread: (projectId: string, threadKind?: ThreadKind) => Promise<HomeThread>
+  addLocalProject: (workspaceRoot: string) => Promise<HomeProject>
+  createNewThread: (projectId: string) => Promise<HomeThread>
   removeProject: (projectId: string) => Promise<void>
   removeThread: (threadId: string) => Promise<void>
   renameThreadTitle: (threadId: string, title: string) => Promise<HomeThread>
@@ -78,7 +68,7 @@ function mapProject(project: Project): HomeProject {
 }
 
 function pickLatestThread(threads: HomeThread[], projectId: string): HomeThread | null {
-  return threads.find((thread) => thread.projectId === projectId && isChatThread(thread)) ?? null
+  return threads.find((thread) => thread.projectId === projectId) ?? null
 }
 
 function findProjectByWorkspaceRoot(
@@ -187,14 +177,10 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
     await loadWorkspace()
   }
 
-  async function addLocalProject(
-    workspaceRoot: string,
-    options?: { threadKind?: ThreadKind }
-  ): Promise<HomeProject> {
-    const threadKind = options?.threadKind ?? THREAD_KIND_CHAT
+  async function addLocalProject(workspaceRoot: string): Promise<HomeProject> {
     const existing = findProjectByWorkspaceRoot(projects.value, workspaceRoot)
     if (existing) {
-      const thread = await createNewThread(existing.id, threadKind)
+      const thread = await createNewThread(existing.id)
       activeProjectId.value = existing.id
       activeThreadId.value = thread.id
       addProjectOpen.value = false
@@ -203,7 +189,7 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
 
     const res = await createProject({ workspaceRoot, createIfMissing: true })
     const project = mapProject(res.data)
-    const threadRes = await createThread(project.id, { ...createThreadInput(), threadKind })
+    const threadRes = await createThread(project.id, createThreadInput())
     const thread = threadRes.data
 
     projects.value = [project, ...projects.value.filter((item) => item.id !== project.id)]
@@ -216,11 +202,8 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
     return project
   }
 
-  async function createNewThread(
-    projectId: string,
-    _threadKind: ThreadKind = THREAD_KIND_CHAT
-  ): Promise<HomeThread> {
-    const res = await createThread(projectId, { ...createThreadInput(), threadKind: THREAD_KIND_CHAT })
+  async function createNewThread(projectId: string): Promise<HomeThread> {
+    const res = await createThread(projectId, createThreadInput())
     const thread = res.data
     threads.value = [thread, ...threads.value.filter((item) => item.id !== thread.id)]
     activeProjectId.value = projectId
@@ -243,15 +226,11 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
     if (activeProjectId.value === projectId) {
       activeProjectId.value = projects.value[0]?.id ?? null
       activeThreadId.value = activeProjectId.value
-        ? (threads.value.find(
-            (item) => item.projectId === activeProjectId.value && isChatThread(item)
-          )?.id ?? null)
+        ? (threads.value.find((item) => item.projectId === activeProjectId.value)?.id ?? null)
         : null
     } else if (activeThreadId.value && removedThreadIds.has(activeThreadId.value)) {
       activeThreadId.value = activeProjectId.value
-        ? (threads.value.find(
-            (item) => item.projectId === activeProjectId.value && isChatThread(item)
-          )?.id ?? null)
+        ? (threads.value.find((item) => item.projectId === activeProjectId.value)?.id ?? null)
         : null
     }
   }
@@ -263,8 +242,7 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
     threads.value = threads.value.filter((item) => item.id !== threadId)
     if (activeThreadId.value === threadId) {
       activeThreadId.value =
-        threads.value.find((item) => item.projectId === existing.projectId && isChatThread(item))
-          ?.id ?? null
+        threads.value.find((item) => item.projectId === existing.projectId)?.id ?? null
     }
   }
 
@@ -338,6 +316,6 @@ export function useHomeWorkspace(): HomeWorkspaceContext {
 
 export function threadsForProject(threads: HomeThread[], projectId: string): HomeThread[] {
   return threads
-    .filter((thread) => thread.projectId === projectId && isChatThread(thread))
+    .filter((thread) => thread.projectId === projectId)
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }

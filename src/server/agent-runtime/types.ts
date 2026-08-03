@@ -77,7 +77,7 @@ export interface AgentTurnRunnerInput {
   workspaceLease?:
     | {
         leaseId: string
-        ownerKind: 'conversation' | 'planner' | 'thread_job'
+        ownerKind: 'conversation' | 'planner' | 'thread_job' | 'job-run'
         ownerId: string
       }
     | undefined

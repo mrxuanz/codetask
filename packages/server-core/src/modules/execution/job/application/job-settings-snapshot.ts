@@ -9,7 +9,7 @@ export type JobExecutionSettingsRecord = {
 }
 
 /**
- * Read frozen execution settings from the job row (05: never re-read live Settings).
+ * Read frozen execution settings from job_snapshots (05: never re-read live Settings).
  * Stored shape is `{ settingsHash, capturedAt, payload }` from JobSubmission.
  */
 export function readJobExecutionSettings(
@@ -18,7 +18,7 @@ export function readJobExecutionSettings(
 ): JobExecutionSettingsRecord | null {
   try {
     const row = db
-      .prepare(`SELECT execution_settings_snapshot_json FROM jobs WHERE id = ?`)
+      .prepare(`SELECT execution_settings_snapshot_json FROM job_snapshots WHERE job_id = ?`)
       .get(jobId) as { execution_settings_snapshot_json?: string } | undefined
     if (!row?.execution_settings_snapshot_json) return null
     const wrapper = JSON.parse(row.execution_settings_snapshot_json) as {
@@ -32,13 +32,13 @@ export function readJobExecutionSettings(
       sourceRevisions?: unknown
     }
     const snapshot =
-      wrapper.payload ??
+      (wrapper.payload as ExecutionSettingsSnapshot | undefined) ??
       ({
         taskMcpServers: wrapper.taskMcpServers ?? {},
         verificationMcpServers: wrapper.verificationMcpServers ?? {},
         sliceVerifierPromptBody: wrapper.sliceVerifierPromptBody ?? '',
         milestoneVerifierPromptBody: wrapper.milestoneVerifierPromptBody ?? '',
-        sourceRevisions: wrapper.sourceRevisions ?? []
+        sourceRevisions: Array.isArray(wrapper.sourceRevisions) ? wrapper.sourceRevisions : []
       } as ExecutionSettingsSnapshot)
     return {
       settingsHash: typeof wrapper.settingsHash === 'string' ? wrapper.settingsHash : '',

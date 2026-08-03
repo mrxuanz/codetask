@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { PlanningCapacityPort } from '../planning/application/planning-application.ts'
+import type { PlanningCapacityPort } from '../application/planning-application.ts'
 import { newId, nowMs } from '../../shared.ts'
 
 /** Design-owned planner capacity — never uses Execution Pool / workload slots. */

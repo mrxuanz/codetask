@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import {
+  CODETEAM_MANAGER_MCP_SERVER,
+  MCP_HTTP_ACCEPT_HEADER_VALUE,
   toCanonicalProviderCode,
   type AgentRuntime,
   type ProviderCode
@@ -8,10 +11,24 @@ import type {
   ExecutionTreeSnapshot,
   ReferenceManifest
 } from '@codetask/contracts'
-import type { PlannerRunnerPort } from '../application/planning-application.ts'
+import type {
+  PlannerRunnerPort,
+  PlanningApplicationPort
+} from './planning-application.ts'
 import { buildTreeFromOutline, validateTreeAgainstDraft } from '../domain/planning.ts'
-import type { PlanningApplicationPort } from '../application/planning-application.ts'
 import { newId } from '../../shared.ts'
+import {
+  buildPlannerMcpUrl,
+  buildPlannerSystemPrompt,
+  buildPlannerUserMessage,
+  getPlannerMcpBackendPort,
+  isPlannerPlanCommitted,
+  isPlannerSilentEmptyTurnError,
+  registerPlannerMcpSession,
+  resolvePlannerMissingFinalizeError,
+  unregisterPlannerMcpSession,
+  type PlannerMcpSession
+} from '../mcp/index.ts'
 
 function buildSnapshotOutlineTree(input: {
   sessionId: string
@@ -100,17 +117,67 @@ export class SnapshotPlannerRunner implements PlannerRunnerPort {
   }
 }
 
+function sleepPlannerRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('Planner turn cancelled'))
+      return
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason instanceof Error ? signal.reason : new Error('Planner turn cancelled'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function resolveSystemPrompt(plannerSettingsSnapshotJson?: string): string {
+  let frozenPrompt = buildPlannerSystemPrompt()
+  if (!plannerSettingsSnapshotJson) return frozenPrompt
+  try {
+    const snap = JSON.parse(plannerSettingsSnapshotJson) as { promptBody?: string }
+    if (typeof snap.promptBody === 'string' && snap.promptBody.trim()) {
+      frozenPrompt = snap.promptBody
+    }
+  } catch {
+    // keep default when snapshot is empty/malformed
+  }
+  return frozenPrompt
+}
+
+function resolveUserMcpServers(plannerSettingsSnapshotJson?: string): Record<string, unknown> {
+  if (!plannerSettingsSnapshotJson) return {}
+  try {
+    const snap = JSON.parse(plannerSettingsSnapshotJson) as {
+      mcpServers?: Record<string, unknown>
+    }
+    if (snap.mcpServers && typeof snap.mcpServers === 'object') {
+      return snap.mcpServers
+    }
+  } catch {
+    // keep empty
+  }
+  return {}
+}
+
 /**
- * Planner that exercises the shared AgentRuntime port (architecture 03),
- * then commits a validated snapshot tree. ScriptedAgentRuntime can observe
- * the planner turn; real providers may fail the probe without blocking commit
- * when `commitEvenIfRuntimeFails` is true (default).
+ * Planner that drives AgentRuntime with Design Planner MCP.
+ * Success path commits only via finalize_plan → registeredPlanToExecutionTree → commitExecutionTree.
  */
 export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
   constructor(
     private readonly planningPort: () => PlanningApplicationPort,
     private readonly agentRuntime: AgentRuntime,
-    private readonly options: { commitEvenIfRuntimeFails?: boolean } = {}
+    private readonly options: {
+      /** Max silent-empty turn retries (default 3). */
+      maxSilentEmptyAttempts?: number
+      getMcpBackendPort?: () => number
+      signal?: AbortSignal
+    } = {}
   ) {}
 
   async run(input: {
@@ -126,70 +193,194 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
       toCanonicalProviderCode(input.executionProfile.plannerCoreCode) ??
       ('codex' as ProviderCode)
     const scopeId = `planning:${input.sessionId}:provider:${provider}`
-    let runtimeFailed: string | null = null
+    const systemPrompt = resolveSystemPrompt(input.plannerSettingsSnapshotJson)
+    const userMcpServers = resolveUserMcpServers(input.plannerSettingsSnapshotJson)
+    const userPrompt = buildPlannerUserMessage({
+      draft: input.draftSnapshot,
+      workspacePath: input.draftSnapshot.workspaceRoot
+    })
+    const defaultCoreCode =
+      input.draftSnapshot.abilities[0]?.recommendedCoreCode ??
+      input.executionProfile.plannerCoreCode
+    const maxSilentEmptyAttempts = Math.max(1, this.options.maxSilentEmptyAttempts ?? 3)
+    const getPort = this.options.getMcpBackendPort ?? getPlannerMcpBackendPort
 
-    let frozenPrompt =
-      'You are the Design Planner. Reply with a short confirmation that planning context was received.'
-    let userMcpServers: Record<string, unknown> = {}
-    if (input.plannerSettingsSnapshotJson) {
+    let planCommitted = false
+    let plannerSession: PlannerMcpSession | null = null
+    let lastSilentEmptyError: Error | null = null
+
+    for (let attempt = 1; attempt <= maxSilentEmptyAttempts; attempt += 1) {
+      if (attempt > 1) {
+        const delayMs = Math.min(2_000 * 2 ** Math.max(0, attempt - 2), 60_000)
+        await sleepPlannerRetry(delayMs, this.options.signal)
+      }
+
+      const mcpSessionId = `plan-mcp-${randomUUID()}`
+      const abortController = new AbortController()
+      if (this.options.signal) {
+        if (this.options.signal.aborted) {
+          throw this.options.signal.reason instanceof Error
+            ? this.options.signal.reason
+            : new Error('Planner turn cancelled')
+        }
+        this.options.signal.addEventListener(
+          'abort',
+          () => abortController.abort(this.options.signal?.reason),
+          { once: true }
+        )
+      }
+
+      plannerSession = {
+        sessionId: mcpSessionId,
+        planningSessionId: input.sessionId,
+        runId: input.runId,
+        fencingToken: input.fencingToken,
+        allowedAbilityCodes: input.draftSnapshot.abilities.map((a) => a.abilityCode),
+        validReferenceIds: input.referenceManifest.references.map((r) => r.id),
+        draftSnapshot: input.draftSnapshot,
+        referenceManifest: input.referenceManifest,
+        defaultCoreCode,
+        planning: this.planningPort(),
+        taskContexts: new Map(),
+        planOutline: null,
+        abortTurn: () => {
+          if (!abortController.signal.aborted) {
+            try {
+              abortController.abort('finalize_plan')
+            } catch {
+              // ignore
+            }
+          }
+        },
+        onPlanOutlineRegistered: async (counts) => {
+          this.planningPort().notifyPlannerProgress?.({
+            sessionId: input.sessionId,
+            contextsRegistered: 0,
+            contextsTotal: counts.tasks,
+            milestones: counts.milestones,
+            slices: counts.slices,
+            tasks: counts.tasks
+          })
+        },
+        onTaskContextRegistered: async (_key, done) => {
+          const outline = plannerSession?.planOutline
+          if (!outline) return
+          let milestones = 0
+          let slices = 0
+          let tasks = 0
+          for (const m of outline.milestones) {
+            milestones += 1
+            for (const s of m.slices) {
+              slices += 1
+              tasks += s.tasks.length
+            }
+          }
+          this.planningPort().notifyPlannerProgress?.({
+            sessionId: input.sessionId,
+            contextsRegistered: done,
+            contextsTotal: tasks,
+            milestones,
+            slices,
+            tasks
+          })
+        }
+      }
+
+      registerPlannerMcpSession(plannerSession)
+
+      let mcpUrl: string
       try {
-        const snap = JSON.parse(input.plannerSettingsSnapshotJson) as {
-          promptBody?: string
-          mcpServers?: Record<string, unknown>
-        }
-        if (typeof snap.promptBody === 'string' && snap.promptBody.trim()) {
-          frozenPrompt = snap.promptBody
-        }
-        if (snap.mcpServers && typeof snap.mcpServers === 'object') {
-          userMcpServers = snap.mcpServers
-        }
-      } catch {
-        // keep defaults when snapshot is empty/malformed
+        mcpUrl = buildPlannerMcpUrl({
+          sessionId: mcpSessionId,
+          planningSessionId: input.sessionId,
+          port: getPort()
+        })
+      } catch (error) {
+        unregisterPlannerMcpSession(mcpSessionId)
+        throw new Error(
+          `Planner MCP unavailable: ${error instanceof Error ? error.message : String(error)}`
+        )
       }
-    }
 
-    try {
-      for await (const event of this.agentRuntime.runTurn({
-        role: 'planner',
-        provider,
-        capabilityProfile: 'planner-read',
-        prompt: [
-          'Produce an execution outline for this draft.',
-          `Title: ${input.draftSnapshot.title}`,
-          `Summary: ${input.draftSnapshot.summary}`,
-          input.draftSnapshot.requirementsMarkdown.slice(0, 4000)
-        ].join('\n'),
-        systemPrompt: frozenPrompt,
-        userMcpServers,
-        scopeId,
-        turnId: input.runId,
-        workspaceRoot: undefined
-      })) {
-        if (event.type === 'failed') {
-          runtimeFailed = event.message
+      let runtimeFailed: string | null = null
+      try {
+        for await (const event of this.agentRuntime.runTurn({
+          role: 'planner',
+          provider,
+          capabilityProfile: 'planner-read',
+          prompt: userPrompt,
+          systemPrompt,
+          mcpServers: [
+            {
+              name: CODETEAM_MANAGER_MCP_SERVER,
+              url: mcpUrl,
+              headers: { Accept: MCP_HTTP_ACCEPT_HEADER_VALUE }
+            }
+          ],
+          userMcpServers,
+          scopeId,
+          turnId: `${input.runId}:attempt:${attempt}`,
+          workspaceRoot: input.draftSnapshot.workspaceRoot || undefined,
+          signal: abortController.signal
+        })) {
+          if (event.type === 'failed') {
+            runtimeFailed = event.message
+          }
+          if (plannerSession.planCommitted) break
         }
+      } catch (error) {
+        if (isPlannerPlanCommitted(planCommitted, plannerSession)) {
+          planCommitted = true
+          return
+        }
+        const abortedForFinalize =
+          abortController.signal.aborted && abortController.signal.reason === 'finalize_plan'
+        if (!abortedForFinalize) {
+          runtimeFailed = error instanceof Error ? error.message : String(error)
+        }
+      } finally {
+        unregisterPlannerMcpSession(mcpSessionId)
       }
-    } catch (error) {
-      runtimeFailed = error instanceof Error ? error.message : String(error)
+
+      if (plannerSession.finalizerPromise) {
+        await plannerSession.finalizerPromise
+      }
+
+      if (plannerSession.planCommitted) {
+        planCommitted = true
+        return
+      }
+
+      if (plannerSession.finalizerError) {
+        throw plannerSession.finalizerError
+      }
+
+      const missingFinalizeError = resolvePlannerMissingFinalizeError(plannerSession)
+      if (
+        isPlannerSilentEmptyTurnError(missingFinalizeError) &&
+        attempt < maxSilentEmptyAttempts
+      ) {
+        lastSilentEmptyError = missingFinalizeError
+        void lastSilentEmptyError
+        void runtimeFailed
+        continue
+      }
+
+      if (runtimeFailed && !plannerSessionTouched(plannerSession)) {
+        // Prefer missing-finalize semantics when MCP was never touched.
+      }
+      throw missingFinalizeError
     }
 
-    if (runtimeFailed && this.options.commitEvenIfRuntimeFails === false) {
-      throw new Error(`Planner AgentRuntime failed: ${runtimeFailed}`)
-    }
-
-    const tree = buildSnapshotOutlineTree(input)
-    validateTreeAgainstDraft({
-      tree,
-      abilities: input.draftSnapshot.abilities,
-      references: input.draftSnapshot.references,
-      manifest: input.referenceManifest
-    })
-    await this.planningPort().commitExecutionTree({
-      sessionId: input.sessionId,
-      fencingToken: input.fencingToken,
-      tree
-    })
+    throw lastSilentEmptyError ?? new Error('Planner failed to finalize execution tree')
   }
 }
+
+function plannerSessionTouched(session: PlannerMcpSession): boolean {
+  return Boolean(session.planOutline) || session.taskContexts.size > 0
+}
+
+/** @internal test/stub helper — not used on AgentRuntimePlannerRunner success path. */
+export { buildSnapshotOutlineTree }
 
 export type { ExecutionTreeSnapshot }

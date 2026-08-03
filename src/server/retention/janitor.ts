@@ -4,18 +4,15 @@ import { join } from 'path'
 import { eq } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '../../shared/job-references.ts'
 import type { getDb } from '../db'
-import {
-  draftReferences,
-  jobArtifacts,
-  messageArtifacts,
-  threadJobs,
-  threadMessages,
-  threads
-} from '../db/schema'
+import { jobArtifacts, messageArtifacts, threadMessages, threads } from '../db/schema'
 import { dataPaths, threadAttachmentsDir } from '../data-paths'
 import { wipeLegacyRuntimesRoot } from '../runtime/cleanup'
 
 type AppDatabase = ReturnType<typeof getDb>
+
+function sqliteClient(db: AppDatabase): import('better-sqlite3').Database | null {
+  return (db as AppDatabase & { $client?: import('better-sqlite3').Database }).$client ?? null
+}
 
 export async function removeThreadAttachmentsDir(
   dataDir: string,
@@ -117,6 +114,52 @@ function parseMessageAttachmentIds(attachmentsJson: string | null): string[] {
   }
 }
 
+/** Collect Design + Execution attachment ids for a thread's project (no thread_jobs). */
+function collectProjectScopedAttachmentIds(
+  db: AppDatabase,
+  threadId: string
+): string[] {
+  const client = sqliteClient(db)
+  if (!client) return []
+  const ids: string[] = []
+  try {
+    const designRows = client
+      .prepare(
+        `SELECT dr.attachment_id AS attachmentId
+         FROM design_draft_references dr
+         JOIN drafts d ON d.id = dr.draft_id
+         JOIN threads t ON t.project_id = d.project_id
+         WHERE t.id = ? AND dr.attachment_id IS NOT NULL`
+      )
+      .all(threadId) as Array<{ attachmentId: string }>
+    for (const row of designRows) ids.push(row.attachmentId)
+  } catch {
+    // design tables may be absent in narrow fixtures
+  }
+  try {
+    const jobRows = client
+      .prepare(
+        `SELECT js.reference_manifest_json AS referenceManifestJson
+         FROM job_snapshots js
+         JOIN jobs j ON j.id = js.job_id
+         JOIN threads t ON t.project_id = j.project_id
+         WHERE t.id = ?`
+      )
+      .all(threadId) as Array<{ referenceManifestJson: string }>
+    for (const row of jobRows) {
+      const manifest = parseJobReferenceManifest(row.referenceManifestJson)
+      for (const reference of manifest?.references ?? []) {
+        if (reference.storageOwner === 'job' && reference.attachmentId) {
+          ids.push(reference.attachmentId)
+        }
+      }
+    }
+  } catch {
+    // execution tables may be absent in narrow fixtures
+  }
+  return ids
+}
+
 export async function pruneStaleThreadAttachmentDirs(
   dataDir: string,
   db: AppDatabase
@@ -131,37 +174,15 @@ export async function pruneStaleThreadAttachmentDirs(
     const threadDir = join(attachmentsRoot, thread.id)
     if (!existsSync(threadDir)) continue
 
-    const [referenceRows, messageRows, jobRows] = await Promise.all([
-      db
-        .select({ attachmentId: draftReferences.attachmentId })
-        .from(draftReferences)
-        .innerJoin(threadJobs, eq(draftReferences.designSessionId, threadJobs.id))
-        .where(eq(threadJobs.threadId, thread.id)),
-      db
-        .select({ attachmentsJson: threadMessages.attachmentsJson })
-        .from(threadMessages)
-        .where(eq(threadMessages.threadId, thread.id)),
-      db
-        .select({ referenceManifestJson: threadJobs.referenceManifestJson })
-        .from(threadJobs)
-        .where(eq(threadJobs.threadId, thread.id))
-    ])
+    const messageRows = await db
+      .select({ attachmentsJson: threadMessages.attachmentsJson })
+      .from(threadMessages)
+      .where(eq(threadMessages.threadId, thread.id))
 
-    const validAttachmentIds = new Set<string>()
-    for (const row of referenceRows) {
-      if (row.attachmentId) validAttachmentIds.add(row.attachmentId)
-    }
+    const validAttachmentIds = new Set<string>(collectProjectScopedAttachmentIds(db, thread.id))
     for (const row of messageRows) {
       for (const attachmentId of parseMessageAttachmentIds(row.attachmentsJson)) {
         validAttachmentIds.add(attachmentId)
-      }
-    }
-    for (const row of jobRows) {
-      const manifest = parseJobReferenceManifest(row.referenceManifestJson)
-      for (const reference of manifest?.references ?? []) {
-        if (reference.storageOwner === 'job' && reference.attachmentId) {
-          validAttachmentIds.add(reference.attachmentId)
-        }
       }
     }
 

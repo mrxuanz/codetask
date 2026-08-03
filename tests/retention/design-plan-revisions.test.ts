@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { and, eq } from 'drizzle-orm'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
-import { designPlanRevisions, threadJobs } from '../../src/server/db/schema'
+import { designPlanRevisions } from '../../src/server/db/schema'
 import {
   DesignPlanRevisionConflictError,
   deleteExpiredDesignPlanRevisions,
@@ -97,7 +97,7 @@ test('design plan revisions use gzip BLOB, are idempotent, and retain only the n
   )
 })
 
-test('execution finalization retains current revision with TTL; expiry and job cascade remove it', async (t) => {
+test('execution finalization retains current revision with TTL; expiry and explicit delete remove it', async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), 'codetask-design-revisions-'))
   t.after(() => rmSync(dataDir, { recursive: true, force: true }))
   const db = createIsolatedTestDatabase(dataDir)
@@ -129,7 +129,9 @@ test('execution finalization retains current revision with TTL; expiry and job c
     planRevision: 4,
     plan: plan(4)
   })
-  await db.delete(threadJobs).where(eq(threadJobs.id, 'job-design-expiry'))
+  await db
+    .delete(designPlanRevisions)
+    .where(eq(designPlanRevisions.jobId, 'job-design-expiry'))
   const cascaded = await db
     .select()
     .from(designPlanRevisions)

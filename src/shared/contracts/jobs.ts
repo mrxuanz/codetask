@@ -72,11 +72,14 @@ export interface TaskProgressDto {
   verificationBundleHashes?: Record<string, string> | undefined
 }
 
-export interface ThreadJobAbilityDto {
+export interface JobAbilityDto {
   abilityCode: string
   label?: string | undefined
   recommendedCoreCode?: string | undefined
 }
+
+/** @deprecated Use JobAbilityDto — legacy thread_jobs naming. */
+export type ThreadJobAbilityDto = JobAbilityDto
 
 export type { PlanningSessionStatus } from './planning-session-view'
 

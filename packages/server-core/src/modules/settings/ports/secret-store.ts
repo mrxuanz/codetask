@@ -5,9 +5,9 @@ export type SecretMeta = {
 }
 
 export interface SecretStore {
-  put(name: string, value: string): Promise<void> | void
-  get(name: string): Promise<string | null> | string | null
-  delete(name: string): Promise<void> | void
-  list(): Promise<SecretMeta[]> | SecretMeta[]
-  has(name: string): Promise<boolean> | boolean
+  put(name: string, value: string): void
+  get(name: string): string | null
+  delete(name: string): void
+  list(): SecretMeta[]
+  has(name: string): boolean
 }

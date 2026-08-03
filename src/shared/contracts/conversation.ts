@@ -11,6 +11,7 @@ export interface MessageAttachment {
 export interface ConversationMessageDto {
   id: string
   role: 'user' | 'assistant' | 'system' | string
+  /** Conversation messages are `text` only after architecture收口. */
   kind: 'text' | string
   content: string
   attachments: MessageAttachment[]

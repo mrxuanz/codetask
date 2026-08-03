@@ -73,7 +73,7 @@ export function resolveDraftReferenceReadRoots(input: {
     roots.push(root)
   }
 
-  for (const ref of input.draft.references) {
+  for (const ref of input.draft.references ?? []) {
     if (ref.source === 'local_corpus' && ref.localPath?.trim()) {
       try {
         const resolvedPath = resolveLocalCorpusPath(ref.localPath)

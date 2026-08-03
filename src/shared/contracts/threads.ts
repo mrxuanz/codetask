@@ -9,7 +9,7 @@ import type { TurnErrorDto } from './turn-errors'
 export interface ThreadDto {
   id: string
   projectId: string
-  username: string
+  actorId: string
   title: string
   titleSource: TitleSource
   threadKind: ThreadKind

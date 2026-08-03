@@ -13,6 +13,7 @@ import {
   composeConversationModule,
   composeDesignModule,
   composeExecutionModule,
+  getPlannerMcpBackendPort,
   type ConversationModule,
   type DesignModule
 } from '@codetask/server-core'
@@ -95,8 +96,22 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
           signal: options.signal,
           mcpUrl: input.mcpServers?.[0]?.url,
           userMcpServers: input.userMcpServers ?? {},
-          model: input.model
-        },
+          model: input.model,
+          ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {}),
+          ...(input.workspaceLease
+            ? {
+                workspaceLease: {
+                  leaseId: input.workspaceLease.leaseId,
+                  ownerKind: input.workspaceLease.ownerKind as
+                    | 'conversation'
+                    | 'planner'
+                    | 'thread_job'
+                    | 'job-run',
+                  ownerId: input.workspaceLease.ownerId
+                }
+              }
+            : {})
+        }
         // runner takes signal on input only
       )) {
         if (chunk.type === 'delta') yield { type: 'delta', content: chunk.content }
@@ -207,7 +222,7 @@ function resolveConversationActorFromTopic(db: Database.Database, topic: string)
   if (topic.startsWith('conversation:')) {
     const conversationId = topic.slice('conversation:'.length)
     const row = db
-      .prepare(`SELECT actor_id FROM conversations WHERE id = ?`)
+      .prepare(`SELECT actor_id FROM conversation_threads WHERE id = ?`)
       .get(conversationId) as { actor_id: string } | undefined
     return row?.actor_id ?? 'unknown'
   }
@@ -253,6 +268,7 @@ export function getOrComposeDesign(ctx: AppContext): DesignModule {
     db: rawDb,
     jobSubmission: execution.submitJob,
     agentRuntime: getOrCreateAgentRuntime(ctx),
+    getMcpBackendPort: getPlannerMcpBackendPort,
     async resolveWorkspaceRoot({ actorId, projectId }) {
       const project = await getProject(actorId, projectId)
       if (!project) {
@@ -316,7 +332,8 @@ export function getOrComposeConversation(ctx: AppContext): ConversationModule {
       tryAcquireExclusive({ workspaceRoot, ownerId }) {
         const acquired = acquireWorkspaceLease({
           workspacePath: workspaceRoot,
-          ownerKind: 'conversation-turn',
+          // Match chat turn-policy + UI blocker mapping (ownerId = turn id).
+          ownerKind: 'conversation',
           ownerId
         })
         return acquired ? { leaseId: acquired.leaseId } : null

@@ -24,10 +24,12 @@ describe('conversation prompts (03 pure chat)', () => {
     assert.ok(!names.includes('propose_task_draft'))
   })
 
-  it('planner default prompt does not advertise retired Planner HTTP MCP tools', () => {
+  it('planner default prompt advertises staged MCP protocol tools', () => {
     const body = buildPlannerSystemPrompt()
-    assert.doesNotMatch(body, /register_plan_outline|finalize_plan|register_task_context/)
-    assert.match(body, /PlanningApplicationPort|retired/i)
+    assert.match(body, /register_plan_outline/)
+    assert.match(body, /register_task_context/)
+    assert.match(body, /finalize_plan/)
+    assert.match(body, /update_task_context/)
   })
 
   it('create-task turn-policy and legacy wizard/draft stubs are removed', () => {

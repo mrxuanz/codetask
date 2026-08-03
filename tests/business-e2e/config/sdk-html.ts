@@ -38,6 +38,6 @@ export function buildCreateHtmlUserMessage(
   return [
     `请在当前项目工作区根目录创建一个名为 ${fileName} 的 HTML 文件。`,
     `文件内容必须是合法 HTML，并在 body 中包含纯文本标记：${marker}`,
-    '创建完成后用一句话确认文件名即可，不要创建其它文件。'
+    '不要追问细节，直接创建。创建完成后用一句话确认文件名即可，不要创建其它文件。'
   ].join('')
 }

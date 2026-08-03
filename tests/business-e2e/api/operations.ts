@@ -204,7 +204,11 @@ export async function getTurn(
     data.turn && typeof data.turn === 'object'
       ? (data.turn as Record<string, unknown>)
       : data
-  return { turn }
+  // ConversationTurnDto exposes `state`; keep `status` alias for harness polls/oracles.
+  const status = turn.status ?? turn.state
+  return {
+    turn: status === undefined ? turn : { ...turn, status, state: turn.state ?? status }
+  }
 }
 
 /**
@@ -497,7 +501,8 @@ async function pollTerminal(
   for (;;) {
     try {
       const entity = await load()
-      const status = String(entity.status ?? '')
+      // Turns use ConversationTurnDto.state; jobs use status. Accept either.
+      const status = String(entity.status ?? entity.state ?? '')
       if (['completed', 'failed', 'cancelled', 'succeeded'].includes(status)) return entity
       lastTransientError = undefined
     } catch (error) {
@@ -724,34 +729,46 @@ export async function getControlPlanePolicies(client: PublicApiClient): Promise<
 export async function getMcpSettings(client: PublicApiClient): Promise<{
   settings: unknown
   constraints?: unknown
+  revision: number
+  updatedAt?: number
 }> {
-  const result = await client.request<{ settings: unknown; constraints?: unknown }>(
-    'GET',
-    '/api/settings/mcp',
-    undefined,
-    { operationId: 'settings.mcp.get' }
-  )
+  const result = await client.request<{
+    settings: unknown
+    constraints?: unknown
+    revision?: number
+    updatedAt?: number
+  }>('GET', '/api/settings/mcp', undefined, { operationId: 'settings.mcp.get' })
   if (result.status >= 400) {
     throw new Error(`settings.mcp_get_failed:${result.status}:${result.raw.message ?? ''}`)
   }
-  return result.data ?? { settings: {} }
+  return {
+    settings: result.data?.settings ?? { roles: {} },
+    constraints: result.data?.constraints,
+    revision: typeof result.data?.revision === 'number' ? result.data.revision : 0,
+    updatedAt: result.data?.updatedAt
+  }
 }
 
 export async function putMcpSettings(
   client: PublicApiClient,
   settings: unknown,
-  expectedRevision = 0
-): Promise<{ settings: unknown }> {
-  const result = await client.request<{ settings: unknown }>(
+  expectedRevision?: number
+): Promise<{ settings: unknown; revision: number }> {
+  const revision =
+    typeof expectedRevision === 'number' ? expectedRevision : (await getMcpSettings(client)).revision
+  const result = await client.request<{ settings: unknown; revision?: number }>(
     'PUT',
     '/api/settings/mcp',
-    { settings, expectedRevision },
+    { settings, expectedRevision: revision },
     { operationId: 'settings.mcp.put' }
   )
   if (result.status >= 400) {
     throw new Error(`settings.mcp_put_failed:${result.status}:${result.raw.message ?? ''}`)
   }
-  return result.data ?? { settings }
+  return {
+    settings: result.data?.settings ?? settings,
+    revision: typeof result.data?.revision === 'number' ? result.data.revision : revision + 1
+  }
 }
 
 /** Soft probe helper: returns status without throwing. */

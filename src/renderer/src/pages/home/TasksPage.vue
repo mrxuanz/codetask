@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { type ExecutionJob } from '@renderer/api/jobs'
+import { mapExecutionJobToPlanView, type ExecutionJob } from '@renderer/api/jobs'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import TaskParameterPanel from '@renderer/components/tasks/TaskParameterPanel.vue'
@@ -64,23 +64,31 @@ const statusFilters = computed(() => [
   { value: 'cancelled', label: t('workspace.tasks.filters.cancelled') }
 ])
 
-const listProgress = (job: ExecutionJob): JobProgressSnapshot => getJobProgressSnapshot(job, t)
-const listStatusBadge = (job: ExecutionJob): { label: string; className: string } =>
-  resolveJobListStatusBadge(job.status, t, job)
+const asPlanView = (job: ExecutionJob) => mapExecutionJobToPlanView(job)
 
-const executionProgress = computed(() => getExecutionProgressSnapshot(selectedJob.value, t))
-const planProgress = computed(() => getPlanProgressSnapshot(selectedJob.value, t))
-const showExecutionProgress = computed(
-  () =>
-    selectedJob.value?.status === 'running' ||
-    selectedJob.value?.status === 'completed' ||
-    selectedJob.value?.status === 'failed' ||
-    selectedJob.value?.status === 'cancelled' ||
-    selectedJob.value?.status === 'paused'
+const listProgress = (job: ExecutionJob): JobProgressSnapshot =>
+  getJobProgressSnapshot(asPlanView(job), t)
+const listStatusBadge = (job: ExecutionJob): { label: string; className: string } =>
+  resolveJobListStatusBadge(job.status, t, asPlanView(job))
+
+const selectedPlanView = computed(() =>
+  selectedJob.value ? asPlanView(selectedJob.value) : null
 )
-const showPlanProgress = computed(
-  () => selectedJob.value?.status === 'planning' || selectedJob.value?.status === 'plan_editing'
-)
+
+const executionProgress = computed(() => getExecutionProgressSnapshot(selectedPlanView.value, t))
+const planProgress = computed(() => getPlanProgressSnapshot(selectedPlanView.value, t))
+const showExecutionProgress = computed(() => {
+  const status = selectedJob.value?.status
+  return (
+    status === 'running' ||
+    status === 'succeeded' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'paused' ||
+    status === 'pausing'
+  )
+})
+const showPlanProgress = computed(() => false)
 
 const standaloneLastError = computed(() => {
   const err = selectedJob.value?.lastError
@@ -91,8 +99,8 @@ const standaloneLastError = computed(() => {
   return formatted
 })
 
-const planTree = computed(() => buildPlanTree(selectedJob.value, t))
-const activeTaskId = computed(() => selectedJob.value?.taskProgress?.currentTaskId ?? null)
+const planTree = computed(() => buildPlanTree(selectedPlanView.value, t))
+const activeTaskId = computed(() => selectedPlanView.value?.taskProgress?.currentTaskId ?? null)
 
 const canDelete = canDeleteAction
 const canCancel = canCancelAction
@@ -206,7 +214,7 @@ onUnmounted(() => {
               <span>{{ formatJobTimestamp(job.updatedAt) }}</span>
             </div>
             <div class="mt-1 truncate text-[11px] text-muted-foreground">
-              {{ t('workspace.tasks.cliLabel', { summary: jobCliSummary(job) }) }}
+              {{ t('workspace.tasks.cliLabel', { summary: jobCliSummary(asPlanView(job)) }) }}
             </div>
           </button>
         </div>
@@ -254,7 +262,7 @@ onUnmounted(() => {
                     class="rounded-md px-2.5 py-1 text-xs font-medium"
                     :class="jobStatusClass(selectedJob.status)"
                   >
-                    {{ jobStatusLabel(selectedJob.status, t, selectedJob) }}
+                    {{ jobStatusLabel(selectedJob.status, t, selectedPlanView) }}
                   </span>
                   <span
                     v-if="pauseButtonText"
@@ -341,7 +349,7 @@ onUnmounted(() => {
               <TaskProgressTree
                 :milestones="planTree"
                 :job-status="selectedJob.status"
-                :abilities="selectedJob.abilities"
+                :abilities="selectedPlanView?.abilities ?? []"
                 :selected-task-id="selectedTask?.id ?? null"
                 :active-task-id="activeTaskId"
                 @select-task="handleSelectTask"
@@ -366,9 +374,9 @@ onUnmounted(() => {
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
         <TaskParameterPanel
           :task="selectedTask"
-          :thread-id="selectedJob?.threadId"
+          :thread-id="selectedPlanView?.threadId"
           :job-id="selectedJob?.id"
-          :abilities="selectedJob?.abilities"
+          :abilities="selectedPlanView?.abilities"
         />
       </div>
       <div class="flex shrink-0 justify-end border-t border-border px-4 py-3">

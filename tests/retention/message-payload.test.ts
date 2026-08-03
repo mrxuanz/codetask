@@ -31,7 +31,7 @@ async function seedThread(db: ReturnType<typeof getDb>): Promise<void> {
   })
   await db.insert(threads).values({
     id: 'thread-1',
-    username: 'user',
+    actorId: 'user',
     projectId: 'proj-1',
     title: 'T',
     status: 'draft',
@@ -62,9 +62,9 @@ test('prepareMessagePayloadForStorage externalizes and hydrates round-trip', asy
     await db.insert(threadMessages).values({
       id: 'msg-1',
       threadId: 'thread-1',
-      username: 'user',
+      actorId: 'user',
       role: 'assistant',
-      kind: 'task-launch-draft',
+      kind: 'text',
       content: 'draft',
       coreCode: 'cursor',
       conversationId: 'conv-1',
@@ -127,9 +127,9 @@ test('insertMessage externalizes large draft payload without FK violation', asyn
 
     const message = await insertMessage({
       threadId: 'thread-1',
-      username: 'user',
+      actorId: 'user',
       role: 'assistant',
-      kind: 'task-launch-draft',
+      kind: 'text',
       content: 'Large draft',
       coreCode: 'cursor',
       conversationId: 'conv-1',
@@ -158,9 +158,9 @@ test('message payload storage strips asset auth query tokens', async () => {
     const message = await insertMessage({
       id: 'msg-token-clean',
       threadId: 'thread-1',
-      username: 'user',
+      actorId: 'user',
       role: 'assistant',
-      kind: 'task-launch-draft',
+      kind: 'text',
       content: 'Draft',
       coreCode: 'cursor',
       conversationId: 'conv-1',

@@ -1,21 +1,15 @@
+import {
+  isRetryableMcpTerminalWaitError,
+  waitForMcpTerminalViaSlices,
+  type McpTerminalWaitRetry
+} from './mcp-terminal-wait'
 import type { McpToolClient } from '../mcp/client'
-
-const DEFAULT_WAIT_SLICE_MS = 30_000
-const DEFAULT_RETRY_DELAY_MS = 500
 
 type JobWaitClient = Pick<McpToolClient, 'callTool'>
 
-export type JobWaitRetry = {
-  attempt: number
-  error: string
-}
+export type JobWaitRetry = McpTerminalWaitRetry
 
-export function isRetryableMcpJobWaitError(error: unknown): boolean {
-  const text = String(error).toLowerCase()
-  return /timeout:job_|fetch failed|econnreset|econnrefused|etimedout|socket|network|aborterror/.test(
-    text
-  )
-}
+export const isRetryableMcpJobWaitError = isRetryableMcpTerminalWaitError
 
 /**
  * Wait through bounded MCP requests so Node's HTTP response-header timeout cannot
@@ -32,22 +26,11 @@ export async function waitForJobTerminalViaMcp(
     onRetry?: (retry: JobWaitRetry) => void
   }
 ): Promise<Record<string, unknown>> {
-  const sliceTimeoutMs = input.sliceTimeoutMs ?? DEFAULT_WAIT_SLICE_MS
-  const retryDelayMs = input.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
-
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return (await mcp.callTool('codetask_wait_job', {
-        threadId: input.threadId,
-        jobId: input.jobId,
-        timeoutMs: sliceTimeoutMs
-      })) as Record<string, unknown>
-    } catch (error) {
-      if (!isRetryableMcpJobWaitError(error)) throw error
-      input.onRetry?.({ attempt, error: String(error) })
-      if (retryDelayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
-      }
-    }
-  }
+  return waitForMcpTerminalViaSlices(mcp, {
+    toolName: 'codetask_wait_job',
+    args: { threadId: input.threadId, jobId: input.jobId },
+    sliceTimeoutMs: input.sliceTimeoutMs,
+    retryDelayMs: input.retryDelayMs,
+    onRetry: input.onRetry
+  })
 }

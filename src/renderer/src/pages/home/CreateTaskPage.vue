@@ -12,10 +12,7 @@ import ChatMessages from '@renderer/components/home/ChatMessages.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import { HomeChatKey } from '@renderer/composables/useHomeChat'
-import {
-  THREAD_KIND_CHAT,
-  useHomeWorkspace
-} from '@renderer/composables/useHomeWorkspace'
+import { useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
 
 type Phase = 'list' | 'workspace' | 'completed'
@@ -137,15 +134,16 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => messages.value.filter((m) => m.kind === 'task-launch-draft').map((m) => m.id),
-  (ids, prev) => {
-    if (phase.value !== 'workspace' || !draftWorkspaceRef.value) return
-    const prevSet = new Set(prev ?? [])
-    const newId = ids.find((id) => !prevSet.has(id))
-    if (newId) {
-      compactPane.value = 'draft'
-      void draftWorkspaceRef.value.onDraftCreated(newId)
-    }
+  () => {
+    const exposed = draftWorkspaceRef.value as
+      | { selectedDraftId?: { value?: string | null } | string | null }
+      | null
+    if (!exposed?.selectedDraftId) return null
+    const id = exposed.selectedDraftId
+    return typeof id === 'object' && id && 'value' in id ? id.value : id
+  },
+  (draftId) => {
+    if (phase.value === 'workspace' && draftId) compactPane.value = 'draft'
   }
 )
 
@@ -215,7 +213,7 @@ async function handleSelectProject(projectId: string): Promise<void> {
   pickingProject.value = true
   try {
     workspace.setActiveProjectId(projectId)
-    await workspace.createNewThread(projectId, THREAD_KIND_CHAT)
+    await workspace.createNewThread(projectId)
     resumeDraftId.value = null
     compactPane.value = 'chat'
     completedContext.value = null
@@ -229,7 +227,7 @@ async function handleSelectProject(projectId: string): Promise<void> {
 async function handleAddProject(workspaceRoot: string): Promise<void> {
   pickingProject.value = true
   try {
-    await workspace.addLocalProject(workspaceRoot, { threadKind: THREAD_KIND_CHAT })
+    await workspace.addLocalProject(workspaceRoot)
     resumeDraftId.value = null
     compactPane.value = 'chat'
     completedContext.value = null
@@ -257,9 +255,10 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
 }
 
 function handleDraftUpdated(
-  message: import('@renderer/api/conversation').ConversationMessage
+  _draftId: string,
+  _draft: import('@renderer/lib/draftForm').TaskLaunchDraftPayload
 ): void {
-  chat.updateDraftMessage(message)
+  // Draft state lives in Design module / draft workspace — not chat messages.
 }
 
 function handlePlanConfirmed(payload: {

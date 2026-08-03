@@ -45,7 +45,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'CHAT-IMG-001': '普通对话·图片附件读取',
       'SETTINGS-MCP-001': '设置MCP·三角色探针',
       'FOUNDATION-FAKE-001': '基础探测',
-      'DESIGN-DRAFT-001': '设计草案·确认冒烟',
+      'DESIGN-DRAFT-001': '设计草案·对话澄清后确认',
     },
     steps: {
       'preflight.start': '预检开始',
@@ -133,7 +133,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'CHAT-IMG-001': 'Chat·image attachment read',
       'SETTINGS-MCP-001': 'Settings MCP·role probe',
       'FOUNDATION-FAKE-001': 'Foundation probe',
-      'DESIGN-DRAFT-001': 'Design draft·confirm smoke',
+      'DESIGN-DRAFT-001': 'Design draft·clarify then confirm',
     },
     steps: {
       'preflight.start': 'preflight start',
@@ -221,7 +221,7 @@ export const MESSAGES: Record<Lang, MessageBag> = {
       'CHAT-IMG-001': '会話·画像添付の読取',
       'SETTINGS-MCP-001': '設定MCP·三角色プローブ',
       'FOUNDATION-FAKE-001': '基礎プローブ',
-      'DESIGN-DRAFT-001': '設計ドラフト·確認スモーク',
+      'DESIGN-DRAFT-001': '設計ドラフト·澄清後確認',
     },
     steps: {
       'preflight.start': '事前チェック開始',

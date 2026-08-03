@@ -50,6 +50,11 @@ import { migration052ProjectsUsernameToActorId } from './052_projects_username_t
 import { migration053SettingsNamespaces } from './053_settings_namespaces'
 import { migration054RealtimeEvents } from './054_realtime_events'
 import { migration055DropWizardColumnsTables } from './055_drop_wizard_columns'
+import { migration056TightenLegacyThreadSchemaTables } from './056_tighten_legacy_thread_schema'
+import { migration057LegacyOwnerActorIdTables } from './057_legacy_owner_actor_id'
+import { migration058DeletionRequestsActorIdTables } from './058_deletion_requests_actor_id'
+import { migration059DropLegacyJobShellTablesHost } from './059_drop_legacy_job_shell_tables'
+import { migration060DropThreadJobsGraphHost } from './060_drop_thread_jobs_graph'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -105,7 +110,12 @@ export const allMigrations = [
   migration052ProjectsUsernameToActorId,
   migration053SettingsNamespaces,
   migration054RealtimeEvents,
-  migration055DropWizardColumnsTables
+  migration055DropWizardColumnsTables,
+  migration056TightenLegacyThreadSchemaTables,
+  migration057LegacyOwnerActorIdTables,
+  migration058DeletionRequestsActorIdTables,
+  migration059DropLegacyJobShellTablesHost,
+  migration060DropThreadJobsGraphHost
 ]
 
 export function applyMigrations(db: Database.Database): void {

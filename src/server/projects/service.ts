@@ -3,7 +3,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import type Database from 'better-sqlite3'
 import { AppError } from '../error'
 import { getDb, type AppDatabase } from '../db'
-import { conversationTurns, projects, threadJobs, type Project } from '../db/schema'
+import { conversationTurns, projects, type Project } from '../db/schema'
 import { findWorkspaceLeaseConflictSnapshot } from '../infra/workspace-lease-store'
 import { cleanDisplayPath, inferTitleFromPath, normalizeWorkspacePath } from '../fs'
 
@@ -182,37 +182,32 @@ export async function getProjectWorkspaceAccess(
       }
     }
   }
-  if (conflict.ownerKind !== 'thread_job') {
+
+  // Execution leases use `job-run`; residual upgrade leases may still say `thread_job`.
+  if (conflict.ownerKind !== 'job-run' && conflict.ownerKind !== 'thread_job') {
     return { mode: 'read_write', blocker: null }
   }
 
-  const legacyJob = getDb()
-    .select({ title: threadJobs.title, status: threadJobs.status })
-    .from(threadJobs)
-    .where(and(eq(threadJobs.id, conflict.ownerId), eq(threadJobs.username, actorId)))
-    .limit(1)
-    .all()[0]
-  if (legacyJob) {
+  const executionJob = readExecutionJobConflict(conflict.ownerId, projectId, actorId)
+  if (executionJob) {
     return {
       mode: 'read_only',
       blocker: {
         kind: 'task',
         taskId: conflict.ownerId,
-        taskTitle: legacyJob.title,
-        status: legacyJob.status
+        taskTitle: executionJob.title ?? '正在执行的任务',
+        status: executionJob.state ?? 'running'
       }
     }
   }
-
-  const executionJob = readExecutionJobConflict(conflict.ownerId, projectId, actorId)
 
   return {
     mode: 'read_only',
     blocker: {
       kind: 'task',
       taskId: conflict.ownerId,
-      taskTitle: executionJob?.title ?? '正在执行的任务',
-      status: executionJob?.state ?? 'running'
+      taskTitle: '正在执行的任务',
+      status: 'running'
     }
   }
 }

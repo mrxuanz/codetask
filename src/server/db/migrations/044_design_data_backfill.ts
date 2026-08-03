@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import type { Migration } from './runner'
+import type { Migration } from './types'
 
 function hash(input: string): string {
   return createHash('sha256').update(input).digest('hex').slice(0, 16)

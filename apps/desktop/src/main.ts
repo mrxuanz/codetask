@@ -1,5 +1,5 @@
 /**
- * Desktop host re-exports the existing Electron main entry.
+ * Desktop host boots the existing Electron main entry.
  * Business logic lives in @codetask/server-core + src/server adapters.
  */
-export { default } from '../../../src/main/index.ts'
+import '../../../src/main/index.ts'

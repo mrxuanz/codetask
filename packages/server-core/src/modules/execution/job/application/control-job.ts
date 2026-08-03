@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { JobCommandBody, JobCommandResult } from '@codetask/contracts'
 import type { Actor } from '../../shared.ts'
@@ -6,8 +7,7 @@ import {
   ExecutionForbiddenError,
   ExecutionValidationError,
   newId,
-  nowMs,
-  stableHash
+  nowMs
 } from '../../shared.ts'
 import { JobRepository } from '../infrastructure/job-repository.ts'
 import { QueueRepository } from '../../queue/infrastructure/queue-repository.ts'
@@ -30,7 +30,8 @@ export class ControlJobService {
     private readonly jobs: JobRepository,
     private readonly queue: QueueRepository,
     private readonly outbox: ExecutionOutbox,
-    private readonly wakeScheduler: WakeSchedulerFn
+    private readonly wakeScheduler: WakeSchedulerFn,
+    private readonly abortActiveRun?: (jobId: string, reason: string) => void
   ) {}
 
   private assertOwner(actor: Actor, actorId: string): void {
@@ -44,24 +45,43 @@ export class ControlJobService {
     body: JobCommandBody,
     fn: () => JobCommandResult
   ): JobCommandResult {
-    const requestHash = stableHash(JSON.stringify({ jobId, command, body }))
-    const existing = this.jobs.getCommandReceipt(actor.userId, body.idempotencyKey)
-    if (existing) {
-      const parsed = JSON.parse(existing.responseJson) as JobCommandResult
-      if (parsed.jobId === jobId) return parsed
-      throw new ExecutionConflictError('Idempotency key reused for different command')
-    }
-    const result = fn()
-    this.jobs.saveCommandReceipt({
-      actorId: actor.userId,
-      idempotencyKey: body.idempotencyKey,
-      jobId,
-      command,
-      requestHash,
-      responseJson: JSON.stringify(result),
-      createdAt: nowMs()
+    const requestHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          jobId,
+          command,
+          expectedRevision: body.expectedRevision,
+          authorizeReplay: body.authorizeReplay ?? false
+        })
+      )
+      .digest('hex')
+
+    const execute = this.db.transaction(() => {
+      const existing = this.jobs.getCommandReceipt(actor.userId, body.idempotencyKey)
+      if (existing) {
+        if (
+          existing.jobId === jobId &&
+          existing.command === command &&
+          existing.requestHash === requestHash
+        ) {
+          return JSON.parse(existing.responseJson) as JobCommandResult
+        }
+        throw new ExecutionConflictError('Idempotency key reused for a different Job command')
+      }
+
+      const result = fn()
+      this.jobs.saveCommandReceipt({
+        actorId: actor.userId,
+        idempotencyKey: body.idempotencyKey,
+        jobId,
+        command,
+        requestHash,
+        responseJson: JSON.stringify(result),
+        createdAt: nowMs()
+      })
+      return result
     })
-    return result
+    return execute()
   }
 
   pause(actor: Actor, jobId: string, body: JobCommandBody): JobCommandResult {
@@ -80,7 +100,9 @@ export class ControlJobService {
           updatedAt: nowMs()
         }
       })
+      this.abortActiveRun?.(jobId, 'job-pause')
       this.outbox.enqueue(jobId, 'job.changed', { jobId, state: updated.state })
+      this.wakeScheduler()
       return {
         jobId,
         state: updated.state,
@@ -168,7 +190,11 @@ export class ControlJobService {
           updatedAt: now
         }
       })
+      if (nextState === 'cancelling') {
+        this.abortActiveRun?.(jobId, 'job-cancel')
+      }
       this.outbox.enqueue(jobId, 'job.changed', { jobId, state: updated.state })
+      this.wakeScheduler()
       return {
         jobId,
         state: updated.state,

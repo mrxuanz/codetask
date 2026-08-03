@@ -8,7 +8,6 @@ import {
   type InjectionKey,
   type Ref
 } from 'vue'
-import type { ConversationMessageDto } from '@shared/contracts/conversation'
 import type { ThreadDraftSummaryDto } from '@shared/contracts/jobs'
 import type { PlanningSessionViewDto } from '@shared/contracts/planning-session-view'
 import {
@@ -17,13 +16,15 @@ import {
   fetchJob,
   freezeReferenceCorpus,
   launchDesignSession,
+  mapExecutionJobToPlanView,
   retryJobPlanning
 } from '@renderer/api/jobs'
-import { useRealtimeGateway, realtimePayload } from '@renderer/composables/useRealtimeGateway'
+import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 import { conversationTopic } from '@codetask/contracts'
 import { resolveDraftPlanReference } from '@shared/draft-plan-resolve'
 import {
   DRAFT_WIZARD_STEP_COUNT,
+  designDraftToPayload,
   isDraftStepComplete,
   resolveDraftStep,
   type TaskLaunchDraftPayload
@@ -45,7 +46,7 @@ export interface DraftPlanWorkspaceContext {
   selectedDraftId: Ref<string | null>
   centerView: Ref<CenterView>
   currentStep: Ref<number>
-  selectedMessage: Ref<ConversationMessageDto | null>
+  selectedDraft: Ref<TaskLaunchDraftPayload | null>
   selectedPlan: Ref<PlanningSessionViewDto | null>
   planTree: Ref<ReturnType<typeof buildPlanTree>>
   showPlanEditor: Ref<boolean>
@@ -55,7 +56,7 @@ export interface DraftPlanWorkspaceContext {
   loadWorkspace: () => Promise<void>
   selectDraft: (messageId: string) => Promise<void>
   onDraftCreated: (messageId: string) => Promise<void>
-  onDraftUpdated: (message: ConversationMessageDto) => void
+  onDraftUpdated: (draftId: string, draft: TaskLaunchDraftPayload) => void
   handlePlanStarted: (jobId: string) => Promise<void>
   handleConfirmPlan: () => Promise<void>
   handleRefreezeCorpus: () => Promise<void>
@@ -76,7 +77,6 @@ const DraftPlanWorkspaceKey: InjectionKey<DraftPlanWorkspaceContext> = Symbol('d
 
 export function provideDraftPlanWorkspace(options: {
   threadId: Ref<string | null>
-  messages: Ref<ConversationMessageDto[]>
   initialDraftId?: Ref<string | null | undefined>
   t: TranslateFn
 }): DraftPlanWorkspaceContext {
@@ -95,13 +95,11 @@ export function provideDraftPlanWorkspace(options: {
   let loadToken = 0
   let planHubRelease: (() => void) | null = null
   let threadHubRelease: (() => void) | null = null
-  let watchedPlanJobId: string | null = null
   const realtime = useRealtimeGateway()
 
   function stopPlanStream(): void {
     planHubRelease?.()
     planHubRelease = null
-    watchedPlanJobId = null
   }
 
   function stopThreadWatch(): void {
@@ -114,18 +112,23 @@ export function provideDraftPlanWorkspace(options: {
     threadHubRelease = realtime.watchTopic(conversationTopic(threadId), (envelope) => {
       if (options.threadId.value !== threadId) return
       if (envelope.type === 'conversation.changed' || envelope.type === 'message.committed') {
-        const message = realtimePayload(envelope).message
-        if (message) void onDraftUpdated(message as Parameters<typeof onDraftUpdated>[0])
+        void (async () => {
+          const before = new Set(drafts.value.map((d) => d.messageId))
+          await loadWorkspace()
+          const created = drafts.value.find((d) => !before.has(d.messageId))
+          if (created) {
+            await selectDraft(created.messageId)
+            setStep(1)
+          }
+        })()
       }
     })
   }
 
-  const draftMessages = computed(() =>
-    options.messages.value.filter((msg) => msg.kind === 'task-launch-draft')
-  )
+  const selectedDraftPayload = ref<TaskLaunchDraftPayload | null>(null)
 
-  const selectedMessage = computed(
-    () => draftMessages.value.find((msg) => msg.id === selectedDraftId.value) ?? null
+  const selectedDraft = computed(() =>
+    selectedDraftId.value ? selectedDraftPayload.value : null
   )
 
   function draftPlanRefs(
@@ -179,15 +182,14 @@ export function provideDraftPlanWorkspace(options: {
   )
 
   function payloadForSelected(): TaskLaunchDraftPayload | null {
-    if (!selectedMessage.value?.payload) return null
-    return selectedMessage.value.payload as TaskLaunchDraftPayload
+    return selectedDraft.value
   }
 
   function draftHasPlan(draft: ThreadDraftSummaryDto): boolean {
     return Boolean(draftPlanRefs(draft).activePlanId)
   }
 
-  async function mergeLaunchedThreadJobs(): Promise<void> {
+  async function mergeLaunchedJobs(): Promise<void> {
     const launchedJobIds = [
       ...new Set(
         drafts.value
@@ -210,9 +212,10 @@ export function provideDraftPlanWorkspace(options: {
 
     for (const job of fetched) {
       if (!job) continue
-      const idx = plans.value.findIndex((plan) => plan.id === job.id)
-      if (idx >= 0) plans.value[idx] = job
-      else plans.value.push(job)
+      const asPlan = mapExecutionJobToPlanView(job)
+      const idx = plans.value.findIndex((plan) => plan.id === asPlan.id)
+      if (idx >= 0) plans.value[idx] = asPlan
+      else plans.value.push(asPlan)
     }
   }
 
@@ -221,8 +224,8 @@ export function provideDraftPlanWorkspace(options: {
   }
 
   function resolveDraftStepForDraft(draft: ThreadDraftSummaryDto): number {
-    const message = draftMessages.value.find((m) => m.id === draft.messageId)
-    const payload = (message?.payload ?? {}) as TaskLaunchDraftPayload
+    const payload =
+      draft.messageId === selectedDraftId.value ? (selectedDraftPayload.value ?? {}) : {}
     const plan = findPlanForDraft(draft, payload) ?? draft.plan
     return resolveDraftStep(payload, plan as { status: string } | null)
   }
@@ -275,7 +278,7 @@ export function provideDraftPlanWorkspace(options: {
 
       drafts.value = draftRes.data.drafts
       plans.value = planRes.data.plans
-      await mergeLaunchedThreadJobs()
+      await mergeLaunchedJobs()
       if (token !== loadToken || options.threadId.value !== threadId) return
 
       const initialId = options.initialDraftId?.value
@@ -283,6 +286,19 @@ export function provideDraftPlanWorkspace(options: {
         selectedDraftId.value = initialId
       }
       if (selectedDraftId.value) {
+        if (
+          !selectedDraftPayload.value ||
+          selectedDraftPayload.value.draftId !== selectedDraftId.value
+        ) {
+          try {
+            const { getDesignDraft } = await import('@renderer/api/design')
+            const res = await getDesignDraft(selectedDraftId.value)
+            if (token !== loadToken || options.threadId.value !== threadId) return
+            selectedDraftPayload.value = designDraftToPayload(res.data)
+          } catch {
+            // keep prior payload if any
+          }
+        }
         syncStepFromState()
         const draft = drafts.value.find((d) => d.messageId === selectedDraftId.value)
         const activePlanId = draft ? draftPlanRefs(draft, payloadForSelected()).activePlanId : null
@@ -302,7 +318,7 @@ export function provideDraftPlanWorkspace(options: {
   async function refreshPlansAfterWatch(threadId: string): Promise<void> {
     const planRes = await fetchThreadPlans(threadId)
     plans.value = planRes.data.plans
-    await mergeLaunchedThreadJobs()
+    await mergeLaunchedJobs()
     syncStepFromState()
   }
 
@@ -310,7 +326,6 @@ export function provideDraftPlanWorkspace(options: {
     const threadId = options.threadId.value
     if (!threadId) return
     stopPlanStream()
-    watchedPlanJobId = sessionId
     planHubRelease = realtime.watchTopic(`planning-session:${sessionId}`, (envelope) => {
       if (options.threadId.value !== threadId) return
       if (
@@ -334,51 +349,18 @@ export function provideDraftPlanWorkspace(options: {
     selectedDraftId.value = messageId
     successMessage.value = null
 
-    // Hydrate Design draft into message list when no conversation payload exists.
-    if (!options.messages.value.some((m) => m.id === messageId)) {
-      try {
-        const { getDesignDraft } = await import('@renderer/api/design')
-        const res = await getDesignDraft(messageId)
-        const d = res.data
-        options.messages.value = [
-          ...options.messages.value,
-          {
-            id: d.id,
-            kind: 'task-launch-draft',
-            role: 'assistant',
-            content: d.title,
-            createdAt: new Date(d.createdAt).toISOString(),
-            payload: {
-              draftId: d.id,
-              title: d.title,
-              summary: d.summary,
-              userFlow: d.userFlow,
-              techStack: d.techStack,
-              nfr: d.nfr,
-              acceptance: d.acceptance,
-              verification: d.verification,
-              outOfScope: d.outOfScope,
-              assumptions: d.assumptions,
-              requirementsContract: {
-                markdown: d.requirementsMarkdown,
-                status: d.requirementsStatus
-              },
-              workspacePath: d.workspaceRoot,
-              status: d.status,
-              lockedSections: d.lockedSections,
-              abilities: d.abilities,
-              references: d.references,
-              executionConfig: d.executionProfile ?? undefined,
-              revision: d.lockRevision
-            }
-          } as ConversationMessageDto
-        ]
-      } catch {
-        // Keep selection even if hydrate fails; form may be read-only.
-      }
+    try {
+      const { getDesignDraft } = await import('@renderer/api/design')
+      const res = await getDesignDraft(messageId)
+      selectedDraftPayload.value = designDraftToPayload(res.data)
+    } catch {
+      // Keep selection even if hydrate fails; form may be read-only.
+      selectedDraftPayload.value = selectedDraftPayload.value?.draftId === messageId
+        ? selectedDraftPayload.value
+        : { draftId: messageId, status: draft.status, title: draft.title, summary: draft.summary }
     }
 
-    const refs = draftPlanRefs(draft)
+    const refs = draftPlanRefs(draft, selectedDraftPayload.value)
     if (options.threadId.value !== threadId) return
     syncStepFromState()
     if (refs.activePlanId) void watchPlan(refs.activePlanId)
@@ -390,18 +372,21 @@ export function provideDraftPlanWorkspace(options: {
     setStep(1)
   }
 
-  async function onDraftUpdated(message: ConversationMessageDto): Promise<void> {
-    const payload = (message.payload ?? {}) as TaskLaunchDraftPayload
+  async function onDraftUpdated(draftId: string, draft: TaskLaunchDraftPayload): Promise<void> {
+    if (selectedDraftId.value === draftId || !selectedDraftId.value) {
+      selectedDraftId.value = draftId
+      selectedDraftPayload.value = draft
+    }
     await loadWorkspace()
-    if (payload.status === 'editing' && !payload.linkedPlanId) {
+    if (draft.status === 'editing' && !draft.linkedPlanId) {
       stopPlanStream()
       setStep(1)
       return
     }
-    const draft = drafts.value.find((d) => d.messageId === message.id)
-    const activePlanId = draft
-      ? draftPlanRefs(draft, payload).activePlanId
-      : (payload.linkedPlanId ?? null)
+    const summary = drafts.value.find((d) => d.messageId === draftId)
+    const activePlanId = summary
+      ? draftPlanRefs(summary, draft).activePlanId
+      : (draft.linkedPlanId ?? null)
     if (activePlanId) void watchPlan(activePlanId)
     else syncStepFromState()
   }
@@ -488,6 +473,7 @@ export function provideDraftPlanWorkspace(options: {
       stopPlanStream()
       stopThreadWatch()
       selectedDraftId.value = null
+      selectedDraftPayload.value = null
       currentStep.value = 0
       centerView.value = 'draft'
       successMessage.value = null
@@ -504,7 +490,7 @@ export function provideDraftPlanWorkspace(options: {
   })
 
   watch(
-    () => [selectedMessage.value?.payload, selectedPlan.value?.status] as const,
+    () => [selectedDraft.value, selectedPlan.value?.status] as const,
     () => {
       if (selectedDraftId.value) syncStepFromState()
     }
@@ -520,7 +506,7 @@ export function provideDraftPlanWorkspace(options: {
     selectedDraftId,
     centerView,
     currentStep,
-    selectedMessage,
+    selectedDraft,
     selectedPlan,
     planTree,
     showPlanEditor,

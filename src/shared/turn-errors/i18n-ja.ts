@@ -112,8 +112,6 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'thread.kind_mismatch': 'スレッドの種類が一致しません。期待: {expected}、実際: {actual}',
   'thread.read_failed': '更新後のスレッド読み取りに失敗しました。',
   'thread.message_not_found': 'ソースメッセージが見つかりません。',
-  'thread.wizard.rollback_fields_required': 'ロールバック先と理由を入力してください',
-  'thread.wizard.invalid_rollback_target': 'ロールバック先のフェーズが無効です',
   'thread.runtime_interrupted':
     '前回の実行はアプリ終了またはサービス再起動により中断されました。新しいメッセージを送信して続行できます。',
   'thread.core_required': 'coreCode を入力してください',
@@ -176,11 +174,6 @@ const jaMessages: Record<TurnErrorCode, string> = {
     'サンドボックスタスクがタイムアウトしました。後で再試行するか、より高速な Planner CLI に変更してください',
   'plan.sandbox_cleanup_failed':
     'サンドボックスプロセスが異常終了しました。アプリを完全に終了して再起動し、計画生成を再試行してください。',
-  'wizard.invalid_phase':
-    '現在のウィザードフェーズ {current} ではこの操作は許可されていません（許可: {expected}）。',
-  'wizard.already_in_phase': 'すでに {phase} フェーズです。',
-  'wizard.rollback_not_allowed': '要求されたフェーズにロールバックできません。',
-  'wizard.tool_not_allowed': 'ツール {toolName} は現在のフェーズでは使用できません。'
 }
 
 export const turnErrorsJa = buildTurnErrorI18nTree(jaMessages)

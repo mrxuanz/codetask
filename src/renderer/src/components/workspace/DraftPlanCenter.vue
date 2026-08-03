@@ -8,6 +8,7 @@ import TaskProgressTree from '@renderer/components/tasks/TaskProgressTree.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import { useDraftPlanWorkspace } from '@renderer/composables/useDraftPlanWorkspace'
+import type { TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
 import { getPlanProgressSnapshot } from '@renderer/lib/jobProgress'
 
 defineProps<{
@@ -17,7 +18,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  draftUpdated: [message: ConversationMessage]
+  draftUpdated: [draftId: string, draft: TaskLaunchDraftPayload]
 }>()
 
 const { t } = useI18n()
@@ -25,9 +26,11 @@ const ws = useDraftPlanWorkspace()
 
 const planProgressSnapshot = computed(() => getPlanProgressSnapshot(ws.selectedPlan.value, t))
 
-function handleDraftUpdated(message: ConversationMessage): void {
-  emit('draftUpdated', message)
-  ws.onDraftUpdated(message)
+function handleDraftUpdated(draft: TaskLaunchDraftPayload): void {
+  const draftId = draft.draftId ?? ws.selectedDraftId.value
+  if (!draftId) return
+  emit('draftUpdated', draftId, draft)
+  void ws.onDraftUpdated(draftId, draft)
 }
 </script>
 
@@ -38,7 +41,7 @@ function handleDraftUpdated(message: ConversationMessage): void {
     </div>
 
     <div
-      v-if="!ws.selectedMessage.value"
+      v-if="!ws.selectedDraft.value"
       class="flex flex-1 items-center justify-center px-6 text-sm text-muted-foreground"
     >
       {{ t('workspace.draftPanel.centerEmpty') }}
@@ -48,7 +51,9 @@ function handleDraftUpdated(message: ConversationMessage): void {
       <div v-if="ws.centerView.value === 'draft'" class="mx-auto max-w-3xl">
         <h2 class="mb-3 text-sm font-semibold">{{ t('workspace.draftPanel.editDraft') }}</h2>
         <TaskLaunchDraftCard
-          :message="ws.selectedMessage.value"
+          v-if="ws.selectedDraftId.value && ws.selectedDraft.value"
+          :draft-id="ws.selectedDraftId.value"
+          :draft="ws.selectedDraft.value"
           :thread-id="threadId"
           :thread-messages="messages"
           :cores="cores"

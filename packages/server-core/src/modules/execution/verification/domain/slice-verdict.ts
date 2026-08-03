@@ -18,6 +18,11 @@ export function sliceEvidenceBundleHashInput(
   return `${jobId}:${sliceId}:${generation}:${parts.join('|')}`
 }
 
+/**
+ * Rule-based stub for unit tests / explicit fallback only.
+ * Production Slice verification goes through AgentRuntime + MCP
+ * (createVerifySliceService → complete_slice_verification).
+ */
 export function evaluateSliceVerdict(workItems: WorkItemRecord[]): SliceVerdict {
   if (workItems.length === 0) {
     return {

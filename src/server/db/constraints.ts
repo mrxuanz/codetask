@@ -14,19 +14,25 @@ export const WIZARD_PHASES = [
 ] as const
 
 /**
- * THREAD_KIND CHECK values retained for upgrading old databases.
- * Runtime creates chat conversations only.
+ * Historical THREAD_KIND CHECK values for migrations ≤055 table rebuilds.
+ * Live schema after 056 only allows `chat`.
  */
-export const THREAD_KINDS = ['chat', 'create_task', 'task_snapshot'] as const
+export const LEGACY_THREAD_KINDS = ['chat', 'create_task', 'task_snapshot'] as const
+
+/** Live threads.thread_kind CHECK values (migration 056+). */
+export const THREAD_KINDS = ['chat'] as const
 export const TITLE_SOURCES = ['auto', 'manual'] as const
 
 export const MESSAGE_ROLES = ['user', 'assistant', 'system'] as const
 
 /**
- * Message kinds retained for migration CHECK / legacy thread_jobs draft rows.
- * Conversation runtime writes `text` only.
+ * Historical message kind CHECK values for migrations ≤055 table rebuilds.
+ * Live schema after 056 only allows `text` (Design owns drafts; Conversation writes text).
  */
-export const MESSAGE_KINDS = ['text', 'task-launch-draft', 'wizard-handoff'] as const
+export const LEGACY_MESSAGE_KINDS = ['text', 'task-launch-draft', 'wizard-handoff'] as const
+
+/** Live thread_messages.kind CHECK values (migration 056+). */
+export const MESSAGE_KINDS = ['text'] as const
 
 export const JOB_STATUSES = [
   'pending',

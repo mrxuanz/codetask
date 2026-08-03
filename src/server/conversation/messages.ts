@@ -63,7 +63,7 @@ async function mapMessage(
     signAssets
       ? {
           ...attachment,
-          assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl, row.username)
+          assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl, row.actorId)
         }
       : attachment
   )
@@ -79,7 +79,7 @@ async function mapMessage(
     runtimeSessionId: row.runtimeSessionId,
     thinking,
     thinkingDurationMs,
-    payload: signAssets ? signAssetUrlsInValue(ctx.security.authSecret, payload, row.username) : payload,
+    payload: signAssets ? signAssetUrlsInValue(ctx.security.authSecret, payload, row.actorId) : payload,
     createdAt: row.createdAt
   }
 }
@@ -87,7 +87,7 @@ async function mapMessage(
 export async function insertMessage(input: {
   id?: string
   threadId: string
-  username: string
+  actorId: string
   role: string
   kind: string
   content: string
@@ -110,7 +110,7 @@ export async function insertMessage(input: {
   await db.insert(threadMessages).values({
     id,
     threadId: input.threadId,
-    username: input.username,
+    actorId: input.actorId,
     role: input.role,
     kind: input.kind,
     content: input.content,
@@ -140,7 +140,7 @@ export async function insertMessage(input: {
       .where(eq(threadMessages.id, id))
   }
 
-  const row = await getMessage(input.username, input.threadId, id)
+  const row = await getMessage(input.actorId, input.threadId, id)
   if (!row) {
     throw new Error('Failed to read message after writing')
   }
@@ -148,7 +148,7 @@ export async function insertMessage(input: {
 }
 
 export async function getMessage(
-  username: string,
+  actorId: string,
   threadId: string,
   messageId: string,
   options: MessageReadOptions = {}
@@ -159,7 +159,7 @@ export async function getMessage(
     .from(threadMessages)
     .where(
       and(
-        eq(threadMessages.username, username),
+        eq(threadMessages.actorId, actorId),
         eq(threadMessages.threadId, threadId),
         eq(threadMessages.id, messageId)
       )
@@ -218,7 +218,7 @@ export async function updateMessagePayload(
     })
     .where(
       and(
-        eq(threadMessages.username, username),
+        eq(threadMessages.actorId, username),
         eq(threadMessages.threadId, threadId),
         eq(threadMessages.id, messageId)
       )
@@ -237,7 +237,7 @@ export async function listMessages(
   const rows = await db
     .select()
     .from(threadMessages)
-    .where(and(eq(threadMessages.username, username), eq(threadMessages.threadId, threadId)))
+    .where(and(eq(threadMessages.actorId, username), eq(threadMessages.threadId, threadId)))
     .orderBy(desc(threadMessages.createdAt))
     .limit(limit)
 

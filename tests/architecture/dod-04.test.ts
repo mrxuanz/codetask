@@ -104,15 +104,26 @@ describe('architecture 04 DoD', () => {
     assert.equal(exists('packages/database/src/migrations/auth-actor-remap.ts'), true)
     assert.equal(exists('src/server/db/migrations/052_projects_username_to_actor_id.ts'), true)
     assert.equal(exists('packages/database/src/migrations/projects-actor-id.ts'), true)
+    assert.equal(exists('src/server/db/migrations/056_tighten_legacy_thread_schema.ts'), true)
+    assert.equal(
+      exists('packages/database/src/migrations/tighten-legacy-thread-schema.ts'),
+      true
+    )
+    assert.equal(exists('src/server/db/migrations/057_legacy_owner_actor_id.ts'), true)
+    assert.equal(exists('packages/database/src/migrations/legacy-owner-actor-id.ts'), true)
     const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
     assert.match(index, /migration051ActorIdUsernameToUserId/)
     assert.match(index, /migration052ProjectsUsernameToActorId/)
+    assert.match(index, /migration056TightenLegacyThreadSchemaTables/)
+    assert.match(index, /migration057LegacyOwnerActorIdTables/)
     const schema = readFileSync(join(root, 'src/server/db/schema.ts'), 'utf8')
     assert.match(schema, /actorId: text\('actor_id'\)/)
-    assert.doesNotMatch(
-      schema.slice(schema.indexOf("export const projects"), schema.indexOf("export const threads")),
-      /username: text\('username'\)/
+    const threadsSlice = schema.slice(
+      schema.indexOf("export const threads"),
+      schema.indexOf("export const conversationTurns")
     )
+    assert.doesNotMatch(threadsSlice, /username: text\('username'\)/)
+    assert.match(threadsSlice, /actorId: text\('actor_id'\)/)
   })
 
   it('SSE routes bind session and recheck auth.session.expired', () => {

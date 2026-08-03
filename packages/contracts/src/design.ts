@@ -141,7 +141,8 @@ export const ReferenceManifestSchema = Type.Object({
   createdAt: Type.String()
 })
 
-export const ExecutionSettingsSnapshotSchema = Type.Object({
+/** Frozen settings envelope on JobSubmission — payload is ExecutionSettingsSnapshot. */
+export const JobExecutionSettingsEnvelopeSchema = Type.Object({
   settingsHash: Type.String(),
   capturedAt: Type.String(),
   payload: Type.Record(Type.String(), Type.Unknown())
@@ -162,7 +163,7 @@ export const JobSubmissionSchema = Type.Object({
   draftSnapshot: DraftSnapshotSchema,
   referenceManifest: ReferenceManifestSchema,
   executionProfile: ExecutionProfileSchema,
-  executionSettings: ExecutionSettingsSnapshotSchema,
+  executionSettings: JobExecutionSettingsEnvelopeSchema,
   executionTree: ExecutionTreeSnapshotSchema,
   createdAt: Type.String()
 })
@@ -258,6 +259,7 @@ export const PublishPlanningBodySchema = Type.Object({
 })
 
 export type DraftStatus = Static<typeof DraftStatusSchema>
+export type AcceptanceCriterion = Static<typeof AcceptanceCriterionSchema>
 export type DraftSnapshot = Static<typeof DraftSnapshotSchema>
 export type DraftAbility = Static<typeof DraftAbilitySchema>
 export type DraftReference = Static<typeof DraftReferenceSchema>
@@ -267,7 +269,7 @@ export type ExecutionMilestone = Static<typeof ExecutionMilestoneSchema>
 export type ExecutionSlice = Static<typeof ExecutionSliceSchema>
 export type ExecutionTask = Static<typeof ExecutionTaskSchema>
 export type ReferenceManifest = Static<typeof ReferenceManifestSchema>
-export type ExecutionSettingsSnapshot = Static<typeof ExecutionSettingsSnapshotSchema>
+export type JobExecutionSettingsEnvelope = Static<typeof JobExecutionSettingsEnvelopeSchema>
 export type JobSubmission = Static<typeof JobSubmissionSchema>
 export type JobAccepted = Static<typeof JobAcceptedSchema>
 export type PlanningSessionStatus = Static<typeof PlanningSessionStatusSchema>

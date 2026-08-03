@@ -1,13 +1,20 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
+import type { AgentRole, AgentTurnEvent } from '@codetask/agent-runtime'
 import type { JobSubmission } from '@codetask/contracts'
 import { allowedJobActions } from '../../packages/server-core/src/modules/execution/job/domain/job-actions.ts'
 import { hashSubmission, JobSubmissionDedup } from '../../packages/server-core/src/modules/execution/job/infrastructure/job-submission-dedup.ts'
-import { composeExecutionModule } from '../../packages/server-core/src/modules/execution/index.ts'
+import {
+  composeExecutionModule,
+  ScriptedAgentRuntime
+} from '../../packages/server-core/src/modules/execution/index.ts'
 import { migration043DesignModuleTables } from '../../packages/database/src/migrations/index.ts'
 import { migration045ExecutionModuleTables } from '../../packages/database/src/migrations/execution.ts'
-import { ExecutionValidationError } from '../../packages/server-core/src/modules/execution/shared.ts'
+import {
+  ExecutionConflictError,
+  ExecutionValidationError
+} from '../../packages/server-core/src/modules/execution/shared.ts'
 
 function minimalSubmission(overrides: Partial<JobSubmission> = {}): JobSubmission {
   const now = new Date().toISOString()
@@ -153,6 +160,72 @@ async function settleExecution(
   }
   execution.drain()
   await new Promise((resolve) => setImmediate(resolve))
+}
+
+async function waitUntil(
+  predicate: () => boolean,
+  message: string,
+  timeoutMs = 2_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.fail(message)
+}
+
+function successfulRuntimeEvents(role: AgentRole): AgentTurnEvent[] {
+  if (role === 'slice-verifier') {
+    return [
+      {
+        type: 'tool_call',
+        name: 'complete_slice_verification',
+        arguments: {
+          status: 'progress-ok',
+          confidence: 'high',
+          summary: 'Slice evidence accepted',
+          satisfiedSignals: ['task-evidence'],
+          missingSignals: [],
+          questionableClaims: [],
+          evidenceTrace: [],
+          repairSuggestions: []
+        }
+      },
+      { type: 'completed', reason: 'scripted' }
+    ]
+  }
+  if (role === 'milestone-verifier') {
+    return [
+      {
+        type: 'tool_call',
+        name: 'complete_milestone_verification',
+        arguments: {
+          status: 'passed',
+          confidence: 'high',
+          summary: 'Milestone evidence accepted',
+          requirementTrace: [],
+          sliceAssessments: [],
+          repairTasks: []
+        }
+      },
+      { type: 'completed', reason: 'scripted' }
+    ]
+  }
+  return [
+    {
+      type: 'tool_call',
+      name: 'report_task_result',
+      arguments: {
+        status: 'completed',
+        summary: 'Task completed',
+        changedFiles: ['src/task.ts'],
+        evidence: ['task evidence'],
+        validation: { ran: true, command: 'npm test', outcome: 'passed' }
+      }
+    },
+    { type: 'completed', reason: 'scripted' }
+  ]
 }
 
 describe('execution job-actions', () => {
@@ -308,6 +381,40 @@ describe('execution module integration', () => {
     db.close()
   })
 
+  it('rejects an idempotency key reused by a different Job command', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+    const execution = composeExecutionModule({ db })
+    execution.drain()
+    const actor = { userId: 'alice', sessionId: 'sess-idem-command' }
+    const accepted = await execution.submitJob.accept(
+      minimalSubmission({ submissionId: 'sub_command_idem', idempotencyKey: 'submit_command_idem' })
+    )
+    const queued = execution.jobs.query.get(actor, accepted.jobId)
+    const cancelled = execution.jobs.control.cancel(actor, accepted.jobId, {
+      idempotencyKey: 'same-command-key',
+      expectedRevision: queued.stateRevision
+    })
+    const replay = execution.jobs.control.cancel(actor, accepted.jobId, {
+      idempotencyKey: 'same-command-key',
+      expectedRevision: queued.stateRevision
+    })
+    assert.deepEqual(replay, cancelled)
+
+    assert.throws(
+      () =>
+        execution.jobs.control.restart(actor, accepted.jobId, {
+          idempotencyKey: 'same-command-key',
+          expectedRevision: cancelled.stateRevision
+        }),
+      (error: unknown) => error instanceof ExecutionConflictError
+    )
+    assert.equal(execution.jobs.query.get(actor, accepted.jobId).state, 'cancelled')
+    db.close()
+  })
+
   it('FIFO: earlier enqueue sorts before later', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
@@ -346,13 +453,132 @@ describe('execution module integration', () => {
     db.close()
   })
 
+  it('does not lose a queued Job wake while another Job is running', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let markFirstStarted!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve
+    })
+    let taskTurns = 0
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'task-worker') {
+        taskTurns += 1
+        if (taskTurns === 1) {
+          markFirstStarted()
+          await firstGate
+        }
+      }
+      return successfulRuntimeEvents(input.role)
+    })
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const actor = { userId: 'alice', sessionId: 'sess-lossless-wake' }
+    const first = await execution.submitJob.accept(
+      minimalSubmission({ submissionId: 'sub_wake_first', idempotencyKey: 'idem_wake_first' })
+    )
+    await firstStarted
+    const second = await execution.submitJob.accept(
+      minimalSubmission({
+        submissionId: 'sub_wake_second',
+        idempotencyKey: 'idem_wake_second',
+        workspaceRoot: '/tmp/codetask-exec-test-second'
+      })
+    )
+
+    releaseFirst()
+    await waitUntil(
+      () =>
+        execution.jobs.query.get(actor, first.jobId).state === 'succeeded' &&
+        execution.jobs.query.get(actor, second.jobId).state === 'succeeded',
+      'both Jobs should finish without a third external wake'
+    )
+    assert.equal(taskTurns, 2)
+    execution.drain()
+    db.close()
+  })
+
+  it('refreshes run, pool, and workspace leases during a long provider turn', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    let releaseTask!: () => void
+    const taskGate = new Promise<void>((resolve) => {
+      releaseTask = resolve
+    })
+    let markTaskStarted!: () => void
+    const taskStarted = new Promise<void>((resolve) => {
+      markTaskStarted = resolve
+    })
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'task-worker') {
+        markTaskStarted()
+        await taskGate
+      }
+      return successfulRuntimeEvents(input.role)
+    })
+    const execution = composeExecutionModule({
+      db,
+      agentRuntime: runtime,
+      heartbeatIntervalMs: 5
+    })
+    const actor = { userId: 'alice', sessionId: 'sess-heartbeat' }
+    const accepted = await execution.submitJob.accept(
+      minimalSubmission({ submissionId: 'sub_heartbeat', idempotencyKey: 'idem_heartbeat' })
+    )
+    await taskStarted
+
+    const readExpiries = (): { run: number; slot: number; workspace: number } => {
+      const run = db
+        .prepare(`SELECT lease_expires_at AS expiresAt FROM execution_runs WHERE job_id = ?`)
+        .get(accepted.jobId) as { expiresAt: number }
+      const slot = db
+        .prepare(`SELECT lease_expires_at AS expiresAt FROM execution_pool_slots WHERE run_id IS NOT NULL`)
+        .get() as { expiresAt: number }
+      const workspace = db
+        .prepare(`SELECT lease_expires_at AS expiresAt FROM workspace_leases WHERE owner_id = ?`)
+        .get(accepted.jobId) as { expiresAt: number }
+      return { run: run.expiresAt, slot: slot.expiresAt, workspace: workspace.expiresAt }
+    }
+    const before = readExpiries()
+    await waitUntil(
+      () => {
+        const after = readExpiries()
+        return (
+          after.run > before.run &&
+          after.slot > before.slot &&
+          after.workspace > before.workspace
+        )
+      },
+      'all Execution lease layers should be refreshed during the provider wait'
+    )
+
+    releaseTask()
+    await waitUntil(
+      () => execution.jobs.query.get(actor, accepted.jobId).state === 'succeeded',
+      'heartbeat test Job should finish'
+    )
+    execution.drain()
+    db.close()
+  })
+
   it('repair inject does not mutate job snapshot tree hash', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
     const execution = composeExecutionModule({ db })
+    execution.drain()
     const accepted = await execution.submitJob.accept(minimalSubmission())
+    await new Promise((resolve) => setImmediate(resolve))
     const work = db
       .prepare(`SELECT id FROM job_work_items WHERE job_id = ? LIMIT 1`)
       .get(accepted.jobId) as { id: string }
@@ -386,7 +612,6 @@ describe('execution module integration', () => {
       .get(result.workId) as { kind: string; parent_work_id: string }
     assert.equal(repairWork.kind, 'implementation-repair')
     assert.equal(repairWork.parent_work_id, work.id)
-    execution.drain()
     db.close()
   })
 })
@@ -495,7 +720,59 @@ describe('execution slice/milestone verification', () => {
     const { ScriptedAgentRuntime } = await import(
       '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
     )
-    const runtime = new ScriptedAgentRuntime(async () => [{ type: 'failed', message: 'boom' }])
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'task-worker') {
+        return [{ type: 'failed', message: 'boom' }]
+      }
+      if (input.role === 'slice-verifier') {
+        const work = db
+          .prepare(
+            `SELECT id FROM job_work_items WHERE kind = 'task' ORDER BY created_at DESC LIMIT 1`
+          )
+          .get() as { id: string } | undefined
+        assert.ok(work, 'expected a task work item for repair target')
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_slice_verification',
+            arguments: {
+              status: 'needs-repair',
+              confidence: 'high',
+              summary: 'Task failed; inject implementation repair',
+              satisfiedSignals: [],
+              missingSignals: [work.id],
+              questionableClaims: [],
+              evidenceTrace: [],
+              repairSuggestions: [
+                {
+                  kind: 'implementation-repair',
+                  title: 'Repair failed task',
+                  description: 'Re-run failed work',
+                  targetWorkId: work.id,
+                  successCriteria: 'Work succeeds'
+                }
+              ]
+            }
+          },
+          { type: 'completed', reason: 'scripted' }
+        ]
+      }
+      return [
+        {
+          type: 'tool_call',
+          name: 'complete_milestone_verification',
+          arguments: {
+            status: 'inconclusive',
+            confidence: 'low',
+            summary: 'Waiting for slice repair',
+            requirementTrace: [],
+            sliceAssessments: [],
+            repairTasks: []
+          }
+        },
+        { type: 'completed', reason: 'scripted' }
+      ]
+    })
     const execution = composeExecutionModule({ db, agentRuntime: runtime })
     const accepted = await execution.submitJob.accept(
       minimalSubmission({ submissionId: 'sub_repair_ver', idempotencyKey: 'idem_repair_ver' })
@@ -542,6 +819,42 @@ describe('execution ScriptedAgentRuntime provider path', () => {
       '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
     )
     const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'slice-verifier') {
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_slice_verification',
+            arguments: {
+              status: 'blocked',
+              confidence: 'high',
+              summary: 'Work failed; slice blocked',
+              satisfiedSignals: [],
+              missingSignals: [],
+              questionableClaims: [],
+              evidenceTrace: [],
+              repairSuggestions: []
+            }
+          },
+          { type: 'completed', reason: 'scripted' }
+        ]
+      }
+      if (input.role === 'milestone-verifier') {
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_milestone_verification',
+            arguments: {
+              status: 'blocked',
+              confidence: 'high',
+              summary: 'Blocked after failed work',
+              requirementTrace: [],
+              sliceAssessments: [],
+              repairTasks: []
+            }
+          },
+          { type: 'completed', reason: 'scripted' }
+        ]
+      }
       assert.equal(input.role, 'task-worker')
       assert.equal(input.provider, 'opencode')
       assert.ok(input.prompt.includes('Implement') || input.prompt.length > 0)
@@ -577,20 +890,58 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     const { ScriptedAgentRuntime } = await import(
       '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
     )
-    const runtime = new ScriptedAgentRuntime(async () => [
-      {
-        type: 'tool_call',
-        name: 'report_task_result',
-        arguments: {
-          status: 'completed',
-          summary: 'Task done via MCP report_task_result',
-          changedFiles: ['src/a.ts'],
-          evidence: ['wrote src/a.ts'],
-          validation: { ran: true, outcome: 'passed' }
-        }
-      },
-      { type: 'completed', reason: 'scripted' }
-    ])
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'slice-verifier') {
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_slice_verification',
+            arguments: {
+              status: 'progress-ok',
+              confidence: 'high',
+              summary: 'Slice ok via scripted verifier',
+              satisfiedSignals: ['scripted'],
+              missingSignals: [],
+              questionableClaims: [],
+              evidenceTrace: [],
+              repairSuggestions: []
+            }
+          },
+          { type: 'completed', reason: 'scripted' }
+        ]
+      }
+      if (input.role === 'milestone-verifier') {
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_milestone_verification',
+            arguments: {
+              status: 'passed',
+              confidence: 'high',
+              summary: 'Milestone passed via scripted verifier',
+              requirementTrace: [],
+              sliceAssessments: [],
+              repairTasks: []
+            }
+          },
+          { type: 'completed', reason: 'scripted' }
+        ]
+      }
+      return [
+        {
+          type: 'tool_call',
+          name: 'report_task_result',
+          arguments: {
+            status: 'completed',
+            summary: 'Task done via MCP report_task_result',
+            changedFiles: ['src/a.ts'],
+            evidence: ['wrote src/a.ts'],
+            validation: { ran: true, outcome: 'passed' }
+          }
+        },
+        { type: 'completed', reason: 'scripted' }
+      ]
+    })
 
     const execution = composeExecutionModule({ db, agentRuntime: runtime })
     const actor = { userId: 'alice', sessionId: 'sess-1' }
@@ -603,6 +954,89 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     const detail = execution.jobs.query.get(actor, accepted.jobId)
     assert.equal(detail.state, 'succeeded')
 
+    const sliceTurn = runtime.turns.find((turn) => turn.role === 'slice-verifier')
+    const milestoneTurn = runtime.turns.find((turn) => turn.role === 'milestone-verifier')
+    assert.ok(sliceTurn)
+    assert.ok(milestoneTurn)
+    assert.match(sliceTurn.prompt, /"requirementsMarkdown": "# Req"/)
+    assert.match(sliceTurn.prompt, /"successCriteria": "Slice done"/)
+    assert.match(sliceTurn.prompt, /"changedFiles": \[/)
+    assert.match(sliceTurn.prompt, /"src\/a\.ts"/)
+    assert.match(sliceTurn.prompt, /"outcome": "passed"/)
+    assert.match(milestoneTurn.prompt, /"successCriteria": "Done"/)
+    assert.match(milestoneTurn.prompt, /"summary": "Slice ok via scripted verifier"/)
+
+    const storedEvidence = db
+      .prepare(`SELECT evidence_json AS evidenceJson FROM work_results LIMIT 1`)
+      .get() as { evidenceJson: string }
+    assert.equal(JSON.parse(storedEvidence.evidenceJson).changedFiles[0], 'src/a.ts')
+
+    const bundles = db
+      .prepare(
+        `SELECT scope_type AS scopeType, evidence_bundle_json AS evidenceBundleJson
+         FROM verification_attempts
+         WHERE job_id = ?`
+      )
+      .all(accepted.jobId) as Array<{ scopeType: string; evidenceBundleJson: string }>
+    assert.deepEqual(
+      bundles.map((row) => row.scopeType).sort(),
+      ['milestone', 'slice']
+    )
+    assert.ok(bundles.every((row) => JSON.parse(row.evidenceBundleJson).schemaVersion === 1))
+
+    execution.drain()
+    db.close()
+  })
+
+  it('pauses promptly while a Slice verifier turn is active', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    let markSliceStarted!: () => void
+    const sliceStarted = new Promise<void>((resolve) => {
+      markSliceStarted = resolve
+    })
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role !== 'slice-verifier') return successfulRuntimeEvents(input.role)
+      markSliceStarted()
+      return await new Promise<AgentTurnEvent[]>((resolve) => {
+        const abort = (): void => resolve([{ type: 'failed', message: 'aborted by Job control' }])
+        if (input.signal?.aborted) abort()
+        else input.signal?.addEventListener('abort', abort, { once: true })
+      })
+    })
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const actor = { userId: 'alice', sessionId: 'sess-pause-verifier' }
+    const accepted = await execution.submitJob.accept(
+      minimalSubmission({
+        submissionId: 'sub_pause_verifier',
+        idempotencyKey: 'idem_pause_verifier'
+      })
+    )
+    await sliceStarted
+
+    const running = execution.jobs.query.get(actor, accepted.jobId)
+    assert.equal(running.state, 'running')
+    execution.jobs.control.pause(actor, accepted.jobId, {
+      idempotencyKey: 'pause-active-verifier',
+      expectedRevision: running.stateRevision
+    })
+    await waitUntil(
+      () => execution.jobs.query.get(actor, accepted.jobId).state === 'paused',
+      'Job should settle to paused after aborting its verifier turn'
+    )
+
+    const abortedAttempts = db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM verification_attempts
+         WHERE job_id = ? AND scope_type = 'slice'`
+      )
+      .get(accepted.jobId) as { count: number }
+    assert.equal(abortedAttempts.count, 0)
+    const sliceTurn = runtime.turns.find((turn) => turn.role === 'slice-verifier')
+    assert.equal(sliceTurn?.signal?.aborted, true)
     execution.drain()
     db.close()
   })
@@ -619,20 +1053,58 @@ describe('execution MCP report_task_result path', () => {
     const { ScriptedAgentRuntime } = await import(
       '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
     )
-    const runtime = new ScriptedAgentRuntime(async () => [
-      {
-        type: 'tool_call',
-        name: 'report_task_result',
-        arguments: {
-          status: 'completed',
-          summary: 'Implemented via provider MCP',
-          changedFiles: ['readme.md'],
-          evidence: ['updated readme'],
-          validation: { ran: true, outcome: 'passed' }
-        }
-      },
-      { type: 'completed', reason: 'mcp-reported' }
-    ])
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'slice-verifier') {
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_slice_verification',
+            arguments: {
+              status: 'progress-ok',
+              confidence: 'high',
+              summary: 'Slice ok',
+              satisfiedSignals: [],
+              missingSignals: [],
+              questionableClaims: [],
+              evidenceTrace: [],
+              repairSuggestions: []
+            }
+          },
+          { type: 'completed', reason: 'mcp-reported' }
+        ]
+      }
+      if (input.role === 'milestone-verifier') {
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_milestone_verification',
+            arguments: {
+              status: 'passed',
+              confidence: 'high',
+              summary: 'Milestone passed',
+              requirementTrace: [],
+              sliceAssessments: [],
+              repairTasks: []
+            }
+          },
+          { type: 'completed', reason: 'mcp-reported' }
+        ]
+      }
+      return [
+        {
+          type: 'tool_call',
+          name: 'report_task_result',
+          arguments: {
+            status: 'completed',
+            summary: 'Implemented via provider MCP',
+            changedFiles: ['readme.md'],
+            evidence: ['updated readme'],
+            validation: { ran: true, outcome: 'passed' }
+          }
+        },
+        { type: 'completed', reason: 'mcp-reported' }
+      ]
+    })
 
     const execution = composeExecutionModule({ db, agentRuntime: runtime })
     const actor = { userId: 'alice', sessionId: 'sess-1' }

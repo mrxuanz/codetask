@@ -11,8 +11,8 @@ Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + S
 
 | Phase | `--part`       | Cases                                                                                    | Evidence (summary)                                                                                               |
 | ----- | -------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 1     | `conversation` | `chat-basic`, `chat-create-html`, `chat-image-attachment`                                | Turn + (html) file oracle; image attachment read in ordinary chat                                                |
-| 2     | `draft-job`    | `design-draft` (aliases: `notes-search`, …)                                              | Design `/api/drafts` smoke: create → abilities → execution profile → confirm                                     |
+| 1     | `conversation` | `chat-basic`, `chat-create-html`, `chat-image-attachment`                                | Turn + (html) file oracle; image attachment read in ordinary chat. Drivers/skills may clarify up to 3 follow-ups (4 turns total) if the agent asks for details. |
+| 2     | `draft-job`    | `design-draft` (aliases: `notes-search`, …)                                              | Chat clarify-loop (≤4 turns) then Design `/api/drafts` smoke: create → abilities → execution profile → confirm                                     |
 | 3     | `settings-mcp` | `settings-mcp-probe`                                                                     | Settings API round-trip + reserved reject + probe self-check (`PROBE_OK_*`). **Not** “SUT role called probe” yet |
 
 Image chat cases upload the fixture as neutral `attachment.png`, never leak `Dream`/`1000`/`Cats` in prompts/titles, and match the contiguous phrase `Dream of 1000 Cats` (NFKC, case/whitespace insensitive). create_task-era draft→job e2e case IDs were removed in architecture 03; deeper Design/Execution coverage lives in unit tests.
@@ -50,7 +50,7 @@ Planner / slice / milestone verifier cores for draft→job cases come from the *
 ## Phase 3 registration (short)
 
 1. Supervisor starts `probes/settings-mcp-probe.ts`.
-2. Driver `GET` → `PUT` → `GET` `/api/settings/mcp` for roles `conversation` / `task` / `verification` × current core.
+2. Driver `GET` → `PUT` → `GET` `/api/settings/mcp` writing probe under `settings.roles.{conversation,task,verification}` × current core (not top-level role keys).
 3. Assert probe name present; assert reserved name rejected; harness `tools/call` gets `PROBE_OK_*`.
 4. Restore settings snapshot; `report_case_result`.
 

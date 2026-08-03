@@ -280,14 +280,18 @@ export const MANIFESTS: Record<string, CaseManifest> = {
   'FOUNDATION-FAKE-001': {
     caseId: 'FOUNDATION-FAKE-001',
     gate: 'foundation',
-    title: 'Fake Driver exercises chat + Design draft MCP surface (architecture 03)',
+    title: 'Fake Driver exercises chat clarify-loop + Design draft MCP surface (architecture 03)',
     driver: 'fake',
-    skills: [],
+    skills: ['common-blackbox', 'project-thread', 'draft-multiturn'],
     allowedTools: [
       'codetask_create_project',
       'codetask_create_thread',
       'codetask_get_thread',
       'case_next_fixture',
+      'codetask_start_turn',
+      'codetask_get_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
       'codetask_create_draft',
       'codetask_list_drafts',
       'codetask_get_draft',
@@ -298,6 +302,7 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'mcp.codetask_create_project',
       'mcp.codetask_create_thread',
       'mcp.case_next_fixture',
+      'mcp.codetask_start_turn',
       'mcp.codetask_create_draft',
       'mcp.codetask_list_drafts',
       'case.report_result'
@@ -312,11 +317,17 @@ export const MANIFESTS: Record<string, CaseManifest> = {
   'DESIGN-DRAFT-001': {
     caseId: 'DESIGN-DRAFT-001',
     gate: 'draft-job',
-    title: 'Design draft create → abilities → execution profile → confirm (/api/drafts)',
+    title:
+      'Chat clarify-loop then Design draft create → abilities → execution profile → confirm (/api/drafts)',
     driver: 'fake',
-    skills: [],
+    skills: ['common-blackbox', 'project-thread', 'draft-multiturn'],
     allowedTools: [
       'codetask_create_project',
+      'codetask_create_thread',
+      'codetask_start_turn',
+      'codetask_get_turn',
+      'codetask_wait_turn',
+      'codetask_list_messages',
       'codetask_create_draft',
       'codetask_list_drafts',
       'codetask_get_draft',
@@ -328,6 +339,8 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     ],
     requiredOperations: [
       'mcp.codetask_create_project',
+      'mcp.codetask_create_thread',
+      'mcp.codetask_start_turn',
       'mcp.codetask_create_draft',
       'mcp.codetask_patch_draft_abilities',
       'mcp.codetask_patch_draft_execution_profile',
@@ -335,7 +348,8 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       'case.report_result'
     ],
     oracle: {
-      requireProject: true
+      requireProject: true,
+      requireThread: true
     },
     workspaceFixture: 'notes-search-project'
   }

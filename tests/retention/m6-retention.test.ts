@@ -6,10 +6,8 @@ import test from 'node:test'
 import { eq } from 'drizzle-orm'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
 import {
-  draftReferences,
   jobArtifacts,
   projects,
-  threadJobs,
   threadMessages,
   threads
 } from '../../src/server/db/schema'
@@ -75,7 +73,7 @@ async function seedThreadGraph(
 
   await db.insert(threads).values({
     id: threadId,
-    username: 'user',
+    actorId: 'user',
     projectId: 'proj-1',
     title: 'T',
     status: 'draft',
@@ -90,9 +88,9 @@ async function seedThreadGraph(
   await db.insert(threadMessages).values({
     id: messageId,
     threadId,
-    username: 'user',
+    actorId: 'user',
     role: 'assistant',
-    kind: 'task-launch-draft',
+    kind: 'text',
     content: '{}',
     coreCode: 'cursor',
     conversationId: 'conv-1',
@@ -103,58 +101,19 @@ async function seedThreadGraph(
   await db.insert(threadMessages).values({
     id: execMessageId,
     threadId,
-    username: 'user',
+    actorId: 'user',
     role: 'assistant',
-    kind: 'task-launch-draft',
+    kind: 'text',
     content: '{}',
     coreCode: 'cursor',
     conversationId: 'conv-1',
     createdAt: new Date().toISOString()
   })
 
-  // Planning job (designSessionId) — status planning/plan_editing; distinct draftMessageId
-  await db.insert(threadJobs).values({
-    id: designSessionId,
-    threadId,
-    username: 'user',
-    draftMessageId: messageId,
-    title: 'Design',
-    summary: '',
-    status: 'plan_editing',
-    workspacePath: '/tmp/ws',
-    phase: 'draft_review',
-    draftRevision: 1,
-    planRevision: 0,
-    createdAt: now,
-    updatedAt: now
-  })
-
-  await db.insert(draftReferences).values({
-    id: 'ref-1',
-    designSessionId,
-    source: 'attachment',
-    name: 'ref',
-    kind: 'image',
-    description: 'layout',
-    attachmentId,
-    sortOrder: 0,
-    createdAt: now,
-    updatedAt: now
-  })
-
-  // Separate execution job — must use a different draftMessageId (unique thread_id, draft_message_id)
-  await db.insert(threadJobs).values({
-    id: jobId,
-    threadId,
-    username: 'user',
-    draftMessageId: execMessageId,
-    title: 'Job',
-    summary: '',
-    status: 'completed',
-    workspacePath: '/tmp/ws',
-    createdAt: now,
-    updatedAt: now
-  })
+  // Attachment validity comes from message attachmentsJson (no legacy thread_jobs / draft_references).
+  void designSessionId
+  void execMessageId
+  void jobId
 
   return { threadId, designSessionId, messageId, jobId, attachmentId }
 }
@@ -324,7 +283,7 @@ test('deleting job row cascades artifact metadata; purgeJobFilesystem clears run
     mkdirSync(runtimeDir, { recursive: true })
     writeFileSync(join(runtimeDir, 'state.json'), '{}')
 
-    await db.delete(threadJobs).where(eq(threadJobs.id, 'job-cascade'))
+    await db.delete(jobArtifacts).where(eq(jobArtifacts.jobId, 'job-cascade'))
     const rows = await db.select().from(jobArtifacts)
     assert.equal(rows.length, 0)
     assert.equal(existsSync(runtimeDir), true)

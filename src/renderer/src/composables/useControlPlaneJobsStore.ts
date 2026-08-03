@@ -136,15 +136,15 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   function mergeJobPatch(existing: ExecutionJob | null | undefined, job: ExecutionJob): ExecutionJob {
     const has = (key: string): boolean => key in job
     return {
-      ...(existing ?? {}),
+      ...(existing ?? ({} as ExecutionJob)),
       ...job,
-      plan: has('plan') ? job.plan : (existing?.plan ?? null),
-      abilities: has('abilities') ? job.abilities : (existing?.abilities ?? []),
-      planProgress: has('planProgress') ? job.planProgress : existing?.planProgress,
-      taskProgress: has('taskProgress') ? job.taskProgress : existing?.taskProgress,
-      availableActions: has('availableActions') ? job.availableActions : existing?.availableActions,
-      stateRevision: has('stateRevision') ? job.stateRevision : existing?.stateRevision
-    } as ExecutionJob
+      availableActions: has('availableActions')
+        ? job.availableActions
+        : (existing?.availableActions ?? job.availableActions),
+      stateRevision: has('stateRevision')
+        ? job.stateRevision
+        : (existing?.stateRevision ?? job.stateRevision)
+    }
   }
 
   const debouncedRefreshJobs = useDebounceFn(() => void loadJobs({ silent: true }), 150)

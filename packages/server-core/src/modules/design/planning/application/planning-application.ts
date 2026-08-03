@@ -350,6 +350,25 @@ export class PlanningApplication {
     return saved
   }
 
+  /** Partial planner progress while MCP outline/contexts are filling in. */
+  notifyPlannerProgress(input: {
+    sessionId: string
+    contextsRegistered: number
+    contextsTotal: number
+    milestones: number
+    slices: number
+    tasks: number
+  }): void {
+    this.events.publish(input.sessionId, 'planning.progress', {
+      status: 'planning',
+      contextsRegistered: input.contextsRegistered,
+      contextsTotal: input.contextsTotal,
+      milestones: input.milestones,
+      slices: input.slices,
+      tasks: input.tasks
+    })
+  }
+
   /** Called by Planner MCP via PlanningApplicationPort after finalize. */
   async commitExecutionTree(input: {
     sessionId: string
@@ -680,4 +699,7 @@ export class PlanningApplication {
 }
 
 /** Narrow port used by Planner MCP tools — no repository / workload imports. */
-export type PlanningApplicationPort = Pick<PlanningApplication, 'commitExecutionTree'>
+export type PlanningApplicationPort = Pick<
+  PlanningApplication,
+  'commitExecutionTree' | 'notifyPlannerProgress'
+>

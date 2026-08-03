@@ -58,7 +58,7 @@ export function conversationToThread(c: ConversationDto): ThreadDto {
   return {
     id: c.id,
     projectId: c.projectId,
-    username: c.actorId,
+    actorId: c.actorId,
     title: c.title,
     titleSource: c.titleSource,
     threadKind: 'chat',
@@ -85,13 +85,23 @@ export function threadFromConversationPayload(value: unknown): ThreadDto | null 
   return conversationToThread(c as ConversationDto)
 }
 
+function mapFailed<T>(res: ApiResponse<unknown>): ApiResponse<T> {
+  return {
+    success: res.success,
+    status: res.status,
+    message: res.message,
+    extra: res.extra,
+    data: null as T
+  }
+}
+
 function mapResponse(res: ApiResponse<ConversationDto>): ApiResponse<ThreadDto> {
-  if (!res.success) return res as unknown as ApiResponse<ThreadDto>
+  if (!res.success) return mapFailed(res)
   return { ...res, data: conversationToThread(res.data) }
 }
 
 function mapList(res: ApiResponse<ConversationDto[]>): ApiResponse<ThreadDto[]> {
-  if (!res.success) return res as unknown as ApiResponse<ThreadDto[]>
+  if (!res.success) return mapFailed(res)
   return { ...res, data: res.data.map(conversationToThread) }
 }
 

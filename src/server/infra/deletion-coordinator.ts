@@ -4,7 +4,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '../../shared/job-references.ts'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { deletionRequests, projects, threadJobs, threads } from '../db/schema'
+import { deletionRequests, projects, threads } from '../db/schema'
 import { attachmentDir } from '../data-paths'
 import { AppError } from '../error'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
@@ -42,7 +42,7 @@ const INCOMPLETE_PHASES: DeletionPhase[] = [
 export interface FrozenJobRuntimeIdentity {
   activeRunId: string | null
   executionLeaseOwner: string | null
-  workspaceLeaseOwnerKind: 'thread_job'
+  workspaceLeaseOwnerKind: 'thread_job' | 'job-run'
   workspaceLeaseOwnerId: string
 }
 
@@ -50,6 +50,8 @@ export interface DeletionFrozenSnapshot {
   runtime?: FrozenJobRuntimeIdentity | null
   deleteOwningThread?: boolean
   childJobIds?: string[]
+  /** Execution module `jobs.id` rows owned by a project. */
+  childExecutionJobIds?: string[]
   childThreadIds?: string[]
 }
 
@@ -62,7 +64,7 @@ export interface LoadedDeletionRequest {
   id: string
   entityKind: DeletionEntityKind
   entityId: string
-  username: string
+  actorId: string
   status: DeletionRequestStatus
   phase: DeletionPhase
   threadId: string | null
@@ -109,7 +111,7 @@ function loadDeletionRequest(requestId: string): LoadedDeletionRequest {
     id: row.id,
     entityKind: row.entityKind as DeletionEntityKind,
     entityId: row.entityId,
-    username: row.username,
+    actorId: row.actorId,
     status: row.status as DeletionRequestStatus,
     phase: (row.phase as DeletionPhase) ?? 'requested',
     threadId: row.threadId ?? null,
@@ -141,19 +143,20 @@ function findActiveDeletionRequest(
 }
 
 async function freezeJobRuntimeIdentity(jobId: string): Promise<FrozenJobRuntimeIdentity> {
-  const rows = await getDb()
-    .select({
-      activeRunId: threadJobs.activeRunId,
-      executionLeaseOwner: threadJobs.executionLeaseOwner
-    })
-    .from(threadJobs)
-    .where(eq(threadJobs.id, jobId))
-    .limit(1)
-  const row = rows[0]
+  const client = sqliteClient()
+  let activeRunId: string | null = null
+  if (client && tableExists(client, 'jobs')) {
+    const row = client
+      .prepare(`SELECT current_run_id AS currentRunId FROM jobs WHERE id = ? LIMIT 1`)
+      .get(jobId) as { currentRunId: string | null } | undefined
+    activeRunId = row?.currentRunId ?? null
+  }
+  const ownerKind: FrozenJobRuntimeIdentity['workspaceLeaseOwnerKind'] =
+    client && tableExists(client, 'jobs') ? 'job-run' : 'thread_job'
   return {
-    activeRunId: row?.activeRunId ?? null,
-    executionLeaseOwner: row?.executionLeaseOwner ?? null,
-    workspaceLeaseOwnerKind: 'thread_job',
+    activeRunId,
+    executionLeaseOwner: null,
+    workspaceLeaseOwnerKind: ownerKind,
     workspaceLeaseOwnerId: jobId
   }
 }
@@ -225,7 +228,7 @@ export async function isThreadProjectDeletionBlocked(threadId: string): Promise<
 function createDeletionRequest(input: {
   entityKind: DeletionEntityKind
   entityId: string
-  username: string
+  actorId: string
   phase?: DeletionPhase
   threadId?: string | null
   projectId?: string | null
@@ -246,7 +249,7 @@ function createDeletionRequest(input: {
       id,
       entityKind: input.entityKind,
       entityId: input.entityId,
-      username: input.username,
+      actorId: input.actorId,
       status: 'draining',
       phase: input.phase ?? 'requested',
       threadId: input.threadId ?? null,
@@ -341,7 +344,7 @@ async function stopJobRuntimeByFrozenIdentity(
   }
 
   const db = getDb()
-  const client = (db as { $client?: import('better-sqlite3').Database }).$client
+  const client = sqliteClient() ?? (db as { $client?: import('better-sqlite3').Database }).$client
   const now = Date.now()
   let runId = frozen.activeRunId
   if (!runId && client) {
@@ -374,38 +377,154 @@ async function stopJobRuntimeByFrozenIdentity(
       .run(now, runId)
   }
 
-  db.update(threadJobs)
-    .set({
-      activeRunId: null,
-      executionLeaseOwner: null
-    })
-    .where(eq(threadJobs.id, jobId))
-    .run()
+  if (client) {
+    try {
+      client
+        .prepare(`UPDATE jobs SET current_run_id = NULL, updated_at = ? WHERE id = ?`)
+        .run(now, jobId)
+    } catch {
+      // ignore
+    }
+  }
 
+  releaseWorkspaceLeaseForOwner('job-run', jobId)
   releaseWorkspaceLeaseForOwner('thread_job', jobId)
   await releaseJobCursorResources(jobId).catch(() => {})
 }
 
-async function ensureChildJobsDeleted(username: string, childJobIds: string[]): Promise<void> {
+async function ensureChildJobsDeleted(actorId: string, childJobIds: string[]): Promise<void> {
   for (const jobId of childJobIds) {
     const active = findActiveDeletionRequest('thread_job', jobId)
     if (active) {
       await executeDeletionRequest(active.id)
       continue
     }
-    const jobExists = await getDb()
-      .select({ id: threadJobs.id })
-      .from(threadJobs)
-      .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
-      .limit(1)
-    if (jobExists.length > 0) {
-      await drainAndDeleteJob(username, jobId)
+    if (readExecutionJobRow(jobId, actorId) || readLegacyThreadJobRow(jobId, actorId)) {
+      await drainAndDeleteJob(actorId, jobId)
     }
   }
 }
 
+function sqliteClient(): import('better-sqlite3').Database | null {
+  const db = getDb()
+  return (db as { $client?: import('better-sqlite3').Database }).$client ?? null
+}
+
+
+function tableExists(client: import('better-sqlite3').Database, name: string): boolean {
+  const row = client
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(name) as { 1: number } | undefined
+  return Boolean(row)
+}
+
+function listLegacyThreadJobIds(threadId: string, actorId: string): string[] {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'thread_jobs')) return []
+  return (
+    client
+      .prepare(`SELECT id FROM thread_jobs WHERE thread_id = ? AND actor_id = ?`)
+      .all(threadId, actorId) as Array<{ id: string }>
+  ).map((row) => row.id)
+}
+
+function deleteLegacyThreadJobRow(jobId: string): void {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'thread_jobs')) return
+  client.prepare(`DELETE FROM thread_jobs WHERE id = ?`).run(jobId)
+}
+
+function readExecutionJobRow(
+  jobId: string,
+  actorId: string
+): {
+  id: string
+  projectId: string
+  workspaceRoot: string
+  referenceManifestJson: string | null
+} | null {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'jobs')) return null
+  const row = client
+    .prepare(
+      `SELECT j.id AS id, j.project_id AS projectId, j.workspace_root AS workspaceRoot,
+              js.reference_manifest_json AS referenceManifestJson
+       FROM jobs j
+       LEFT JOIN job_snapshots js ON js.job_id = j.id
+       WHERE j.id = ? AND j.actor_id = ?
+       LIMIT 1`
+    )
+    .get(jobId, actorId) as
+    | {
+        id: string
+        projectId: string
+        workspaceRoot: string
+        referenceManifestJson: string | null
+      }
+    | undefined
+  return row ?? null
+}
+
+function readLegacyThreadJobRow(
+  jobId: string,
+  actorId: string
+): {
+  id: string
+  threadId: string
+  workspacePath: string | null
+  referenceManifestJson: string | null
+} | null {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'thread_jobs')) return null
+  const row = client
+    .prepare(
+      `SELECT id, thread_id AS threadId, workspace_path AS workspacePath,
+              reference_manifest_json AS referenceManifestJson
+       FROM thread_jobs WHERE id = ? AND actor_id = ? LIMIT 1`
+    )
+    .get(jobId, actorId) as
+    | {
+        id: string
+        threadId: string
+        workspacePath: string | null
+        referenceManifestJson: string | null
+      }
+    | undefined
+  return row ?? null
+}
+
+
+/** Force-delete Execution `jobs` rows for a project (cascade cleans snapshots/tree/work). */
+async function ensureProjectExecutionJobsDeleted(
+  actorId: string,
+  projectId: string,
+  jobIds?: string[]
+): Promise<void> {
+  const client = sqliteClient()
+  if (!client) return
+
+  const ids =
+    jobIds ??
+    (
+      client
+        .prepare(`SELECT id FROM jobs WHERE project_id = ? AND actor_id = ?`)
+        .all(projectId, actorId) as Array<{ id: string }>
+    ).map((row) => row.id)
+
+  for (const jobId of ids) {
+    await stopJobRuntimeByFrozenIdentity(jobId, {
+      activeRunId: null,
+      executionLeaseOwner: null,
+      workspaceLeaseOwnerKind: 'job-run',
+      workspaceLeaseOwnerId: jobId
+    }).catch(() => {})
+    releaseWorkspaceLeaseForOwner('job-run', jobId)
+    client.prepare(`DELETE FROM jobs WHERE id = ? AND actor_id = ?`).run(jobId, actorId)
+  }
+}
+
 async function ensureChildThreadsDeleted(
-  username: string,
+  actorId: string,
   childThreadIds: string[]
 ): Promise<void> {
   for (const threadId of childThreadIds) {
@@ -417,10 +536,10 @@ async function ensureChildThreadsDeleted(
     const threadExists = await getDb()
       .select({ id: threads.id })
       .from(threads)
-      .where(and(eq(threads.id, threadId), eq(threads.username, username)))
+      .where(and(eq(threads.id, threadId), eq(threads.actorId, actorId)))
       .limit(1)
     if (threadExists.length > 0) {
-      await drainAndDeleteThread(username, threadId)
+      await drainAndDeleteThread(actorId, threadId)
     }
   }
 }
@@ -428,16 +547,18 @@ async function ensureChildThreadsDeleted(
 async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise<void> {
   const db = getDb()
   if (request.entityKind === 'thread_job') {
-    db.transaction((tx) => {
-      tx.delete(threadJobs).where(eq(threadJobs.id, request.entityId)).run()
-    })
+    const client = sqliteClient()
+    client
+      ?.prepare(`DELETE FROM jobs WHERE id = ? AND actor_id = ?`)
+      .run(request.entityId, request.actorId)
+    deleteLegacyThreadJobRow(request.entityId)
     return
   }
 
   if (request.entityKind === 'thread') {
     db.transaction((tx) => {
       tx.delete(threads)
-        .where(and(eq(threads.username, request.username), eq(threads.id, request.entityId)))
+        .where(and(eq(threads.actorId, request.actorId), eq(threads.id, request.entityId)))
         .run()
     })
     return
@@ -446,7 +567,7 @@ async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise
   if (request.entityKind === 'project') {
     db.transaction((tx) => {
       tx.delete(projects)
-        .where(and(eq(projects.actorId, request.username), eq(projects.id, request.entityId)))
+        .where(and(eq(projects.actorId, request.actorId), eq(projects.id, request.entityId)))
         .run()
     })
   }
@@ -491,7 +612,7 @@ async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<voi
       frozen.deleteOwningThread &&
       !isEntityDeletionBlocked('thread', request.threadId)
     ) {
-      await drainAndDeleteThread(request.username, request.threadId)
+      await drainAndDeleteThread(request.actorId, request.threadId)
     }
 
     const { getOrComposeExecution } = await import('../design-module')
@@ -505,7 +626,7 @@ async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<voi
 
   if (request.entityKind === 'thread' && request.projectId) {
     const { touchProject } = await import('../projects/service')
-    await touchProject(request.username, request.projectId)
+    await touchProject(request.actorId, request.projectId)
   }
 }
 
@@ -521,12 +642,21 @@ export async function executeDeletionRequest(requestId: string): Promise<void> {
     if (phase === 'requested' || phase === 'draining') {
       const frozen = parseFrozenSnapshot(request.frozenJson)
 
-      if (request.entityKind === 'project' && frozen.childThreadIds?.length) {
-        await ensureChildThreadsDeleted(request.username, frozen.childThreadIds)
+      if (request.entityKind === 'project') {
+        if (frozen.childThreadIds?.length) {
+          await ensureChildThreadsDeleted(request.actorId, frozen.childThreadIds)
+        }
+        if (request.projectId) {
+          await ensureProjectExecutionJobsDeleted(
+            request.actorId,
+            request.projectId,
+            frozen.childExecutionJobIds
+          )
+        }
       }
 
       if (request.entityKind === 'thread' && frozen.childJobIds?.length) {
-        await ensureChildJobsDeleted(request.username, frozen.childJobIds)
+        await ensureChildJobsDeleted(request.actorId, frozen.childJobIds)
       }
 
       if (request.entityKind === 'thread_job' && frozen.runtime) {
@@ -577,45 +707,48 @@ export async function executeDeletionRequest(requestId: string): Promise<void> {
   }
 }
 
-export async function drainAndDeleteJob(username: string, jobId: string): Promise<void> {
+export async function drainAndDeleteJob(actorId: string, jobId: string): Promise<void> {
   const active = findActiveDeletionRequest('thread_job', jobId)
   if (active) {
     return executeDeletionRequest(active.id)
   }
 
-  const job = getDb()
-    .select()
-    .from(threadJobs)
-    .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
-    .limit(1)
-    .all()[0]
-  if (!job) {
+  const execution = readExecutionJobRow(jobId, actorId)
+  const legacy = execution ? null : readLegacyThreadJobRow(jobId, actorId)
+  if (!execution && !legacy) {
     throw AppError.notFound('Job not found', 'job.not_found')
   }
 
-  const threadRows = await getDb()
-    .select({ projectId: threads.projectId })
-    .from(threads)
-    .where(eq(threads.id, job.threadId))
-    .limit(1)
-  const projectId = threadRows[0]?.projectId ?? null
+  const projectId = execution?.projectId ?? null
+  let threadId: string | null = legacy?.threadId ?? null
+  if (!threadId && projectId) {
+    const threadRows = await getDb()
+      .select({ id: threads.id })
+      .from(threads)
+      .where(eq(threads.projectId, projectId))
+      .limit(1)
+    threadId = threadRows[0]?.id ?? null
+  }
+  const workspacePath = execution?.workspaceRoot ?? legacy?.workspacePath ?? null
   const frozen = await freezeJobRuntimeIdentity(jobId)
-  const ownedAttachmentIds = collectJobOwnedAttachmentIds(job.referenceManifestJson)
+  const ownedAttachmentIds = collectJobOwnedAttachmentIds(
+    execution?.referenceManifestJson ?? legacy?.referenceManifestJson
+  )
 
   const requestId = await createDeletionRequest({
     entityKind: 'thread_job',
     entityId: jobId,
-    username,
-    threadId: job.threadId,
+    actorId,
+    threadId,
     projectId,
-    workspacePath: job.workspacePath ?? null,
+    workspacePath,
     frozenJson: JSON.stringify({
       runtime: frozen,
       deleteOwningThread: false
     }),
     cleanupTargetsJson: JSON.stringify({
       kind: 'job',
-      threadId: job.threadId,
+      threadId: threadId ?? '',
       jobId,
       attachmentIds: ownedAttachmentIds
     } satisfies CleanupTargets)
@@ -640,74 +773,7 @@ function collectJobOwnedAttachmentIds(rawManifest: string | null | undefined): s
   return [...ids]
 }
 
-/**
- * Atomically claim deletion of a pre-launch planning Job. The launch transaction
- * checks the durable deletion intent, so either deletion wins or launch wins; a
- * Job can never cross into the task list after this function claims it.
- */
-export async function drainAndDeletePlanningJob(
-  username: string,
-  jobId: string
-): Promise<{ mode: 'deleted' | 'launched' }> {
-  const db = getDb()
-  const claim = db.transaction(() => {
-    const active = findActiveDeletionRequest('thread_job', jobId)
-    if (active) {
-      return { kind: 'delete' as const, requestId: active.id }
-    }
-
-    const job = db
-      .select()
-      .from(threadJobs)
-      .where(and(eq(threadJobs.id, jobId), eq(threadJobs.username, username)))
-      .limit(1)
-      .all()[0]
-    if (!job) return { kind: 'missing' as const }
-    if (job.planConfirmedAt != null) return { kind: 'launched' as const }
-
-    const projectId =
-      db
-        .select({ projectId: threads.projectId })
-        .from(threads)
-        .where(eq(threads.id, job.threadId))
-        .limit(1)
-        .all()[0]?.projectId ?? null
-
-    const requestId = createDeletionRequest({
-      entityKind: 'thread_job',
-      entityId: jobId,
-      username,
-      threadId: job.threadId,
-      projectId,
-      workspacePath: job.workspacePath ?? null,
-      frozenJson: JSON.stringify({
-        runtime: {
-          activeRunId: job.activeRunId ?? null,
-          executionLeaseOwner: job.executionLeaseOwner ?? null,
-          workspaceLeaseOwnerKind: 'thread_job',
-          workspaceLeaseOwnerId: jobId
-        }
-      } satisfies DeletionFrozenSnapshot),
-      cleanupTargetsJson: JSON.stringify({
-        kind: 'job',
-        threadId: job.threadId,
-        jobId,
-        attachmentIds: []
-      } satisfies CleanupTargets)
-    })
-    return { kind: 'delete' as const, requestId }
-  })
-
-  if (claim.kind === 'missing') {
-    throw AppError.notFound('Job not found', 'job.not_found')
-  }
-  if (claim.kind === 'launched') return { mode: 'launched' }
-
-  await executeDeletionRequest(claim.requestId)
-  return { mode: 'deleted' }
-}
-
-export async function drainAndDeleteThread(username: string, threadId: string): Promise<void> {
+export async function drainAndDeleteThread(actorId: string, threadId: string): Promise<void> {
   const active = findActiveDeletionRequest('thread', threadId)
   if (active) {
     return executeDeletionRequest(active.id)
@@ -716,7 +782,7 @@ export async function drainAndDeleteThread(username: string, threadId: string): 
   const threadRows = await getDb()
     .select()
     .from(threads)
-    .where(and(eq(threads.username, username), eq(threads.id, threadId)))
+    .where(and(eq(threads.actorId, actorId), eq(threads.id, threadId)))
     .limit(1)
   const existing = threadRows[0]
   if (!existing) {
@@ -724,20 +790,17 @@ export async function drainAndDeleteThread(username: string, threadId: string): 
   }
 
   const db = getDb()
-  const jobRows = await db
-    .select({ id: threadJobs.id })
-    .from(threadJobs)
-    .where(and(eq(threadJobs.threadId, threadId), eq(threadJobs.username, username)))
+  const legacyJobIds = listLegacyThreadJobIds(threadId, actorId)
   const purgeTargets = await collectThreadPurgeTargets(db, threadId)
 
   const requestId = await createDeletionRequest({
     entityKind: 'thread',
     entityId: threadId,
-    username,
+    actorId,
     threadId,
     projectId: existing.projectId,
     frozenJson: JSON.stringify({
-      childJobIds: jobRows.map((row) => row.id)
+      childJobIds: legacyJobIds
     } satisfies DeletionFrozenSnapshot),
     cleanupTargetsJson: JSON.stringify({
       kind: 'thread',
@@ -770,13 +833,23 @@ export async function drainAndDeleteProject(actorId: string, projectId: string):
     .from(threads)
     .where(eq(threads.projectId, projectId))
 
+  const client = sqliteClient()
+  const executionJobIds = client
+    ? (
+        client
+          .prepare(`SELECT id FROM jobs WHERE project_id = ? AND actor_id = ?`)
+          .all(projectId, actorId) as Array<{ id: string }>
+      ).map((row) => row.id)
+    : []
+
   const requestId = await createDeletionRequest({
     entityKind: 'project',
     entityId: projectId,
-    username: actorId,
+    actorId,
     projectId,
     frozenJson: JSON.stringify({
-      childThreadIds: threadRows.map((row) => row.id)
+      childThreadIds: threadRows.map((row) => row.id),
+      childExecutionJobIds: executionJobIds
     } satisfies DeletionFrozenSnapshot),
     cleanupTargetsJson: JSON.stringify({ kind: 'project' } satisfies CleanupTargets)
   })

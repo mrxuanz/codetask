@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { migration054RealtimeEvents as realtimeEventsMigration } from '../../../../packages/database/src/migrations/realtime-events.ts'
-import type { Migration } from './runner'
+import type { Migration } from './types'
 
 export const migration054RealtimeEvents: Migration = {
   version: realtimeEventsMigration.version,

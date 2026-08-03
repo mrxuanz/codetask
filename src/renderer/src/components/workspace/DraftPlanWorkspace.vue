@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { ConversationCore, ConversationMessage } from '@renderer/api/conversation'
 import DraftStepForm from '@renderer/components/create/DraftStepForm.vue'
 import { provideDraftPlanWorkspace } from '@renderer/composables/useDraftPlanWorkspace'
+import type { TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
 import { isDraftListEntryLaunched } from '@shared/job-lifecycle'
 
 const props = defineProps<{
@@ -14,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  draftUpdated: [message: ConversationMessage]
+  draftUpdated: [draftId: string, draft: TaskLaunchDraftPayload]
   draftCreated: [messageId: string]
   planConfirmed: [payload: { jobId: string; draftMessageId: string; title: string }]
   workspaceReadyChange: [ready: boolean]
@@ -23,12 +24,10 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const threadIdRef = toRef(props, 'threadId')
-const messagesRef = toRef(props, 'messages')
 const initialDraftIdRef = toRef(props, 'initialDraftId')
 
 const ws = provideDraftPlanWorkspace({
   threadId: threadIdRef,
-  messages: messagesRef,
   initialDraftId: initialDraftIdRef,
   t
 })
@@ -50,9 +49,9 @@ watch(
   { immediate: true }
 )
 
-function handleDraftUpdated(message: ConversationMessage): void {
-  emit('draftUpdated', message)
-  void ws.onDraftUpdated(message)
+function handleDraftUpdated(draftId: string, draft: TaskLaunchDraftPayload): void {
+  emit('draftUpdated', draftId, draft)
+  void ws.onDraftUpdated(draftId, draft)
 }
 
 watch(
@@ -71,7 +70,9 @@ defineExpose({
   selectDraft: ws.selectDraft,
   loadWorkspace: ws.loadWorkspace,
   stopPlanStream: ws.stopPlanStream,
-  workspaceReady: ws.workspaceReady
+  workspaceReady: ws.workspaceReady,
+  selectedDraftId: ws.selectedDraftId,
+  drafts: ws.drafts
 })
 </script>
 

@@ -97,8 +97,6 @@ export type TurnErrorCode =
   | 'thread.kind_mismatch'
   | 'thread.read_failed'
   | 'thread.message_not_found'
-  | 'thread.wizard.rollback_fields_required'
-  | 'thread.wizard.invalid_rollback_target'
   | 'thread.runtime_interrupted'
   | 'thread.core_required'
   | 'project.not_found'
@@ -160,10 +158,6 @@ export type TurnErrorCode =
   | 'plan.confirm_conflict'
   | 'plan.sandbox_timeout'
   | 'plan.sandbox_cleanup_failed'
-  | 'wizard.invalid_phase'
-  | 'wizard.already_in_phase'
-  | 'wizard.rollback_not_allowed'
-  | 'wizard.tool_not_allowed'
 
 export type TurnErrorParams = Record<string, string | number | boolean>
 
@@ -281,8 +275,6 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'thread.kind_mismatch': 'Thread kind mismatch: expected {expected}, got {actual}',
   'thread.read_failed': 'Failed to read thread after update',
   'thread.message_not_found': 'Source message not found',
-  'thread.wizard.rollback_fields_required': 'Rollback target and reason are required',
-  'thread.wizard.invalid_rollback_target': 'Invalid rollback target phase',
   'thread.runtime_interrupted':
     'The previous run was interrupted when the app closed or the service restarted. You can send a new message to continue.',
   'thread.core_required': 'coreCode is required',
@@ -347,11 +339,6 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'plan.sandbox_timeout': 'Plan sandbox task timed out',
   'plan.sandbox_cleanup_failed':
     'Sandbox process exited abnormally. Fully quit the app and restart, then retry plan generation.',
-  'wizard.invalid_phase':
-    'Current wizard phase {current} does not allow this action (allowed: {expected})',
-  'wizard.already_in_phase': 'Already in wizard phase {phase}',
-  'wizard.rollback_not_allowed': 'Cannot roll back to the requested phase',
-  'wizard.tool_not_allowed': 'Tool {toolName} is not allowed in the current phase'
 }
 
 export const TURN_ERROR_SCHEMA_VERSION = 1 as const

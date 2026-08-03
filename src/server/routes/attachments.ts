@@ -46,7 +46,7 @@ function mapConversationAuthError(error: unknown): never {
   if (error instanceof ConversationForbiddenError) {
     throw AppError.unauthorized(error.message, error.code)
   }
-  throw error
+  throw error instanceof Error ? error : new Error(String(error))
 }
 
 /**

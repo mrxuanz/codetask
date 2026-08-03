@@ -58,9 +58,13 @@ export const migration051ActorIdRemap: AuthMigration = {
         ).run(user.id, user.username, user.id)
       }
 
-      // Legacy threads table used username as owner.
+      // Legacy threads.username remapped to actor_id in migration 056.
       if (tableExists(db, 'threads') && columnExists(db, 'threads', 'username')) {
-        // keep username column as display username; no remap required
+        db.prepare(`UPDATE threads SET username = ? WHERE username = ? OR username = ?`).run(
+          user.id,
+          user.username,
+          user.id
+        )
       }
 
       if (tableExists(db, 'auth_sessions')) {

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { MESSAGE_KINDS, MESSAGE_ROLES, sqlInList, WIZARD_PHASES } from '../constraints'
+import { LEGACY_MESSAGE_KINDS, MESSAGE_ROLES, sqlInList, WIZARD_PHASES } from '../constraints'
 
 export function dropThreadMessagePointerTriggers(db: Database.Database): void {
   db.exec(`
@@ -18,8 +18,9 @@ function threadsHasActiveDraftId(db: Database.Database): boolean {
 }
 
 /**
- * Recreate draft pointer triggers when columns exist (pre-055), plus
- * thread_jobs draft_message integrity (still required after 055).
+ * Recreate draft pointer triggers when columns exist (pre-055).
+ * thread_jobs draft_message integrity checks existence + same thread only
+ * (kind no longer required after migration 056).
  */
 export function createThreadMessagePointerTriggers(db: Database.Database): void {
   if (threadsHasActiveDraftId(db)) {
@@ -81,8 +82,6 @@ export function createThreadMessagePointerTriggers(db: Database.Database): void 
           THEN RAISE(ABORT, 'draft_message_id must reference an existing message')
         WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.draft_message_id) != NEW.thread_id
           THEN RAISE(ABORT, 'draft_message_id must belong to the same thread')
-        WHEN (SELECT kind FROM thread_messages WHERE id = NEW.draft_message_id) != 'task-launch-draft'
-          THEN RAISE(ABORT, 'draft_message_id must reference a task-launch-draft message')
       END;
     END;
 
@@ -95,8 +94,6 @@ export function createThreadMessagePointerTriggers(db: Database.Database): void 
           THEN RAISE(ABORT, 'draft_message_id must reference an existing message')
         WHEN (SELECT thread_id FROM thread_messages WHERE id = NEW.draft_message_id) != NEW.thread_id
           THEN RAISE(ABORT, 'draft_message_id must belong to the same thread')
-        WHEN (SELECT kind FROM thread_messages WHERE id = NEW.draft_message_id) != 'task-launch-draft'
-          THEN RAISE(ABORT, 'draft_message_id must reference a task-launch-draft message')
       END;
     END;
   `)
@@ -132,7 +129,7 @@ export function repairMissingThreadMessagesTable(db: Database.Database): boolean
         thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
         username TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN (${sqlInList(MESSAGE_ROLES)})),
-        kind TEXT NOT NULL CHECK (kind IN (${sqlInList(MESSAGE_KINDS)})),
+        kind TEXT NOT NULL CHECK (kind IN (${sqlInList(LEGACY_MESSAGE_KINDS)})),
         content TEXT NOT NULL,
         core_code TEXT NOT NULL,
         conversation_id TEXT NOT NULL,
@@ -169,7 +166,7 @@ export function rebuildThreadMessagesKindConstraint(db: Database.Database): void
       thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
       username TEXT NOT NULL,
       role TEXT NOT NULL CHECK (role IN (${sqlInList(MESSAGE_ROLES)})),
-      kind TEXT NOT NULL CHECK (kind IN (${sqlInList(MESSAGE_KINDS)})),
+      kind TEXT NOT NULL CHECK (kind IN (${sqlInList(LEGACY_MESSAGE_KINDS)})),
       content TEXT NOT NULL,
       core_code TEXT NOT NULL,
       conversation_id TEXT NOT NULL,

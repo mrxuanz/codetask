@@ -2,6 +2,11 @@ import type { MilestoneVerdict } from '@codetask/contracts'
 
 export type { MilestoneVerdict }
 
+/**
+ * Rule-based stub for unit tests / explicit fallback only.
+ * Production Milestone verification goes through AgentRuntime + MCP
+ * (createVerifyMilestoneService → complete_milestone_verification).
+ */
 export function evaluateMilestoneVerdict(input: {
   sliceIds: string[]
   sliceVerificationStates: Map<string, string>
