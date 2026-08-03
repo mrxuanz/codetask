@@ -44,6 +44,8 @@ export type DesignModuleDeps = {
    * AgentRuntimePlannerRunner (03); otherwise SnapshotPlannerRunner.
    */
   agentRuntime?: AgentRuntime
+  /** HTTP port for Planner MCP URLs (defaults to initPlannerMcpBackend). */
+  getMcpBackendPort?: () => number
   capturePlannerSettings?: (providerCode: string) => DesignSettingsSnapshot
   captureExecutionSettings?: (
     taskProvider: string,
@@ -64,7 +66,9 @@ export function composeDesignModule(deps: DesignModuleDeps): DesignModule {
 
   let planningApp!: PlanningApplication
   const planner = deps.agentRuntime
-    ? new AgentRuntimePlannerRunner(() => planningApp, deps.agentRuntime)
+    ? new AgentRuntimePlannerRunner(() => planningApp, deps.agentRuntime, {
+        ...(deps.getMcpBackendPort ? { getMcpBackendPort: deps.getMcpBackendPort } : {})
+      })
     : new SnapshotPlannerRunner(() => planningApp)
   planningApp = new PlanningApplication(
     planningRepo,
@@ -110,3 +114,15 @@ export {
   AgentRuntimePlannerRunner,
   SnapshotPlannerRunner
 } from './planning/application/planner-runner.ts'
+export {
+  authorizePlannerMcpRequest,
+  buildPlannerMcpUrl,
+  buildPlannerSystemPrompt,
+  buildPlannerUserMessage,
+  dispatchPlannerToolForTests,
+  getPlannerMcpBackendPort,
+  handlePlannerMcpJsonRpc,
+  initPlannerMcpBackend,
+  registerPlannerMcpSession,
+  unregisterPlannerMcpSession
+} from './planning/mcp/index.ts'

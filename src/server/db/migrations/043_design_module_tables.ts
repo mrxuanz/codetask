@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { migration043DesignModuleTables } from '../../../../packages/database/src/migrations/index.ts'
-import type { Migration } from './runner'
+import type { Migration } from './types'
 
 /**
  * One-shot Design schema (01). Data backfill runs in migration044.

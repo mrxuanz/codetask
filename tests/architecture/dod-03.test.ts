@@ -13,6 +13,10 @@ import {
 } from '@codetask/agent-runtime'
 import { ScriptedAgentRuntime } from '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
 import { AgentRuntimePlannerRunner } from '../../packages/server-core/src/modules/design/planning/application/planner-runner.ts'
+import {
+  dispatchPlannerToolForTests,
+  initPlannerMcpBackend
+} from '../../packages/server-core/src/modules/design/planning/mcp/index.ts'
 
 const root = join(import.meta.dirname, '../..')
 
@@ -83,18 +87,93 @@ describe('architecture 03 DoD', () => {
   })
 
   it('AgentRuntimePlannerRunner exercises shared runtime port (Scripted)', async () => {
-    const runtime = new ScriptedAgentRuntime(async function* (): AsyncIterable<AgentTurnEvent> {
-      yield { type: 'completed', reason: 'completed', reply: 'ok' }
+    initPlannerMcpBackend(9_001)
+
+    const runtime = new ScriptedAgentRuntime(async function* (input): AsyncIterable<AgentTurnEvent> {
+      const mcpUrl = input.mcpServers?.[0]?.url ?? ''
+      const sessionId = decodeURIComponent(mcpUrl.split('/planner/')[1]?.split('?')[0] ?? '')
+      assert.ok(sessionId, 'expected planner mcp session id in mcpServers url')
+
+      const abilityCode = 'backend-implementation'
+      const outline = {
+        milestones: [
+          {
+            title: 'Deliver demo',
+            description: 'Ship the demo feature',
+            successCriteria: 'Demo works end to end',
+            slices: [
+              {
+                title: 'Core slice',
+                description: 'Implement core units',
+                successCriteria: 'Core units land',
+                tasks: [
+                  {
+                    title: 'Scaffold module',
+                    description: 'Create module skeleton',
+                    taskKind: 'scaffolding',
+                    abilityCode,
+                    successCriteria: 'Skeleton files exist'
+                  },
+                  {
+                    title: 'Implement service',
+                    description: 'Add service logic',
+                    taskKind: 'backend-implementation',
+                    abilityCode,
+                    successCriteria: 'Service behaves correctly',
+                    dependsOnTaskRefs: ['m1-s1-t1']
+                  },
+                  {
+                    title: 'Wire routes',
+                    description: 'Expose HTTP routes',
+                    taskKind: 'backend-implementation',
+                    abilityCode,
+                    successCriteria: 'Routes respond',
+                    dependsOnTaskRefs: ['m1-s1-t2']
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+      await dispatchPlannerToolForTests(sessionId, 'register_plan_outline', outline)
+      for (const [index, title] of [
+        'Scaffold module',
+        'Implement service',
+        'Wire routes'
+      ].entries()) {
+        await dispatchPlannerToolForTests(sessionId, 'register_task_context', {
+          milestone: 1,
+          slice: 1,
+          task: index + 1,
+          taskTitle: title,
+          content: [
+            '### Read First',
+            'Draft requirements',
+            '### Files',
+            `src/demo/t${index + 1}.ts`,
+            '### Constraints',
+            'Within the stated task boundary, reject lightweight or partial implementations: land that slice of work fully and production-grade so operators can trust it — not a prototype that leaves cleanup debt. Do not enlarge the task to swallow unrelated concerns.',
+            '### Do',
+            `Implement ${title}`,
+            '### Done When',
+            'Acceptance criteria met'
+          ].join('\n')
+        })
+      }
+      await dispatchPlannerToolForTests(sessionId, 'finalize_plan', {})
+      yield { type: 'completed', reason: 'completed', reply: 'plan finalized' }
     })
     let committed = false
     const planner = new AgentRuntimePlannerRunner(
       () => ({
         async commitExecutionTree() {
           committed = true
-        }
+        },
+        notifyPlannerProgress() {}
       }),
       runtime,
-      { commitEvenIfRuntimeFails: false }
+      { maxSilentEmptyAttempts: 1, getMcpBackendPort: () => 9_001 }
     )
     await planner.run({
       sessionId: 'plan-1',
@@ -148,6 +227,7 @@ describe('architecture 03 DoD', () => {
     })
     assert.equal(runtime.turns.length, 1)
     assert.equal(runtime.turns[0]?.role, 'planner')
+    assert.ok(runtime.turns[0]?.mcpServers?.[0]?.url.includes('/api/mcp/planner/'))
     assert.equal(committed, true)
   })
 

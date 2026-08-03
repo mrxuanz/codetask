@@ -1,6 +1,11 @@
 import type { Composer } from 'vue-i18n'
 import type { TurnErrorCode, TurnErrorDto } from '@shared/turn-errors'
-import { coerceTurnErrorField, parseStoredTurnError, turnErrorI18nKey } from '@shared/turn-errors'
+import {
+  coerceTurnErrorField,
+  isTurnErrorCode,
+  parseStoredTurnError,
+  turnErrorI18nKey
+} from '@shared/turn-errors'
 
 function interpolate(template: string, params?: TurnErrorDto['params']): string {
   if (!params) return template
@@ -10,14 +15,35 @@ function interpolate(template: string, params?: TurnErrorDto['params']): string 
   })
 }
 
+function coerceLooseTurnError(input: unknown): TurnErrorDto | null {
+  if (!input) return null
+  if (typeof input === 'string') {
+    return parseStoredTurnError(input) ?? coerceTurnErrorField(input)
+  }
+  if (typeof input !== 'object' || Array.isArray(input)) return null
+  const record = input as Record<string, unknown>
+  if (typeof record.message !== 'string') return null
+  const code =
+    typeof record.code === 'string' && isTurnErrorCode(record.code) ? record.code : 'turn.unknown'
+  return {
+    code,
+    message: record.message,
+    detail: typeof record.detail === 'string' ? record.detail : record.detail === null ? null : undefined,
+    params:
+      record.params && typeof record.params === 'object' && !Array.isArray(record.params)
+        ? (record.params as TurnErrorDto['params'])
+        : undefined
+  }
+}
+
+/** Accepts shared TurnErrorDto, contract `{ code: string }` errors, or unknown job.lastError. */
 export function formatTurnError(
-  input: TurnErrorDto | string | null | undefined,
+  input: TurnErrorDto | string | null | undefined | unknown,
   t: Composer['t']
 ): string | null {
   if (!input) return null
 
-  const dto =
-    typeof input === 'string' ? (parseStoredTurnError(input) ?? coerceTurnErrorField(input)) : input
+  const dto = coerceLooseTurnError(input)
 
   if (!dto) return typeof input === 'string' ? input : null
 

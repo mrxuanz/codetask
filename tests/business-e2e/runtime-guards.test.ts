@@ -212,6 +212,28 @@ test('terminal polling without timeoutMs waits until CodeTask API terminal', asy
   assert.equal(calls, 3)
 })
 
+test('terminal polling accepts ConversationTurnDto.state as terminal', async () => {
+  const client = {
+    async request() {
+      return {
+        status: 200,
+        data: {
+          turn: {
+            id: 'turn-1',
+            state: 'failed',
+            lastError: { code: 'runtime.failed', message: 'lease' }
+          }
+        },
+        raw: {}
+      }
+    }
+  } as unknown as PublicApiClient
+
+  const turn = await waitTurnTerminal(client, 'thread-1', 'turn-1', 2_000)
+  assert.equal(turn.status, 'failed')
+  assert.equal(turn.state, 'failed')
+})
+
 test('terminal polling with short timeoutMs still fails for probes', async () => {
   const client = {
     async request() {

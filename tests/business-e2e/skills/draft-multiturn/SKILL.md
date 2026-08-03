@@ -2,46 +2,37 @@
 
 ## Role
 
-You are an external black-box agent driving CodeTask create_task conversation to collect requirements and produce a Draft.
+You are an external black-box agent driving CodeTask **Design** drafts (not create_task turns), optionally preceded by a short clarifying chat.
 
 ## Goal
 
 Drive a **human-like collect state machine** (do not blast every fixture then confirm):
 
 1. Create a project using the provided workspaceRoot.
-2. Create a `create_task` thread with `coreCode` equal to the exact `conversationCore` from Runtime context.
-3. Loop until the draft is reviewable:
-   1. Call `case_next_fixture` only when the prior turn left a gap (still `collecting`, empty `summary`, assistant still asking, or missing scope/constraints/acceptance).
-   2. Send **one** user message via `codetask_start_turn` and `codetask_wait_turn`.
-   3. Inspect public state before the next unlock:
-      - `codetask_get_thread` → `wizardPhase`
-      - `codetask_get_thread_drafts` (+ optional soft GET draft detail)
-      - `codetask_list_messages` → whether the assistant is still asking
-   4. If still collecting / summary empty / gaps remain → unlock the next fixture phase that fills the gap (fixtures stay ordered; never invent later phases).
-   5. If fixtures are exhausted but draft is still collecting → send at most a few propose nudges asking for `propose_task_draft`.
-4. Only when the draft is reviewable (`collecting=false` with non-empty summary, or wizard left `collect`):
-   1. `codetask_confirm_draft`
-   2. **`codetask_update_draft_execution_config`** with the exact `plannerCoreCode` / `sliceVerifierCoreCode` / `milestoneVerifierCoreCode` from Runtime context (this is the **per-draft** run config that freezes into the execution tree — do **not** use global settings)
-   3. `codetask_confirm_draft_final` when the case requires it
-5. Record checkpoints: `project_created`, `thread_created`, `phase_<name>`, `draft_ready`, `execution_config_set` as applicable.
+2. Create a normal `chat` conversation (or reuse project thread); Design drafts live under `/api/drafts`.
+3. **Conversation clarification (max 4 turns = 1 initial + up to 3 follow-ups):**
+   - Prefer unlocking the next staged fixture phase (`case_next_fixture`) only when the prior chat turn left a gap or the assistant asked for details.
+   - Send follow-ups that restate scope/constraints — do not change the oracle.
+   - Wait each turn with sliced `codetask_wait_turn` (`timeoutMs: 30000`, retry on timeout/fetch failed).
+   - Stop early when the assistant confirms understanding (not still clarifying), then continue to Design MCP.
+4. Loop until the draft is reviewable:
+   1. Prefer Design MCP tools: `codetask_create_draft` → patch abilities / execution profile → confirm.
+   2. Inspect public state before the next unlock via draft/list APIs (not wizardPhase).
+5. Only when the draft is reviewable:
+   1. Confirm requirements / draft as required by the case
+   2. Design execution-profile patch with Runtime cores
+   3. Confirm draft final when the case requires it
+6. Record checkpoints: `project_created`, `turn_completed` (if chat used), `draft_ready` / `draft_confirmed`, `execution_config_set` as applicable.
 
 ## Allowed tools
 
 Only tools exposed by the Test MCP capability.
 
-## Required checkpoints
-
-Follow the case skill/runtime prompt. Typical: project_created, thread_created, and one checkpoint per unlocked phase.
-
 ## Forbidden behavior
 
 - Do not invent later fixture phases before `case_next_fixture` unlocks them
-- Do not confirm while `collecting=true` / empty summary / wizard still in collect
-- Do not skip `codetask_update_draft_execution_config` before `codetask_confirm_draft_final`
-- Do not write workspace business files yourself
-- Do not call raw HTTP or invent Bearer tokens
-- Do not report completed if required tools were skipped
-
-## Completion
-
-Call `report_case_result` exactly once with status=completed and include projectId/threadId/(draft)messageId in artifacts.
+- Do not confirm while collecting / empty summary
+- Do not use retired `create_task` turns or wizard APIs
+- Do not skip execution profile before final confirm when the case requires it
+- Do not exceed 4 conversation turns for clarification
+- Do not call unbounded `codetask_wait_turn` without `timeoutMs`

@@ -5,11 +5,20 @@ import { WorkRepository } from '../infrastructure/work-repository.ts'
 import { ExecutionOutbox } from '../../events/execution-outbox.ts'
 import { validateTaskEvidence } from '../../verification/domain/task-evidence.ts'
 
+export type AcceptWorkResultService = {
+  accept(input: {
+    jobId: string
+    workId: string
+    attemptId: string
+    evidence: TaskEvidence
+  }): void
+}
+
 export function createAcceptWorkResultService(deps: {
   db: Database.Database
   work: WorkRepository
   outbox: ExecutionOutbox
-}) {
+}): AcceptWorkResultService {
   return {
     accept(input: {
       jobId: string
@@ -35,15 +44,16 @@ export function createAcceptWorkResultService(deps: {
         deps.db
           .prepare(
             `INSERT INTO work_results (
-              id, attempt_id, status, summary, changed_files_json, validation_json,
+              id, attempt_id, status, summary, evidence_json, changed_files_json, validation_json,
               evidence_summary, result_hash, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .run(
             resultId,
             input.attemptId,
             input.evidence.status,
             input.evidence.summary,
+            JSON.stringify(input.evidence),
             JSON.stringify(input.evidence.changedFiles),
             JSON.stringify(input.evidence.validation),
             input.evidence.evidence.join('\n'),

@@ -11,6 +11,7 @@ import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import Spinner from '@renderer/components/ui/Spinner.vue'
 import { useDraftPlanWorkspace } from '@renderer/composables/useDraftPlanWorkspace'
+import type { TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
 import { getPlanProgressSnapshot } from '@renderer/lib/jobProgress'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import { toastError } from '@renderer/lib/toast'
@@ -23,7 +24,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  draftUpdated: [message: ConversationMessage]
+  draftUpdated: [draftId: string, draft: TaskLaunchDraftPayload]
 }>()
 
 const { t } = useI18n()
@@ -184,9 +185,11 @@ const stepLabels = computed(() => [
   t('workspace.create.steps.executionTree')
 ])
 
-function handleDraftUpdated(message: ConversationMessage): void {
-  emit('draftUpdated', message)
-  ws.onDraftUpdated(message)
+function handleDraftUpdated(draft: TaskLaunchDraftPayload): void {
+  const draftId = draft.draftId ?? ws.selectedDraftId.value
+  if (!draftId) return
+  emit('draftUpdated', draftId, draft)
+  void ws.onDraftUpdated(draftId, draft)
 }
 
 function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
@@ -216,7 +219,7 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
                 stepStatus(index) === 'upcoming' && 'text-muted-foreground/50'
               )
             "
-            :disabled="index > ws.currentStep.value && !ws.selectedMessage.value"
+            :disabled="index > ws.currentStep.value && !ws.selectedDraft.value"
             @click="ws.setStep(index)"
           >
             <span
@@ -245,11 +248,12 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
       </div>
 
       <div
-        v-else-if="ws.currentStep.value === 1 && ws.selectedMessage.value"
+        v-else-if="ws.currentStep.value === 1 && ws.selectedDraft.value && ws.selectedDraftId.value"
         class="mx-auto max-w-3xl"
       >
         <TaskLaunchDraftCard
-          :message="ws.selectedMessage.value"
+          :draft-id="ws.selectedDraftId.value"
+          :draft="ws.selectedDraft.value"
           :thread-id="threadId"
           :thread-messages="messages"
           :cores="cores"

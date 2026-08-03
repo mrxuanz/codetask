@@ -131,7 +131,7 @@ export class JobRepository {
     return this.requireById(input.jobId)
   }
 
-  toSummary(job: JobRecord, queuePosition: number | null): JobSummary {
+  toSummary(job: JobRecord, _queuePosition: number | null): JobSummary {
     return {
       id: job.id,
       title: job.title,
@@ -169,7 +169,7 @@ export class JobRepository {
   }
 
   getTree(jobId: string, generation: number): JobTreeDto {
-    const job = this.requireById(jobId)
+    this.requireById(jobId)
     const milestones = this.db
       .prepare(
         `SELECT * FROM job_milestones WHERE job_id = ? AND generation = ? ORDER BY sort_order`
@@ -246,13 +246,34 @@ export class JobRepository {
   getCommandReceipt(
     actorId: string,
     idempotencyKey: string
-  ): { responseJson: string } | null {
+  ): {
+    jobId: string
+    command: JobAction
+    requestHash: string
+    responseJson: string
+  } | null {
     const row = this.db
       .prepare(
-        `SELECT response_json FROM job_command_receipts WHERE actor_id = ? AND idempotency_key = ?`
+        `SELECT job_id, command, request_hash, response_json
+         FROM job_command_receipts
+         WHERE actor_id = ? AND idempotency_key = ?`
       )
-      .get(actorId, idempotencyKey) as { response_json: string } | undefined
-    return row ?? null
+      .get(actorId, idempotencyKey) as
+      | {
+          job_id: string
+          command: JobAction
+          request_hash: string
+          response_json: string
+        }
+      | undefined
+    return row
+      ? {
+          jobId: row.job_id,
+          command: row.command,
+          requestHash: row.request_hash,
+          responseJson: row.response_json
+        }
+      : null
   }
 
   saveCommandReceipt(input: {
@@ -266,7 +287,7 @@ export class JobRepository {
   }): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO job_command_receipts (
+        `INSERT INTO job_command_receipts (
           actor_id, idempotency_key, job_id, command, request_hash, response_json, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       )

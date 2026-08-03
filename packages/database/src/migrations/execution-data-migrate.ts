@@ -24,12 +24,6 @@ function tableExists(db: Database.Database, name: string): boolean {
   )
 }
 
-function columnExists(db: Database.Database, table: string, column: string): boolean {
-  return Boolean(
-    db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`).get(table, column)
-  )
-}
-
 function recordFailure(
   db: Database.Database,
   sourceKey: string,

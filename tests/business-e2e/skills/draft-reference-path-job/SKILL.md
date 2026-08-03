@@ -2,30 +2,24 @@
 
 ## Role
 
-Drive image + local-corpus directory references through Draft → Planner → Job, proving the task can read the image and every file under the referenced directory (including nested).
+Drive image + local-corpus directory references through Design Draft → Planning → Job, proving the task can read the image and every file under the referenced directory (including nested).
 
 ## Goal
 
-1. Isolated project + `create_task` thread.
-2. Upload fixture as `attachment.png`; one turn that proposes a draft (no answer leaks).
-3. Poll until draft is editable; keep `draftMessageId`.
-4. `codetask_import_draft_references` with the message attachmentId + description.
-   (Turn attachments are often auto-added with empty descriptions; the import tool must still apply descriptions — via PATCH if the id already exists.)
-5. `codetask_add_local_corpus_reference` with an **absolute** directory path **outside** the project workspace (under the case run's `reference-corpus/`).
-6. `confirm_draft` → `update_draft_execution_config` → `confirm_draft_final`; keep `designSessionId`.
-7. Poll `codetask_get_plans` (real `/plans`) until plan ready; ensure tasks use Reference IDs (not absolute paths) with non-empty `referenceReason`.
-8. `confirm_plan` → `wait_job` completed.
-9. `confirm_plan` publishes the executable Job into a new task-owned thread. Wait with the returned Job's `threadId`, never the original create-task thread id.
-10. Report: `draftMessageId`, `attachmentId`, `directoryReferenceId`, `designSessionId`, `launchedJobId`, `launchedThreadId`, `localCorpusPath`.
-
-This is a one-shot read proof, not a request to build a reusable tool. The Job must read the
-bound References directly and only add `reference-proof.json`; it must not add programs, scripts,
-dependencies, tests, fixtures, or mock design files. The proof contains image text + all design
-sentinels (overview / api / nested constraints).
+1. Isolated project + chat conversation (Design owns drafts via `/api/drafts`).
+2. Upload fixture as `attachment.png`; produce a draft (no answer leaks).
+3. If the chat agent asks for details, follow up up to 3 more turns (4 total) without leaking fixture text; attachments only on the first turn.
+4. Poll until draft is editable; keep `draftId`.
+5. Import draft references with the message attachmentId + description.
+6. Add local-corpus reference with an **absolute** directory path **outside** the project workspace.
+7. Confirm draft → set execution profile → confirm final / start planning; keep planning session id.
+8. Poll plans until ready; ensure tasks use Reference IDs (not absolute paths) with non-empty `referenceReason`.
+9. Confirm plan → wait job completed.
+10. Wait with the returned Job id/thread, never assume a create_task thread id.
+11. Report: `draftId`, `attachmentId`, `directoryReferenceId`, planning/job identifiers, `localCorpusPath`.
 
 ## Forbidden
-
-- Do not put Dream / 1000 / Cats or DESIGN\_\* sentinels into prompts, titles, or fileName
-- Do not place the local corpus inside the project workspace
-- Do not treat absolute paths as Reference IDs
-- Do not use missing-message probes as business success
+- Retired `create_task` turns / wizard APIs
+- Leaking fixture answer text into prompts
+- Exceeding 4 clarification chat turns
+- Unbounded `codetask_wait_turn` without `timeoutMs`

@@ -79,25 +79,31 @@ export class PoolRepository {
 
   heartbeat(runId: string, leaseOwner: string, now: number): void {
     const expires = now + LEASE_TTL_MS
-    this.db
-      .prepare(
-        `UPDATE execution_runs SET lease_expires_at = ?, updated_at = ?
-         WHERE id = ? AND lease_owner = ? AND status = 'active'`
-      )
-      .run(expires, now, runId, leaseOwner)
-    const run = this.getRun(runId)
-    if (!run) return
-    this.db
-      .prepare(
-        `UPDATE execution_pool_slots SET lease_expires_at = ?
-         WHERE pool = ? AND slot_number = ? AND run_id = ?`
-      )
-      .run(expires, EXECUTION_POOL, EXECUTION_SLOT, runId)
-    this.db
-      .prepare(
-        `UPDATE workspace_leases SET lease_expires_at = ?
-         WHERE run_id = ? AND status = 'active'`
-      )
-      .run(expires, runId)
+    const refresh = this.db.transaction(() => {
+      const run = this.db
+        .prepare(
+          `UPDATE execution_runs SET lease_expires_at = ?, updated_at = ?
+           WHERE id = ? AND lease_owner = ? AND status = 'active'`
+        )
+        .run(expires, now, runId, leaseOwner)
+      if (run.changes !== 1) throw new Error(`Execution run lease lost: ${runId}`)
+
+      const slot = this.db
+        .prepare(
+          `UPDATE execution_pool_slots SET lease_expires_at = ?
+           WHERE pool = ? AND slot_number = ? AND run_id = ? AND status = 'claimed'`
+        )
+        .run(expires, EXECUTION_POOL, EXECUTION_SLOT, runId)
+      const workspace = this.db
+        .prepare(
+          `UPDATE workspace_leases SET lease_expires_at = ?
+           WHERE run_id = ? AND status = 'active'`
+        )
+        .run(expires, runId)
+      if (slot.changes !== 1 || workspace.changes !== 1) {
+        throw new Error(`Execution lease set is incomplete: ${runId}`)
+      }
+    })
+    refresh()
   }
 }

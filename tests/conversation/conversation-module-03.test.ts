@@ -31,9 +31,13 @@ describe('conversation module (03)', () => {
     migration048ConversationModuleTables.up(db)
 
     let seenReadRoots: string[] | undefined
+    let seenWorkspaceAccess: string | undefined
+    let seenLease: { leaseId: string; ownerKind: string; ownerId: string } | undefined
     const runtime = createAgentRuntime({
       async *streamTurn(input) {
         seenReadRoots = input.readRoots
+        seenWorkspaceAccess = input.workspaceAccess
+        seenLease = input.workspaceLease
         yield { type: 'delta', content: 'hello' }
         yield { type: 'completed', reply: 'hello', runtimeSessionId: null }
       }
@@ -97,6 +101,10 @@ describe('conversation module (03)', () => {
     assert.equal(user!.attachments?.[0]?.name, 'shot.png')
     assert.ok(messages.some((m) => m.role === 'assistant' && m.content.includes('hello')))
     assert.deepEqual(seenReadRoots, ['/tmp/att-root'])
+    assert.equal(seenWorkspaceAccess, 'exclusive-write')
+    assert.equal(seenLease?.leaseId, 'lease-1')
+    assert.equal(seenLease?.ownerKind, 'conversation')
+    assert.ok(seenLease?.ownerId)
   })
 
   it('rejects draft/plan fields on turn body via route validation helper', () => {

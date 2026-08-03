@@ -5,8 +5,10 @@ import {
   fetchConversationCores,
   fetchThreadConversationState,
   fetchConversationMessages,
+  toUiConversationMessage,
   type ConversationCore,
   type ConversationMessage,
+  type ConversationMessageDto as ContractConversationMessageDto,
   type ConversationState
 } from '@renderer/api/conversation'
 import { uploadThreadAttachment } from '@renderer/api/jobs'
@@ -24,7 +26,6 @@ import {
 } from '@renderer/lib/conversationMessages'
 import { setPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
-import type { TurnErrorDto } from '@shared/turn-errors'
 import type { WorkspaceAccessMode } from '@shared/workspace-access'
 
 export interface HomeChatContext {
@@ -47,7 +48,6 @@ export interface HomeChatContext {
     message: string
     files?: File[]
   }) => Promise<Thread | null>
-  updateDraftMessage: (message: ConversationMessage) => void
   clear: () => void
 }
 
@@ -74,10 +74,30 @@ function readTurnPayload(value: unknown): ConversationTurnDto | null {
 
 function readMessagePayload(value: unknown): ConversationMessage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const message = value as Partial<ConversationMessage>
+  const message = value as Partial<ContractConversationMessageDto>
   if (typeof message.id !== 'string' || typeof message.role !== 'string') return null
   if (typeof message.content !== 'string') return null
-  return message as ConversationMessage
+  if (typeof message.conversationId !== 'string') {
+    // Shared UI shape already (coreCode present) — accept as-is when well-formed.
+    const shared = value as Partial<ConversationMessage>
+    if (typeof shared.coreCode === 'string' && typeof shared.createdAt === 'string') {
+      return {
+        id: shared.id!,
+        role: shared.role!,
+        kind: shared.kind ?? 'text',
+        content: shared.content!,
+        attachments: shared.attachments ?? [],
+        coreCode: shared.coreCode,
+        conversationId: shared.conversationId ?? null,
+        thinking: shared.thinking ?? null,
+        thinkingDurationMs: shared.thinkingDurationMs ?? null,
+        createdAt: shared.createdAt
+      }
+    }
+    return null
+  }
+  if (typeof message.kind !== 'string' || typeof message.createdAt !== 'string') return null
+  return toUiConversationMessage(message as ContractConversationMessageDto)
 }
 
 export function useHomeChat(
@@ -150,7 +170,7 @@ export function useHomeChat(
     }
   }
 
-  function displayError(value: TurnErrorDto | string | null | undefined): string | null {
+  function displayError(value: unknown): string | null {
     return formatTurnError(value, t)
   }
 
@@ -229,10 +249,6 @@ export function useHomeChat(
     } finally {
       coreSwitching.value = false
     }
-  }
-
-  function updateDraftMessage(message: ConversationMessage): void {
-    messages.value = messages.value.map((item) => (item.id === message.id ? message : item))
   }
 
   async function sendMessage(input: {
@@ -489,7 +505,6 @@ export function useHomeChat(
     openThread,
     setCoreCode,
     sendMessage,
-    updateDraftMessage,
     clear
   }
 }

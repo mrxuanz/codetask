@@ -1,4 +1,5 @@
 import type { PlanningSessionViewDto } from '@shared/contracts/planning-session-view'
+import type { ExecutionQueueDto, JobAbilityDto, PlanProgressDto, TaskProgressDto } from '@shared/contracts/jobs'
 import {
   buildUnifiedProgressTree,
   type UnifiedMilestoneNode,
@@ -13,7 +14,7 @@ import {
   resolveJobStatusBadgeKey,
   resolveJobStatusDisplay
 } from '@shared/job-display'
-import { formatUnixTimestamp } from '@renderer/lib/formatDateTime'
+import { formatDateTimeValue, formatUnixTimestamp } from '@renderer/lib/formatDateTime'
 import { resolvePlanningPercent } from '@shared/plan-generation-progress'
 import { getProviderDescriptors } from '@shared/providers/descriptors'
 
@@ -32,6 +33,22 @@ export type PlanTreeSelection =
   | { kind: 'task'; node: UnifiedTaskNode }
 
 export type TranslateFn = (key: string, params?: Record<string, unknown>) => string
+
+/**
+ * Looser progress-view input so ExecutionJob adapters and PlanningSessionViewDto
+ * both type-check (status may include execution states like queued/succeeded).
+ */
+export type JobProgressView = {
+  id?: string
+  title?: string
+  status: string
+  planProgress?: PlanProgressDto | null | undefined
+  taskProgress?: TaskProgressDto | null | undefined
+  abilities?: JobAbilityDto[] | undefined
+  plan?: PlanningSessionViewDto['plan']
+  queue?: ExecutionQueueDto | null | undefined
+  referenceManifest?: PlanningSessionViewDto['referenceManifest']
+}
 
 function interpolate(template: string, params?: Record<string, unknown>): string {
   if (!params) return template
@@ -88,7 +105,7 @@ export function resolveTaskCli(
   return resolveAbilityCli(task.abilityCode, abilities)
 }
 
-export function jobCliSummary(job: Pick<PlanningSessionViewDto, 'abilities'>): string {
+export function jobCliSummary(job: Pick<JobProgressView, 'abilities'>): string {
   const codes = Array.from(
     new Set(
       (job.abilities ?? []).map((item) => item.recommendedCoreCode?.trim() ?? '').filter(Boolean)
@@ -113,7 +130,7 @@ function isExecutionPhase(status: string): boolean {
 }
 
 function resolvePendingExecutionSummary(
-  job: PlanningSessionViewDto,
+  job: JobProgressView,
   t: TranslateFn,
   fallback?: string | null
 ): string {
@@ -121,7 +138,7 @@ function resolvePendingExecutionSummary(
 }
 
 export function getPlanProgressSnapshot(
-  job: PlanningSessionViewDto | null | undefined,
+  job: JobProgressView | null | undefined,
   t: TranslateFn
 ): JobProgressSnapshot {
   const status = job?.status ?? ''
@@ -235,7 +252,7 @@ export function getPlanProgressSnapshot(
 }
 
 export function getExecutionProgressSnapshot(
-  job: PlanningSessionViewDto | null | undefined,
+  job: JobProgressView | null | undefined,
   t: TranslateFn
 ): JobProgressSnapshot {
   const status = job?.status ?? ''
@@ -337,7 +354,7 @@ export function getExecutionProgressSnapshot(
 }
 
 export function getJobProgressSnapshot(
-  job: PlanningSessionViewDto | null | undefined,
+  job: JobProgressView | null | undefined,
   t: TranslateFn
 ): JobProgressSnapshot {
   const execution = getExecutionProgressSnapshot(job, t)
@@ -354,7 +371,7 @@ export function getJobProgressSnapshot(
   return plan.kind !== 'idle' ? plan : execution
 }
 
-export function jobStatusLabel(status: string, t: TranslateFn, job?: PlanningSessionViewDto | null): string {
+export function jobStatusLabel(status: string, t: TranslateFn, job?: JobProgressView | null): string {
   if (isExecutionDisplayStatus(status)) {
     const queueLabel = job ? formatExecutionQueueLabel(t, job.queue) : null
     if (queueLabel && (status === 'pending' || status === 'queued')) return queueLabel
@@ -389,8 +406,9 @@ export function jobStatusClass(status: string): string {
   }
 }
 
-export function formatJobTimestamp(sec: number): string {
-  return formatUnixTimestamp(sec)
+export function formatJobTimestamp(value: string | number): string {
+  if (typeof value === 'number') return formatUnixTimestamp(value)
+  return formatDateTimeValue(value)
 }
 
 export function formatMilestoneTitle(title: string, order: number, t: TranslateFn): string {
@@ -406,14 +424,14 @@ export function formatSliceTitle(title: string, order: number, t: TranslateFn): 
 }
 
 export function buildPlanTree(
-  job: PlanningSessionViewDto | null | undefined,
+  job: JobProgressView | null | undefined,
   _t: TranslateFn
 ): UnifiedMilestoneNode[] {
   if (!job) return []
   void _t
   const tree = buildUnifiedProgressTree({
-    jobId: job.id,
-    title: job.title,
+    jobId: job.id ?? '',
+    title: job.title ?? '',
     jobStatus: job.status,
     plan: job.plan as Parameters<typeof buildUnifiedProgressTree>[0]['plan'],
     taskProgressItems: job.taskProgress?.tasks,
@@ -530,7 +548,7 @@ const LIFECYCLE_ONLY_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 export function resolveJobListStatusBadge(
   status: string,
   t: TranslateFn,
-  job?: PlanningSessionViewDto | null
+  job?: JobProgressView | null
 ): { label: string; className: string } {
   if (LIFECYCLE_ONLY_STATUSES.has(status)) {
     const bucket = resolveJobLifecycleBucket(status)

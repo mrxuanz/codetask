@@ -551,6 +551,16 @@ export class ConversationApplication {
         provider: turn.providerCode as RuntimeProviderCode,
         workspaceRoot: workspace.workspaceRoot || undefined,
         capabilityProfile,
+        workspaceAccess,
+        ...(exclusive
+          ? {
+              workspaceLease: {
+                leaseId: exclusive.leaseId,
+                ownerKind: 'conversation',
+                ownerId: turnId
+              }
+            }
+          : {}),
         prompt,
         systemPrompt,
         userMcpServers,

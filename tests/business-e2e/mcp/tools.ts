@@ -114,7 +114,7 @@ export const TOOL_DEFS: Array<{
   {
     name: 'codetask_wait_turn',
     description:
-      'Poll until turn reaches a terminal status (completed|failed|cancelled) from the CodeTask business API. Omit timeoutMs to wait indefinitely for that status; pass a positive timeoutMs only for short negative probes.',
+      'Poll until turn reaches a terminal status (completed|failed|cancelled). ALWAYS pass timeoutMs<=30000 and retry on timeout/fetch failed — a single unbounded call hits Node undici headersTimeout (~300s) and dies with TypeError: fetch failed. Omit timeoutMs only for harness internals that already slice.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -255,7 +255,7 @@ export const TOOL_DEFS: Array<{
   {
     name: 'codetask_wait_job',
     description:
-      'Poll until job reaches a terminal status (completed|failed|cancelled) from the CodeTask business API. Omit timeoutMs to wait indefinitely for that status; pass a positive timeoutMs only for short negative probes.',
+      'Poll until job reaches a terminal status (completed|failed|cancelled). ALWAYS pass timeoutMs<=30000 and retry on timeout/fetch failed — a single unbounded call hits Node undici headersTimeout (~300s). Omit timeoutMs only for harness internals that already slice.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -353,16 +353,19 @@ export const TOOL_DEFS: Array<{
   },
   {
     name: 'codetask_get_mcp_settings',
-    description: 'GET /api/settings/mcp (user MCP for conversation/task/verification)',
+    description:
+      'GET /api/settings/mcp — returns { settings: { roles: { conversation|planner|task|verification: { <core>: { <rootKey>: servers } } } }, revision, constraints }',
     inputSchema: { type: 'object', properties: {} }
   },
   {
     name: 'codetask_put_mcp_settings',
-    description: 'PUT /api/settings/mcp with full UserMcpSettings body',
+    description:
+      'PUT /api/settings/mcp with AgentMcpSettings body { roles: { ... } }. Pass expectedRevision from the prior GET when available.',
     inputSchema: {
       type: 'object',
       properties: {
-        settings: { type: 'object' }
+        settings: { type: 'object' },
+        expectedRevision: { type: 'number' }
       },
       required: ['settings']
     }
@@ -619,7 +622,9 @@ const handlers: Record<string, ToolHandler> = {
       return fail('settings object required')
     }
     try {
-      return ok(await ops.putMcpSettings(ctx.client, args.settings))
+      const expectedRevision =
+        typeof args.expectedRevision === 'number' ? Number(args.expectedRevision) : undefined
+      return ok(await ops.putMcpSettings(ctx.client, args.settings, expectedRevision))
     } catch (error) {
       return fail(String(error))
     }

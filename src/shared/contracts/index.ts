@@ -23,10 +23,12 @@ export type {
   TaskProgressMilestoneDto,
   TaskProgressSliceDto,
   ThreadDraftSummaryDto,
+  JobAbilityDto,
   ThreadJobAbilityDto,
   UserDraftListItemDto
 } from './jobs'
 export type { PlanningSessionViewDto, PlanningSessionStatus } from './planning-session-view'
+export { toPlanningSessionStatus } from './planning-session-view'
 export type {
   FlatTaskPlan,
   PlannerRegisteredMilestone,

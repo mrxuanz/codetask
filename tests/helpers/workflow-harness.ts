@@ -11,6 +11,7 @@ import {
   type AppContext
 } from '../../src/server/index'
 import { initConversationMcpBackend } from '../../src/server/conversation/mcp/url'
+import { initExecutionMcpBackend, initPlannerMcpBackend } from '@codetask/server-core'
 import {
   resetCoreAvailabilityStubForTests,
   setCoreAvailabilityStubForTests,
@@ -89,6 +90,8 @@ export class WorkflowHarness {
     const port = typeof address === 'object' && address ? address.port : 0
     this.baseUrl = `http://127.0.0.1:${port}`
     initConversationMcpBackend(port)
+    initExecutionMcpBackend(port)
+    initPlannerMcpBackend(port)
 
     setCoreAvailabilityStubForTests((code) => ({
       code,
@@ -164,6 +167,8 @@ export class WorkflowHarness {
     // Wire test doubles before startup reconcile: running jobs may auto-resume
     // immediately, and must not execute against unbound agent providers.
     initConversationMcpBackend(port)
+    initExecutionMcpBackend(port)
+    initPlannerMcpBackend(port)
     setCoreAvailabilityStubForTests((code) => ({
       code,
       label: code,
@@ -586,10 +591,6 @@ export class WorkflowHarness {
       message: payload.message ?? payload.error ?? `HTTP ${response.status}`,
       code: payload.data?.turnErrorCode ?? payload.data?.error?.code ?? null
     }
-  }
-
-  findDraftMessage(messages: Array<Record<string, unknown>>): Record<string, unknown> | undefined {
-    return messages.find((msg) => msg.kind === 'task-launch-draft')
   }
 
   async getJob(jobId: string): Promise<Record<string, unknown>> {

@@ -23,8 +23,8 @@ function dropColumnIfPresent(db: Database.Database, table: string, column: strin
  * Drop historical wizard / create_task pointer columns (03 §14 / 06 residuals).
  * Completes the incomplete archive-only step from migration 050.
  *
- * Keeps `threads.thread_kind` and MESSAGE_KINDS CHECK values so upgrading DBs
- * with create_task / task-launch-draft rows remain readable.
+ * Live CHECK tightening (chat-only thread_kind, text-only message kind, actor_id)
+ * is migration 056.
  */
 export const migration055DropWizardColumns: ConversationMigration = {
   version: 55,

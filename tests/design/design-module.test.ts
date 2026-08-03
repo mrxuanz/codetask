@@ -72,6 +72,8 @@ describe('design module (01)', () => {
       await new Promise((r) => setTimeout(r, 20))
     }
     assert.ok(tree, 'expected planner to produce a tree')
+    // Let startPlanning's finally (capacity.release) settle before later db.close().
+    await new Promise((r) => setImmediate(r))
 
     let revision = tree!.revision
     for (const milestone of tree!.milestones) {
@@ -114,6 +116,8 @@ describe('design module (01)', () => {
 
     await execution.scheduler.tick()
     design.outbox.stop()
+    // Drain any scheduler/outbox microtasks before closing the in-memory db.
+    await new Promise((r) => setTimeout(r, 50))
     db.close()
   })
 
@@ -261,6 +265,8 @@ describe('design module (01)', () => {
       await new Promise((r) => setTimeout(r, 20))
     }
     assert.ok(tree)
+    // Let startPlanning's finally settle before db.close().
+    await new Promise((r) => setImmediate(r))
     const nodeId = tree!.milestones[0]!.id
     await assert.rejects(
       () =>

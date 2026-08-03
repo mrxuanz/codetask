@@ -7,7 +7,8 @@ import type {
   UserDraftListItemDto
 } from '@shared/contracts'
 import type { PlanningSessionViewDto } from '@shared/contracts/planning-session-view'
-import type { ConversationMessageDto } from '@shared/contracts/conversation'
+import { toPlanningSessionStatus } from '@shared/contracts/planning-session-view'
+import { designDraftToPayload, type TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
 import { api, ApiError } from './client'
 import type { ApiResponse } from './types'
 import {
@@ -36,6 +37,57 @@ import {
 
 export type { ExecutionJob }
 export type { PlanningSessionViewDto } from '@shared/contracts/planning-session-view'
+export { toPlanningSessionStatus } from '@shared/contracts/planning-session-view'
+
+/** Map an Execution job into the plan-review list shape (no fake runtime fields). */
+export function mapExecutionJobToPlanView(job: ExecutionJob): PlanningSessionViewDto {
+  const status =
+    job.status === 'succeeded'
+      ? 'completed'
+      : job.status === 'queued'
+        ? 'pending'
+        : job.status === 'cancelling'
+          ? 'cancelled'
+          : toPlanningSessionStatus(job.status)
+  return {
+    id: job.id,
+    threadId: '',
+    draftMessageId: job.sourceDraftId || '',
+    title: job.title,
+    summary: job.summary ?? '',
+    status,
+    abilities: [],
+    workspacePath: job.workspaceRoot,
+    planProgress: {
+      phase: status === 'failed' ? 'failed' : 'plan_ready',
+      status: status === 'failed' ? 'failed' : 'completed',
+      contextsRegistered: 0,
+      contextsTotal: 0
+    },
+    taskProgress: {
+      phase: status === 'running' || status === 'pausing' ? 'running' : 'idle',
+      status:
+        status === 'running' || status === 'pausing'
+          ? 'running'
+          : status === 'failed'
+            ? 'failed'
+            : status === 'completed'
+              ? 'completed'
+              : 'pending',
+      currentIndex: 0,
+      total: 0,
+      tasks: []
+    },
+    queue:
+      job.queuePosition != null
+        ? { position: job.queuePosition, ahead: Math.max(0, job.queuePosition - 1) }
+        : undefined,
+    designSessionId: job.sourcePlanningSessionId || null,
+    stateRevision: job.stateRevision,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt
+  }
+}
 
 export type {
   MessageAttachment,
@@ -228,7 +280,7 @@ export function fetchTaskEvidenceDetail(
 export function confirmDraftMessage(
   _threadId: string,
   draftId: string
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   return getDesignDraft(draftId).then(async (res) => {
     const draft = res.data
     const confirmed = await confirmDesignDraft(draftId, draft.lockRevision)
@@ -236,7 +288,7 @@ export function confirmDraftMessage(
       ...confirmed,
       data: {
         messageId: draftId,
-        payload: confirmed.data as unknown as Record<string, unknown>
+        payload: designDraftToPayload(confirmed.data)
       }
     }
   })
@@ -245,7 +297,7 @@ export function confirmDraftSection(
   _threadId: string,
   draftId: string,
   section: string
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   return getDesignDraft(draftId).then(async (res) => {
     const draft = res.data
     const body = await api<DesignDraftDto>(
@@ -257,7 +309,7 @@ export function confirmDraftSection(
     )
     return {
       ...body,
-      data: { messageId: draftId, payload: body.data as unknown as Record<string, unknown> }
+      data: { messageId: draftId, payload: designDraftToPayload(body.data) }
     }
   })
 }
@@ -286,33 +338,29 @@ function mapPlanningSessionToJob(session: {
   createdAt: number
   updatedAt: number
 }): PlanningSessionViewDto {
+  const status = toPlanningSessionStatus(
+    session.status === 'plan_editing' || session.status === 'ready_to_publish'
+      ? 'plan_editing'
+      : session.status === 'planning' || session.status === 'queued'
+        ? 'planning'
+        : session.status === 'published'
+          ? 'pending'
+          : session.status
+  )
+  const planning =
+    status === 'planning' || session.status === 'queued' || session.status === 'planning'
   return {
     id: session.id,
     threadId: '',
     draftMessageId: session.sourceDraftId,
     title: `Planning ${session.id}`,
     summary: '',
-    status: session.status === 'plan_editing' || session.status === 'ready_to_publish'
-      ? 'plan_editing'
-      : session.status === 'planning' || session.status === 'queued'
-        ? 'planning'
-        : session.status === 'published'
-          ? 'pending'
-          : session.status,
+    status,
     workspacePath: '',
+    abilities: [],
     planProgress: {
-      phase:
-        session.status === 'planning' || session.status === 'queued'
-          ? 'planning'
-          : session.status === 'failed'
-            ? 'failed'
-            : 'plan_ready',
-      status:
-        session.status === 'planning' || session.status === 'queued'
-          ? 'running'
-          : session.status === 'failed'
-            ? 'failed'
-            : 'completed',
+      phase: planning ? 'planning' : status === 'failed' ? 'failed' : 'plan_ready',
+      status: planning ? 'running' : status === 'failed' ? 'failed' : 'completed',
       contextsRegistered: 0,
       contextsTotal: 0
     },
@@ -328,7 +376,7 @@ function mapPlanningSessionToJob(session: {
     planRevision: session.treeRevision,
     designSessionId: session.id,
     planConfirmedAt: session.publishedJobId ? Math.floor(session.updatedAt / 1000) : null
-  } as PlanningSessionViewDto
+  }
 }
 
 export async function fetchThreadDrafts(
@@ -465,7 +513,7 @@ export function updateDraftContent(
     techStack?: string
     requirementsContractMarkdown?: string
   }
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   return getDesignDraft(draftId).then(async (res) => {
     const body = await api<DesignDraftDto>(`/api/drafts/${encodeURIComponent(draftId)}`, {
       method: 'PATCH',
@@ -480,7 +528,7 @@ export function updateDraftContent(
     })
     return {
       ...body,
-      data: { messageId: draftId, payload: body.data as unknown as Record<string, unknown> }
+      data: { messageId: draftId, payload: designDraftToPayload(body.data) }
     }
   })
 }
@@ -489,7 +537,7 @@ export async function updateDraftAbilityCores(
   _threadId: string,
   messageId: string,
   selections: Array<{ abilityCode: string; coreCode: string }>
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   const current = await getDesignDraft(messageId)
   const byCode = new Map(selections.map((s) => [s.abilityCode, s.coreCode]))
   const abilities = current.data.abilities.map((ability) => {
@@ -497,7 +545,7 @@ export async function updateDraftAbilityCores(
     return core ? { ...ability, recommendedCoreCode: core } : ability
   })
   const updated = await patchDesignAbilities(messageId, current.data.lockRevision, abilities)
-  return asDraftMessagePayload(messageId, updated.data)
+  return asDraftPayload(messageId, updated.data)
 }
 
 export async function updateDraftExecutionConfig(
@@ -508,39 +556,42 @@ export async function updateDraftExecutionConfig(
     sliceVerifierCoreCode: string
     milestoneVerifierCoreCode: string
   }
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   const current = await getDesignDraft(messageId)
   const updated = await patchDesignExecutionProfile(
     messageId,
     current.data.lockRevision,
     config
   )
-  return asDraftMessagePayload(messageId, updated.data)
+  return asDraftPayload(messageId, updated.data)
 }
 
-function designDraftAsConversationMessage(draft: DesignDraftDto): ConversationMessageDto {
+function asDraftPayload(
+  draftId: string,
+  draft: DesignDraftDto
+): ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }> {
   return {
-    id: draft.id,
-    role: 'assistant',
-    kind: 'task-launch-draft',
-    content: draft.title || draft.summary || '',
-    attachments: [],
-    coreCode: draft.executionProfile?.plannerCoreCode ?? '',
-    payload: draft as unknown as Record<string, unknown>,
-    createdAt: new Date(draft.createdAt).toISOString()
+    success: true,
+    data: {
+      messageId: draftId,
+      payload: designDraftToPayload(draft)
+    },
+    status: 0,
+    message: 'success',
+    extra: {}
   }
 }
 
 export async function unlockDraftForEdit(
   _threadId: string,
   draftMessageId: string
-): Promise<ApiResponse<{ draft: ConversationMessageDto; thread: { id: string } }>> {
+): Promise<ApiResponse<{ draft: TaskLaunchDraftPayload; thread: { id: string } }>> {
   const current = await getDesignDraft(draftMessageId)
   const unlocked = await unlockDesignDraft(draftMessageId, current.data.lockRevision)
   return {
     ...unlocked,
     data: {
-      draft: designDraftAsConversationMessage(unlocked.data),
+      draft: designDraftToPayload(unlocked.data),
       thread: { id: _threadId }
     }
   }
@@ -552,20 +603,18 @@ export async function unlockRequirementsContract(
 ): Promise<
   ApiResponse<{
     messageId: string
-    payload: Record<string, unknown>
-    message: ConversationMessageDto
+    payload: TaskLaunchDraftPayload
   }>
 > {
   // Design has no contract-only unlock — full draft unlock restores editability.
   const current = await getDesignDraft(draftMessageId)
   const unlocked = await unlockDesignDraft(draftMessageId, current.data.lockRevision)
-  const message = designDraftAsConversationMessage(unlocked.data)
+  const payload = designDraftToPayload(unlocked.data)
   return {
     ...unlocked,
     data: {
       messageId: draftMessageId,
-      payload: unlocked.data as unknown as Record<string, unknown>,
-      message
+      payload
     }
   }
 }
@@ -573,9 +622,7 @@ export async function unlockRequirementsContract(
 export async function launchJobFromDraft(
   _threadId: string,
   draftMessageId: string
-): Promise<
-  ApiResponse<{ job: PlanningSessionViewDto; draft: import('./conversation').ConversationMessage }>
-> {
+): Promise<ApiResponse<{ job: PlanningSessionViewDto; draft: TaskLaunchDraftPayload }>> {
   const draftRes = await getDesignDraft(draftMessageId)
   let draft = draftRes.data
   if (draft.status !== 'confirmed') {
@@ -587,28 +634,8 @@ export async function launchJobFromDraft(
     ...session,
     data: {
       job,
-      draft: {
-        id: draftMessageId,
-        kind: 'task-launch-draft',
-        payload: draft as unknown as Record<string, unknown>
-      } as import('./conversation').ConversationMessage
+      draft: designDraftToPayload(draft)
     }
-  }
-}
-
-async function asDraftMessagePayload(
-  draftId: string,
-  draft: DesignDraftDto
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
-  return {
-    success: true,
-    data: {
-      messageId: draftId,
-      payload: draft as unknown as Record<string, unknown>
-    },
-    status: 0,
-    message: 'success',
-    extra: {}
   }
 }
 
@@ -616,7 +643,7 @@ export async function uploadDraftReferences(
   threadId: string,
   messageId: string,
   files: File[]
-): Promise<{ messageId: string; payload: Record<string, unknown> }> {
+): Promise<{ messageId: string; payload: TaskLaunchDraftPayload }> {
   // Upload bytes via thread attachments, then attach metadata on the Design draft.
   const attachments: MessageAttachment[] = []
   for (const file of files) {
@@ -637,21 +664,21 @@ export async function uploadDraftReferences(
     })
     draft = draftRes.data
   }
-  return { messageId, payload: draft as unknown as Record<string, unknown> }
+  return { messageId, payload: designDraftToPayload(draft) }
 }
 
 export async function deleteDraftReference(
   _threadId: string,
   messageId: string,
   referenceId: string
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   const current = await getDesignDraft(messageId)
   const updated = await deleteDesignDraftReference(
     messageId,
     referenceId,
     current.data.lockRevision
   )
-  return asDraftMessagePayload(messageId, updated.data)
+  return asDraftPayload(messageId, updated.data)
 }
 
 export async function updateDraftReferenceDescription(
@@ -659,13 +686,13 @@ export async function updateDraftReferenceDescription(
   messageId: string,
   referenceId: string,
   description: string
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   const current = await getDesignDraft(messageId)
   const updated = await patchDesignDraftReference(messageId, referenceId, {
     expectedRevision: current.data.lockRevision,
     description
   })
-  return asDraftMessagePayload(messageId, updated.data)
+  return asDraftPayload(messageId, updated.data)
 }
 
 export async function importDraftReferences(
@@ -673,7 +700,7 @@ export async function importDraftReferences(
   messageId: string,
   attachmentIds: string[],
   descriptions: Record<string, string> = {}
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   void threadId
   let draftRes = await getDesignDraft(messageId)
   let draft = draftRes.data
@@ -688,7 +715,7 @@ export async function importDraftReferences(
     })
     draft = draftRes.data
   }
-  return asDraftMessagePayload(messageId, draft)
+  return asDraftPayload(messageId, draft)
 }
 
 export async function addLocalCorpusDraftReference(
@@ -700,7 +727,7 @@ export async function addLocalCorpusDraftReference(
     description: string
     kind?: 'file' | 'directory'
   }
-): Promise<ApiResponse<{ messageId: string; payload: Record<string, unknown> }>> {
+): Promise<ApiResponse<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   const current = await getDesignDraft(messageId)
   const updated = await addDesignDraftReference(messageId, {
     expectedRevision: current.data.lockRevision,
@@ -711,5 +738,5 @@ export async function addLocalCorpusDraftReference(
     localPath: input.localPath,
     resolvedPath: input.localPath
   })
-  return asDraftMessagePayload(messageId, updated.data)
+  return asDraftPayload(messageId, updated.data)
 }

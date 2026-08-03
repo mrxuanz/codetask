@@ -71,11 +71,11 @@ export class OpenCodeDriver implements AgentDriver {
 
     const caseHints: Record<string, string> = {
       'CHAT-HTML-001':
-        'Create project/thread with the conversation coreCode. Ask the product agent to create the SDK-named HTML file in workspace root (opencode.html / cursor.html / …) containing BUSINESS_E2E_CHAT_HTML. Wait for turn completion, then report with expectedHtmlFile in artifacts.',
+        'Create project/thread with the conversation coreCode. Ask the product agent to create the SDK-named HTML file in workspace root (opencode.html / cursor.html / …) containing BUSINESS_E2E_CHAT_HTML. If the agent asks for details, follow up up to 3 more turns (4 total) restating filename+marker; stop early if the file exists. Then report with expectedHtmlFile in artifacts.',
       'CHAT-IMG-001':
-        'Upload image fixture as attachment.png only. start_turn with attachmentIds. Do not put Dream/1000/Cats into message, titles, or fileName. Report messageIdsBefore + attachmentId + turnId.',
+        'Upload image fixture as attachment.png only. start_turn with attachmentIds on the first turn only. If the agent asks for details, follow up up to 3 more turns without re-attaching. Do not put Dream/1000/Cats into message, titles, or fileName. Report messageIdsBefore + attachmentId + turnId.',
       'DESIGN-DRAFT-001':
-        'Use Design MCP tools only: codetask_create_draft → patch abilities → patch execution profile → codetask_confirm_design_draft. Do not use create_task turns.'
+        'Create a chat thread first. Clarify requirements in at most 4 turns if the agent asks for details, then use Design MCP only: codetask_create_draft → patch abilities → patch execution profile → codetask_confirm_design_draft. Do not use create_task turns.'
     }
 
     const prompt = [

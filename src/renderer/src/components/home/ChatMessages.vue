@@ -19,9 +19,7 @@ const { t } = useI18n()
 const scrollRoot = ref<HTMLElement | null>(null)
 const { onScroll, scrollToBottom, stickToBottomIfNeeded } = useStickToBottom(scrollRoot)
 
-const visibleMessages = computed(() =>
-  props.messages.filter((message) => message.kind !== 'task-launch-draft')
-)
+const visibleMessages = computed(() => props.messages)
 
 const streamingMessageIdRef = toRef(props, 'streamingMessageId')
 const pendingReplyRef = toRef(props, 'pendingReply')

@@ -50,6 +50,13 @@ export interface AgentTurnInput {
   scopeId: string
   turnId: string
   signal?: AbortSignal
+  /** Required as exclusive-write for task-sandbox / chat-write. */
+  workspaceAccess?: 'metadata' | 'snapshot-read' | 'live-read' | 'exclusive-write'
+  workspaceLease?: {
+    leaseId: string
+    ownerKind: string
+    ownerId: string
+  }
 }
 
 export type AgentTurnEvent =

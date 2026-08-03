@@ -6,7 +6,7 @@ import ChatMessages from '@renderer/components/home/ChatMessages.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
 import { HomeChatKey } from '@renderer/composables/useHomeChat'
-import { isChatThread, useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
+import { useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 import { getPreferredCoreCode } from '@renderer/lib/preferredCore'
 import { fetchProjectWorkspaceAccess, type ProjectWorkspaceAccess } from '@renderer/api/projects'
 
@@ -40,10 +40,9 @@ const activeProject = computed(
 )
 
 const activeThread = computed(() => {
-  const thread =
+  return (
     workspace.threads.value.find((item) => item.id === workspace.activeThreadId.value) ?? null
-  if (!thread || !isChatThread(thread)) return null
-  return thread
+  )
 })
 
 const threadTitle = computed(() => activeThread.value?.title || t('workspace.newThread'))

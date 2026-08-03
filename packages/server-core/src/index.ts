@@ -5,6 +5,11 @@ export { createHonoApp, type CreateHonoAppOptions } from './create-app.ts'
 export {
   composeDesignModule,
   registeredPlanToExecutionTree,
+  authorizePlannerMcpRequest,
+  handlePlannerMcpJsonRpc,
+  initPlannerMcpBackend,
+  getPlannerMcpBackendPort,
+  buildPlannerSystemPrompt,
   type DesignModule,
   type DesignModuleDeps,
   type Actor
@@ -13,13 +18,28 @@ export {
   composeExecutionModule,
   type ExecutionModule,
   FakeAgentRuntime,
-  ScriptedAgentRuntime
+  ScriptedAgentRuntime,
+  authorizeTaskMcpRequest,
+  handleTaskMcpJsonRpc,
+  initExecutionMcpBackend,
+  getExecutionMcpBackendPort,
+  registerTaskMcpSession,
+  unregisterTaskMcpSession,
+  tryBuildTaskWorkerMcpUrl,
+  buildTaskWorkerMcpUrl,
+  buildTaskMcpCapabilityToken,
+  handleSliceVerifierMcpJsonRpc,
+  handleMilestoneVerifierMcpJsonRpc,
+  authorizeSliceVerifierMcpRequest,
+  authorizeMilestoneVerifierMcpRequest
 } from './modules/execution/index.ts'
 export {
   composeConversationModule,
   type ConversationModule,
   type ConversationModuleDeps,
-  ConversationApplication
+  ConversationApplication,
+  ConversationForbiddenError,
+  ConversationNotFoundError
 } from './modules/conversation/index.ts'
 export {
   composeAuthModule,
@@ -46,6 +66,7 @@ export {
 } from './modules/settings/index.ts'
 export {
   composeRealtimeModule,
+  openRealtimeStream,
   RealtimeDispatcher,
   RealtimeEventLog,
   LiveFanout,

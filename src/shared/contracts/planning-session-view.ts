@@ -10,9 +10,9 @@ import type {
 import type { JobRecoveryReason, SuspensionKind } from '../job-suspension'
 import type {
   ExecutionQueueDto,
+  JobAbilityDto,
   PlanProgressDto,
-  TaskProgressDto,
-  ThreadJobAbilityDto
+  TaskProgressDto
 } from './jobs'
 
 /** Design planning-session status values used by plan review UI. */
@@ -42,7 +42,7 @@ export interface PlanningSessionViewDto {
   status: PlanningSessionStatus
   planProgress: PlanProgressDto
   taskProgress: TaskProgressDto
-  abilities: ThreadJobAbilityDto[]
+  abilities: JobAbilityDto[]
   plan?: SavedJobPlan | null | undefined
   executionProfile?: JobExecutionProfile | undefined
   referenceManifest?: JobReferenceManifestDto | null | undefined
@@ -75,4 +75,26 @@ export interface PlanningSessionViewDto {
 
   createdAt: number | string
   updatedAt: number | string
+}
+
+export function toPlanningSessionStatus(status: string): PlanningSessionStatus {
+  if (status === 'ready_to_publish') return 'plan_editing'
+  if (status === 'queued') return 'planning'
+  if (status === 'published') return 'pending'
+  switch (status) {
+    case 'pending':
+    case 'planning':
+    case 'plan_editing':
+    case 'plan_confirmed':
+    case 'plan_ready':
+    case 'running':
+    case 'pausing':
+    case 'paused':
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+      return status
+    default:
+      return 'planning'
+  }
 }

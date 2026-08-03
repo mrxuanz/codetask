@@ -37,7 +37,7 @@ import {
   createJobRoutes,
   type ExecutionHttpEnv
 } from './job/http/job-routes.ts'
-import { nowMs } from './shared.ts'
+import { LEASE_TTL_MS, nowMs } from './shared.ts'
 
 export type ExecutionModule = {
   submitJob: JobSubmissionPort
@@ -68,6 +68,8 @@ export function composeExecutionModule(deps: {
     outboxId: string
   ) => void
   leaseOwner?: string
+  /** Test override; production refreshes at one third of the lease TTL. */
+  heartbeatIntervalMs?: number
 }): ExecutionModule {
   const leaseOwner = deps.leaseOwner ?? 'execution-host'
   const agentRuntime = deps.agentRuntime ?? new FakeAgentRuntime()
@@ -86,7 +88,8 @@ export function composeExecutionModule(deps: {
     db: deps.db,
     work,
     agentRuntime,
-    acceptResult
+    acceptResult,
+    handles
   })
   const dispatchWork = createDispatchNextWorkService({ executeWork })
   const claimNext = createClaimNextJobService({ db: deps.db, outbox, leaseOwner })
@@ -94,18 +97,90 @@ export function composeExecutionModule(deps: {
   const heartbeatRun = createHeartbeatRunService({ pool, leaseOwner })
   const drainPool = createDrainPoolService({ db: deps.db })
   const reconcilePool = createReconcilePoolService({ pool })
-  const verifySlice = createVerifySliceService({ db: deps.db, verification, outbox, work })
-  const verifyMilestone = createVerifyMilestoneService({ db: deps.db, verification, outbox })
+  const verifySlice = createVerifySliceService({
+    db: deps.db,
+    verification,
+    outbox,
+    work,
+    agentRuntime,
+    handles
+  })
+  const verifyMilestone = createVerifyMilestoneService({
+    db: deps.db,
+    verification,
+    outbox,
+    agentRuntime,
+    handles
+  })
   const startupReconcile = createStartupReconcileService({ db: deps.db })
 
   let ticking = false
+  let rerunRequested = false
   let activeRun: { runId: string; jobId: string } | null = null
+  const heartbeatIntervalMs =
+    deps.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(LEASE_TTL_MS / 3))
+
+  function abortActiveTurn(reason: string): void {
+    if (!activeRun) return
+    const handle = handles.get(activeRun.runId)
+    handles.abort(activeRun.runId, reason)
+    if (handle?.turnId) {
+      void agentRuntime.abort(handle.turnId, reason)
+    }
+  }
+
+  async function awaitWithRunHeartbeat<T>(runId: string, task: () => Promise<T>): Promise<T> {
+    const timer = setInterval(() => {
+      try {
+        heartbeatRun.heartbeat(runId)
+      } catch (error) {
+        console.error('[execution] run heartbeat failed:', error)
+        abortActiveTurn('execution-lease-heartbeat-failed')
+      }
+    }, heartbeatIntervalMs)
+    timer.unref?.()
+    try {
+      return await task()
+    } finally {
+      clearInterval(timer)
+    }
+  }
 
   async function runCoordinatorSteps(runId: string, jobId: string): Promise<boolean> {
+    if (drainPool.isDraining()) return false
     const job = jobs.requireById(jobId)
-    if (job.state !== 'running') return false
+    if (job.state !== 'running' && job.state !== 'pausing' && job.state !== 'cancelling') {
+      return false
+    }
 
     heartbeatRun.heartbeat(runId)
+
+    if (job.state === 'pausing' || job.state === 'cancelling') {
+      const handle = handles.get(runId)
+      if (handle?.turnId) {
+        // Turn still active — abort and wait for execute-work to clear turnId.
+        abortActiveTurn(job.state === 'pausing' ? 'pause' : 'cancel')
+        return false
+      }
+      const now = nowMs()
+      if (job.state === 'pausing') {
+        jobs.casUpdateState({
+          jobId,
+          expectedRevision: job.stateRevision,
+          next: { state: 'paused', updatedAt: now }
+        })
+      } else {
+        jobs.casUpdateState({
+          jobId,
+          expectedRevision: job.stateRevision,
+          next: { state: 'cancelled', terminalAt: now, updatedAt: now }
+        })
+      }
+      releaseRun.releaseRun(runId, 'control-settled')
+      handles.drop(runId)
+      activeRun = null
+      return false
+    }
 
     const workItems = work.listWork(jobId, job.executionGeneration)
     const dependencies = work.listDependencies(jobId, job.executionGeneration)
@@ -124,28 +199,34 @@ export function composeExecutionModule(deps: {
 
     switch (decision.kind) {
       case 'dispatch-work':
-        await dispatchWork.dispatch({
-          jobId,
-          workId: decision.workId,
-          runId,
-          workspaceRoot: job.workspaceRoot
-        })
+        await awaitWithRunHeartbeat(runId, () =>
+          dispatchWork.dispatch({
+            jobId,
+            workId: decision.workId,
+            runId,
+            workspaceRoot: job.workspaceRoot
+          })
+        )
         return true
       case 'verify-slice':
-        verifySlice.verify({
-          jobId,
-          generation: job.executionGeneration,
-          sliceId: decision.sliceId,
-          runId
-        })
+        await awaitWithRunHeartbeat(runId, () =>
+          verifySlice.verify({
+            jobId,
+            generation: job.executionGeneration,
+            sliceId: decision.sliceId,
+            runId
+          })
+        )
         return true
       case 'verify-milestone':
-        verifyMilestone.verify({
-          jobId,
-          generation: job.executionGeneration,
-          milestoneId: decision.milestoneId,
-          runId
-        })
+        await awaitWithRunHeartbeat(runId, () =>
+          verifyMilestone.verify({
+            jobId,
+            generation: job.executionGeneration,
+            milestoneId: decision.milestoneId,
+            runId
+          })
+        )
         return true
       case 'complete-job': {
         const now = nowMs()
@@ -160,28 +241,14 @@ export function composeExecutionModule(deps: {
         })
         outbox.enqueue(jobId, 'job.completed', { jobId })
         releaseRun.releaseRun(runId, 'completed')
+        handles.drop(runId)
         activeRun = null
         return false
       }
-      case 'settle-control': {
-        const now = nowMs()
-        if (job.state === 'pausing') {
-          jobs.casUpdateState({
-            jobId,
-            expectedRevision: job.stateRevision,
-            next: { state: 'paused', updatedAt: now }
-          })
-        } else if (job.state === 'cancelling') {
-          jobs.casUpdateState({
-            jobId,
-            expectedRevision: job.stateRevision,
-            next: { state: 'cancelled', terminalAt: now, updatedAt: now }
-          })
-        }
-        releaseRun.releaseRun(runId, 'control-settled')
-        activeRun = null
+      case 'settle-control':
+        // Pausing/cancelling while a turn may still be active: abort and wait.
+        abortActiveTurn(job.controlIntent === 'pause' ? 'pause' : 'cancel')
         return false
-      }
       case 'fail-deadlock': {
         const now = nowMs()
         jobs.casUpdateState({
@@ -195,6 +262,7 @@ export function composeExecutionModule(deps: {
           }
         })
         releaseRun.releaseRun(runId, 'deadlock')
+        handles.drop(runId)
         activeRun = null
         return false
       }
@@ -205,27 +273,34 @@ export function composeExecutionModule(deps: {
   }
 
   async function tick(): Promise<void> {
-    if (ticking || drainPool.isDraining()) return
+    if (drainPool.isDraining()) return
+    if (ticking) {
+      rerunRequested = true
+      return
+    }
     ticking = true
     try {
-      reconcilePool.reconcile()
+      do {
+        rerunRequested = false
+        reconcilePool.reconcile()
 
-      if (!activeRun) {
-        const claimed = claimNext.claimNext()
-        if (claimed) {
-          activeRun = claimed
-          handles.register(claimed.runId)
+        if (!activeRun) {
+          const claimed = claimNext.claimNext()
+          if (claimed) {
+            activeRun = claimed
+            handles.register(claimed.runId)
+          }
         }
-      }
 
-      if (!activeRun) return
-
-      let progressed = true
-      let guard = 0
-      while (progressed && activeRun && guard < 100) {
-        guard += 1
-        progressed = await runCoordinatorSteps(activeRun.runId, activeRun.jobId)
-      }
+        if (activeRun) {
+          let progressed = true
+          let guard = 0
+          while (progressed && activeRun && !drainPool.isDraining() && guard < 100) {
+            guard += 1
+            progressed = await runCoordinatorSteps(activeRun.runId, activeRun.jobId)
+          }
+        }
+      } while (rerunRequested && !drainPool.isDraining())
     } finally {
       ticking = false
     }
@@ -237,7 +312,17 @@ export function composeExecutionModule(deps: {
   registerWakeScheduler(wake)
 
   const query = new QueryJobService(jobs, queue, work, verification)
-  const control = new ControlJobService(deps.db, jobs, queue, outbox, wake)
+  const control = new ControlJobService(
+    deps.db,
+    jobs,
+    queue,
+    outbox,
+    wake,
+    (jobId, reason) => {
+      if (!activeRun || activeRun.jobId !== jobId) return
+      abortActiveTurn(reason)
+    }
+  )
   const deleteJob = new DeleteJobService(deps.db, jobs, outbox)
 
   const routes = new Hono<ExecutionHttpEnv>()

@@ -7,8 +7,10 @@ import {
   fetchConversationMessages,
   type ConversationMessage
 } from '@renderer/api/conversation'
+import { getDesignDraft } from '@renderer/api/design'
 import { fetchJob, fetchThreadPlans, type PlanningSessionViewDto } from '@renderer/api/jobs'
 import TaskLaunchDraftCard from '@renderer/components/home/TaskLaunchDraftCard.vue'
+import { designDraftToPayload, type TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
 import PlanReviewAccordion from '@renderer/components/tasks/PlanReviewAccordion.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
@@ -28,7 +30,7 @@ const router = useRouter()
 
 const loading = ref(true)
 const error = ref<string | null>(null)
-const draftMessage = ref<ConversationMessage | null>(null)
+const draftPayload = ref<TaskLaunchDraftPayload | null>(null)
 const threadMessages = ref<ConversationMessage[]>([])
 const plan = ref<PlanningSessionViewDto | null>(null)
 const cores = ref<Awaited<ReturnType<typeof fetchConversationCores>>['data']['cores']>([])
@@ -55,8 +57,12 @@ onMounted(async () => {
       fetchJob(props.jobId)
     ])
     threadMessages.value = messagesRes.data ?? []
-    draftMessage.value =
-      (messagesRes.data ?? []).find((msg) => msg.id === props.draftMessageId) ?? null
+    try {
+      const draftRes = await getDesignDraft(props.draftMessageId)
+      draftPayload.value = designDraftToPayload(draftRes.data)
+    } catch {
+      draftPayload.value = null
+    }
     const plans = plansRes.data.plans
     plan.value =
       plans.find((item) => item.id === props.jobId) ??
@@ -67,7 +73,7 @@ onMounted(async () => {
       plan.value = null
     }
     cores.value = coresRes.data.cores
-    if (!draftMessage.value) {
+    if (!draftPayload.value) {
       error.value = t('workspace.create.completedDraftMissing')
     }
   } catch (err) {
@@ -126,9 +132,10 @@ onMounted(async () => {
             {{ t('workspace.create.completedDraftTag') }}
           </span>
         </button>
-        <div v-if="expanded.draft && draftMessage" class="border-t border-border px-4 py-4">
+        <div v-if="expanded.draft && draftPayload" class="border-t border-border px-4 py-4">
           <TaskLaunchDraftCard
-            :message="draftMessage"
+            :draft-id="draftMessageId"
+            :draft="draftPayload"
             :thread-id="threadId"
             :thread-messages="threadMessages"
             :cores="cores"

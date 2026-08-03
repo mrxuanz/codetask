@@ -1,26 +1,61 @@
 import type {
   ConversationDto,
-  ConversationMessageDto,
+  ConversationMessageDto as ContractConversationMessageDto,
   ConversationTurnDto,
   CreateTurnAcceptedDto,
   ProviderSummary
 } from '@codetask/contracts'
-import type { ConversationCoreDto, ConversationStateDto } from '@shared/contracts/conversation'
+import type {
+  ConversationCoreDto,
+  ConversationMessageDto,
+  ConversationStateDto,
+  MessageAttachment
+} from '@shared/contracts/conversation'
 import { api } from './client'
 import type { ApiResponse } from './types'
 
 export type {
   ConversationDto,
-  ConversationMessageDto,
   ConversationTurnDto,
   CreateTurnAcceptedDto,
   ProviderSummary
 }
 
+/** Wire contract message shape (packages/contracts). Prefer UI alias below for renderer code. */
+export type { ContractConversationMessageDto as ConversationMessageDto }
+
 /** UI-facing aliases kept while chat surfaces still say “core / thread”. */
 export type ConversationCore = ConversationCoreDto
 export type ConversationMessage = ConversationMessageDto
 export type ConversationState = ConversationStateDto
+
+/** Map control-plane message DTO → shared chat UI message (attachments + coreCode). */
+export function toUiConversationMessage(
+  message: ContractConversationMessageDto
+): ConversationMessageDto {
+  const conversationId = message.conversationId
+  const attachments: MessageAttachment[] = (message.attachments ?? []).map((attachment) => ({
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    kind: attachment.kind,
+    relativePath: '',
+    assetUrl: `/api/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachment.id)}`
+  }))
+  return {
+    id: message.id,
+    role: message.role,
+    kind: message.kind,
+    content: message.content,
+    attachments,
+    coreCode: message.providerCode ?? '',
+    conversationId,
+    thinking: message.thinking ?? null,
+    thinkingDurationMs: message.thinkingDurationMs ?? null,
+    createdAt: message.createdAt
+  }
+}
 
 function toHostCore(code: string): string {
   if (code === 'claude') return 'claude-code'
@@ -146,13 +181,20 @@ export function deleteConversation(
   })
 }
 
-export function fetchConversationMessages(
+export async function fetchConversationMessages(
   conversationId: string,
   limit = 50
 ): Promise<ApiResponse<ConversationMessageDto[]>> {
-  return api<ConversationMessageDto[]>(
+  const res = await api<ContractConversationMessageDto[]>(
     `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`
   )
+  if (!res.success) {
+    return res as unknown as ApiResponse<ConversationMessageDto[]>
+  }
+  return {
+    ...res,
+    data: res.data.map(toUiConversationMessage)
+  }
 }
 
 export function createConversationTurn(

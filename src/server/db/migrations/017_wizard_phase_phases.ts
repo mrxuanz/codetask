@@ -1,10 +1,10 @@
 import type { Migration } from './types'
 import {
-  MESSAGE_KINDS,
+  LEGACY_MESSAGE_KINDS,
   MESSAGE_ROLES,
   RUNTIME_STATUSES,
   sqlInList,
-  THREAD_KINDS,
+  LEGACY_THREAD_KINDS,
   THREAD_STATUSES,
   TITLE_SOURCES,
   WIZARD_PHASES
@@ -62,7 +62,7 @@ export const migration017WizardPhasePhases: Migration = {
         active_draft_id TEXT,
         active_plan_id TEXT,
         wizard_phase TEXT NOT NULL DEFAULT 'collect' CHECK (wizard_phase IN (${sqlInList(WIZARD_PHASES)})),
-        thread_kind TEXT NOT NULL DEFAULT 'chat' CHECK (thread_kind IN (${sqlInList(THREAD_KINDS)})),
+        thread_kind TEXT NOT NULL DEFAULT 'chat' CHECK (thread_kind IN (${sqlInList(LEGACY_THREAD_KINDS)})),
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -87,7 +87,7 @@ export const migration017WizardPhasePhases: Migration = {
         thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
         username TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN (${sqlInList(MESSAGE_ROLES)})),
-        kind TEXT NOT NULL CHECK (kind IN (${sqlInList(MESSAGE_KINDS)})),
+        kind TEXT NOT NULL CHECK (kind IN (${sqlInList(LEGACY_MESSAGE_KINDS)})),
         content TEXT NOT NULL,
         core_code TEXT NOT NULL,
         conversation_id TEXT NOT NULL,

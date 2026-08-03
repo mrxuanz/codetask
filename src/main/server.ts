@@ -2,6 +2,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import type { ExecutionContext, Hono } from 'hono'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
+import { initExecutionMcpBackend, initPlannerMcpBackend } from '@codetask/server-core'
 import type { DataDirResolution } from './storage-selection'
 import { createSetupShell } from './setup-shell'
 import { resolveAvailablePort } from './port'
@@ -187,6 +188,8 @@ export async function startAppServer(
           )
           activeApp = app
           initConversationMcpBackend(boundPort)
+          initExecutionMcpBackend(boundPort)
+          initPlannerMcpBackend(boundPort)
           console.log(
             `[server] ${cli.mode} mode ready after storage setup on ${formatUrl(cli.host, boundPort)}`
           )
@@ -264,6 +267,8 @@ export async function startAppServer(
       boundPort = port
       bindChanged = cli.port !== port
       initConversationMcpBackend(port)
+      initExecutionMcpBackend(port)
+      initPlannerMcpBackend(port)
       break
     } catch (error) {
       if (!isAddressInUse(error)) throw error

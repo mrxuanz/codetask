@@ -1,8 +1,7 @@
-import { eq } from 'drizzle-orm'
-import type { TaskProgressSliceDto } from '../infra/job-progress-types'
+import { desc, eq } from 'drizzle-orm'
 import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
 import { getDb } from '../db'
-import { threadJobs } from '../db/schema'
+import { designPlanRevisions } from '../db/schema'
 import {
   cleanupJobRuntimeTreeIfTerminal,
   isTerminalJobStatus as isTerminalRuntimeStatus
@@ -37,6 +36,35 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+function sqliteClient(): import('better-sqlite3').Database | null {
+  const db = getDb()
+  return (db as { $client?: import('better-sqlite3').Database }).$client ?? null
+}
+
+/** Current plan revision for a job id (host design_plan_revisions; Execution tree is separate). */
+function readCurrentPlanRevision(jobId: string): number {
+  const row = getDb()
+    .select({ planRevision: designPlanRevisions.planRevision })
+    .from(designPlanRevisions)
+    .where(eq(designPlanRevisions.jobId, jobId))
+    .orderBy(desc(designPlanRevisions.planRevision))
+    .limit(1)
+    .all()[0]
+  return row?.planRevision ?? 0
+}
+
+function markExecutionJobTerminal(jobId: string, terminalAt: number): void {
+  const client = sqliteClient()
+  if (!client) return
+  try {
+    client
+      .prepare(`UPDATE jobs SET terminal_at = ?, updated_at = ? WHERE id = ?`)
+      .run(terminalAt * 1000, terminalAt * 1000, jobId)
+  } catch {
+    // jobs table may be absent on partial fixtures
+  }
+}
+
 export async function onJobStatusTransition(input: {
   jobId: string
   threadId: string
@@ -48,12 +76,7 @@ export async function onJobStatusTransition(input: {
     input.nextStatus !== input.previousStatus
   ) {
     const ctx = getAppContext()
-    const rows = await getDb()
-      .select({ planRevision: threadJobs.planRevision })
-      .from(threadJobs)
-      .where(eq(threadJobs.id, input.jobId))
-      .limit(1)
-    const revision = rows[0]?.planRevision ?? 0
+    const revision = readCurrentPlanRevision(input.jobId)
     if (revision > 0) {
       finalizeDesignPlanRevisions(
         getDb(),
@@ -78,52 +101,17 @@ export async function onJobReachedTerminal(
   const settings = readRetentionSettings(ctx.config)
   const now = nowSec()
 
-  await db
-    .update(threadJobs)
-    .set({ terminalAt: now, updatedAt: now })
-    .where(eq(threadJobs.id, jobId))
+  markExecutionJobTerminal(jobId, now)
 
   const expiresAt = artifactExpirySec(settings, 'working')
   if (expiresAt != null) {
     await scheduleJobArtifactExpiry(db, jobId, expiresAt)
   }
-  const revisionRows = await db
-    .select({ planRevision: threadJobs.planRevision })
-    .from(threadJobs)
-    .where(eq(threadJobs.id, jobId))
-    .limit(1)
-  const revision = revisionRows[0]?.planRevision ?? 0
+  const revision = readCurrentPlanRevision(jobId)
   if (revision > 0) finalizeDesignPlanRevisions(db, jobId, revision, expiresAt)
 
   if (settings.compactCountersOnTerminal) {
     await deleteJobCounters(db, jobId)
-    const rows = await db
-      .select({ taskMetaJson: threadJobs.taskMetaJson })
-      .from(threadJobs)
-      .where(eq(threadJobs.id, jobId))
-      .limit(1)
-    const row = rows[0]
-    if (row?.taskMetaJson) {
-      try {
-        const meta = JSON.parse(row.taskMetaJson) as {
-          slices?: TaskProgressSliceDto[]
-          milestones?: unknown
-          verificationBundleHashes?: Record<string, string>
-        }
-        await db
-          .update(threadJobs)
-          .set({
-            taskMetaJson: JSON.stringify({
-              slices: meta.slices,
-              milestones: meta.milestones,
-              verificationBundleHashes: meta.verificationBundleHashes
-            })
-          })
-          .where(eq(threadJobs.id, jobId))
-      } catch {
-        // ignore
-      }
-    }
   }
 
   if (settings.runtimeTerminalImmediate && isTerminalRuntimeStatus(status)) {

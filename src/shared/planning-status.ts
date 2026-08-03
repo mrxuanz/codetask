@@ -1,5 +1,5 @@
 /**
- * Planning-phase status helpers for legacy thread_jobs / UI adapters.
+ * Planning-phase status helpers for UI adapters over Design planning sessions.
  * Prefer Design PlanningSessionStatus from @codetask/contracts for new code.
  */
 

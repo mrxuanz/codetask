@@ -102,8 +102,6 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'thread.kind_mismatch': '对话类型不匹配：应为 {expected}，当前为 {actual}',
   'thread.read_failed': '更新后读取对话失败',
   'thread.message_not_found': '源消息不存在',
-  'thread.wizard.rollback_fields_required': 'to 和 reason 不能为空',
-  'thread.wizard.invalid_rollback_target': 'to 必须是 collect 或 draft_review',
   'thread.runtime_interrupted': '上次运行在应用关闭或服务重启时中断，可以发送新消息继续。',
   'thread.core_required': 'coreCode 不能为空',
   'project.not_found': '项目不存在',
@@ -163,10 +161,6 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'plan.confirm_conflict': '确认执行树时计划已变更',
   'plan.sandbox_timeout': '沙箱任务超时，可稍后重试或更换更快的 Planner CLI',
   'plan.sandbox_cleanup_failed': '沙箱进程异常退出。请完全退出应用后重新启动，再试一次生成计划。',
-  'wizard.invalid_phase': '当前阶段为 {current}，此操作仅允许在 {expected} 阶段执行',
-  'wizard.already_in_phase': '已在 {phase} 阶段',
-  'wizard.rollback_not_allowed': '无法回退到目标阶段',
-  'wizard.tool_not_allowed': '工具 {toolName} 在当前阶段不可用'
 }
 
 export const turnErrorsZh = buildTurnErrorI18nTree(zhMessages)

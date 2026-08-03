@@ -10,62 +10,82 @@ import {
   isLaunchedJobStatus,
   LAUNCHED_JOB_STATUSES
 } from '@shared/job-lifecycle'
+import type {
+  TaskLaunchDraftAbility,
+  TaskLaunchDraftPayload,
+  TaskLaunchDraftReference
+} from '@shared/contracts/task-launch-draft'
 
-export interface TaskLaunchDraftAbility {
-  abilityCode: string
-  label?: string
-  description?: string
-  reason?: string
-  recommendedCoreCode?: string
-}
-
-export interface TaskLaunchDraftReference {
-  id: string
-  name: string
-  mimeType: string
-  kind: 'image' | 'file' | 'directory'
-  assetUrl: string
-  description?: string | undefined
-  source?: 'upload' | 'import' | 'message' | 'local_corpus' | undefined
-  localPath?: string | undefined
-}
-
-export interface TaskLaunchDraftPayload {
-  draftId?: string
-  title?: string
-  summary?: string
-  userFlow?: string
-  techStack?: string
-  status?: 'editing' | 'confirmed' | 'archived' | 'pending' | 'launched' | string
-  linkedPlanId?: string | null
-  designSessionId?: string | null
-  launchedJobId?: string | null
-  lockedSections?: Record<string, boolean>
-  requirementsContract?: {
-    markdown?: string
-    status?: string
-    confirmedAt?: string | null
-  }
-  abilities?: TaskLaunchDraftAbility[]
-  references?: TaskLaunchDraftReference[]
-  sourceAttachments?: Array<{
-    id: string
-    name: string
-    mimeType: string
-    kind: 'image' | 'file'
-    assetUrl: string
-  }>
-  executionConfig?: {
-    plannerCoreCode: string
-    sliceVerifierCoreCode: string
-    milestoneVerifierCoreCode: string
-  }
-  revision?: number
-}
+export type {
+  TaskLaunchDraftAbility,
+  TaskLaunchDraftPayload,
+  TaskLaunchDraftReference
+} from '@shared/contracts/task-launch-draft'
 
 export interface AbilitySelection {
   abilityCode: string
   coreCode: string
+}
+
+/** Map Design module draft DTO → create-task form payload (not a ConversationMessage). */
+export function designDraftToPayload(draft: {
+  id: string
+  title: string
+  summary: string
+  userFlow: string
+  techStack: string
+  requirementsMarkdown: string
+  requirementsStatus: string
+  workspaceRoot: string
+  status: string
+  lockedSections: Record<string, boolean>
+  abilities?: TaskLaunchDraftAbility[]
+  references?: Array<{
+    id: string
+    name: string
+    kind: 'image' | 'file' | 'directory'
+    mimeType?: string
+    assetUrl?: string
+    description?: string
+    source?: string
+    localPath?: string
+  }>
+  executionProfile?: TaskLaunchDraftPayload['executionConfig'] | null
+  lockRevision: number
+  linkedPlanId?: string | null
+  designSessionId?: string | null
+  launchedJobId?: string | null
+}): TaskLaunchDraftPayload {
+  return {
+    draftId: draft.id,
+    title: draft.title,
+    summary: draft.summary,
+    userFlow: draft.userFlow,
+    techStack: draft.techStack,
+    requirementsContract: {
+      markdown: draft.requirementsMarkdown,
+      status: draft.requirementsStatus
+    },
+    workspacePath: draft.workspaceRoot,
+    status: draft.status,
+    linkedPlanId: draft.linkedPlanId ?? null,
+    designSessionId: draft.designSessionId ?? null,
+    launchedJobId: draft.launchedJobId ?? null,
+    lockedSections: draft.lockedSections,
+    abilities: draft.abilities ?? [],
+    references: (draft.references ?? []).map((ref) => ({
+      id: ref.id,
+      name: ref.name,
+      mimeType: ref.mimeType ?? 'application/octet-stream',
+      kind: ref.kind,
+      assetUrl: ref.assetUrl ?? '',
+      description: ref.description,
+      source: (ref.source as TaskLaunchDraftReference['source']) ?? undefined,
+      localPath: ref.localPath
+    })),
+    executionConfig: draft.executionProfile ?? undefined,
+    revision: draft.lockRevision
+  }
 }
 
 /** Prefer control-plane / listCores labels; fall back to the raw code (PRU-11-05). */
