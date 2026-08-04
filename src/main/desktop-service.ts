@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
@@ -24,7 +25,9 @@ function resolveRepoRootFromMain(): string {
           name?: string
           main?: string
         }
-        if (pkg.main === './out/main/index.js' || pkg.name === 'task') return dir
+        if (pkg.main === './out/main/index.js' || pkg.name === 'codetask' || pkg.name === 'task') {
+          return dir
+        }
       } catch {
         // continue walking
       }
@@ -36,17 +39,70 @@ function resolveRepoRootFromMain(): string {
   return app.getAppPath()
 }
 
-function resolveServiceLaunch(): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
-  const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+function looksLikeElectronBinary(path: string): boolean {
+  return /Electron\.app|[\\/]electron([\\/]|$)/i.test(path)
+}
 
+/** Resolve system Node for the Hono Service child (dev). Packaged builds use Electron-as-Node. */
+function resolveHostNodeBinary(): string {
+  const override = process.env.CODETASK_HOST_NODE?.trim()
+  if (override) {
+    if (!existsSync(override)) {
+      throw new Error(`CODETASK_HOST_NODE does not exist: ${override}`)
+    }
+    if (looksLikeElectronBinary(override)) {
+      throw new Error(
+        `CODETASK_HOST_NODE points at Electron (${override}); set it to a system Node 24 binary.`
+      )
+    }
+    return override
+  }
+
+  const candidates: string[] = []
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('where.exe', ['node'], { encoding: 'utf8' })
+      candidates.push(
+        ...out
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+      )
+    } else {
+      const out = execFileSync('which', ['-a', 'node'], { encoding: 'utf8' })
+      candidates.push(
+        ...out
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+      )
+    }
+  } catch {
+    // fall through to error below
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate || looksLikeElectronBinary(candidate)) continue
+    if (existsSync(candidate)) return candidate
+  }
+
+  throw new Error(
+    'Host Node.js not found for the desktop Service child. Set CODETASK_HOST_NODE to your Node 24 binary, or use `npm run dev:service`.'
+  )
+}
+
+function resolveServiceLaunch(): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
   if (is.dev) {
     const root = resolveRepoRootFromMain()
-    const tsxCli = join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
     const tsconfigImport = join(root, 'tests', 'tsx-tsconfig.mjs')
     const entry = join(root, 'apps', 'service', 'src', 'main.ts')
+    const env: NodeJS.ProcessEnv = { ...process.env }
+    delete env.ELECTRON_RUN_AS_NODE
+    // Same process as the spawn'd Node so stdio[3] ready-fd stays open.
+    // `tsx/cli` re-enters and loses fd 3 (ENXIO on announceServiceReady).
     return {
-      command: process.execPath,
-      args: ['--import', tsconfigImport, '--import', tsxCli, entry],
+      command: resolveHostNodeBinary(),
+      args: ['--import', tsconfigImport, '--import', 'tsx', entry],
       env
     }
   }
@@ -57,10 +113,11 @@ function resolveServiceLaunch(): { command: string; args: string[]; env: NodeJS.
       `Service entry not found at ${standalone}. Build the desktop/standalone bundle first.`
     )
   }
+  // Packaged desktop: no host Node required; run the bundled service as Electron-as-Node.
   return {
     command: process.execPath,
     args: [standalone],
-    env
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   }
 }
 

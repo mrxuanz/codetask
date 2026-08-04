@@ -46,6 +46,11 @@ export default defineConfig({
   preload: {},
   renderer: {
     root: resolve('apps/web'),
+    server: {
+      // Match desktop-service --renderer-dev-url http://127.0.0.1:5173 (avoid ::1-only bind).
+      host: '127.0.0.1',
+      port: 5173
+    },
     build: {
       rollupOptions: {
         input: resolve('apps/web/index.html')

@@ -72,6 +72,10 @@ describe('host parity (01)', () => {
     assert.match(appMain, /startDesktopService/)
     assert.doesNotMatch(appMain, /startAppServer/)
     assert.match(desktopService, /spawnSupervisedService/)
+    // Dev: Service child uses host Node (Node ABI). Packaged: Electron-as-Node.
+    assert.match(desktopService, /resolveHostNodeBinary/)
+    assert.match(desktopService, /CODETASK_HOST_NODE/)
+    assert.match(desktopService, /ELECTRON_RUN_AS_NODE/)
     assert.match(service, /startAppServer/)
     assert.match(server, /\bcreateApp\b/)
   })
