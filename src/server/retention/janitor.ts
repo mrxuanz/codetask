@@ -4,14 +4,80 @@ import { join } from 'path'
 import { eq } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '../../shared/job-references.ts'
 import type { getDb } from '../db'
-import { jobArtifacts, messageArtifacts, threadMessages, threads } from '../db/schema'
-import { dataPaths, threadAttachmentsDir } from '../data-paths'
+import { jobArtifacts, messageArtifacts } from '../db/schema'
+
+import { dataPaths, resolveAssetStoragePath, threadAttachmentsDir } from '../data-paths'
+import {
+  finalizeAssetDeleted,
+  listPendingDeleteAssets,
+  markAssetDeleteFailed
+} from '../assets/registry'
 import { wipeLegacyRuntimesRoot } from '../runtime/cleanup'
 
 type AppDatabase = ReturnType<typeof getDb>
 
 function sqliteClient(db: AppDatabase): import('better-sqlite3').Database | null {
   return (db as AppDatabase & { $client?: import('better-sqlite3').Database }).$client ?? null
+}
+
+function tableExists(client: import('better-sqlite3').Database, name: string): boolean {
+  const row = client
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(name) as { 1: number } | undefined
+  return Boolean(row)
+}
+
+/** Legitimate attachment owner dirs: Conversation + asset_references. */
+function collectValidAttachmentOwnerIds(db: AppDatabase): Set<string> {
+  const valid = new Set<string>()
+  const client = sqliteClient(db)
+  if (client && tableExists(client, 'conversation_threads')) {
+    try {
+      const rows = client.prepare(`SELECT id FROM conversation_threads`).all() as Array<{
+        id: string
+      }>
+      for (const row of rows) valid.add(row.id)
+    } catch {
+      // conversation tables may be absent in narrow fixtures
+    }
+  }
+  if (client && tableExists(client, 'asset_references')) {
+    try {
+      const rows = client
+        .prepare(
+          `SELECT DISTINCT owner_id AS ownerId
+             FROM asset_references
+            WHERE owner_type IN ('conversation', 'thread')`
+        )
+        .all() as Array<{ ownerId: string }>
+      for (const row of rows) valid.add(row.ownerId)
+    } catch {
+      // asset tables may be absent pre-062
+    }
+  }
+  return valid
+}
+
+function collectConversationAttachmentIds(db: AppDatabase, conversationId: string): string[] {
+  const client = sqliteClient(db)
+  if (!client || !tableExists(client, 'conversation_message_attachments')) return []
+  try {
+    const rows = client
+      .prepare(
+        `SELECT id, asset_id AS assetId
+         FROM conversation_message_attachments
+         WHERE conversation_id = ?`
+      )
+      .all(conversationId) as Array<{ id: string; assetId: string }>
+    const ids: string[] = []
+    for (const row of rows) {
+      if (row.id) ids.push(row.id)
+      if (row.assetId) ids.push(row.assetId)
+    }
+    return ids
+  } catch {
+    return []
+  }
 }
 
 export async function removeThreadAttachmentsDir(
@@ -24,6 +90,36 @@ export async function removeThreadAttachmentsDir(
   return true
 }
 
+/** Async file delete for assets in pending_delete (Batch G2). */
+export async function processPendingAssetDeletes(
+  dataDir: string,
+  db: AppDatabase
+): Promise<{ removed: number; failed: number }> {
+  const client = sqliteClient(db)
+  if (!client) return { removed: 0, failed: 0 }
+
+  let removed = 0
+  let failed = 0
+  for (const asset of listPendingDeleteAssets(client)) {
+    try {
+      const absolute = resolveAssetStoragePath(dataDir, asset.storageKey)
+      if (existsSync(absolute)) {
+        await rm(absolute, { recursive: true, force: true })
+      }
+      finalizeAssetDeleted(client, asset.id)
+      removed += 1
+    } catch (error) {
+      markAssetDeleteFailed(
+        client,
+        asset.id,
+        error instanceof Error ? error.message : String(error)
+      )
+      failed += 1
+    }
+  }
+  return { removed, failed }
+}
+
 export async function pruneOrphanAttachments(
   dataDir: string,
   db: AppDatabase
@@ -31,8 +127,7 @@ export async function pruneOrphanAttachments(
   const root = dataPaths(dataDir).attachments
   if (!existsSync(root)) return { removed: 0 }
 
-  const threadRows = await db.select({ id: threads.id }).from(threads)
-  const valid = new Set(threadRows.map((row) => row.id))
+  const valid = collectValidAttachmentOwnerIds(db)
   let removed = 0
 
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -103,22 +198,8 @@ export async function pruneOrphanJobArtifactFiles(
   return { removed }
 }
 
-function parseMessageAttachmentIds(attachmentsJson: string | null): string[] {
-  if (!attachmentsJson) return []
-  try {
-    const parsed = JSON.parse(attachmentsJson) as Array<{ id?: string }>
-    if (!Array.isArray(parsed)) return []
-    return parsed.map((item) => item.id).filter((id): id is string => typeof id === 'string')
-  } catch {
-    return []
-  }
-}
-
-/** Collect Design + Execution attachment ids for a thread's project (no thread_jobs). */
-function collectProjectScopedAttachmentIds(
-  db: AppDatabase,
-  threadId: string
-): string[] {
+/** Collect Design + Execution attachment ids for a conversation's project. */
+function collectProjectScopedAttachmentIds(db: AppDatabase, conversationId: string): string[] {
   const client = sqliteClient(db)
   if (!client) return []
   const ids: string[] = []
@@ -128,10 +209,10 @@ function collectProjectScopedAttachmentIds(
         `SELECT dr.attachment_id AS attachmentId
          FROM design_draft_references dr
          JOIN drafts d ON d.id = dr.draft_id
-         JOIN threads t ON t.project_id = d.project_id
-         WHERE t.id = ? AND dr.attachment_id IS NOT NULL`
+         JOIN conversation_threads ct ON ct.project_id = d.project_id
+         WHERE ct.id = ? AND dr.attachment_id IS NOT NULL`
       )
-      .all(threadId) as Array<{ attachmentId: string }>
+      .all(conversationId) as Array<{ attachmentId: string }>
     for (const row of designRows) ids.push(row.attachmentId)
   } catch {
     // design tables may be absent in narrow fixtures
@@ -142,10 +223,10 @@ function collectProjectScopedAttachmentIds(
         `SELECT js.reference_manifest_json AS referenceManifestJson
          FROM job_snapshots js
          JOIN jobs j ON j.id = js.job_id
-         JOIN threads t ON t.project_id = j.project_id
-         WHERE t.id = ?`
+         JOIN conversation_threads ct ON ct.project_id = j.project_id
+         WHERE ct.id = ?`
       )
-      .all(threadId) as Array<{ referenceManifestJson: string }>
+      .all(conversationId) as Array<{ referenceManifestJson: string }>
     for (const row of jobRows) {
       const manifest = parseJobReferenceManifest(row.referenceManifestJson)
       for (const reference of manifest?.references ?? []) {
@@ -167,23 +248,30 @@ export async function pruneStaleThreadAttachmentDirs(
   const attachmentsRoot = dataPaths(dataDir).attachments
   if (!existsSync(attachmentsRoot)) return { removed: 0 }
 
-  const threadRows = await db.select({ id: threads.id }).from(threads)
+  const client = sqliteClient(db)
+  const conversationIds: string[] = []
+  if (client && tableExists(client, 'conversation_threads')) {
+    try {
+      const rows = client.prepare(`SELECT id FROM conversation_threads`).all() as Array<{
+        id: string
+      }>
+      for (const row of rows) conversationIds.push(row.id)
+    } catch {
+      // narrow fixtures
+    }
+  }
+
   let removed = 0
 
-  for (const thread of threadRows) {
-    const threadDir = join(attachmentsRoot, thread.id)
+  for (const conversationId of conversationIds) {
+    const threadDir = join(attachmentsRoot, conversationId)
     if (!existsSync(threadDir)) continue
 
-    const messageRows = await db
-      .select({ attachmentsJson: threadMessages.attachmentsJson })
-      .from(threadMessages)
-      .where(eq(threadMessages.threadId, thread.id))
-
-    const validAttachmentIds = new Set<string>(collectProjectScopedAttachmentIds(db, thread.id))
-    for (const row of messageRows) {
-      for (const attachmentId of parseMessageAttachmentIds(row.attachmentsJson)) {
-        validAttachmentIds.add(attachmentId)
-      }
+    const validAttachmentIds = new Set<string>(
+      collectProjectScopedAttachmentIds(db, conversationId)
+    )
+    for (const id of collectConversationAttachmentIds(db, conversationId)) {
+      validAttachmentIds.add(id)
     }
 
     for (const entry of await readdir(threadDir, { withFileTypes: true })) {

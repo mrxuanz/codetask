@@ -1,7 +1,9 @@
-import type { TaskBlockerKind } from './contracts/evidence'
-import type { TaskProgressItemDto } from './contracts/jobs'
-import type { PlanningSessionStatus } from './contracts/planning-session-view'
-import type { PlanningSessionViewDto } from './contracts/planning-session-view'
+import type {
+  TaskBlockerKind,
+  TaskProgressItemDto,
+  PlanningSessionViewStatus,
+  PlanningSessionViewDto
+} from '@codetask/contracts'
 
 const MAX_INFRA_RETRIES = 3
 const MAX_TASK_PREP_GENERATIONS = 3
@@ -59,7 +61,7 @@ export interface JobRecoveryStateFields {
   availableActions: JobAvailableAction[]
 }
 
-import type { TurnErrorCode, TurnErrorDto } from './contracts/turn-errors'
+import type { TurnErrorCode } from './turn-errors'
 import { coerceTurnErrorField } from './turn-errors/storage.ts'
 
 const WORKFLOW_PROGRESS_BY_TURN_CODE = {
@@ -75,10 +77,17 @@ const GATE_FAILURE_PROGRESS_CODES = new Set([
 ])
 
 function matchesWorkflowCode(
-  input: TurnErrorDto | string | null | undefined,
+  input:
+    | { code: string; message?: string; params?: Record<string, unknown> }
+    | string
+    | null
+    | undefined,
   code: 'workflow.deadlock' | 'workflow.failed_block'
 ): boolean {
-  const dto = typeof input === 'object' && input ? input : coerceTurnErrorField(input)
+  const dto =
+    typeof input === 'object' && input
+      ? input
+      : coerceTurnErrorField(typeof input === 'string' ? input : null)
   return dto?.code === code
 }
 
@@ -89,7 +98,7 @@ function matchesWorkflowProgressCode(
   return progressCode === WORKFLOW_PROGRESS_BY_TURN_CODE[code]
 }
 
-function resolveLifecycle(status: PlanningSessionStatus): JobLifecycle {
+function resolveLifecycle(status: PlanningSessionViewStatus): JobLifecycle {
   if (status === 'running' || status === 'pausing') return 'running'
   if (status === 'paused') return 'paused'
   if (status === 'completed') return 'completed'
@@ -102,20 +111,24 @@ function countCompletedTasks(tasks: TaskProgressItemDto[]): number {
   return tasks.filter((task) => task.status === 'completed' || task.status === 'skipped').length
 }
 
-function isWorkflowDeadlockOnly(job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>): boolean {
+function isWorkflowDeadlockOnly(
+  job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>
+): boolean {
   const tasks = job.taskProgress.tasks
   if (tasks.some((task) => task.status === 'failed')) return false
   if (matchesWorkflowCode(job.lastError, 'workflow.deadlock')) return true
   return matchesWorkflowProgressCode(job.taskProgress.progressCode, 'workflow.deadlock')
 }
 
-function readGateFailureId(job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>): string | null {
+function readGateFailureId(
+  job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>
+): string | null {
   const fromParams = job.taskProgress.progressParams?.id
   if (typeof fromParams === 'string' && fromParams.trim()) return fromParams
   const lastErrorDto =
     typeof job.lastError === 'object' && job.lastError
-      ? job.lastError
-      : coerceTurnErrorField(job.lastError)
+      ? (job.lastError as { code?: string; message?: string; params?: Record<string, unknown> })
+      : coerceTurnErrorField(job.lastError as string | null | undefined)
   const fromError = lastErrorDto?.params?.taskId
   if (typeof fromError === 'string' && fromError.trim()) return fromError
   return null
@@ -125,7 +138,9 @@ export function isGateFailureProgressCode(progressCode: string | null | undefine
   return Boolean(progressCode && GATE_FAILURE_PROGRESS_CODES.has(progressCode))
 }
 
-function isGateFailureRecoverable(job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>): boolean {
+function isGateFailureRecoverable(
+  job: Pick<PlanningSessionViewDto, 'taskProgress' | 'lastError'>
+): boolean {
   return isGateFailureProgressCode(job.taskProgress.progressCode)
 }
 
@@ -134,7 +149,10 @@ function isHumanBlockedTask(task: TaskProgressItemDto): boolean {
   return kind === 'dependency-human' || task.evidence?.recovery?.action === 'pause-human'
 }
 
-function isRecoverableTask(task: TaskProgressItemDto, job?: Pick<PlanningSessionViewDto, 'status'>): boolean {
+function isRecoverableTask(
+  task: TaskProgressItemDto,
+  job?: Pick<PlanningSessionViewDto, 'status'>
+): boolean {
   if (job && isInterruptedFailedJobTask(job, task)) return true
   // Human blockers cannot continue from the breakpoint; restart/delete only.
   if (isHumanBlockedTask(task)) return false
@@ -217,7 +235,10 @@ function mapGateProgressToFailureKind(progressCode: string | null | undefined): 
   return 'gate_blocked'
 }
 
-function readTaskInfraAttempt(job: Pick<PlanningSessionViewDto, 'taskProgress'>, taskId: string): number {
+function readTaskInfraAttempt(
+  job: Pick<PlanningSessionViewDto, 'taskProgress'>,
+  taskId: string
+): number {
   return job.taskProgress.repairGenerations?.[`task-infra:${taskId}`] ?? 0
 }
 
@@ -249,7 +270,7 @@ function readTaskRepairAttempt(
 }
 
 function readTaskErrorCode(task: TaskProgressItemDto): TurnErrorCode | null {
-  if (task.error?.code) return task.error.code
+  if (task.error?.code) return task.error.code as TurnErrorCode
   return coerceTurnErrorField(task.errorMessage)?.code ?? null
 }
 
@@ -318,7 +339,7 @@ function resolveNextAction(input: {
 
 function deriveAvailableActions(input: {
   lifecycle: JobLifecycle
-  status: PlanningSessionStatus
+  status: PlanningSessionViewStatus
   recoverable: boolean
 }): JobAvailableAction[] {
   const actions: JobAvailableAction[] = []

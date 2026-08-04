@@ -56,10 +56,7 @@ export function isActivePlanningStatus(status: PlanningSessionStatus): boolean {
   return ACTIVE_PLANNING.has(status)
 }
 
-export function assertTransition(
-  from: PlanningSessionStatus,
-  to: PlanningSessionStatus
-): void {
+export function assertTransition(from: PlanningSessionStatus, to: PlanningSessionStatus): void {
   const allowed: Record<PlanningSessionStatus, PlanningSessionStatus[]> = {
     queued: ['planning', 'cancelled'],
     planning: ['plan_editing', 'failed', 'cancelled'],
@@ -168,9 +165,7 @@ export function validateTreeAgainstDraft(input: {
   manifest: ReferenceManifest | null
 }): void {
   const abilityCodes = new Set(input.abilities.map((a) => a.abilityCode))
-  const refIds = new Set(
-    (input.manifest?.references ?? input.references).map((r) => r.id)
-  )
+  const refIds = new Set((input.manifest?.references ?? input.references).map((r) => r.id))
   const taskIds = new Set<string>()
 
   for (const milestone of input.tree.milestones) {

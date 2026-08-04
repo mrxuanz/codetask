@@ -63,6 +63,12 @@ jobs:
 
       - run: npm ci
 
+      - if: ${{ runner.os != 'Linux' }}
+        name: Test platform-native modules
+        # Release packaging must prove target-specific Seatbelt, PTY, and
+        # Windows sandbox code, not only that the helper binaries compile.
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/native-test.log -- cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1
+
       - name: Build sandbox (native)
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/build-sandbox.log -- npm run build:sandbox
 

@@ -38,12 +38,7 @@ export class ExecutionOutbox {
     for (const row of rows) {
       const event = row as ExecutionOutboxEvent
       try {
-        this.onEvent?.(
-          event.jobId,
-          event.eventType,
-          JSON.parse(event.payloadJson),
-          event.id
-        )
+        this.onEvent?.(event.jobId, event.eventType, JSON.parse(event.payloadJson), event.id)
         this.db
           .prepare(`UPDATE execution_outbox SET dispatched_at = ? WHERE id = ?`)
           .run(now, event.id)

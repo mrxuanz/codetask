@@ -4,10 +4,7 @@ import {
   type ProvidersConfig,
   type ProvidersConfigOverrides
 } from '../../shared/providers/settings'
-import {
-  DEFAULT_RETENTION_SETTINGS,
-  type RetentionSettings
-} from '../../shared/contracts/retention.ts'
+import { DEFAULT_RETENTION_SETTINGS, type RetentionSettings } from '@codetask/contracts'
 import {
   DEFAULT_RUNTIME_FEATURES,
   type DebugRuntimeFeatures,

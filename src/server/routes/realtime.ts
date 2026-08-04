@@ -239,9 +239,7 @@ async function handleStream(c: Context, ctx: AppContext): Promise<Response> {
             ? item.type
             : 'domain'
         await stream.writeSSE({
-          ...(item.ephemeral || item.eventId == null
-            ? {}
-            : { id: String(item.eventId) }),
+          ...(item.ephemeral || item.eventId == null ? {} : { id: String(item.eventId) }),
           event: sseEvent,
           data: JSON.stringify(item)
         })
@@ -263,7 +261,4 @@ export function createRealtimeRoutes(ctx: AppContext): Hono {
   return routes
 }
 
-export {
-  closeRealtimeForSession,
-  closeRealtimeForUser
-} from '../events/realtime-session-registry'
+export { closeRealtimeForSession, closeRealtimeForUser } from '../events/realtime-session-registry'

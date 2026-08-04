@@ -24,11 +24,7 @@ export const DraftReferenceSchema = Type.Object({
   id: Type.String(),
   source: Type.Optional(Type.String()),
   name: Type.String(),
-  kind: Type.Union([
-    Type.Literal('image'),
-    Type.Literal('file'),
-    Type.Literal('directory')
-  ]),
+  kind: Type.Union([Type.Literal('image'), Type.Literal('file'), Type.Literal('directory')]),
   mimeType: Type.Optional(Type.String()),
   description: Type.String(),
   attachmentId: Type.Optional(Type.String()),

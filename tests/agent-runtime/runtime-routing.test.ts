@@ -31,9 +31,12 @@ test('Cursor task work uses a one-shot sandbox worker and ephemeral ACP runtime'
     'utf8'
   )
   const worker = readFileSync(join(process.cwd(), 'src/sandbox/role-worker.ts'), 'utf8')
-  const lifecycle = readFileSync(join(process.cwd(), 'src/server/providers/lifecycle.ts'), 'utf8')
+  const lifecycle = readFileSync(
+    join(process.cwd(), 'packages/provider-runtime-node/src/providers/lifecycle.ts'),
+    'utf8'
+  )
   const cursorStream = readFileSync(
-    join(process.cwd(), 'src/server/agent-runtime/cursor-acp/stream-session-turn.ts'),
+    join(process.cwd(), 'packages/provider-runtime-node/src/cursor-acp/stream-session-turn.ts'),
     'utf8'
   )
 
@@ -47,7 +50,7 @@ test('Cursor task work uses a one-shot sandbox worker and ephemeral ACP runtime'
 
 test('Cursor ACP turns have a bounded no-update wait', () => {
   const source = readFileSync(
-    join(process.cwd(), 'src/server/agent-runtime/cursor-acp/session-runtime.ts'),
+    join(process.cwd(), 'packages/provider-runtime-node/src/cursor-acp/session-runtime.ts'),
     'utf8'
   )
   assert.match(source, /CURSOR_ACP_UPDATE_IDLE_TIMEOUT_MS/)
@@ -72,10 +75,20 @@ test('application runtime starts Conversation + Execution modules on ready', () 
 })
 
 test('ordinary chat write turns use one-shot Provider reuse (03)', () => {
-  const lifecycle = readFileSync(join(process.cwd(), 'src/server/providers/lifecycle.ts'), 'utf8')
-  const runtime = readFileSync(join(process.cwd(), 'packages/agent-runtime/src/index.ts'), 'utf8')
+  const lifecycle = readFileSync(
+    join(process.cwd(), 'packages/provider-runtime-node/src/providers/lifecycle.ts'),
+    'utf8'
+  )
+  const runtime = readFileSync(
+    join(process.cwd(), 'packages/agent-runtime/src/provider-runtime.ts'),
+    'utf8'
+  )
+  const runtimeApi = readFileSync(
+    join(process.cwd(), 'packages/agent-runtime/src/index.ts'),
+    'utf8'
+  )
   assert.match(lifecycle, /capabilityProfile === 'chat-write'/)
   assert.match(runtime, /capabilityProfile === 'chat-write'/)
-  assert.match(runtime, /buildConversationScopeId/)
-  assert.doesNotMatch(runtime, /create_task|createTaskMode/)
+  assert.match(runtimeApi, /buildConversationScopeId/)
+  assert.doesNotMatch(runtimeApi, /create_task|createTaskMode/)
 })

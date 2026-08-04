@@ -45,10 +45,7 @@ describe('architecture residual DoD — M3', () => {
   })
 
   it('deletion prefers Execution jobs helpers', () => {
-    const deletion = readFileSync(
-      join(root, 'src/server/infra/deletion-coordinator.ts'),
-      'utf8'
-    )
+    const deletion = readFileSync(join(root, 'src/server/infra/deletion-coordinator.ts'), 'utf8')
     assert.match(deletion, /readExecutionJobRow/)
     assert.match(deletion, /DELETE FROM jobs WHERE/)
     assert.match(deletion, /releaseWorkspaceLeaseForOwner\('job-run'/)

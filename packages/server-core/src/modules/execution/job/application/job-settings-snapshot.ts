@@ -56,9 +56,7 @@ export function taskMcpFromJobSettings(
 ): Record<string, unknown> {
   if (!record) return {}
   const snap = record.snapshot as Partial<ExecutionSettingsSnapshot>
-  return snap.taskMcpServers && typeof snap.taskMcpServers === 'object'
-    ? snap.taskMcpServers
-    : {}
+  return snap.taskMcpServers && typeof snap.taskMcpServers === 'object' ? snap.taskMcpServers : {}
 }
 
 export function verificationMcpFromJobSettings(

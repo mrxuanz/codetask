@@ -4,11 +4,7 @@ import { existsSync, readFileSync } from 'fs'
 import { mkdir, readFile, rename, rm, unlink, writeFile } from 'fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'path'
 import { and, eq, inArray, lte } from 'drizzle-orm'
-import type {
-  JobArtifactKind,
-  JobArtifactTier,
-  RetentionSettings
-} from '../../shared/contracts/retention.ts'
+import type { JobArtifactKind, JobArtifactTier, RetentionSettings } from '@codetask/contracts'
 import type { getDb } from '../db'
 import { jobArtifacts } from '../db/schema'
 import { jobArtifactRelPath } from '../data-paths'

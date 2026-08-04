@@ -6,11 +6,7 @@ function tableExists(db: Parameters<Migration['up']>[0], table: string): boolean
   )
 }
 
-function columnExists(
-  db: Parameters<Migration['up']>[0],
-  table: string,
-  column: string
-): boolean {
+function columnExists(db: Parameters<Migration['up']>[0], table: string, column: string): boolean {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(
     (row) => row.name === column
   )
@@ -22,7 +18,9 @@ export const migration027ControlPlaneSchema: Migration = {
   up(db) {
     if (tableExists(db, 'control_jobs')) {
       if (!columnExists(db, 'control_task_attempts', 'result_revision')) {
-        db.exec('ALTER TABLE control_task_attempts ADD COLUMN result_revision INTEGER NOT NULL DEFAULT 0')
+        db.exec(
+          'ALTER TABLE control_task_attempts ADD COLUMN result_revision INTEGER NOT NULL DEFAULT 0'
+        )
       }
       if (tableExists(db, 'control_schema_meta')) {
         if (!columnExists(db, 'control_schema_meta', 'source_migration')) {

@@ -62,6 +62,38 @@ jobs:
       - name: Rust build check
         run: cargo check --manifest-path native/Cargo.toml --release
 
+  rust-macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: native
+      - name: macOS Rust tests
+        # Seatbelt and PTY behavior is compiled only on macOS; the Ubuntu job
+        # cannot detect regressions in those platform-specific modules.
+        run: cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1
+      - name: macOS Rust build check
+        run: cargo check --manifest-path native/Cargo.toml --release
+
+  rust-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: native
+      - name: Windows Rust tests
+        # Windows sandbox and process code is cfg-gated and is not compiled by
+        # either Unix native-test job.
+        run: cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1
+      - name: Windows Rust build check
+        run: cargo check --manifest-path native/Cargo.toml --release
+
   package-smoke:
     needs: [quality, test]
     uses: ./.github/workflows/build.yml

@@ -338,7 +338,7 @@ export const TURN_ERROR_DEFAULT_MESSAGES: Record<TurnErrorCode, string> = {
   'plan.confirm_conflict': 'Plan changed while it was being confirmed',
   'plan.sandbox_timeout': 'Plan sandbox task timed out',
   'plan.sandbox_cleanup_failed':
-    'Sandbox process exited abnormally. Fully quit the app and restart, then retry plan generation.',
+    'Sandbox process exited abnormally. Fully quit the app and restart, then retry plan generation.'
 }
 
 export const TURN_ERROR_SCHEMA_VERSION = 1 as const

@@ -1,4 +1,8 @@
-import { composeSettingsModule, type SettingsModule, type SettingsModuleDeps } from './composition.ts'
+import {
+  composeSettingsModule,
+  type SettingsModule,
+  type SettingsModuleDeps
+} from './composition.ts'
 
 export type { SettingsModule, SettingsModuleDeps }
 export { composeSettingsModule }
@@ -56,9 +60,16 @@ export {
   providerRuntimeRestartRequired
 } from './domain/provider-runtime-settings.ts'
 
-export { SettingsApplication, type SettingsApplicationDeps } from './application/settings-application.ts'
+export {
+  SettingsApplication,
+  type SettingsApplicationDeps
+} from './application/settings-application.ts'
 
-export type { SettingsRepository, StoredNamespace, WriteNamespaceResult } from './ports/settings-repository.ts'
+export type {
+  SettingsRepository,
+  StoredNamespace,
+  WriteNamespaceResult
+} from './ports/settings-repository.ts'
 export type { SecretStore, SecretMeta } from './ports/secret-store.ts'
 export type { SettingsEventsPort } from './ports/settings-events.ts'
 export type { ProviderCatalogPort, ProviderCatalogEntry } from './ports/provider-catalog.ts'

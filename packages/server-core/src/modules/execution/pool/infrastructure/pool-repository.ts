@@ -38,9 +38,7 @@ export class PoolRepository {
 
   isSlotFree(): boolean {
     const row = this.db
-      .prepare(
-        `SELECT status FROM execution_pool_slots WHERE pool = ? AND slot_number = ?`
-      )
+      .prepare(`SELECT status FROM execution_pool_slots WHERE pool = ? AND slot_number = ?`)
       .get(EXECUTION_POOL, EXECUTION_SLOT) as { status: string } | undefined
     return row?.status === 'free'
   }

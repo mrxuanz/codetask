@@ -1,0 +1,26 @@
+import { ProviderAuthError } from '@server/sandbox/provider-auth/errors'
+import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
+import type { ProviderInstallation } from '@shared/providers/installation'
+
+const CODEX_LABEL = 'Codex'
+const CODEX_LOGIN_HINT = 'Run `codex login` in a terminal and retry.'
+
+/**
+ * Codex auth preflight owned by the Codex driver module.
+ *
+ * The runtime auth reference is authoritative. Running `login status` on a
+ * separately installed CLI validates a different executable than the SDK and
+ * makes authentication depend on host toolchain-manager shims.
+ */
+export function runCodexAuthPreflight(
+  profile: ProviderRuntimeProfile,
+  _installation: ProviderInstallation
+): void {
+  if (profile.diagnostics.authMaterialPresent) return
+
+  throw new ProviderAuthError(
+    `${CODEX_LABEL} is not authenticated. ${CODEX_LOGIN_HINT}`,
+    'codex',
+    'provider.codex.not_authenticated'
+  )
+}

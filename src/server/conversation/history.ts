@@ -5,12 +5,12 @@ const MAX_HISTORY_CHARS = 32_000
 
 const CORE_SHORT_LABELS: Record<string, string> = {
   codex: 'Codex',
-  'claude-code': 'Claude Code',
+  claude: 'Claude Code',
   opencode: 'OpenCode',
-  cursorcli: 'Cursor'
+  cursor: 'Cursor'
 }
 
-const ALWAYS_SEED_HISTORY_CORES = new Set(['cursorcli', 'opencode'])
+const ALWAYS_SEED_HISTORY_CORES = new Set(['cursor', 'opencode'])
 
 function isHistoryEligible(message: ConversationMessageDto): boolean {
   if (message.role !== 'user' && message.role !== 'assistant') {

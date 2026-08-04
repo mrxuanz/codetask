@@ -71,13 +71,7 @@ export class WorkRepository {
         `UPDATE job_work_items SET state = ?, state_revision = state_revision + 1, updated_at = ?
          WHERE job_id = ? AND id = ? AND state_revision = ?`
       )
-      .run(
-        input.nextState,
-        input.updatedAt,
-        input.jobId,
-        input.workId,
-        input.expectedRevision
-      )
+      .run(input.nextState, input.updatedAt, input.jobId, input.workId, input.expectedRevision)
     if (result.changes === 0) throw new Error('Work CAS failed')
     return this.requireWork(input.jobId, input.workId)
   }

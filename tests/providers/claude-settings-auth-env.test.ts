@@ -101,7 +101,7 @@ test('outer-sandbox turn options use user settingSources and re-inject settings 
 
     const plan = buildClaudeTurnOptions(
       {
-        provider: 'claude-code',
+        provider: 'claude',
         role: 'slice-verifier',
         cwd: runtimeRoot,
         runtimeRoot,
@@ -116,7 +116,7 @@ test('outer-sandbox turn options use user settingSources and re-inject settings 
     // Direct conversation still loads full sources.
     const conversation = buildClaudeTurnOptions(
       {
-        provider: 'claude-code',
+        provider: 'claude',
         role: 'conversation',
         cwd: runtimeRoot,
         runtimeRoot,

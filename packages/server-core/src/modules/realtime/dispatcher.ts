@@ -70,9 +70,7 @@ export class RealtimeDispatcher {
   }
 
   /** Convenience: durable for terminal/state, ephemeral for deltas. */
-  publish(
-    input: PublishDurableInput & { ephemeral?: boolean }
-  ): RealtimeEnvelope {
+  publish(input: PublishDurableInput & { ephemeral?: boolean }): RealtimeEnvelope {
     if (input.ephemeral) {
       return this.publishEphemeral(input)
     }

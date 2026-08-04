@@ -1,8 +1,5 @@
 import type Database from 'better-sqlite3'
-import {
-  AuthApplication,
-  type CredentialsPolicy
-} from './application/auth-application.ts'
+import { AuthApplication, type CredentialsPolicy } from './application/auth-application.ts'
 import { createAuthHttpRoutes, type AuthHttpDeps } from './http/auth-routes.ts'
 import { HmacTokenDigester, ScryptPasswordHasher } from './infrastructure/scrypt-password-hasher.ts'
 import { SqliteAuthRepository } from './infrastructure/sqlite-auth-repository.ts'
@@ -10,7 +7,9 @@ import { SqliteAuthRepository } from './infrastructure/sqlite-auth-repository.ts
 export type AuthModule = {
   app: AuthApplication
   /** Routes relative to `/auth` mount point. */
-  createRoutes: (http: Omit<AuthHttpDeps, 'auth' | 'authSecret'>) => ReturnType<typeof createAuthHttpRoutes>
+  createRoutes: (
+    http: Omit<AuthHttpDeps, 'auth' | 'authSecret'>
+  ) => ReturnType<typeof createAuthHttpRoutes>
   cleanup: () => void
 }
 

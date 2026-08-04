@@ -6,15 +6,8 @@ import {
   type AgentRuntime,
   type ProviderCode
 } from '@codetask/agent-runtime'
-import type {
-  DraftSnapshot,
-  ExecutionTreeSnapshot,
-  ReferenceManifest
-} from '@codetask/contracts'
-import type {
-  PlannerRunnerPort,
-  PlanningApplicationPort
-} from './planning-application.ts'
+import type { DraftSnapshot, ExecutionTreeSnapshot, ReferenceManifest } from '@codetask/contracts'
+import type { PlannerRunnerPort, PlanningApplicationPort } from './planning-application.ts'
 import { buildTreeFromOutline, validateTreeAgainstDraft } from '../domain/planning.ts'
 import { newId } from '../../shared.ts'
 import {
@@ -190,8 +183,7 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
     plannerSettingsSnapshotJson?: string
   }): Promise<void> {
     const provider =
-      toCanonicalProviderCode(input.executionProfile.plannerCoreCode) ??
-      ('codex' as ProviderCode)
+      toCanonicalProviderCode(input.executionProfile.plannerCoreCode) ?? ('codex' as ProviderCode)
     const scopeId = `planning:${input.sessionId}:provider:${provider}`
     const systemPrompt = resolveSystemPrompt(input.plannerSettingsSnapshotJson)
     const userMcpServers = resolveUserMcpServers(input.plannerSettingsSnapshotJson)
@@ -356,10 +348,7 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
       }
 
       const missingFinalizeError = resolvePlannerMissingFinalizeError(plannerSession)
-      if (
-        isPlannerSilentEmptyTurnError(missingFinalizeError) &&
-        attempt < maxSilentEmptyAttempts
-      ) {
+      if (isPlannerSilentEmptyTurnError(missingFinalizeError) && attempt < maxSilentEmptyAttempts) {
         lastSilentEmptyError = missingFinalizeError
         void lastSilentEmptyError
         void runtimeFailed

@@ -22,7 +22,9 @@ export type SettingsHttpDeps = {
   >
 }
 
-function unwrapSettings<T extends object>(body: T | { settings?: T; expectedRevision?: number }): {
+function unwrapSettings<T extends object>(
+  body: T | { settings?: T; expectedRevision?: number }
+): {
   settings: T
   expectedRevision?: number
 } {

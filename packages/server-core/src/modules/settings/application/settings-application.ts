@@ -41,7 +41,11 @@ import {
   validateProviderRuntimeSettings
 } from '../domain/provider-runtime-settings.ts'
 import { SettingsError } from '../domain/settings-errors.ts'
-import { contentHash, toSettingsProviderCode, type DefaultPromptBodies } from '../domain/setting-namespace.ts'
+import {
+  contentHash,
+  toSettingsProviderCode,
+  type DefaultPromptBodies
+} from '../domain/setting-namespace.ts'
 import type { ProviderCatalogPort } from '../ports/provider-catalog.ts'
 import type { SecretStore } from '../ports/secret-store.ts'
 import type { SettingsEventsPort } from '../ports/settings-events.ts'
@@ -79,7 +83,11 @@ export class SettingsApplication {
     const validated = validateAgentDefaultsSettings(normalized, {
       isProviderAvailable: await this.providerAvailabilityChecker()
     })
-    const result = this.deps.repository.writeNamespace('agent_defaults', validated, expectedRevision)
+    const result = this.deps.repository.writeNamespace(
+      'agent_defaults',
+      validated,
+      expectedRevision
+    )
     await this.publishChange('agent_defaults', result.revision, 'new-operations')
     return {
       settings: validated,
@@ -137,7 +145,10 @@ export class SettingsApplication {
     }
   }
 
-  async updateMcp(expectedRevision: number, value: unknown): Promise<WriteOutcome<AgentMcpSettings>> {
+  async updateMcp(
+    expectedRevision: number,
+    value: unknown
+  ): Promise<WriteOutcome<AgentMcpSettings>> {
     const normalized = normalizeAgentMcpSettings(value)
     const validated = validateAgentMcpSettings(normalized)
     const result = this.deps.repository.writeNamespace('agent_mcp', validated, expectedRevision)
@@ -178,7 +189,11 @@ export class SettingsApplication {
     const validated = validateProviderRuntimeSettings(normalized, {
       isProviderAvailable: await this.providerAvailabilityChecker()
     })
-    const result = this.deps.repository.writeNamespace('provider_runtime', validated, expectedRevision)
+    const result = this.deps.repository.writeNamespace(
+      'provider_runtime',
+      validated,
+      expectedRevision
+    )
     const effective = normalizeProviderRuntimeSettings(effectiveProviders)
     const restartRequired = providerRuntimeRestartRequired(validated, effective)
     await this.publishChange('provider_runtime', result.revision, 'restart-required')
@@ -210,7 +225,10 @@ export class SettingsApplication {
     )
     const references = collectSecretReferences(mcp)
     if (references.has(trimmed)) {
-      throw SettingsError.conflict('settings.secret_in_use', `Secret is still referenced: ${trimmed}`)
+      throw SettingsError.conflict(
+        'settings.secret_in_use',
+        `Secret is still referenced: ${trimmed}`
+      )
     }
     this.deps.secrets.delete(trimmed)
   }
@@ -236,7 +254,11 @@ export class SettingsApplication {
       mcpServers: this.resolveMcpServersMap('conversation', hostProvider, mcp),
       sourceRevisions: this.buildSourceRevisions([
         { namespace: 'agent_prompts', revision: prompts.revision, value: prompts.settings },
-        { namespace: 'agent_mcp', revision: this.deps.repository.readNamespace('agent_mcp').revision, value: mcp },
+        {
+          namespace: 'agent_mcp',
+          revision: this.deps.repository.readNamespace('agent_mcp').revision,
+          value: mcp
+        },
         {
           namespace: 'provider_runtime',
           revision: providerRuntime.revision,
@@ -261,7 +283,11 @@ export class SettingsApplication {
       sourceRevisions: this.buildSourceRevisions([
         { namespace: 'agent_defaults', revision: defaults.revision, value: defaults.settings },
         { namespace: 'agent_prompts', revision: prompts.revision, value: prompts.settings },
-        { namespace: 'agent_mcp', revision: this.deps.repository.readNamespace('agent_mcp').revision, value: mcp }
+        {
+          namespace: 'agent_mcp',
+          revision: this.deps.repository.readNamespace('agent_mcp').revision,
+          value: mcp
+        }
       ])
     }
   }
@@ -284,7 +310,11 @@ export class SettingsApplication {
       milestoneVerifierPromptBody: this.resolvePromptBody('milestoneVerifier') ?? '',
       sourceRevisions: this.buildSourceRevisions([
         { namespace: 'agent_prompts', revision: prompts.revision, value: prompts.settings },
-        { namespace: 'agent_mcp', revision: this.deps.repository.readNamespace('agent_mcp').revision, value: mcp }
+        {
+          namespace: 'agent_mcp',
+          revision: this.deps.repository.readNamespace('agent_mcp').revision,
+          value: mcp
+        }
       ])
     }
   }
@@ -295,10 +325,12 @@ export class SettingsApplication {
     settings?: AgentMcpSettings
   ): Record<string, unknown> {
     const hostProvider = toSettingsProviderCode(providerCode)
-    const mcp = settings ?? normalizeAgentMcpSettings(
-      this.deps.repository.readNamespace<AgentMcpSettings>('agent_mcp').value ??
-        defaultAgentMcpSettings()
-    )
+    const mcp =
+      settings ??
+      normalizeAgentMcpSettings(
+        this.deps.repository.readNamespace<AgentMcpSettings>('agent_mcp').value ??
+          defaultAgentMcpSettings()
+      )
     const map = extractMcpServersMap(mcp, role, hostProvider)
     return resolveSecretRefs(map, (name) => {
       const secret = this.deps.secrets.get(name)
@@ -309,9 +341,7 @@ export class SettingsApplication {
     })
   }
 
-  resolvePromptBody(
-    role: keyof AgentPromptSettings
-  ): string | null {
+  resolvePromptBody(role: keyof AgentPromptSettings): string | null {
     const stored = this.deps.repository.readNamespace<AgentPromptSettings>('agent_prompts')
     const settings = normalizeAgentPromptSettings(stored.value ?? defaultAgentPromptSettings())
     const entry = settings[role]

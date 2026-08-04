@@ -87,7 +87,7 @@ test('sandbox policy grants read access to a generic PATH toolchain container', 
   createExecutableNode(managerBin)
   try {
     const roots = resolveProviderReadRoots(
-      'claude-code',
+      'claude',
       Object.freeze({ HOME: home, PATH: managerBin })
     )
     assert.ok(roots.includes(realpathSync.native(managerBin)))

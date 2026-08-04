@@ -193,6 +193,7 @@ npm run test:sandbox:tdd      # native sandbox TDD（需 build:sandbox）
 npm run test:sandbox
 npm run typecheck
 npm run test:ci               # typecheck + 快速测试套件
+npm run release:test-gate     # 与发布流水线一致的 JS/TS 门禁
 ```
 
 ## 架构文档

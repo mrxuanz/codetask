@@ -1,7 +1,9 @@
 import { Type } from '@sinclair/typebox'
-import type { TSchema } from '@sinclair/typebox'
+import type { TLiteral, TObject, TSchema, TString } from '@sinclair/typebox'
 
-export const ApiSuccessSchema = <T extends TSchema>(data: T) =>
+export const ApiSuccessSchema = <T extends TSchema>(
+  data: T
+): TObject<{ success: TLiteral<true>; data: T; requestId: TString }> =>
   Type.Object({
     success: Type.Literal(true),
     data,

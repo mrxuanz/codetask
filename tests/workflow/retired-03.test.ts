@@ -33,7 +33,10 @@ describe('workflow suite retirement (03)', () => {
   it('replacement suites exist', () => {
     assert.equal(existsSync(join(root, 'tests/conversation/conversation-module-03.test.ts')), true)
     assert.equal(existsSync(join(root, 'tests/design/design-module.test.ts')), true)
-    assert.equal(existsSync(join(root, 'tests/execution/design-publish-to-execution.test.ts')), true)
+    assert.equal(
+      existsSync(join(root, 'tests/execution/design-publish-to-execution.test.ts')),
+      true
+    )
     assert.equal(existsSync(join(root, 'tests/architecture/dod-03.test.ts')), true)
   })
 })

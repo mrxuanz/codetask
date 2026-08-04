@@ -18,9 +18,7 @@ export const PLANNING_JOB_STATUSES = ['planning', 'plan_editing'] as const
 export type PlanningJobStatus = (typeof PLANNING_JOB_STATUSES)[number]
 
 export function isPlanningJobStatus(status: string | null | undefined): boolean {
-  return (
-    typeof status === 'string' && (PLANNING_JOB_STATUSES as readonly string[]).includes(status)
-  )
+  return typeof status === 'string' && (PLANNING_JOB_STATUSES as readonly string[]).includes(status)
 }
 
 export function isPlanningWorkspaceStatus(status: string | null | undefined): boolean {

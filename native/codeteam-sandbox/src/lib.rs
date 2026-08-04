@@ -427,7 +427,11 @@ impl SandboxChild {
         if let Some(inner) = guard.as_mut() {
             match inner {
                 #[cfg(not(windows))]
-                SandboxChildInner::Os { child, stdout, stderr } => {
+                SandboxChildInner::Os {
+                    child,
+                    stdout,
+                    stderr,
+                } => {
                     let _ = child.kill();
                     stdout.join();
                     stderr.join();
@@ -452,7 +456,11 @@ impl SandboxChild {
             .ok_or_else(|| Error::from_reason("sandbox child closed"))?;
         let code = match inner {
             #[cfg(not(windows))]
-            SandboxChildInner::Os { child, stdout, stderr } => match child.try_wait() {
+            SandboxChildInner::Os {
+                child,
+                stdout,
+                stderr,
+            } => match child.try_wait() {
                 Ok(Some(status)) => {
                     stdout.join();
                     stderr.join();
@@ -478,7 +486,11 @@ impl SandboxChild {
             .ok_or_else(|| Error::from_reason("sandbox child closed"))?;
         let code = match inner {
             #[cfg(not(windows))]
-            SandboxChildInner::Os { child, stdout, stderr } => {
+            SandboxChildInner::Os {
+                child,
+                stdout,
+                stderr,
+            } => {
                 let status = child
                     .wait()
                     .map_err(|e| Error::from_reason(e.to_string()))?;
@@ -503,7 +515,11 @@ impl SandboxChild {
         if let Some(inner) = guard.take() {
             match inner {
                 #[cfg(not(windows))]
-                SandboxChildInner::Os { mut child, mut stdout, mut stderr } => {
+                SandboxChildInner::Os {
+                    mut child,
+                    mut stdout,
+                    mut stderr,
+                } => {
                     let _ = child.kill();
                     let _ = child.wait();
                     stdout.join();

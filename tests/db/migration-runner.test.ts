@@ -236,44 +236,14 @@ test('migration 017 succeeds when design_sessions references threads (FK on)', (
 
   runMigrations(db, allMigrations)
   assert.equal(currentMigrationVersion(db), latestMigrationVersion)
-  const threadsSql = db
-    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'threads'`)
-    .get() as { sql: string }
-  assert.doesNotMatch(threadsSql.sql, /wizard_phase|active_draft_id|active_plan_id|create_task|task_snapshot/)
-  assert.match(threadsSql.sql, /thread_kind IN \('chat'\)/)
-  assert.match(threadsSql.sql, /actor_id/)
-  assert.doesNotMatch(threadsSql.sql, /\busername\b/)
-  const threadCols = db.prepare(`PRAGMA table_info(threads)`).all() as Array<{ name: string }>
-  const threadColNames = new Set(threadCols.map((c) => c.name))
-  assert.equal(threadColNames.has('wizard_phase'), false)
-  assert.equal(threadColNames.has('active_draft_id'), false)
-  assert.equal(threadColNames.has('active_plan_id'), false)
-  assert.equal(threadColNames.has('username'), false)
-  assert.equal(threadColNames.has('actor_id'), true)
-  const messageCols = db.prepare(`PRAGMA table_info(thread_messages)`).all() as Array<{
-    name: string
-  }>
-  assert.equal(
-    messageCols.some((c) => c.name === 'wizard_phase'),
-    false
-  )
-  const messagesSql = db
-    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'thread_messages'`)
-    .get() as { sql: string }
-  assert.match(messagesSql.sql, /kind IN \('text'\)/)
-  assert.doesNotMatch(messagesSql.sql, /task-launch-draft|wizard-handoff/)
-  assert.equal(threadColNames.has('actor_id'), true)
-  const messageColNames = new Set(messageCols.map((c) => c.name))
-  assert.equal(messageColNames.has('username'), false)
-  assert.equal(messageColNames.has('actor_id'), true)
-  assert.equal(
-    db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_jobs'`).get(),
-    undefined
-  )
-  const archive = db
-    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'threads_legacy_archive'`)
-    .get()
-  assert.equal(archive, undefined)
+  for (const table of ['threads', 'thread_messages', 'thread_jobs', 'threads_legacy_archive']) {
+    assert.equal(
+      db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table),
+      undefined,
+      `expected ${table} removed after the legacy upgrade path`
+    )
+  }
+  assert.deepEqual(db.prepare(`PRAGMA foreign_key_check`).all(), [])
   db.close()
 })
 
@@ -335,7 +305,13 @@ test('migration 026 moves unlaunched design_session into thread_jobs and drops d
   runMigrations(db, allMigrations)
   assert.equal(currentMigrationVersion(db), latestMigrationVersion)
 
-  for (const table of ['job_abilities', 'job_plan_tasks', 'design_runs', 'thread_jobs', 'draft_references']) {
+  for (const table of [
+    'job_abilities',
+    'job_plan_tasks',
+    'design_runs',
+    'thread_jobs',
+    'draft_references'
+  ]) {
     assert.equal(
       db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table),
       undefined,
@@ -380,23 +356,23 @@ test('migration 026 enriches launched job and rewrites plan pointers', () => {
     .get('ref-launched') as { design_session_id: string }
   assert.equal(refAfter26.design_session_id, 'job-launched')
 
-  runMigrations(db, allMigrations)
-  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
-
-  const threadCols = db.prepare(`PRAGMA table_info(threads)`).all() as Array<{ name: string }>
-  assert.equal(
-    threadCols.some((c) => c.name === 'active_plan_id'),
-    false
-  )
-
-  const msg = db
+  const messageAfter26 = db
     .prepare(
       `SELECT json_extract(payload_json, '$.linkedPlanId') AS linked FROM thread_messages WHERE id = ?`
     )
     .get('msg-launched') as { linked: string }
-  assert.equal(msg.linked, 'job-launched')
+  assert.equal(messageAfter26.linked, 'job-launched')
 
-  for (const table of ['thread_jobs', 'draft_references', 'design_sessions']) {
+  runMigrations(db, allMigrations)
+  assert.equal(currentMigrationVersion(db), latestMigrationVersion)
+
+  for (const table of [
+    'threads',
+    'thread_messages',
+    'thread_jobs',
+    'draft_references',
+    'design_sessions'
+  ]) {
     assert.equal(
       db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table),
       undefined,

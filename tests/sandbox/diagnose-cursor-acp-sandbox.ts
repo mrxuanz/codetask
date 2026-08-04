@@ -404,8 +404,8 @@ async function main(): Promise<void> {
 
   log('setup', 'fixture', { workspace, runtimeRoot, projectRoot: process.cwd() })
 
-  const cursorDriver = getProviderDriverForTest('cursorcli')
-  const runtimeProfile = prepareProviderRuntimeForTest('cursorcli', {
+  const cursorDriver = getProviderDriverForTest('cursor')
+  const runtimeProfile = prepareProviderRuntimeForTest('cursor', {
     workspaceRoot: workspace
   })
   let providerPreflightOk = true
@@ -436,7 +436,7 @@ async function main(): Promise<void> {
   })
   policy = applyProviderWriteRoots(policy, providerRuntimeWriteRoots(runtimeProfile))
   policy = applyProviderReadRoots(policy, [
-    ...resolveProviderReadRoots('cursorcli'),
+    ...resolveProviderReadRoots('cursor'),
     ...providerRuntimeReadRoots(runtimeProfile),
     dataDir,
     process.cwd(),

@@ -1,17 +1,11 @@
 import type { AgentRuntime, AgentTurnInput } from '@codetask/agent-runtime'
-import {
-  CODETEAM_MANAGER_MCP_SERVER,
-  MCP_HTTP_ACCEPT_HEADER_VALUE
-} from '@codetask/agent-runtime'
+import { CODETEAM_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from '@codetask/agent-runtime'
 import type { TaskEvidence } from '@codetask/contracts'
 import type Database from 'better-sqlite3'
 import { newId, nowMs, stableHash } from '../../shared.ts'
 import { WorkRepository } from '../infrastructure/work-repository.ts'
 import { handleReportTaskResult } from '../mcp/task-result-tool.ts'
-import {
-  registerTaskMcpSession,
-  unregisterTaskMcpSession
-} from '../mcp/task-session.ts'
+import { registerTaskMcpSession, unregisterTaskMcpSession } from '../mcp/task-session.ts'
 import { tryBuildTaskWorkerMcpUrl } from '../mcp/task-url.ts'
 import {
   readJobExecutionSettings,
@@ -22,6 +16,15 @@ import type { RuntimeHandleRegistry } from '../../pool/infrastructure/runtime-ha
 /** Post-complete grace waiting for HTTP MCP report_task_result (legacy parity). */
 export const TASK_EVIDENCE_GRACE_MS = 3 * 60 * 1000
 
+export type ExecuteWorkService = {
+  dispatch(input: {
+    jobId: string
+    workId: string
+    runId: string
+    workspaceRoot: string
+  }): Promise<void>
+}
+
 export function createExecuteWorkService(deps: {
   db: Database.Database
   work: WorkRepository
@@ -29,7 +32,7 @@ export function createExecuteWorkService(deps: {
   acceptResult: ReturnType<typeof import('./accept-work-result.ts').createAcceptWorkResultService>
   handles?: RuntimeHandleRegistry
   evidenceGraceMs?: number
-}) {
+}): ExecuteWorkService {
   return {
     async dispatch(input: {
       jobId: string
@@ -92,7 +95,9 @@ export function createExecuteWorkService(deps: {
       })
 
       deps.db
-        .prepare(`UPDATE work_attempts SET status = 'running', provider_started_at = ? WHERE id = ?`)
+        .prepare(
+          `UPDATE work_attempts SET status = 'running', provider_started_at = ? WHERE id = ?`
+        )
         .run(nowMs(), attemptId)
 
       const jobSettings = readJobExecutionSettings(deps.db, input.jobId)
@@ -187,7 +192,11 @@ export function createExecuteWorkService(deps: {
           )
           .run(nowMs(), JSON.stringify({ message }), attemptId)
         const current = deps.work.requireWork(input.jobId, input.workId)
-        if (current.state === 'running' || current.state === 'leased' || current.state === 'reported') {
+        if (
+          current.state === 'running' ||
+          current.state === 'leased' ||
+          current.state === 'reported'
+        ) {
           deps.work.casWorkState({
             jobId: input.jobId,
             workId: input.workId,
@@ -247,8 +256,7 @@ export function createExecuteWorkService(deps: {
 
         // Turn completed without tool_call — wait for HTTP MCP report_task_result, then fail.
         // Without an MCP URL (unit tests / unbound port), fail immediately.
-        const graceMs =
-          deps.evidenceGraceMs ?? (mcpUrl ? TASK_EVIDENCE_GRACE_MS : 0)
+        const graceMs = deps.evidenceGraceMs ?? (mcpUrl ? TASK_EVIDENCE_GRACE_MS : 0)
         let graceTimer: ReturnType<typeof setTimeout> | undefined
         try {
           const evidence = await Promise.race([
@@ -278,5 +286,3 @@ export function createExecuteWorkService(deps: {
     }
   }
 }
-
-export type ExecuteWorkService = ReturnType<typeof createExecuteWorkService>

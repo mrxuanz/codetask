@@ -12,7 +12,7 @@ import {
 import { THREAD_KIND_CHAT, WorkflowHarness } from '../helpers/workflow-harness'
 
 describe('conversation turn preflight (03)', () => {
-  const harness = new WorkflowHarness()
+  const harness = new WorkflowHarness({ inMemory: true })
 
   before(async () => {
     await harness.setup()

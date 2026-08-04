@@ -2,10 +2,7 @@ import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { createTurnError } from '../../shared/turn-errors.ts'
 import type { SupportedCoreCode } from '../conversation/cores'
 import type { ConversationRole } from './roles'
-import {
-  getProviderDescriptor,
-  type ProviderCapabilityProfile
-} from '../../shared/providers'
+import { getProviderDescriptor, type ProviderCapabilityProfile } from '../../shared/providers'
 
 export type AgentCapabilityProfile = ProviderCapabilityProfile
 

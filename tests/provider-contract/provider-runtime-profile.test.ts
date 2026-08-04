@@ -30,7 +30,7 @@ import {
   providerRuntimeWriteRoots
 } from '../../src/server/sandbox/provider-auth/types'
 
-const PROVIDERS = ['codex', 'cursorcli', 'claude-code', 'opencode'] as const
+const PROVIDERS = ['codex', 'cursor', 'claude', 'opencode'] as const
 
 function createHostIdentityFixture(hostRoot: string): {
   readonly hostEnvironment: Readonly<Record<string, string>>
@@ -147,14 +147,14 @@ test('Provider-native identity paths and private instance state are wired per SD
     assert.equal(codex.environment.CODEX_HOME, resolveCodexHostHome(host))
     assert.ok(providerRuntimeWriteRoots(codex).includes(resolveCodexHostHome(host)))
 
-    const cursor = prepareProviderRuntimeForTest('cursorcli', {
+    const cursor = prepareProviderRuntimeForTest('cursor', {
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(cursor.environment.CURSOR_CONFIG_DIR, resolveCursorHostConfigDir(host))
     assert.equal('CURSOR_DATA_DIR' in cursor.environment, false)
     assert.ok(!providerRuntimeWriteRoots(cursor).includes(join(hostRoot, '.cursor')))
 
-    const claude = prepareProviderRuntimeForTest('claude-code', {
+    const claude = prepareProviderRuntimeForTest('claude', {
       hostEnvironment: fixture.hostEnvironment
     })
     assert.equal(claude.environment.CLAUDE_CONFIG_DIR, resolveClaudeHostConfigDir(host))
@@ -193,8 +193,6 @@ test('two runtime profiles share host identity defaults, never instance-local SD
 
   try {
     for (const provider of PROVIDERS) {
-      const firstRoot = join(runtimeTree, `${provider}-one`)
-      const secondRoot = join(runtimeTree, `${provider}-two`)
       const first = prepareProviderRuntimeForTest(provider, {
         hostEnvironment: fixture.hostEnvironment
       })
@@ -237,7 +235,7 @@ test('configuration files alone are not treated as login identity', () => {
     writeFileSync(join(resolveOpencodeHostConfigDir(host), 'opencode.json'), '{}\n')
 
     assert.equal(
-      prepareProviderRuntimeForTest('cursorcli', {
+      prepareProviderRuntimeForTest('cursor', {
         hostEnvironment
       }).diagnostics.authMaterialPresent,
       process.platform === 'darwin'

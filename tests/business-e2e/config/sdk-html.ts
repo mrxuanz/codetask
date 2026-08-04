@@ -15,7 +15,7 @@ export function htmlFileNameForConversationCore(core: string): string {
   if (c === 'opencode') return 'opencode.html'
   if (
     c === 'cursor' ||
-    c === 'cursorcli' ||
+    c === 'cursor' ||
     c === 'cursor-cli' ||
     c === 'cursoracp' ||
     c === 'cursor-acp' ||

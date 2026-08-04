@@ -28,10 +28,7 @@ describe('architecture residual DoD — M1', () => {
       /export const deletionRequests[\s\S]*?username:\s*text\('username'\)/
     )
 
-    const coordinator = readFileSync(
-      join(root, 'src/server/infra/deletion-coordinator.ts'),
-      'utf8'
-    )
+    const coordinator = readFileSync(join(root, 'src/server/infra/deletion-coordinator.ts'), 'utf8')
     assert.match(coordinator, /actorId:\s*string/)
     assert.match(coordinator, /actorId:\s*row\.actorId/)
     assert.doesNotMatch(coordinator, /username:\s*row\.username/)
@@ -49,12 +46,12 @@ describe('architecture residual DoD — M1', () => {
   })
 
   it('TaskLaunchDraftPayload has a single shared definition', () => {
-    const draftForm = readFileSync(join(root, 'src/renderer/src/lib/draftForm.ts'), 'utf8')
+    const draftForm = readFileSync(join(root, 'apps/web/src/lib/draftForm.ts'), 'utf8')
     assert.doesNotMatch(draftForm, /export interface TaskLaunchDraftPayload/)
     assert.doesNotMatch(draftForm, /export interface TaskLaunchDraftAbility/)
-    assert.match(draftForm, /from '@shared\/contracts\/task-launch-draft'/)
+    assert.match(draftForm, /from '@codetask\/contracts'/)
 
-    const shared = readFileSync(join(root, 'src/shared/contracts/task-launch-draft.ts'), 'utf8')
-    assert.match(shared, /export interface TaskLaunchDraftPayload/)
+    const shared = readFileSync(join(root, 'packages/contracts/src/ui-draft.ts'), 'utf8')
+    assert.match(shared, /export type TaskLaunchDraftPayload/)
   })
 })

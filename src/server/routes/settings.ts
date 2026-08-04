@@ -8,7 +8,9 @@ import { getOrComposeSettings } from '../settings/service'
 import { listChatCores } from '../conversation/cores'
 
 function getEffectiveProviders(ctx: AppContext): ProviderRuntimeSettings {
-  return { providers: structuredClone(ctx.config.providers) as ProviderRuntimeSettings['providers'] }
+  return {
+    providers: structuredClone(ctx.config.providers) as ProviderRuntimeSettings['providers']
+  }
 }
 
 export function createSettingsRoutes(ctx: AppContext): Hono {

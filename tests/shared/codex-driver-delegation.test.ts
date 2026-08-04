@@ -16,11 +16,14 @@ import { CODEX_DESCRIPTOR } from '../../src/shared/providers/descriptors/codex.t
 import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
 import type { ProviderInstallation } from '../../src/shared/providers/installation.ts'
 import type { AgentTurnChunk, AgentTurnInput } from '../../src/server/agent-runtime/types.ts'
-import { buildProviderTurnContext } from '../../src/server/providers/driver.ts'
-import { resolveProviderExecutable } from '../../src/server/providers/executable.ts'
-import { createProviderRegistry } from '../../src/server/providers/composition.ts'
-import { CodexDriver, createCodexStreamFactory } from '../../src/server/providers/codex/driver.ts'
-import { resolveCodexPathOverride } from '../../src/server/providers/codex/turn-plan.ts'
+import { buildProviderTurnContext } from '../../packages/provider-runtime-node/src/providers/driver.ts'
+import { resolveProviderExecutable } from '../../packages/provider-runtime-node/src/providers/executable.ts'
+import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
+import {
+  CodexDriver,
+  createCodexStreamFactory
+} from '../../packages/provider-runtime-node/src/providers/codex/driver.ts'
+import { resolveCodexPathOverride } from '../../packages/provider-runtime-node/src/providers/codex/turn-plan.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -40,6 +43,7 @@ function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
     role: 'conversation',
     cwd: '/workspace',
     runtimeRoot: '/runtime/codex',
+    providerRuntimeScopeId: 'conversation:test-codex',
     prompt: 'delegate-me',
     ...overrides
   }
@@ -88,17 +92,20 @@ test('CodexDriver prepareTurn delegates to stream factory without altering chunk
   assert.equal(prepared.reusePolicy, 'conversation-scoped')
 })
 
-test('default Codex stream factory delegates to legacy streamCodexTurn', () => {
-  const source = readFileSync(join(root, 'src/server/providers/codex/driver.ts'), 'utf8')
+test('default Codex stream factory delegates to the canonical SDK streamer', () => {
+  const source = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/codex/driver.ts'),
+    'utf8'
+  )
   assert.match(source, /createCodexStreamFactory/)
   assert.match(source, /streamCodexTurn/)
-  assert.match(source, /agent-runtime\/providers\/codex-sdk/)
+  assert.match(source, /streamers\/codex-sdk/)
   assert.equal(typeof createCodexStreamFactory, 'function')
 })
 
 test('Registry Codex entry uses the shared descriptor without a parallel runtime catalog', () => {
   const descriptorSource = readFileSync(
-    join(root, 'src/server/providers/codex/descriptor.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/codex/descriptor.ts'),
     'utf8'
   )
   assert.equal(existsSync(join(root, 'src/server/providers/catalog.ts')), false)
@@ -143,8 +150,14 @@ test('CodexDriver.discover returns a stable installationId matching the resolver
 })
 
 test('central preflight switch no longer handles Codex; driver owns preflight', () => {
-  const driverSource = readFileSync(join(root, 'src/server/providers/codex/driver.ts'), 'utf8')
-  const codexPreflight = readFileSync(join(root, 'src/server/providers/codex/preflight.ts'), 'utf8')
+  const driverSource = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/codex/driver.ts'),
+    'utf8'
+  )
+  const codexPreflight = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/codex/preflight.ts'),
+    'utf8'
+  )
 
   assert.equal(existsSync(join(root, 'src/server/sandbox/provider-auth/preflight.ts')), false)
   assert.equal(existsSync(join(root, 'src/server/providers/provider-subsystem.ts')), false)
@@ -155,16 +168,28 @@ test('central preflight switch no longer handles Codex; driver owns preflight', 
 })
 
 test('buildCodexTurnPlan lives in Codex driver module; runner does not import policy', () => {
-  const turnPlan = readFileSync(join(root, 'src/server/providers/codex/turn-plan.ts'), 'utf8')
-  const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/codex-sdk.ts'), 'utf8')
+  const turnPlan = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/codex/turn-plan.ts'),
+    'utf8'
+  )
+  const sdk = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/streamers/codex-sdk.ts'),
+    'utf8'
+  )
   const runner = readFileSync(join(root, 'src/server/agent-runtime/runner.ts'), 'utf8')
-  const driverSource = readFileSync(join(root, 'src/server/providers/codex/driver.ts'), 'utf8')
+  const driverSource = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/codex/driver.ts'),
+    'utf8'
+  )
 
   assert.match(turnPlan, /export function buildCodexTurnPlan/)
-  assert.match(sdk, /from '\.\.\/\.\.\/providers\/codex\/turn-plan'/)
+  assert.match(sdk, /from '\.\.\/providers\/codex\/turn-plan'/)
   assert.doesNotMatch(sdk, /from '\.\/codex-policy'/)
   assert.doesNotMatch(runner, /codex-policy|buildCodexTurnPlan/)
-  assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/codex-policy.ts')), false)
+  assert.equal(
+    existsSync(join(root, 'packages/provider-runtime-node/src/streamers/codex-policy.ts')),
+    false
+  )
   assert.match(driverSource, /export \{\s*buildCodexTurnPlan/s)
 })
 
@@ -187,7 +212,8 @@ test('explicit Codex path is passed to the SDK with the same installationId', as
     })
     assert.ok(discovered)
 
-    const { buildCodexTurnPlan } = await import('../../src/server/providers/codex/turn-plan.ts')
+    const { buildCodexTurnPlan } =
+      await import('../../packages/provider-runtime-node/src/providers/codex/turn-plan.ts')
     const plan = buildCodexTurnPlan({
       provider: 'codex',
       role: 'conversation',
@@ -202,7 +228,10 @@ test('explicit Codex path is passed to the SDK with the same installationId', as
     assert.equal(plan.codexPathOverride, bin)
     assert.equal(plan.executableStrategy, 'installation')
 
-    const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/codex-sdk.ts'), 'utf8')
+    const sdk = readFileSync(
+      join(root, 'packages/provider-runtime-node/src/streamers/codex-sdk.ts'),
+      'utf8'
+    )
     assert.match(sdk, /codexPathOverride:\s*plan\.codexPathOverride/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -234,7 +263,8 @@ test('automatic Codex discovery never overrides the SDK-bundled native CLI', asy
 })
 
 test('CodexDriver turn handle uses RuntimeManager cancel/close contract', async () => {
-  const { ProviderRuntimeManager } = await import('../../src/server/providers/lifecycle.ts')
+  const { ProviderRuntimeManager } =
+    await import('../../packages/provider-runtime-node/src/providers/lifecycle.ts')
   const events: string[] = []
 
   async function* factory(
@@ -311,7 +341,10 @@ test('CodexDriver turn handle uses RuntimeManager cancel/close contract', async 
   ])
   assert.equal(manager.activeCount(), 0)
 
-  const routing = readFileSync(join(root, 'src/server/agent-runtime/providers/index.ts'), 'utf8')
+  const routing = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/streamers/index.ts'),
+    'utf8'
+  )
   assert.match(routing, /getProviderRuntimeManager\(\)\.stream/)
   assert.match(routing, /buildProviderTurnContext/)
 })

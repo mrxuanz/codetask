@@ -1,9 +1,6 @@
 import type { SupportedCoreCode } from '../conversation/cores'
 import { getProviderDescriptor } from '../../shared/providers/descriptors'
-import {
-  CODETEAM_MANAGER_MCP_SERVER,
-  MCP_HTTP_ACCEPT_HEADER_VALUE
-} from '@codetask/agent-runtime'
+import { CODETEAM_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from '@codetask/agent-runtime'
 import { allConversationMcpToolNames } from '../conversation/mcp/tools'
 
 export function buildHttpMcpServerConfig(url: string): {

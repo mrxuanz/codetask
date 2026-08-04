@@ -248,7 +248,12 @@ export class ControlJobService {
           )
           .run(jobId, nextGeneration, sequence, now)
 
-        this.outbox.enqueue(jobId, 'job.queue.changed', { jobId, generation: nextGeneration }, this.db)
+        this.outbox.enqueue(
+          jobId,
+          'job.queue.changed',
+          { jobId, generation: nextGeneration },
+          this.db
+        )
         return updated
       })
 

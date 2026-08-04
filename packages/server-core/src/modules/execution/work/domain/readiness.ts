@@ -21,9 +21,7 @@ export function computeReadyWork(input: {
     return { jobId, workIds, blocked }
   }
 
-  const depsByWork = buildAdjacency(
-    dependencies.filter((d) => d.generation === generation)
-  )
+  const depsByWork = buildAdjacency(dependencies.filter((d) => d.generation === generation))
   const currentWork = workItems.filter((w) => w.generation === generation)
 
   for (const work of currentWork) {

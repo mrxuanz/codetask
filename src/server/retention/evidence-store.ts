@@ -1,9 +1,6 @@
-import type {
-  SliceVerificationRecordDto,
-  TaskEvidenceDto
-} from '../../shared/contracts/evidence.ts'
-import { DEFAULT_RETENTION_SETTINGS } from '../../shared/contracts/retention.ts'
-import type { RetentionSettings } from '../../shared/contracts/retention.ts'
+import type { SliceVerificationRecordDto, TaskEvidenceDto } from '@codetask/contracts'
+import { DEFAULT_RETENTION_SETTINGS } from '@codetask/contracts'
+import type { RetentionSettings } from '@codetask/contracts'
 import { getDb } from '../db'
 import { putJobArtifact } from './artifacts'
 import { slimEvidenceForState, slimSliceVerdict } from './lifecycle-helpers'

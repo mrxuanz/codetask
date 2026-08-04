@@ -8,7 +8,7 @@ import { getProviderDescriptor } from '../../src/shared/providers/descriptors.ts
 import { MCP_ROOT_KEYS } from '@codetask/server-core/modules/settings'
 import { cliMcpRootKey as runtimeCliMcpRootKey } from '../../src/server/agent-runtime/mcp.ts'
 import { SUPPORTED_CORE_CODES } from '../../src/shared/providers/codes.ts'
-import { createProviderRegistry } from '../../src/server/providers/composition.ts'
+import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
 import { resolveCoreModel } from '../../src/server/conversation/models.ts'
 import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
 
@@ -53,11 +53,13 @@ test('MCP root keys come from shared descriptors; no duplicated Maps', () => {
     assert.equal(runtimeCliMcpRootKey(code), expected)
   }
 
-  const settingsMcp = readSource('src/server/settings/mcp.ts')
+  const settingsMcp = readSource(
+    'packages/server-core/src/modules/settings/application/settings-application.ts'
+  )
   const runtimeMcp = readSource('src/server/agent-runtime/mcp.ts')
   assert.match(settingsMcp, /resolveMcpServersMap/)
   assert.match(runtimeMcp, /getProviderDescriptor\(coreCode\)\.mcpRootKey/)
-  assert.doesNotMatch(runtimeMcp, /'claude-code':\s*'mcpServers'/)
+  assert.doesNotMatch(runtimeMcp, /'claude':\s*'mcpServers'/)
 })
 
 test('sandbox orchestrator uses driver contributeSandboxPolicy without provider if-chain', () => {
@@ -67,14 +69,14 @@ test('sandbox orchestrator uses driver contributeSandboxPolicy without provider 
   assert.match(orchestrator, /getProviderRegistry\(\)\.get\(input\.coreCode\)/)
   assert.doesNotMatch(orchestrator, /coreCode === 'codex'/)
   assert.doesNotMatch(orchestrator, /runProviderAuthPreflight/)
-  assert.doesNotMatch(readRoots, /provider === 'cursorcli'/)
+  assert.doesNotMatch(readRoots, /provider === 'cursor'/)
   assert.doesNotMatch(readRoots, /resolveCursorAgentInstallDirs/)
 })
 
 test('auth preflight and install dirs are owned directly by Registry drivers', () => {
-  const driver = readSource('src/server/providers/driver.ts')
-  const composition = readSource('src/server/providers/composition.ts')
-  const installation = readSource('src/server/providers/installation.ts')
+  const driver = readSource('packages/provider-runtime-node/src/providers/driver.ts')
+  const composition = readSource('packages/provider-runtime-node/src/providers/composition.ts')
+  const installation = readSource('packages/provider-runtime-node/src/providers/installation.ts')
   const readRoots = readSource('src/server/sandbox/provider-read-roots.ts')
   assert.match(driver, /prepareRuntimeProfile\(context:/)
   assert.match(driver, /installDirs\(hostEnvironment/)
@@ -90,13 +92,13 @@ test('auth preflight and install dirs are owned directly by Registry drivers', (
 
 test('role-worker-cursor-job routes through Registry getAgentTurnProvider', () => {
   const worker = readSource('src/sandbox/role-worker-cursor-job.ts')
-  assert.match(worker, /getAgentTurnProvider\('cursorcli'\)/)
+  assert.match(worker, /getAgentTurnProvider\('cursor'\)/)
   assert.doesNotMatch(worker, /providers\/cursor-acp/)
 })
 
 test('UI core labels do not hardcode Provider metadata copies', () => {
-  const draftForm = readSource('src/renderer/src/lib/draftForm.ts')
-  const jobProgress = readSource('src/renderer/src/lib/jobProgress.ts')
+  const draftForm = readSource('apps/web/src/lib/draftForm.ts')
+  const jobProgress = readSource('apps/web/src/lib/jobProgress.ts')
   assert.doesNotMatch(draftForm, /CORE_LABELS/)
   assert.match(jobProgress, /getProviderDescriptors/)
   assert.doesNotMatch(jobProgress, /codex:\s*'Codex'/)
@@ -108,7 +110,7 @@ test('Registry production drivers remain the single registration surface', () =>
     registry.list().map((driver) => driver.descriptor.code),
     [...SUPPORTED_CORE_CODES]
   )
-  const index = readSource('src/server/agent-runtime/providers/index.ts')
+  const index = readSource('packages/provider-runtime-node/src/streamers/index.ts')
   assert.doesNotMatch(index, /AGENT_TURN_PROVIDERS/)
   assert.match(index, /getProviderRegistry/)
 })

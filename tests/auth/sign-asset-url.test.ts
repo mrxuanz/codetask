@@ -28,11 +28,7 @@ test('signAssetUrl refreshes stale asset_token instead of preserving it', () => 
 })
 
 test('signAssetUrl still signs legacy /api/threads attachment URLs', () => {
-  const signed = signAssetUrl(
-    'test-secret',
-    '/api/threads/thread-1/attachments/att-1',
-    'alice'
-  )
+  const signed = signAssetUrl('test-secret', '/api/threads/thread-1/attachments/att-1', 'alice')
   assert.match(signed, /asset_token=/)
   assert.match(signed, /\/api\/threads\/thread-1\/attachments\/att-1/)
 })

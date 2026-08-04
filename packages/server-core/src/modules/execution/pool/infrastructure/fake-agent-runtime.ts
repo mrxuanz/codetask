@@ -1,8 +1,4 @@
-import type {
-  AgentRuntime,
-  AgentTurnEvent,
-  AgentTurnInput
-} from '@codetask/agent-runtime'
+import type { AgentRuntime, AgentTurnEvent, AgentTurnInput } from '@codetask/agent-runtime'
 
 /** Test/runtime helper that completes turns immediately without a real provider. */
 export class FakeAgentRuntime implements AgentRuntime {
@@ -55,8 +51,12 @@ export class FakeAgentRuntime implements AgentRuntime {
     yield { type: 'completed', reason: 'fake-runtime' }
   }
 
-  async abort(): Promise<void> {}
-  async closeScope(): Promise<void> {}
+  async abort(): Promise<void> {
+    // Fake turns are synchronous generators and have no background work to abort.
+  }
+  async closeScope(): Promise<void> {
+    // Fake runtimes do not allocate reusable scopes.
+  }
   async inspectScope(): Promise<null> {
     return null
   }

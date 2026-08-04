@@ -7,9 +7,9 @@ import { OPENCODE_DESCRIPTOR } from './descriptors/opencode'
 
 const DESCRIPTORS: Readonly<Record<SupportedCoreCode, ProviderDescriptor>> = Object.freeze({
   codex: CODEX_DESCRIPTOR,
-  'claude-code': CLAUDE_DESCRIPTOR,
+  claude: CLAUDE_DESCRIPTOR,
   opencode: OPENCODE_DESCRIPTOR,
-  cursorcli: CURSOR_DESCRIPTOR
+  cursor: CURSOR_DESCRIPTOR
 })
 
 export function getProviderDescriptor(code: SupportedCoreCode): ProviderDescriptor {

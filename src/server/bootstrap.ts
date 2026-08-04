@@ -31,10 +31,7 @@ import { createProviderRegistry } from './providers/composition'
 import { ProviderRuntimeManager } from './providers/lifecycle'
 import { SecureAuthService } from './auth/service'
 import { configureRuntimeMode, resetRuntimeMode } from './runtime-mode'
-import {
-  configureRuntimeFeatures,
-  resetRuntimeFeatures
-} from './config/runtime-features'
+import { configureRuntimeFeatures, resetRuntimeFeatures } from './config/runtime-features'
 import {
   configureShellChildEnvironment,
   resetShellChildEnvironment
@@ -52,6 +49,8 @@ export interface BootstrapOptions {
   mode?: AppMode
   config?: AppConfigOverrides
   shellChildEnvironment?: Record<string, string>
+  /** Optional recovery master key file (--master-key-file). */
+  masterKeyFile?: string
   storage?: {
     source: string
   }
@@ -126,6 +125,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       dataDir: options.dataDir,
       db,
       settings,
+      masterKeyFile: options.masterKeyFile,
       security: {
         mode,
         authSecret,

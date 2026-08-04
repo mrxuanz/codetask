@@ -25,9 +25,7 @@ export class QueueRepository {
         `SELECT status, priority, sequence FROM execution_queue_entries
          WHERE job_id = ? AND generation = ?`
       )
-      .get(jobId, generation) as
-      | { status: string; priority: number; sequence: number }
-      | undefined
+      .get(jobId, generation) as { status: string; priority: number; sequence: number } | undefined
     if (!current || current.status !== 'queued') return null
     const row = this.db
       .prepare(

@@ -1,9 +1,6 @@
 import { createHash } from 'crypto'
 
-export function buildConversationMcpCapabilityToken(
-  sessionId: string,
-  threadId: string
-): string {
+export function buildConversationMcpCapabilityToken(sessionId: string, threadId: string): string {
   const primary = createHash('sha256')
     .update(['conversation-mcp', '1', sessionId, threadId].join('\0'))
     .digest('hex')

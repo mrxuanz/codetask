@@ -99,12 +99,7 @@ test('buildCursorAcpCliArgs sandbox matrix', () => {
 })
 
 test('all supported providers are covered by contract matrix', () => {
-  assert.deepEqual([...SUPPORTED_CORE_CODES].sort(), [
-    'claude-code',
-    'codex',
-    'cursorcli',
-    'opencode'
-  ])
+  assert.deepEqual([...SUPPORTED_CORE_CODES].sort(), ['claude', 'codex', 'cursor', 'opencode'])
   for (const provider of SUPPORTED_CORE_CODES) {
     for (const role of ROLES) {
       const outer = resolveProviderOuterSandbox(role, undefined)

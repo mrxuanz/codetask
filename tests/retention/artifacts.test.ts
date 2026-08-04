@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import test from 'node:test'
-import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
+import { DEFAULT_RETENTION_SETTINGS } from '@codetask/contracts'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
 import {
   putJobArtifact,
@@ -19,7 +19,7 @@ import {
 } from '../../src/server/retention/counters'
 import { summarizeEvidence } from '../../src/server/retention/lifecycle-helpers'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
-import type { TaskEvidenceDto } from '../../src/shared/contracts/evidence'
+import type { TaskEvidenceDto } from '@codetask/contracts'
 import { eq } from 'drizzle-orm'
 import { jobArtifacts } from '../../src/server/db/schema'
 

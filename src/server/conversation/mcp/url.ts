@@ -10,10 +10,7 @@ export function getConversationMcpBackendPort(): number {
   return backendPort
 }
 
-export function buildConversationMcpUrl(input: {
-  sessionId: string
-  threadId: string
-}): string {
+export function buildConversationMcpUrl(input: { sessionId: string; threadId: string }): string {
   if (!backendPort) {
     throw new Error('Conversation MCP backend port is not initialized')
   }
@@ -25,4 +22,3 @@ export function buildConversationMcpUrl(input: {
   })
   return `http://127.0.0.1:${backendPort}/api/mcp/conversation/${encodeURIComponent(input.sessionId)}?${params}`
 }
-

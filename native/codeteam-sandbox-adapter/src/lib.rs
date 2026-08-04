@@ -345,11 +345,13 @@ pub fn to_permission_profile(policy: &ParsedTaskPolicy) -> Result<PermissionProf
 pub fn to_permission_profile_v2(policy: &TaskSandboxPolicyV2) -> Result<PermissionProfile> {
     let cwd = Path::new(&policy.cwd);
     let (file_system, _attestation) = build_filesystem_policy_v2(policy, cwd)?;
-    Ok(PermissionProfile::from_runtime_permissions_with_enforcement(
-        codeteam_sandbox_policy::models::SandboxEnforcement::Managed,
-        &file_system,
-        network_policy_v2(&policy.network),
-    ))
+    Ok(
+        PermissionProfile::from_runtime_permissions_with_enforcement(
+            codeteam_sandbox_policy::models::SandboxEnforcement::Managed,
+            &file_system,
+            network_policy_v2(&policy.network),
+        ),
+    )
 }
 
 pub fn effective_roots_attestation(policy: &ParsedTaskPolicy) -> Result<EffectiveRootsAttestation> {
@@ -548,8 +550,16 @@ mod tests {
         let profile = to_permission_profile(&policy).unwrap();
         let (fs, _) = profile.to_runtime_permissions();
         let readable = fs.get_readable_roots_with_cwd(Path::new("/workspace"));
-        assert!(readable.iter().any(|p| p.as_path() == Path::new("/workspace")));
-        assert!(readable.iter().any(|p| p.as_path() == Path::new("/runtime")));
+        assert!(
+            readable
+                .iter()
+                .any(|p| p.as_path() == Path::new("/workspace"))
+        );
+        assert!(
+            readable
+                .iter()
+                .any(|p| p.as_path() == Path::new("/runtime"))
+        );
     }
 
     #[test]

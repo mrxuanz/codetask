@@ -3,14 +3,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createProviderRegistry } from '../../src/server/providers/composition.ts'
+import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
 import {
   ProcessHostAuthSource,
   processHostAuthSource,
   processHostEnvironmentSource
 } from '../../src/server/host-environment.ts'
 import { toProviderRuntimeLogDto } from '../../src/server/sandbox/provider-auth/types.ts'
-import { spawnProviderCommandSync } from '../../src/server/providers/spawn.ts'
+import { spawnProviderCommandSync } from '../../packages/provider-runtime-node/src/providers/spawn.ts'
 import { resolveProviderRunPolicy } from '../../src/server/agent-runtime/provider-policy.ts'
 
 test('ProviderRegistry driver is the only complete production runtime entry (PRU-04-03)', () => {
@@ -24,14 +24,8 @@ test('ProviderRegistry driver is the only complete production runtime entry (PRU
 })
 
 test('ProviderAuthMode always uses native host identity paths (PRU-05-01)', () => {
-  assert.equal(
-    resolveProviderRunPolicy({ outerSandbox: true }).authMode,
-    'host-identity'
-  )
-  assert.equal(
-    resolveProviderRunPolicy({ outerSandbox: false }).authMode,
-    'host-identity'
-  )
+  assert.equal(resolveProviderRunPolicy({ outerSandbox: true }).authMode, 'host-identity')
+  assert.equal(resolveProviderRunPolicy({ outerSandbox: false }).authMode, 'host-identity')
   const policySource = readFileSync(
     join(process.cwd(), 'src/server/agent-runtime/provider-policy.ts'),
     'utf8'
@@ -120,7 +114,10 @@ test('provider preflight creates no credential artifacts or parent env mutation 
   const previous = process.env[markerKey]
   delete process.env[markerKey]
 
-  const spawnSource = readFileSync(join(process.cwd(), 'src/server/providers/spawn.ts'), 'utf8')
+  const spawnSource = readFileSync(
+    join(process.cwd(), 'packages/provider-runtime-node/src/providers/spawn.ts'),
+    'utf8'
+  )
   assert.match(spawnSource, /shell:\s*false/)
 
   try {
@@ -176,7 +173,7 @@ test('provider preflight creates no credential artifacts or parent env mutation 
     // authoritative runtime profile without probing a different host CLI.
     for (const name of ['codex', 'claude', 'cursor', 'opencode'] as const) {
       const source = readFileSync(
-        join(process.cwd(), `src/server/providers/${name}/preflight.ts`),
+        join(process.cwd(), `packages/provider-runtime-node/src/providers/${name}/preflight.ts`),
         'utf8'
       )
       assert.doesNotMatch(source, /writeFile(Sync)?\(/)

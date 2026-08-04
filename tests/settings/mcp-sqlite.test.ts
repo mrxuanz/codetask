@@ -46,7 +46,9 @@ test('MCP configuration is stored in SQLite agent_mcp namespace', async (t) => {
   assert.match(row?.value_json ?? '', /\$secret/)
   assert.match(row?.value_json ?? '', /API_TOKEN/)
   assert.equal(existsSync(join(dataDir, 'mcp-secrets.json')), false)
-  assert.equal(existsSync(join(dataDir, 'secrets')), false)
+  // Batch E may create installation.key under secrets/; MCP secrets must stay in SQLite.
+  assert.equal(existsSync(join(dataDir, 'secrets', 'mcp-secrets.json')), false)
+  assert.equal(existsSync(join(dataDir, 'mcp.json')), false)
 })
 
 test('settings capture normalizes canonical provider aliases to host MCP keys', async (t) => {
@@ -59,10 +61,10 @@ test('settings capture normalizes canonical provider aliases to host MCP keys', 
   const app = getOrComposeSettings(getAppContext()).app
   const current = app.getMcp()
   const settings = structuredClone(current.settings)
-  settings.roles.conversation['claude-code'].mcpServers = {
+  settings.roles.conversation.claude.mcpServers = {
     docs: { command: 'docs-server' }
   }
-  settings.roles.planner.cursorcli.mcpServers = {
+  settings.roles.planner.cursor.mcpServers = {
     planner: { command: 'planner-server' }
   }
   await app.updateMcp(current.revision, settings)

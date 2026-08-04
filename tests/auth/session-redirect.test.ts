@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { shouldClearSessionOnApiError } from '../../src/renderer/src/auth/sessionRedirect'
+import { shouldClearSessionOnApiError } from '../../apps/web/src/auth/sessionRedirect'
 
 test('shouldClearSessionOnApiError keeps session on login guard responses', () => {
   assert.equal(

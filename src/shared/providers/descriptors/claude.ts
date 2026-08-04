@@ -1,7 +1,7 @@
 import type { ProviderDescriptor } from '../descriptor'
 
 export const CLAUDE_DESCRIPTOR = Object.freeze({
-  code: 'claude-code',
+  code: 'claude',
   aliases: ['claude', 'claude_code', 'claude-code'],
   label: 'Claude Code',
   description: 'Anthropic Claude Code CLI',

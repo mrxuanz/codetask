@@ -2,11 +2,7 @@ import type Database from 'better-sqlite3'
 import type { ProviderCode, TitleSource } from '@codetask/contracts'
 import type { ConversationRecord, MessageRecord, TurnRecord } from '../domain/conversation.ts'
 import { ACTIVE_TURN_STATES } from '../domain/conversation.ts'
-import type {
-  ConversationRepository,
-  MessageRepository,
-  TurnRepository
-} from '../ports/ports.ts'
+import type { ConversationRepository, MessageRepository, TurnRepository } from '../ports/ports.ts'
 
 function mapConversation(row: Record<string, unknown>): ConversationRecord {
   return {
@@ -35,8 +31,7 @@ function mapMessage(row: Record<string, unknown>): MessageRecord {
     providerCode: (row.provider_code as ProviderCode | null) ?? null,
     model: row.model == null ? null : String(row.model),
     thinkingText: row.thinking_text == null ? null : String(row.thinking_text),
-    thinkingDurationMs:
-      row.thinking_duration_ms == null ? null : Number(row.thinking_duration_ms),
+    thinkingDurationMs: row.thinking_duration_ms == null ? null : Number(row.thinking_duration_ms),
     createdAt: String(row.created_at)
   }
 }
@@ -56,8 +51,7 @@ function mapTurn(row: Record<string, unknown>): TurnRecord {
     requestHash: String(row.request_hash ?? ''),
     stateRevision: Number(row.state_revision),
     userMessageId: row.user_message_id == null ? null : String(row.user_message_id),
-    assistantMessageId:
-      row.assistant_message_id == null ? null : String(row.assistant_message_id),
+    assistantMessageId: row.assistant_message_id == null ? null : String(row.assistant_message_id),
     lastErrorJson: row.last_error_json == null ? null : String(row.last_error_json),
     createdAt: String(row.created_at),
     admittedAt: row.admitted_at == null ? null : String(row.admitted_at),

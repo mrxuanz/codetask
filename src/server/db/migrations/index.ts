@@ -55,6 +55,11 @@ import { migration057LegacyOwnerActorIdTables } from './057_legacy_owner_actor_i
 import { migration058DeletionRequestsActorIdTables } from './058_deletion_requests_actor_id'
 import { migration059DropLegacyJobShellTablesHost } from './059_drop_legacy_job_shell_tables'
 import { migration060DropThreadJobsGraphHost } from './060_drop_thread_jobs_graph'
+import { migration061CanonicalProviderCodesHost } from './061_canonical_provider_codes'
+import { migration062AssetsAndDropDeadRuntimeTablesHost } from './062_assets_and_drop_dead_runtime'
+import { migration063ProjectFkAndAssetStorageKeysHost } from './063_project_fk_and_asset_storage'
+import { migration064DropBackupAndMarkerTablesHost } from './064_drop_backup_and_marker_tables'
+import { migration065DropLegacyThreadTablesHost } from './065_drop_legacy_thread_tables'
 import { runMigrations } from './runner'
 import type Database from 'better-sqlite3'
 
@@ -115,15 +120,20 @@ export const allMigrations = [
   migration057LegacyOwnerActorIdTables,
   migration058DeletionRequestsActorIdTables,
   migration059DropLegacyJobShellTablesHost,
-  migration060DropThreadJobsGraphHost
+  migration060DropThreadJobsGraphHost,
+  migration061CanonicalProviderCodesHost,
+  migration062AssetsAndDropDeadRuntimeTablesHost,
+  migration063ProjectFkAndAssetStorageKeysHost,
+  migration064DropBackupAndMarkerTablesHost,
+  migration065DropLegacyThreadTablesHost
 ]
 
 export function applyMigrations(db: Database.Database): void {
   runMigrations(db, allMigrations)
   try {
-    const failures = db
-      .prepare(`SELECT COUNT(*) AS c FROM migration_failures`)
-      .get() as { c: number }
+    const failures = db.prepare(`SELECT COUNT(*) AS c FROM migration_failures`).get() as {
+      c: number
+    }
     if (failures.c > 0) {
       throw new Error(
         `Design migration recorded ${failures.c} failure(s); resolve migration_failures before starting`

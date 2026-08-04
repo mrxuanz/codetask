@@ -34,7 +34,10 @@ describe('architecture 04 DoD', () => {
   it('Auth module lives under packages/server-core/src/modules/auth', () => {
     assert.equal(exists('packages/server-core/src/modules/auth'), true)
     assert.equal(exists('packages/server-core/src/modules/auth/composition.ts'), true)
-    assert.equal(exists('packages/server-core/src/modules/auth/application/auth-application.ts'), true)
+    assert.equal(
+      exists('packages/server-core/src/modules/auth/application/auth-application.ts'),
+      true
+    )
     assert.equal(exists('packages/server-core/src/modules/auth/http/auth-routes.ts'), true)
   })
 
@@ -82,10 +85,10 @@ describe('architecture 04 DoD', () => {
   })
 
   it('renderer does not write task_token; only clears legacy keys', () => {
-    const token = readFileSync(join(root, 'src/renderer/src/auth/token.ts'), 'utf8')
+    const token = readFileSync(join(root, 'apps/web/src/auth/token.ts'), 'utf8')
     assert.doesNotMatch(token, /localStorage\.setItem/)
     assert.match(token, /localStorage\.removeItem/)
-    const authApi = readFileSync(join(root, 'src/renderer/src/api/auth.ts'), 'utf8')
+    const authApi = readFileSync(join(root, 'apps/web/src/api/auth.ts'), 'utf8')
     assert.match(authApi, /\/api\/auth\//)
     assert.doesNotMatch(authApi, /\/api\/bootstrap|\/api\/login[^/]|\/api\/setup[^/]/)
   })
@@ -105,10 +108,7 @@ describe('architecture 04 DoD', () => {
     assert.equal(exists('src/server/db/migrations/052_projects_username_to_actor_id.ts'), true)
     assert.equal(exists('packages/database/src/migrations/projects-actor-id.ts'), true)
     assert.equal(exists('src/server/db/migrations/056_tighten_legacy_thread_schema.ts'), true)
-    assert.equal(
-      exists('packages/database/src/migrations/tighten-legacy-thread-schema.ts'),
-      true
-    )
+    assert.equal(exists('packages/database/src/migrations/tighten-legacy-thread-schema.ts'), true)
     assert.equal(exists('src/server/db/migrations/057_legacy_owner_actor_id.ts'), true)
     assert.equal(exists('packages/database/src/migrations/legacy-owner-actor-id.ts'), true)
     const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
@@ -118,12 +118,9 @@ describe('architecture 04 DoD', () => {
     assert.match(index, /migration057LegacyOwnerActorIdTables/)
     const schema = readFileSync(join(root, 'src/server/db/schema.ts'), 'utf8')
     assert.match(schema, /actorId: text\('actor_id'\)/)
-    const threadsSlice = schema.slice(
-      schema.indexOf("export const threads"),
-      schema.indexOf("export const conversationTurns")
-    )
-    assert.doesNotMatch(threadsSlice, /username: text\('username'\)/)
-    assert.match(threadsSlice, /actorId: text\('actor_id'\)/)
+    assert.doesNotMatch(schema, /export const threads =/)
+    assert.doesNotMatch(schema, /export const threadMessages =/)
+    assert.match(schema, /export const projects =/)
   })
 
   it('SSE routes bind session and recheck auth.session.expired', () => {

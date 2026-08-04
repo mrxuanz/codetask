@@ -3,11 +3,11 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use codeteam_sandbox_adapter::{
-    network_sandbox_policy, parse_task_policy_json, to_permission_profile, ParsedTaskPolicy,
+    ParsedTaskPolicy, network_sandbox_policy, parse_task_policy_json, to_permission_profile,
 };
 use codeteam_sandboxing::seatbelt::{
-    create_seatbelt_command_args, CreateSeatbeltCommandArgsParams,
-    MACOS_PATH_TO_SEATBELT_EXECUTABLE,
+    CreateSeatbeltCommandArgsParams, MACOS_PATH_TO_SEATBELT_EXECUTABLE,
+    create_seatbelt_command_args,
 };
 use codeteam_utils_absolute_path::AbsolutePathBuf;
 

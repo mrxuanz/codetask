@@ -53,12 +53,10 @@ describe('architecture 05 DoD', () => {
 
   it('contracts expose four namespaces and settings error codes', () => {
     const settings = readFileSync(join(root, 'packages/contracts/src/settings.ts'), 'utf8')
-    assert.deepEqual([...SETTING_NAMESPACES], [
-      'agent_defaults',
-      'agent_prompts',
-      'agent_mcp',
-      'provider_runtime'
-    ])
+    assert.deepEqual(
+      [...SETTING_NAMESPACES],
+      ['agent_defaults', 'agent_prompts', 'agent_mcp', 'provider_runtime']
+    )
     assert.ok(AGENT_MCP_ROLES.includes('planner'))
     assert.match(settings, /SETTINGS_ERROR_CODES/)
     assert.match(settings, /settings\.revision_conflict/)
@@ -102,7 +100,8 @@ describe('architecture 05 DoD', () => {
     const service = readFileSync(join(root, 'src/server/settings/service.ts'), 'utf8')
     assert.match(service, /composeSettingsModule/)
     assert.match(service, /getOrComposeSettings/)
-    assert.match(service, /CODETASK_SETTINGS_MASTER_KEY|masterKey|authSecret/)
+    assert.match(service, /createFileSecretKeyProvider|masterKey|authSecret/)
+    assert.doesNotMatch(service, /CODETASK_SETTINGS_MASTER_KEY/)
     assert.doesNotMatch(service, /class SettingsHost/)
   })
 
@@ -116,10 +115,7 @@ describe('architecture 05 DoD', () => {
       'utf8'
     )
     assert.match(agentMcp, /AGENT_MCP_ROLE_LIST|AGENT_MCP_ROLES/)
-    assert.doesNotMatch(
-      agentMcp,
-      /planner.*conversation|conversation.*planner.*reuse/i
-    )
+    assert.doesNotMatch(agentMcp, /planner.*conversation|conversation.*planner.*reuse/i)
   })
 
   it('agent runner does not live-read MCP settings mid-turn', () => {
@@ -146,7 +142,7 @@ describe('architecture 05 DoD', () => {
   })
 
   it('renderer settings client uses typed settings APIs with CAS', () => {
-    const api = readFileSync(join(root, 'src/renderer/src/api/settings.ts'), 'utf8')
+    const api = readFileSync(join(root, 'apps/web/src/api/settings.ts'), 'utf8')
     assert.match(api, /\/api\/settings\/agent-defaults/)
     assert.match(api, /\/api\/settings\/prompts/)
     assert.match(api, /\/api\/settings\/mcp/)
@@ -155,9 +151,9 @@ describe('architecture 05 DoD', () => {
     assert.match(api, /expectedRevision/)
     assert.doesNotMatch(api, /\/api\/settings\/control-plane/)
     assert.doesNotMatch(api, /\/api\/settings\/business-skills/)
-    const storage = readFileSync(join(root, 'src/renderer/src/api/storage.ts'), 'utf8')
+    const storage = readFileSync(join(root, 'apps/web/src/api/storage.ts'), 'utf8')
     assert.match(storage, /\/api\/system\/storage/)
-    const page = readFileSync(join(root, 'src/renderer/src/pages/home/SettingsPage.vue'), 'utf8')
+    const page = readFileSync(join(root, 'apps/web/src/pages/home/SettingsPage.vue'), 'utf8')
     assert.match(page, /secrets/)
     assert.match(page, /fetchSecrets|putSecret/)
     assert.doesNotMatch(page, /controlPlane|BusinessSkills/)

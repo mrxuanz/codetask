@@ -11,10 +11,7 @@ export type WorkspaceResolverPort = {
 }
 
 export type WorkspaceLeasePort = {
-  tryAcquireExclusive(input: {
-    workspaceRoot: string
-    ownerId: string
-  }): { leaseId: string } | null
+  tryAcquireExclusive(input: { workspaceRoot: string; ownerId: string }): { leaseId: string } | null
   release(leaseId: string): void
 }
 

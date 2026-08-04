@@ -16,27 +16,27 @@ import { CLAUDE_DESCRIPTOR } from '../../src/shared/providers/descriptors/claude
 import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
 import type { ProviderInstallation } from '../../src/shared/providers/installation.ts'
 import type { AgentTurnChunk, AgentTurnInput } from '../../src/server/agent-runtime/types.ts'
-import { buildProviderTurnContext } from '../../src/server/providers/driver.ts'
-import { resolveProviderExecutable } from '../../src/server/providers/executable.ts'
-import { createProviderRegistry } from '../../src/server/providers/composition.ts'
+import { buildProviderTurnContext } from '../../packages/provider-runtime-node/src/providers/driver.ts'
+import { resolveProviderExecutable } from '../../packages/provider-runtime-node/src/providers/executable.ts'
+import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
 import {
   ClaudeDriver,
   createClaudeStreamFactory
-} from '../../src/server/providers/claude/driver.ts'
+} from '../../packages/provider-runtime-node/src/providers/claude/driver.ts'
 import {
   buildClaudeTurnOptions,
   resolveClaudePathOverride
-} from '../../src/server/providers/claude/turn-options.ts'
+} from '../../packages/provider-runtime-node/src/providers/claude/turn-options.ts'
 import {
   buildClaudeSdkCommandInvocation,
   requiresClaudeSdkSpawnGateway
-} from '../../src/server/providers/claude/sdk-spawn.ts'
+} from '../../packages/provider-runtime-node/src/providers/claude/sdk-spawn.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
 const installation: ProviderInstallation = Object.freeze({
   id: 'claude-code:test-delegation',
-  provider: 'claude-code',
+  provider: 'claude',
   command: 'claude',
   source: 'path',
   invocation: Object.freeze({ executable: '/bin/claude', prefixArgs: Object.freeze([]) }),
@@ -46,21 +46,22 @@ const installation: ProviderInstallation = Object.freeze({
 
 function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
   return {
-    provider: 'claude-code',
+    provider: 'claude',
     role: 'conversation',
     cwd: '/workspace',
     runtimeRoot: '/runtime/claude',
+    providerRuntimeScopeId: 'conversation:test-claude',
     prompt: 'delegate-me',
     ...overrides
   }
 }
 
 test('ClaudeDriver shell uses shared Claude descriptor and production kind', () => {
-  const driver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude-code'])
+  const driver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude'])
   assert.equal(driver.kind, 'production')
   assert.equal(driver.descriptor, CLAUDE_DESCRIPTOR)
-  assert.equal(driver.descriptor.code, 'claude-code')
-  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG['claude-code'])
+  assert.equal(driver.descriptor.code, 'claude')
+  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG['claude'])
 })
 
 test('ClaudeDriver prepareTurn delegates to stream factory without altering chunks', async () => {
@@ -74,7 +75,7 @@ test('ClaudeDriver prepareTurn delegates to stream factory without altering chun
     yield { type: 'completed', reply: 'hi', runtimeSessionId: 'sess-1' }
   }
 
-  const driver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude-code'], factory)
+  const driver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude'], factory)
   const prepared = await driver.prepareTurn(
     buildProviderTurnContext({
       input: baseInput(),
@@ -98,21 +99,24 @@ test('ClaudeDriver prepareTurn delegates to stream factory without altering chun
   assert.equal(prepared.reusePolicy, 'conversation-scoped')
 })
 
-test('default Claude stream factory delegates to legacy streamClaudeTurn', () => {
-  const source = readFileSync(join(root, 'src/server/providers/claude/driver.ts'), 'utf8')
+test('default Claude stream factory delegates to the canonical SDK streamer', () => {
+  const source = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/claude/driver.ts'),
+    'utf8'
+  )
   assert.match(source, /createClaudeStreamFactory/)
   assert.match(source, /streamClaudeTurn/)
-  assert.match(source, /agent-runtime\/providers\/claude-sdk/)
+  assert.match(source, /streamers\/claude-sdk/)
   assert.equal(typeof createClaudeStreamFactory, 'function')
 })
 
 test('Registry Claude entry uses the shared descriptor without a parallel runtime catalog', () => {
   const descriptorSource = readFileSync(
-    join(root, 'src/server/providers/claude/descriptor.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/claude/descriptor.ts'),
     'utf8'
   )
   assert.equal(existsSync(join(root, 'src/server/providers/catalog.ts')), false)
-  assert.equal(createProviderRegistry().get('claude-code').descriptor, CLAUDE_DESCRIPTOR)
+  assert.equal(createProviderRegistry().get('claude').descriptor, CLAUDE_DESCRIPTOR)
   assert.doesNotMatch(descriptorSource, /label:|description:|defaultCommands:/)
 })
 
@@ -132,7 +136,7 @@ test('ClaudeDriver.discover returns a stable installationId matching the resolve
     const hostEnvironment = Object.freeze({ PATH: '/usr/bin' })
     const first = await driver.discover({ hostEnvironment, installDirs: [] })
     const second = await driver.discover({ hostEnvironment, installDirs: [] })
-    const viaResolver = resolveProviderExecutable('claude-code', {
+    const viaResolver = resolveProviderExecutable('claude', {
       settings,
       env: hostEnvironment,
       installDirs: []
@@ -146,16 +150,19 @@ test('ClaudeDriver.discover returns a stable installationId matching the resolve
     assert.equal(first.resolvedPath, bin)
     assert.equal(first.canonicalPath, realpathSync(bin))
     assert.equal(first.source, 'app-config')
-    assert.equal(first.provider, 'claude-code')
+    assert.equal(first.provider, 'claude')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
 test('central preflight switch no longer handles Claude; driver owns preflight', () => {
-  const driverSource = readFileSync(join(root, 'src/server/providers/claude/driver.ts'), 'utf8')
+  const driverSource = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/claude/driver.ts'),
+    'utf8'
+  )
   const claudePreflight = readFileSync(
-    join(root, 'src/server/providers/claude/preflight.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/claude/preflight.ts'),
     'utf8'
   )
 
@@ -169,17 +176,23 @@ test('central preflight switch no longer handles Claude; driver owns preflight',
 
 test('buildClaudeTurnOptions lives in Claude driver module; runner does not import Claude policy', () => {
   const turnOptions = readFileSync(
-    join(root, 'src/server/providers/claude/turn-options.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/claude/turn-options.ts'),
     'utf8'
   )
-  const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/claude-sdk.ts'), 'utf8')
+  const sdk = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/streamers/claude-sdk.ts'),
+    'utf8'
+  )
   const runner = readFileSync(join(root, 'src/server/agent-runtime/runner.ts'), 'utf8')
 
   assert.match(turnOptions, /export function buildClaudeTurnOptions/)
-  assert.match(sdk, /from '\.\.\/\.\.\/providers\/claude\/turn-options'/)
+  assert.match(sdk, /from '\.\.\/providers\/claude\/turn-options'/)
   assert.doesNotMatch(sdk, /from '\.\/claude-policy'/)
   assert.doesNotMatch(runner, /claude-policy|buildClaudeTurnOptions/)
-  assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/claude-policy.ts')), false)
+  assert.equal(
+    existsSync(join(root, 'packages/provider-runtime-node/src/streamers/claude-policy.ts')),
+    false
+  )
 })
 
 test('explicit Claude path is passed to the SDK with the same installationId', async () => {
@@ -202,7 +215,7 @@ test('explicit Claude path is passed to the SDK with the same installationId', a
     assert.ok(discovered)
 
     const plan = buildClaudeTurnOptions({
-      provider: 'claude-code',
+      provider: 'claude',
       role: 'conversation',
       cwd: '/workspace',
       runtimeRoot: dir,
@@ -216,7 +229,10 @@ test('explicit Claude path is passed to the SDK with the same installationId', a
     assert.equal(plan.executableInvocation, discovered.invocation)
     assert.equal(plan.executableStrategy, 'installation')
 
-    const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/claude-sdk.ts'), 'utf8')
+    const sdk = readFileSync(
+      join(root, 'packages/provider-runtime-node/src/streamers/claude-sdk.ts'),
+      'utf8'
+    )
     assert.match(sdk, /pathToClaudeCodeExecutable:\s*plan\.pathToClaudeCodeExecutable/)
     assert.match(sdk, /spawnClaudeCodeProcess/)
   } finally {
@@ -234,7 +250,7 @@ test('automatic Claude discovery never overrides the SDK-bundled native CLI', ()
   for (const [index, entry] of automaticEntries.entries()) {
     const automaticInstallation: ProviderInstallation = {
       id: `claude-code:auto-${index}`,
-      provider: 'claude-code',
+      provider: 'claude',
       command: 'claude',
       source: entry.source,
       invocation: { executable: entry.path, prefixArgs: [] },
@@ -273,7 +289,8 @@ test('Claude SDK routes Windows command wrappers through the structured spawn ga
 })
 
 test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async () => {
-  const { ProviderRuntimeManager } = await import('../../src/server/providers/lifecycle.ts')
+  const { ProviderRuntimeManager } =
+    await import('../../packages/provider-runtime-node/src/providers/lifecycle.ts')
   const events: string[] = []
 
   async function* factory(
@@ -298,7 +315,7 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
     yield { type: 'completed', reply: 'done', runtimeSessionId: null }
   }
 
-  const driver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude-code'], factory)
+  const driver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude'], factory)
   const prepared = await driver.prepareTurn(
     buildProviderTurnContext({
       input: baseInput({ role: 'task-worker', prompt: 'managed' }),
@@ -330,10 +347,7 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
     yield { type: 'delta', content: 'a' }
     yield { type: 'completed', reply: 'a', runtimeSessionId: 's1' }
   }
-  const completingDriver = new ClaudeDriver(
-    DEFAULT_PROVIDERS_CONFIG['claude-code'],
-    completingFactory
-  )
+  const completingDriver = new ClaudeDriver(DEFAULT_PROVIDERS_CONFIG['claude'], completingFactory)
   const chunks: AgentTurnChunk[] = []
   for await (const chunk of manager.stream(
     completingDriver,
@@ -355,16 +369,16 @@ test('ClaudeDriver turn handle uses RuntimeManager cancel/close contract', async
 
 test('production Claude streamClaudeTurn routes through getAgentTurnProvider / RuntimeManager', () => {
   const indexSource = readFileSync(
-    join(root, 'src/server/agent-runtime/providers/index.ts'),
+    join(root, 'packages/provider-runtime-node/src/streamers/index.ts'),
     'utf8'
   )
-  assert.match(indexSource, /getAgentTurnProvider\('claude-code'\)\.streamTurn/)
+  assert.match(indexSource, /getAgentTurnProvider\('claude'\)\.streamTurn/)
   assert.doesNotMatch(indexSource, /streamClaudeTurn[\s\S]*await import\('\.\/claude-sdk'\)/)
 })
 
 test('role-worker-claude-code production entry uses Registry ClaudeDriver', () => {
   const worker = readFileSync(join(root, 'src/sandbox/role-worker-claude-code.ts'), 'utf8')
-  assert.match(worker, /getAgentTurnProvider\('claude-code'\)/)
+  assert.match(worker, /getAgentTurnProvider\('claude'\)/)
   assert.doesNotMatch(worker, /providers\/claude-sdk/)
 })
 
@@ -377,10 +391,10 @@ test('sandbox orchestrator uses ClaudeDriver.preflight for Claude', () => {
 
 test('Claude registry production driver matches descriptor and settings slot', () => {
   const registry = createProviderRegistry(DEFAULT_PROVIDERS_CONFIG)
-  const driver = registry.get('claude-code')
+  const driver = registry.get('claude')
   assert.equal(driver.kind, 'production')
   assert.equal(driver.descriptor, CLAUDE_DESCRIPTOR)
-  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG['claude-code'])
+  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG['claude'])
   assert.equal(driver.descriptor.capabilities.protocol, 'sdk')
   assert.equal(driver.descriptor.capabilities.authMode, 'host-identity')
 })

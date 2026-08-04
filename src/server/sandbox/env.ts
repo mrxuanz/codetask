@@ -82,7 +82,8 @@ export function buildSandboxEnv(input: {
   const host = snapshotHostEnv()
   const hostEnvironment = processHostEnvironmentSource.snapshot()
   const providerEnv = stripCodeTaskTransientEnv({ ...(input.providerEnv ?? {}) })
-  const hostHome = host.HOME ?? host.USERPROFILE ?? hostEnvironment.HOME ?? hostEnvironment.USERPROFILE
+  const hostHome =
+    host.HOME ?? host.USERPROFILE ?? hostEnvironment.HOME ?? hostEnvironment.USERPROFILE
   const hostTmp =
     host.TMPDIR?.trim() ||
     host.TEMP?.trim() ||

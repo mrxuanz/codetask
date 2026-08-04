@@ -4,8 +4,13 @@ import { TIMEOUTS } from '../config/timeouts'
 /** Map host CLI codes ↔ canonical Conversation provider codes (architecture 03). */
 export function toCanonicalProviderCode(coreCode: string): string {
   const value = coreCode.trim().toLowerCase()
-  if (value === 'claude-code' || value === 'claude' || value === 'claudecode') return 'claude'
-  if (value === 'cursorcli' || value === 'cursor' || value === 'cursor-cli' || value === 'cursor-agent') {
+  if (value === 'claude' || value === 'claude' || value === 'claudecode') return 'claude'
+  if (
+    value === 'cursor' ||
+    value === 'cursor' ||
+    value === 'cursor-cli' ||
+    value === 'cursor-agent'
+  ) {
     return 'cursor'
   }
   return value
@@ -13,8 +18,8 @@ export function toCanonicalProviderCode(coreCode: string): string {
 
 export function toHostCoreCode(providerCode: string): string {
   const value = providerCode.trim().toLowerCase()
-  if (value === 'claude') return 'claude-code'
-  if (value === 'cursor') return 'cursorcli'
+  if (value === 'claude') return 'claude'
+  if (value === 'cursor') return 'cursor'
   return value
 }
 
@@ -201,9 +206,7 @@ export async function getTurn(
   }
   const data = (result.data ?? {}) as Record<string, unknown>
   const turn =
-    data.turn && typeof data.turn === 'object'
-      ? (data.turn as Record<string, unknown>)
-      : data
+    data.turn && typeof data.turn === 'object' ? (data.turn as Record<string, unknown>) : data
   // ConversationTurnDto exposes `state`; keep `status` alias for harness polls/oracles.
   const status = turn.status ?? turn.state
   return {
@@ -602,13 +605,9 @@ export async function uploadThreadAttachment(
   const bytes = readFileSync(filePath)
   const form = new FormData()
   form.append('file', new Blob([bytes]), fileName)
-  const result = await client.uploadMultipart(
-    `/api/conversations/${threadId}/attachments`,
-    form,
-    {
-      operationId: 'attachment.upload'
-    }
-  )
+  const result = await client.uploadMultipart(`/api/conversations/${threadId}/attachments`, form, {
+    operationId: 'attachment.upload'
+  })
   if (result.status >= 400) {
     throw new Error(`attachment.upload_failed:${result.status}:${result.raw.message ?? ''}`)
   }
@@ -755,7 +754,9 @@ export async function putMcpSettings(
   expectedRevision?: number
 ): Promise<{ settings: unknown; revision: number }> {
   const revision =
-    typeof expectedRevision === 'number' ? expectedRevision : (await getMcpSettings(client)).revision
+    typeof expectedRevision === 'number'
+      ? expectedRevision
+      : (await getMcpSettings(client)).revision
   const result = await client.request<{ settings: unknown; revision?: number }>(
     'PUT',
     '/api/settings/mcp',

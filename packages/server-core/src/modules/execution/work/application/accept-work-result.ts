@@ -6,12 +6,7 @@ import { ExecutionOutbox } from '../../events/execution-outbox.ts'
 import { validateTaskEvidence } from '../../verification/domain/task-evidence.ts'
 
 export type AcceptWorkResultService = {
-  accept(input: {
-    jobId: string
-    workId: string
-    attemptId: string
-    evidence: TaskEvidence
-  }): void
+  accept(input: { jobId: string; workId: string; attemptId: string; evidence: TaskEvidence }): void
 }
 
 export function createAcceptWorkResultService(deps: {
@@ -62,7 +57,9 @@ export function createAcceptWorkResultService(deps: {
           )
 
         deps.db
-          .prepare(`UPDATE work_attempts SET status = 'succeeded', ended_at = ?, result_hash = ? WHERE id = ?`)
+          .prepare(
+            `UPDATE work_attempts SET status = 'succeeded', ended_at = ?, result_hash = ? WHERE id = ?`
+          )
           .run(now, resultHash, input.attemptId)
 
         const nextState =

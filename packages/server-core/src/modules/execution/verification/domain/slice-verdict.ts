@@ -69,9 +69,7 @@ export function evaluateSliceVerdict(workItems: WorkItemRecord[]): SliceVerdict 
   }
 
   const failed = workItems.filter(
-    (w) =>
-      (w.state === 'failed' || w.state === 'cancelled') &&
-      w.kind === 'task'
+    (w) => (w.state === 'failed' || w.state === 'cancelled') && w.kind === 'task'
   )
   if (failed.length > 0) {
     return {
@@ -98,9 +96,7 @@ export function evaluateSliceVerdict(workItems: WorkItemRecord[]): SliceVerdict 
   }
 
   const failedRepair = workItems.filter(
-    (w) =>
-      (w.state === 'failed' || w.state === 'cancelled') &&
-      w.kind !== 'task'
+    (w) => (w.state === 'failed' || w.state === 'cancelled') && w.kind !== 'task'
   )
   if (failedRepair.length > 0) {
     return {

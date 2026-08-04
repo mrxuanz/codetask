@@ -182,7 +182,7 @@ export function createFakeAgentProvider(
 
 export function registerFakeProviders(
   registry: FakeScriptRegistry,
-  codes: SupportedCoreCode[] = ['codex', 'cursorcli', 'claude-code', 'opencode']
+  codes: SupportedCoreCode[] = ['codex', 'cursor', 'claude', 'opencode']
 ): Record<SupportedCoreCode, AgentTurnProvider> {
   const overrides = {} as Record<SupportedCoreCode, AgentTurnProvider>
   for (const code of codes) {

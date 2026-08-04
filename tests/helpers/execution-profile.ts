@@ -1,4 +1,4 @@
-import type { JobExecutionProfile } from '../../src/shared/contracts/plan'
+import type { JobExecutionProfile } from '@codetask/contracts'
 
 export const TEST_JOB_EXECUTION_PROFILE: JobExecutionProfile = {
   plannerCoreCode: 'codex',

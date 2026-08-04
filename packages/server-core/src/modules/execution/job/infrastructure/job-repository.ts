@@ -1,11 +1,5 @@
 import type Database from 'better-sqlite3'
-import type {
-  JobAction,
-  JobDetail,
-  JobSummary,
-  JobTreeDto,
-  WorkItemDto
-} from '@codetask/contracts'
+import type { JobAction, JobDetail, JobSummary, JobTreeDto, WorkItemDto } from '@codetask/contracts'
 import type { JobRecord } from '../domain/job-state.ts'
 import { allowedJobActions } from '../domain/job-actions.ts'
 import { isoFromMs } from '../../shared.ts'

@@ -173,7 +173,7 @@ const jaMessages: Record<TurnErrorCode, string> = {
   'plan.sandbox_timeout':
     'サンドボックスタスクがタイムアウトしました。後で再試行するか、より高速な Planner CLI に変更してください',
   'plan.sandbox_cleanup_failed':
-    'サンドボックスプロセスが異常終了しました。アプリを完全に終了して再起動し、計画生成を再試行してください。',
+    'サンドボックスプロセスが異常終了しました。アプリを完全に終了して再起動し、計画生成を再試行してください。'
 }
 
 export const turnErrorsJa = buildTurnErrorI18nTree(jaMessages)

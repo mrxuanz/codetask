@@ -39,7 +39,11 @@ const REPAIR_TASK_ITEM_SCHEMA = {
     evidenceGap: { type: 'string' },
     targetTaskId: { type: 'string' }
   },
-  anyOf: [{ required: ['targetSliceId'] }, { required: ['targetWorkId'] }, { required: ['targetTaskId'] }]
+  anyOf: [
+    { required: ['targetSliceId'] },
+    { required: ['targetWorkId'] },
+    { required: ['targetTaskId'] }
+  ]
 } as const
 
 const TOOLS = [

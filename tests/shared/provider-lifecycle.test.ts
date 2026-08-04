@@ -95,7 +95,8 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
         provider: 'codex',
         role: 'conversation',
         cwd: '/workspace',
-        prompt: 'hello'
+        prompt: 'hello',
+        providerRuntimeScopeId: 'conversation:lifecycle-test'
       },
       installation,
       authMode: 'host-identity'
@@ -105,7 +106,7 @@ test('RuntimeManager selects scope, injects settings, and publishes completed af
   }
 
   assert.equal(seen[0]?.runtimeScope?.reusePolicy, 'conversation-scoped')
-  assert.equal(seen[0]?.runtimeScope?.id, 'conversation:/workspace')
+  assert.equal(seen[0]?.runtimeScope?.id, 'conversation:lifecycle-test')
   assert.equal(seen[0]?.input.providerSettings, DEFAULT_PROVIDERS_CONFIG.codex)
   assert.deepEqual(events, [
     'stream:delta',

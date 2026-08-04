@@ -11,9 +11,7 @@ function columnExists(
 
 function tableExists(db: import('better-sqlite3').Database, table: string): boolean {
   const row = db
-    .prepare(
-      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`
-    )
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
     .get(table) as { name: string } | undefined
   return row?.name === table
 }

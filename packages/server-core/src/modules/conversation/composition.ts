@@ -15,10 +15,7 @@ import type {
   WorkspaceLeasePort,
   WorkspaceResolverPort
 } from './ports/ports.ts'
-import {
-  createConversationRoutes,
-  type ConversationHttpEnv
-} from './http/conversation-routes.ts'
+import { createConversationRoutes, type ConversationHttpEnv } from './http/conversation-routes.ts'
 
 export type ConversationModule = {
   app: ConversationApplication

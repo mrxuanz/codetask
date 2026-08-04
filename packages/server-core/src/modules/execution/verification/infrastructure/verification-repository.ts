@@ -15,9 +15,7 @@ export class VerificationRepository {
 
   getMilestoneState(jobId: string, generation: number, milestoneId: string): string {
     const row = this.db
-      .prepare(
-        `SELECT state FROM job_milestones WHERE job_id = ? AND generation = ? AND id = ?`
-      )
+      .prepare(`SELECT state FROM job_milestones WHERE job_id = ? AND generation = ? AND id = ?`)
       .get(jobId, generation, milestoneId) as { state: string } | undefined
     return row?.state ?? 'pending'
   }
@@ -74,9 +72,7 @@ export class VerificationRepository {
     state: string
   ): void {
     this.db
-      .prepare(
-        `UPDATE job_milestones SET state = ? WHERE job_id = ? AND generation = ? AND id = ?`
-      )
+      .prepare(`UPDATE job_milestones SET state = ? WHERE job_id = ? AND generation = ? AND id = ?`)
       .run(state, jobId, generation, milestoneId)
   }
 }

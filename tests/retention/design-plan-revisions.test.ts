@@ -129,9 +129,7 @@ test('execution finalization retains current revision with TTL; expiry and expli
     planRevision: 4,
     plan: plan(4)
   })
-  await db
-    .delete(designPlanRevisions)
-    .where(eq(designPlanRevisions.jobId, 'job-design-expiry'))
+  await db.delete(designPlanRevisions).where(eq(designPlanRevisions.jobId, 'job-design-expiry'))
   const cascaded = await db
     .select()
     .from(designPlanRevisions)

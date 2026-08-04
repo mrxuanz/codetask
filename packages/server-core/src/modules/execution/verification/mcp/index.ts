@@ -1,7 +1,4 @@
-export {
-  initExecutionMcpBackend,
-  getExecutionMcpBackendPort
-} from './backend-port.ts'
+export { initExecutionMcpBackend, getExecutionMcpBackendPort } from './backend-port.ts'
 export {
   registerSliceVerifierMcpSession,
   unregisterSliceVerifierMcpSession,

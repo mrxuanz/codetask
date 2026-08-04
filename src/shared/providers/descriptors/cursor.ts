@@ -1,7 +1,7 @@
 import type { ProviderDescriptor } from '../descriptor'
 
 export const CURSOR_DESCRIPTOR = Object.freeze({
-  code: 'cursorcli',
+  code: 'cursor',
   aliases: ['cursor', 'cursor-cli', 'cursor-agent', 'cursor_cli', 'cursorcli'],
   label: 'Cursor CLI',
   description: 'Cursor Agent CLI',

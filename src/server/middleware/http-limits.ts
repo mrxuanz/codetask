@@ -20,11 +20,9 @@ const SSE_STREAM_PATHS = new Set(['/realtime/stream'])
 function requestTimedOut(): Response {
   return new Response(
     JSON.stringify({
-      data: null,
-      status: 40801,
-      extra: {},
-      message: 'Request timed out',
-      success: false
+      success: false,
+      error: { code: '40801', message: 'Request timed out' },
+      requestId: 'timeout'
     }),
     {
       status: 408,

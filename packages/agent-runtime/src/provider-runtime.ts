@@ -1,6 +1,25 @@
 /**
- * Host-facing re-export: ProviderRuntimeManager remains implemented under
- * `src/server/providers` (SDK/ACP adapters). Business modules must use
- * `createAgentRuntime` from this package — never import Manager directly.
+ * Provider reuse policy (Batch F).
+ * Kept in a leaf module so index.ts can re-export without circular aliases.
  */
-export { resolveReusePolicy as resolveProviderReusePolicy } from './index.ts'
+export type AgentRoleForReuse =
+  | 'conversation'
+  | 'planner'
+  | 'task-worker'
+  | 'slice-verifier'
+  | 'milestone-verifier'
+
+export function resolveReusePolicy(
+  role: AgentRoleForReuse,
+  capabilityProfile: string
+): 'one-shot' | 'conversation-scoped' {
+  if (role !== 'conversation' || capabilityProfile === 'chat-write') return 'one-shot'
+  return 'conversation-scoped'
+}
+
+export function resolveProviderReusePolicy(
+  role: AgentRoleForReuse,
+  capabilityProfile: string
+): 'one-shot' | 'conversation-scoped' {
+  return resolveReusePolicy(role, capabilityProfile)
+}

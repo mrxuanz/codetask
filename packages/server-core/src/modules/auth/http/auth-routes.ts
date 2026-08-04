@@ -1,5 +1,9 @@
 import { Hono, type Context } from 'hono'
-import type { AuthApplication, LoginOptions, SessionIssue } from '../application/auth-application.ts'
+import type {
+  AuthApplication,
+  LoginOptions,
+  SessionIssue
+} from '../application/auth-application.ts'
 import { AuthError } from '../domain/auth-errors.ts'
 import {
   clearSessionCookies,
@@ -29,7 +33,9 @@ function wantsBearerToken(c: Context): boolean {
   return c.req.header('x-codetask-auth-transport')?.toLowerCase() === 'bearer'
 }
 
-function browserActorPayload(issue: SessionIssue) {
+function browserActorPayload(issue: SessionIssue): {
+  actor: { userId: string; username: string; sessionExpiresAt: number }
+} {
   return {
     actor: {
       userId: issue.userId,
@@ -39,7 +45,10 @@ function browserActorPayload(issue: SessionIssue) {
   }
 }
 
-function responsePayload(c: Context, issue: SessionIssue) {
+function responsePayload(
+  c: Context,
+  issue: SessionIssue
+): ReturnType<typeof browserActorPayload> & { token?: string } {
   if (wantsBearerToken(c)) {
     return {
       token: issue.token,

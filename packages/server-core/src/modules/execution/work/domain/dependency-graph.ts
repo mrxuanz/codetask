@@ -1,9 +1,6 @@
 import type { WorkDependencyRecord } from './work-item.ts'
 
-export function hasCycle(
-  workIds: string[],
-  deps: WorkDependencyRecord[]
-): boolean {
+export function hasCycle(workIds: string[], deps: WorkDependencyRecord[]): boolean {
   const adj = new Map<string, string[]>()
   for (const id of workIds) adj.set(id, [])
   for (const d of deps) {

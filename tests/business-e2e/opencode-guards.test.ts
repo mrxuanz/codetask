@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
 import test from 'node:test'
 import {
   assertNoTimeoutAllowed,
@@ -190,69 +189,47 @@ test('OpenCode harness config preserves host defaults instead of replacing them'
 })
 
 test('waitForCapabilityReport returns null on timeout when prompt succeeded but no report', async () => {
-  const server = createServer((req, res) => {
-    if (req.url?.startsWith('/capability-report')) {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ report: null }))
-      return
-    }
-    res.writeHead(404).end()
+  const fetchImpl: typeof globalThis.fetch = async () =>
+    new Response(JSON.stringify({ report: null }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  const started = Date.now()
+  const report = await waitForCapabilityReport('http://local.test/mcp', 'cap-missing', 200, {
+    pollMs: 50,
+    fetchImpl
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  assert.ok(address && typeof address === 'object')
-  const mcpUrl = `http://127.0.0.1:${address.port}/mcp`
-  try {
-    const started = Date.now()
-    const report = await waitForCapabilityReport(mcpUrl, 'cap-missing', 200, { pollMs: 50 })
-    assert.equal(report, null)
-    assert.ok(Date.now() - started >= 200)
-    assert.ok(Date.now() - started < 2_000)
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve()))
-    )
-  }
+  assert.equal(report, null)
+  assert.ok(Date.now() - started >= 200)
+  assert.ok(Date.now() - started < 2_000)
 })
 
 test('waitForCapabilityReport returns completed report', async () => {
-  const server = createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ report: { status: 'completed', summary: 'ok' } }))
+  const fetchImpl: typeof globalThis.fetch = async () =>
+    new Response(JSON.stringify({ report: { status: 'completed', summary: 'ok' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  const report = await waitForCapabilityReport('http://local.test/mcp', 'cap-ok', 1_000, {
+    pollMs: 50,
+    fetchImpl
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  assert.ok(address && typeof address === 'object')
-  const mcpUrl = `http://127.0.0.1:${address.port}/mcp`
-  try {
-    const report = await waitForCapabilityReport(mcpUrl, 'cap-ok', 1_000, { pollMs: 50 })
-    assert.deepEqual(report, { status: 'completed', summary: 'ok' })
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve()))
-    )
-  }
+  assert.deepEqual(report, { status: 'completed', summary: 'ok' })
 })
 
 test('waitForCapabilityReport treats timeoutMs 0 as immediate miss (not infinite)', async () => {
-  const server = createServer((_req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ report: null }))
+  const fetchImpl: typeof globalThis.fetch = async () =>
+    new Response(JSON.stringify({ report: null }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  const started = Date.now()
+  const report = await waitForCapabilityReport('http://local.test/mcp', 'cap-zero', 0, {
+    pollMs: 50,
+    fetchImpl
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const address = server.address()
-  assert.ok(address && typeof address === 'object')
-  const mcpUrl = `http://127.0.0.1:${address.port}/mcp`
-  try {
-    const started = Date.now()
-    const report = await waitForCapabilityReport(mcpUrl, 'cap-zero', 0, { pollMs: 50 })
-    assert.equal(report, null)
-    assert.ok(Date.now() - started < 500)
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve()))
-    )
-  }
+  assert.equal(report, null)
+  assert.ok(Date.now() - started < 500)
 })
 
 test('MCP server exit surfaces as mcp_failed after bounded retries', async () => {

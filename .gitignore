@@ -38,6 +38,7 @@ logs_*/
 *.pem
 *.key
 *.pfx
+.codetask-run-manifest.json
 
 # OS
 .DS_Store

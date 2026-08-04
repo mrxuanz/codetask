@@ -10,7 +10,7 @@ import { putJobArtifact } from '../../src/server/retention/artifacts'
 import { putDesignPlanRevisionInTx } from '../../src/server/retention/design-plan-artifacts'
 import { ArtifactExpiryScheduler } from '../../src/server/retention/expiry-scheduler'
 import { putMessageArtifact } from '../../src/server/retention/message-artifacts'
-import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
+import { DEFAULT_RETENTION_SETTINGS } from '@codetask/contracts'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
 
 test('expiry scheduler startup catch-up deletes overdue Job, Message, and Design artifacts', async (t) => {

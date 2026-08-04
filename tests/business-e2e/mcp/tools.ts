@@ -430,11 +430,7 @@ const handlers: Record<string, ToolHandler> = {
     return ok(await ops.listCores(ctx.client))
   },
   async codetask_start_turn(args, ctx) {
-    if (
-      args.createTaskMode === true ||
-      args.kind === 'create_task' ||
-      args.kind === 'draft'
-    ) {
+    if (args.createTaskMode === true || args.kind === 'create_task' || args.kind === 'draft') {
       return fail(
         'architecture_03_removed:create_task_turn:use_/api/drafts_and_/api/planning-sessions'
       )
@@ -545,11 +541,7 @@ const handlers: Record<string, ToolHandler> = {
   },
   async codetask_confirm_design_draft(args, ctx) {
     return ok(
-      await ops.confirmDesignDraft(
-        ctx.client,
-        String(args.draftId),
-        Number(args.expectedRevision)
-      )
+      await ops.confirmDesignDraft(ctx.client, String(args.draftId), Number(args.expectedRevision))
     )
   },
   async codetask_get_thread_drafts(args, ctx) {

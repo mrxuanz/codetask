@@ -36,9 +36,9 @@ export class SqlitePlanningRepository implements PlanningRepository {
   constructor(private readonly db: Database.Database) {}
 
   async getSession(sessionId: string): Promise<PlanningSessionRecord | null> {
-    const row = this.db
-      .prepare(`SELECT * FROM planning_sessions WHERE id = ?`)
-      .get(sessionId) as SessionRow | undefined
+    const row = this.db.prepare(`SELECT * FROM planning_sessions WHERE id = ?`).get(sessionId) as
+      | SessionRow
+      | undefined
     return row ? this.mapSession(row) : null
   }
 
@@ -155,9 +155,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
 
   async updateRun(run: PlanningRunRecord): Promise<void> {
     this.db
-      .prepare(
-        `UPDATE planning_runs SET status = ?, finished_at = ?, error_json = ? WHERE id = ?`
-      )
+      .prepare(`UPDATE planning_runs SET status = ?, finished_at = ?, error_json = ? WHERE id = ?`)
       .run(run.status, run.finishedAt, run.errorJson, run.id)
   }
 
@@ -252,13 +250,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
           `INSERT INTO execution_plans (id, planning_session_id, revision, status, content_hash, created_at)
            VALUES (?, ?, ?, 'current', ?, ?)`
         )
-        .run(
-          planRowId,
-          input.sessionId,
-          input.tree.revision,
-          input.contentHash,
-          Date.now()
-        )
+        .run(planRowId, input.sessionId, input.tree.revision, input.contentHash, Date.now())
 
       input.tree.milestones.forEach((milestone, mi) => {
         this.db
@@ -366,9 +358,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
     if (!plan) return null
 
     const milestones = this.db
-      .prepare(
-        `SELECT * FROM execution_plan_milestones WHERE plan_id = ? ORDER BY sort_order ASC`
-      )
+      .prepare(`SELECT * FROM execution_plan_milestones WHERE plan_id = ? ORDER BY sort_order ASC`)
       .all(plan.id) as Array<{
       id: string
       title: string

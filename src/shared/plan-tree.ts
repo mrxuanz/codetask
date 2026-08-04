@@ -1,5 +1,5 @@
 import type { JobReferenceManifestDto, TaskAssignedReference } from './job-references'
-import type { TaskEvidenceDto } from './contracts/evidence'
+import type { TaskEvidenceDto } from '@codetask/contracts'
 import { resolveAssignedReferencesFromDto } from './job-references'
 
 export type PlanUnitStatus =
@@ -27,10 +27,12 @@ export interface UnifiedTaskNode {
   executionStatus?: string | null | undefined
   evidenceStatus?: string | null | undefined
   errorMessage?: string | null | undefined
-  error?: import('./contracts/turn-errors').TurnErrorDto | null | undefined
+  error?: import('./turn-errors').TurnErrorDto | null | undefined
   evidence?: TaskEvidenceDto | null | undefined
   evidenceArtifactId?: string | null | undefined
   evidenceSummary?: string | null | undefined
+  providerCode?: string | null | undefined
+  /** @deprecated Use providerCode */
   coreCode?: string | null | undefined
   referenceIds?: string[] | undefined
   referenceReason?: string | undefined
@@ -78,6 +80,7 @@ export interface FlatPlanTask {
   abilityCode: string
   contextMarkdown: string
   successCriteria?: string | undefined
+  providerCode?: string | undefined
   coreCode?: string | undefined
   referenceIds?: string[] | undefined
   referenceReason?: string | undefined
@@ -131,10 +134,12 @@ export interface TaskProgressItemShape {
   executionStatus?: string | null | undefined
   evidenceStatus?: string | null | undefined
   errorMessage?: string | null | undefined
-  error?: import('./contracts/turn-errors').TurnErrorDto | null | undefined
+  error?: import('./turn-errors').TurnErrorDto | null | undefined
   evidence?: TaskEvidenceDto | null | undefined
   evidenceArtifactId?: string | null | undefined
   evidenceSummary?: string | null | undefined
+  providerCode?: string | null | undefined
+  /** @deprecated Use providerCode */
   coreCode?: string | null | undefined
 }
 
@@ -194,6 +199,7 @@ function mapExecutionStatus(
   | 'evidence'
   | 'evidenceArtifactId'
   | 'evidenceSummary'
+  | 'providerCode'
   | 'coreCode'
 > {
   if (!item) {
@@ -206,6 +212,7 @@ function mapExecutionStatus(
       evidence: null,
       evidenceArtifactId: null,
       evidenceSummary: null,
+      providerCode: null,
       coreCode: null
     }
   }
@@ -236,7 +243,8 @@ function mapExecutionStatus(
         evidence: item.evidence ?? null,
         evidenceArtifactId: item.evidenceArtifactId ?? null,
         evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
-        coreCode: item.coreCode ?? null
+        providerCode: item.providerCode ?? item.coreCode ?? null,
+        coreCode: item.providerCode ?? item.coreCode ?? null
       }
     }
   }
@@ -250,7 +258,8 @@ function mapExecutionStatus(
       evidence: item.evidence ?? null,
       evidenceArtifactId: item.evidenceArtifactId ?? null,
       evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
-      coreCode: item.coreCode ?? null
+      providerCode: item.providerCode ?? item.coreCode ?? null,
+      coreCode: item.providerCode ?? item.coreCode ?? null
     }
   }
   const status = treatAsRunning
@@ -269,7 +278,8 @@ function mapExecutionStatus(
     evidence: item.evidence ?? null,
     evidenceArtifactId: item.evidenceArtifactId ?? null,
     evidenceSummary: item.evidenceSummary ?? item.evidence?.summary ?? null,
-    coreCode: item.coreCode ?? null
+    providerCode: item.providerCode ?? item.coreCode ?? null,
+    coreCode: item.providerCode ?? item.coreCode ?? null
   }
 }
 
@@ -406,8 +416,18 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
           referenceReason: flat?.referenceReason,
           assignedReferences: assignedReferences.length > 0 ? assignedReferences : undefined,
           ...exec,
-          coreCode:
+          providerCode:
+            flat?.providerCode?.trim() ||
             flat?.coreCode?.trim() ||
+            exec.providerCode ||
+            exec.coreCode ||
+            input.abilities?.find((a) => a.abilityCode === flat?.abilityCode)
+              ?.recommendedCoreCode ||
+            null,
+          coreCode:
+            flat?.providerCode?.trim() ||
+            flat?.coreCode?.trim() ||
+            exec.providerCode ||
             exec.coreCode ||
             input.abilities?.find((a) => a.abilityCode === flat?.abilityCode)
               ?.recommendedCoreCode ||
@@ -418,14 +438,13 @@ export function buildUnifiedProgressTree(input: BuildTreeInput): UnifiedProgress
       const sliceStatus = sliceAggregateStatus(tasks)
       const sliceRow = sliceProgress.get(sliceId)
       const allTasksDone = tasks.length > 0 && tasks.every((t) => t.status === 'completed')
-      const synthesizedRuntime =
-        allTasksDone
-          ? 'ready-for-verification'
-          : sliceStatus === 'in_progress' && !jobPaused
-            ? 'running'
-            : sliceStatus === 'paused'
-              ? null
-              : null
+      const synthesizedRuntime = allTasksDone
+        ? 'ready-for-verification'
+        : sliceStatus === 'in_progress' && !jobPaused
+          ? 'running'
+          : sliceStatus === 'paused'
+            ? null
+            : null
       return {
         id: sliceId,
         title: slice.title?.trim() || '',

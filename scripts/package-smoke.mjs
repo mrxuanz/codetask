@@ -45,13 +45,16 @@ export function findExecutable(distDir, platform = process.platform) {
     return executable
   }
 
-  const executableNames =
-    platform === 'win32'
-      ? [`${PRODUCT_NAME}.exe`]
-      : // electron-builder defaults the Linux executable to package.json#name,
-        // while productName controls the displayed product and artifact names.
-        [PACKAGE_NAME, PRODUCT_NAME]
-  const candidates = [...new Set(executableNames)]
+  const executableNames = [
+    ...new Set(
+      platform === 'win32'
+        ? [`${PRODUCT_NAME}.exe`]
+        : // electron-builder defaults the Linux executable to package.json#name,
+          // while productName controls the displayed product and artifact names.
+          [PACKAGE_NAME, PRODUCT_NAME]
+    )
+  ]
+  const candidates = executableNames
     .map((name) => join(root, name))
     .filter((path) => existsSync(path))
   if (candidates.length === 0) {

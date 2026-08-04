@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { allMigrations } from '../../src/server/db/migrations'
@@ -59,35 +59,29 @@ describe('architecture residual DoD — M4', () => {
 
 describe('architecture residual DoD — M5', () => {
   it('planning session mapper has no as-unknown cast', () => {
-    const jobsApi = readFileSync(join(root, 'src/renderer/src/api/jobs.ts'), 'utf8')
+    const jobsApi = readFileSync(join(root, 'apps/web/src/api/jobs.ts'), 'utf8')
     assert.match(jobsApi, /function mapPlanningSessionToJob/)
     assert.doesNotMatch(jobsApi, /as unknown as PlanningSessionViewDto/)
     assert.match(jobsApi, /mapExecutionJobToPlanView/)
   })
 
-  it('threads façade maps failures without as-unknown ApiResponse cast', () => {
-    const threads = readFileSync(join(root, 'src/renderer/src/api/threads.ts'), 'utf8')
-    assert.match(threads, /function mapFailed/)
-    assert.doesNotMatch(threads, /as unknown as ApiResponse/)
+  it('threads façade is deleted; conversation client owns list helpers', () => {
+    assert.equal(existsSync(join(root, 'apps/web/src/api/threads.ts')), false)
+    const conversation = readFileSync(join(root, 'apps/web/src/api/conversation.ts'), 'utf8')
+    assert.match(conversation, /listConversationItems|conversationToListItem/)
   })
 
   it('JobAbilityDto is the canonical ability type', () => {
-    const jobs = readFileSync(join(root, 'src/shared/contracts/jobs.ts'), 'utf8')
-    assert.match(jobs, /export interface JobAbilityDto/)
+    const jobs = readFileSync(join(root, 'packages/contracts/src/ui-jobs.ts'), 'utf8')
+    assert.match(jobs, /export type JobAbilityDto/)
     assert.match(jobs, /export type ThreadJobAbilityDto = JobAbilityDto/)
-    const planning = readFileSync(
-      join(root, 'src/shared/contracts/planning-session-view.ts'),
-      'utf8'
-    )
+    const planning = readFileSync(join(root, 'packages/contracts/src/ui-planning.ts'), 'utf8')
     assert.match(planning, /abilities: JobAbilityDto\[\]/)
     assert.match(planning, /export function toPlanningSessionStatus/)
   })
 
   it('draft plan workspace uses mapExecutionJobToPlanView', () => {
-    const ws = readFileSync(
-      join(root, 'src/renderer/src/composables/useDraftPlanWorkspace.ts'),
-      'utf8'
-    )
+    const ws = readFileSync(join(root, 'apps/web/src/composables/useDraftPlanWorkspace.ts'), 'utf8')
     assert.match(ws, /mapExecutionJobToPlanView/)
     assert.doesNotMatch(ws, /as unknown as PlanningSessionViewDto/)
   })

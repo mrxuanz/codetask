@@ -2,8 +2,8 @@
 use crate::bwrap::WSL1_BWRAP_WARNING;
 #[cfg(target_os = "linux")]
 use crate::bwrap::is_wsl1;
-use crate::landlock::allow_network_for_proxy;
 use crate::landlock::CODETEAM_LINUX_SANDBOX_ARG0;
+use crate::landlock::allow_network_for_proxy;
 use crate::landlock::create_linux_sandbox_command_args_for_permission_profile;
 use crate::policy_transforms::effective_permission_profile;
 use crate::policy_transforms::should_require_platform_sandbox;

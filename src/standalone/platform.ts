@@ -41,13 +41,23 @@ export function resolveStandaloneStaticDir(
 }
 
 /** Pure Node adapter for the shared HTTP/runtime composition. */
-export function createNodeServerPlatform(): AppServerPlatform {
+export function createNodeServerPlatform(options?: { dataDir?: string }): AppServerPlatform {
   const appRoot = resolveStandaloneAppRoot()
+  const cliDataDir = options?.dataDir ? resolve(options.dataDir) : undefined
   return {
     isDev: false,
     staticDir: resolveStandaloneStaticDir(appRoot),
     appRoot,
-    resolveDataDirSelection: () => resolveNodeDataDirSelection(),
+    resolveDataDirSelection: () => {
+      if (cliDataDir) {
+        return {
+          phase: 'ready',
+          dataDir: cliDataDir,
+          source: 'cli'
+        }
+      }
+      return resolveNodeDataDirSelection()
+    },
     persistDataDirSelection: (dataDir) => {
       writeNodeDataInitializationConfig(dataDir)
     }

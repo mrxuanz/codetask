@@ -6,7 +6,10 @@ import { composeExecutionModule } from '../../packages/server-core/src/modules/e
 import { migration043DesignModuleTables } from '../../packages/database/src/migrations/index.ts'
 import { migration045ExecutionModuleTables } from '../../packages/database/src/migrations/execution.ts'
 
-function composeTestModules(db: Database.Database) {
+function composeTestModules(db: Database.Database): {
+  design: ReturnType<typeof composeDesignModule>
+  execution: ReturnType<typeof composeExecutionModule>
+} {
   const execution = composeExecutionModule({ db })
   const design = composeDesignModule({
     db,
@@ -91,9 +94,10 @@ describe('design publish → execution succeed', () => {
     )
     assert.ok(published.jobId)
 
-    const jobRow = db
-      .prepare(`SELECT id, state FROM jobs WHERE id = ?`)
-      .get(published.jobId) as { id: string; state: string }
+    const jobRow = db.prepare(`SELECT id, state FROM jobs WHERE id = ?`).get(published.jobId) as {
+      id: string
+      state: string
+    }
     assert.equal(jobRow.id, published.jobId)
 
     let finalState = jobRow.state

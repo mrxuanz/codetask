@@ -66,7 +66,9 @@ export function decideNextStep(input: {
     return { kind: 'dispatch-work', workId: ready.workIds[0]! }
   }
 
-  const slices = [...new Set(workItems.filter((w) => w.generation === generation).map((w) => w.sliceId))]
+  const slices = [
+    ...new Set(workItems.filter((w) => w.generation === generation).map((w) => w.sliceId))
+  ]
   for (const sliceId of slices) {
     const verificationState = input.verification.getSliceVerificationState(
       jobId,

@@ -120,11 +120,7 @@ export class DraftApplication {
     return this.drafts.update(next, expectedRevision)
   }
 
-  async unlock(
-    actor: Actor,
-    draftId: string,
-    expectedRevision: number
-  ): Promise<DraftRecord> {
+  async unlock(actor: Actor, draftId: string, expectedRevision: number): Promise<DraftRecord> {
     const current = await this.requireOwned(actor, draftId)
     if (current.lockRevision !== expectedRevision) throw new DesignConflictError()
     if (current.status === 'archived') {

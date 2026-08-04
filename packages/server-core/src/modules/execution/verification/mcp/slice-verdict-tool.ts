@@ -16,7 +16,9 @@ function nonEmpty(value: unknown): string | null {
 /** Validates MCP / tool_call payload into a canonical SliceVerdict. */
 export function parseCompleteSliceVerification(args: unknown): SliceVerdict {
   const raw =
-    args && typeof args === 'object' ? (args as Record<string, unknown>) : ({} as Record<string, unknown>)
+    args && typeof args === 'object'
+      ? (args as Record<string, unknown>)
+      : ({} as Record<string, unknown>)
 
   const status = nonEmpty(raw.status)
   if (!status || !SLICE_STATUSES.has(status)) {
@@ -53,9 +55,14 @@ export function parseCompleteSliceVerification(args: unknown): SliceVerdict {
     ? raw.repairSuggestions.map((item, index) => {
         const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
         const kindRaw = nonEmpty(row.kind) ?? 'implementation-repair'
-        const kind = (WORK_KINDS.has(kindRaw as WorkKind) ? kindRaw : 'implementation-repair') as WorkKind
+        const kind = (
+          WORK_KINDS.has(kindRaw as WorkKind) ? kindRaw : 'implementation-repair'
+        ) as WorkKind
         const title =
-          nonEmpty(row.title) ?? nonEmpty(row.reason) ?? nonEmpty(row.instruction) ?? `Repair ${index + 1}`
+          nonEmpty(row.title) ??
+          nonEmpty(row.reason) ??
+          nonEmpty(row.instruction) ??
+          `Repair ${index + 1}`
         const description =
           nonEmpty(row.description) ?? nonEmpty(row.instruction) ?? nonEmpty(row.reason) ?? title
         const successCriteria = nonEmpty(row.successCriteria) ?? 'Repair completed'

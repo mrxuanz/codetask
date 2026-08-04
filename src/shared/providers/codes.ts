@@ -1,18 +1,19 @@
-/** Canonical provider codes shared across main/renderer/server boundaries. */
-export const SUPPORTED_CORE_CODES = ['codex', 'claude-code', 'opencode', 'cursorcli'] as const
+/** Canonical provider codes shared across server/renderer boundaries. */
+export const SUPPORTED_CORE_CODES = ['codex', 'claude', 'opencode', 'cursor'] as const
 export type SupportedCoreCode = (typeof SUPPORTED_CORE_CODES)[number]
 
+/** Historical input aliases → canonical codes. Write paths must store canonical only. */
 export const PROVIDER_CODE_ALIASES: Readonly<Record<string, SupportedCoreCode>> = {
   codex: 'codex',
-  claude: 'claude-code',
-  claude_code: 'claude-code',
-  'claude-code': 'claude-code',
+  claude: 'claude',
+  claude_code: 'claude',
+  'claude-code': 'claude',
   opencode: 'opencode',
-  cursor: 'cursorcli',
-  'cursor-cli': 'cursorcli',
-  'cursor-agent': 'cursorcli',
-  cursor_cli: 'cursorcli',
-  cursorcli: 'cursorcli'
+  cursor: 'cursor',
+  'cursor-cli': 'cursor',
+  'cursor-agent': 'cursor',
+  cursor_cli: 'cursor',
+  cursorcli: 'cursor'
 }
 
 export function isSupportedCoreCode(value: string): value is SupportedCoreCode {

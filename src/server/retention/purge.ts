@@ -1,11 +1,13 @@
-import { eq } from 'drizzle-orm'
 import type { getDb } from '../db'
-import { threadMessages } from '../db/schema'
 import { deleteMessageArtifactFiles } from './message-artifacts'
 import { removeThreadAttachmentsDir } from './janitor'
 import { cleanupJobRuntimeTree, cleanupThreadRuntimeTree } from '../runtime/cleanup'
 
 type AppDatabase = ReturnType<typeof getDb>
+
+function sqliteClient(db: AppDatabase): import('better-sqlite3').Database | null {
+  return (db as AppDatabase & { $client?: import('better-sqlite3').Database }).$client ?? null
+}
 
 export interface ThreadPurgeTargets {
   messageIds: string[]
@@ -13,15 +15,17 @@ export interface ThreadPurgeTargets {
 
 export async function collectThreadPurgeTargets(
   db: AppDatabase,
-  threadId: string
+  conversationId: string
 ): Promise<ThreadPurgeTargets> {
-  const messageRows = await db
-    .select({ id: threadMessages.id })
-    .from(threadMessages)
-    .where(eq(threadMessages.threadId, threadId))
-
-  return {
-    messageIds: messageRows.map((row) => row.id)
+  const client = sqliteClient(db)
+  if (!client) return { messageIds: [] }
+  try {
+    const messageRows = client
+      .prepare(`SELECT id FROM conversation_messages WHERE conversation_id = ?`)
+      .all(conversationId) as Array<{ id: string }>
+    return { messageIds: messageRows.map((row) => row.id) }
+  } catch {
+    return { messageIds: [] }
   }
 }
 

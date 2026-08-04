@@ -19,10 +19,7 @@ import {
 } from '../../shared/frozen-ids'
 import { throwIfCurrentRequestAborted } from '../context/request-abort'
 import { getOrComposeConversation } from '../design-module'
-import {
-  ConversationForbiddenError,
-  ConversationNotFoundError
-} from '@codetask/server-core'
+import { ConversationForbiddenError, ConversationNotFoundError } from '@codetask/server-core'
 
 function frozenIdToAppError(error: FrozenIdError): AppError {
   return AppError.badRequest(error.message, error.code)
@@ -92,11 +89,7 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
         ok({
           attachment: {
             ...attachment,
-            assetUrl: signAssetUrl(
-              ctx.security.authSecret,
-              attachment.assetUrl,
-              principal.userId
-            )
+            assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl, principal.userId)
           }
         })
       )

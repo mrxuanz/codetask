@@ -231,7 +231,11 @@ export const migration046ExecutionDataMigrate: ExecutionDataMigration = {
           row.id,
           draftSnapshot,
           executionProfile,
-          JSON.stringify({ settingsHash: row.id, capturedAt: new Date(now).toISOString(), payload: {} }),
+          JSON.stringify({
+            settingsHash: row.id,
+            capturedAt: new Date(now).toISOString(),
+            payload: {}
+          }),
           referenceManifest,
           executionTree,
           row.id,

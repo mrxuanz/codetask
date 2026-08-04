@@ -2,7 +2,6 @@ import { createHash } from 'crypto'
 import {
   AGENT_MCP_ROLES,
   SETTING_NAMESPACES,
-  type AgentMcpRole,
   type AgentPromptSettings,
   type SettingsProviderCode
 } from '@codetask/contracts'
@@ -14,42 +13,53 @@ export function contentHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-export function isSettingNamespace(value: string): value is import('@codetask/contracts').SettingNamespace {
+export function isSettingNamespace(
+  value: string
+): value is import('@codetask/contracts').SettingNamespace {
   return (SETTING_NAMESPACES as readonly string[]).includes(value)
 }
 
-export const AGENT_MCP_ROLE_LIST: readonly AgentMcpRole[] = AGENT_MCP_ROLES
+export const AGENT_MCP_ROLE_LIST: readonly import('@codetask/contracts').AgentMcpRole[] =
+  AGENT_MCP_ROLES
 
+/** Canonical settings provider codes (Batch F) — must match contracts ProviderCodeSchema. */
 export const PROVIDER_CODES: readonly SettingsProviderCode[] = [
   'codex',
-  'claude-code',
+  'claude',
   'opencode',
-  'cursorcli'
+  'cursor'
 ] as const
 
-/** Canonical / host / alias → Settings host provider code (MCP map keys). */
+/**
+ * Canonical / historical alias → Settings canonical provider code.
+ */
 const SETTINGS_PROVIDER_ALIASES: Readonly<Record<string, SettingsProviderCode>> = {
   codex: 'codex',
-  claude: 'claude-code',
-  'claude-code': 'claude-code',
-  claude_code: 'claude-code',
+  claude: 'claude',
+  'claude-code': 'claude',
+  claude_code: 'claude',
   opencode: 'opencode',
-  cursor: 'cursorcli',
-  cursorcli: 'cursorcli',
-  'cursor-cli': 'cursorcli',
-  'cursor-agent': 'cursorcli',
-  cursor_cli: 'cursorcli'
+  cursor: 'cursor',
+  cursorcli: 'cursor',
+  'cursor-cli': 'cursor',
+  'cursor-agent': 'cursor',
+  cursor_cli: 'cursor'
 }
 
 /**
- * Normalize any known provider spelling to Settings host codes used as MCP role keys.
- * Unknown values fall back to `cursorcli` (agent_defaults default).
+ * Normalize any known provider spelling to Settings canonical codes.
+ * Unknown values fall back to `cursor` (agent_defaults default).
  */
 export function toSettingsProviderCode(
   value: string,
-  fallback: SettingsProviderCode = 'cursorcli'
+  fallback: SettingsProviderCode = 'cursor'
 ): SettingsProviderCode {
   return SETTINGS_PROVIDER_ALIASES[value.trim().toLowerCase()] ?? fallback
+}
+
+/** Resolve known provider spellings; return null when unknown (no silent fallback). */
+export function trySettingsProviderCode(value: string): SettingsProviderCode | null {
+  return SETTINGS_PROVIDER_ALIASES[value.trim().toLowerCase()] ?? null
 }
 
 export type DefaultPromptBodies = () => AgentPromptSettings

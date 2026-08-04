@@ -4,8 +4,8 @@ import { parseJobExecutionProfile } from '../../src/server/execution-profile.ts'
 
 const profile = {
   plannerCoreCode: 'codex',
-  sliceVerifierCoreCode: 'claude-code',
-  milestoneVerifierCoreCode: 'cursorcli',
+  sliceVerifierCoreCode: 'claude',
+  milestoneVerifierCoreCode: 'cursor',
   skills: {
     planner: { skillIds: ['planning'], instructions: 'Plan the work.' },
     taskWorker: { skillIds: ['working'], instructions: 'Execute and verify the task.' },

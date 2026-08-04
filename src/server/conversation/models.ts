@@ -39,7 +39,7 @@ export function resolveCoreModel(
   const configured = getAppConfig().providers[coreCode].model?.trim()
   if (configured) return configured
 
-  if (coreCode === 'cursorcli') {
+  if (coreCode === 'cursor') {
     return readCursorCliDefaultModelId() ?? undefined
   }
 
@@ -47,5 +47,5 @@ export function resolveCoreModel(
 }
 
 export function resolveCursorAcpModelId(model?: string): string | undefined {
-  return resolveCoreModel('cursorcli', model)
+  return resolveCoreModel('cursor', model)
 }

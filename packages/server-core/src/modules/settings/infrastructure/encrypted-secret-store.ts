@@ -59,7 +59,13 @@ export class EncryptedSecretStore implements SecretStore {
               SET ciphertext = ?, nonce = ?, auth_tag = ?, updated_at = ?
             WHERE name = ?`
         )
-        .run(encrypted.toString('base64'), nonce.toString('base64'), authTag.toString('base64'), now, trimmed)
+        .run(
+          encrypted.toString('base64'),
+          nonce.toString('base64'),
+          authTag.toString('base64'),
+          now,
+          trimmed
+        )
       return
     }
 
@@ -123,11 +129,7 @@ export class EncryptedSecretStore implements SecretStore {
 
   private decrypt(row: SecretRow): string {
     this.requireMasterKey()
-    const decipher = createDecipheriv(
-      'aes-256-gcm',
-      this.key!,
-      Buffer.from(row.nonce, 'base64')
-    )
+    const decipher = createDecipheriv('aes-256-gcm', this.key!, Buffer.from(row.nonce, 'base64'))
     decipher.setAuthTag(Buffer.from(row.auth_tag, 'base64'))
     const plaintext = Buffer.concat([
       decipher.update(Buffer.from(row.ciphertext, 'base64')),

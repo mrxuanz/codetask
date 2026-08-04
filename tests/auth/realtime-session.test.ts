@@ -9,7 +9,13 @@ import {
   resetRealtimeSessionRegistryForTests
 } from '../../src/server/events/realtime-session-registry.ts'
 
-function fakeHub() {
+function fakeHub(): {
+  connectionId: string
+  closed(): boolean
+  close(): void
+  setSubscriptions(): Promise<void>
+  stream: AsyncGenerator<never, void, unknown>
+} {
   let closed = false
   return {
     connectionId: 'conn-1',

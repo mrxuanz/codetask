@@ -3,7 +3,8 @@ import { dirname } from 'path'
 import { getAppContext } from '../bootstrap'
 import { threadAttachmentsDir } from '../data-paths'
 import type { JobReferenceManifest } from '../../shared/job-references.ts'
-import type { TaskLaunchDraftPayload } from '../../shared/contracts/task-launch-draft.ts'
+import type { TaskLaunchDraftPayload } from '@codetask/contracts'
+
 import {
   resolveAttachmentRelativePath,
   resolveTurnAttachmentReadRoots

@@ -4,7 +4,10 @@ import Database from 'better-sqlite3'
 import type { AgentRole, AgentTurnEvent } from '@codetask/agent-runtime'
 import type { JobSubmission } from '@codetask/contracts'
 import { allowedJobActions } from '../../packages/server-core/src/modules/execution/job/domain/job-actions.ts'
-import { hashSubmission, JobSubmissionDedup } from '../../packages/server-core/src/modules/execution/job/infrastructure/job-submission-dedup.ts'
+import {
+  hashSubmission,
+  JobSubmissionDedup
+} from '../../packages/server-core/src/modules/execution/job/infrastructure/job-submission-dedup.ts'
 import {
   composeExecutionModule,
   ScriptedAgentRuntime
@@ -541,7 +544,9 @@ describe('execution module integration', () => {
         .prepare(`SELECT lease_expires_at AS expiresAt FROM execution_runs WHERE job_id = ?`)
         .get(accepted.jobId) as { expiresAt: number }
       const slot = db
-        .prepare(`SELECT lease_expires_at AS expiresAt FROM execution_pool_slots WHERE run_id IS NOT NULL`)
+        .prepare(
+          `SELECT lease_expires_at AS expiresAt FROM execution_pool_slots WHERE run_id IS NOT NULL`
+        )
         .get() as { expiresAt: number }
       const workspace = db
         .prepare(`SELECT lease_expires_at AS expiresAt FROM workspace_leases WHERE owner_id = ?`)
@@ -549,17 +554,12 @@ describe('execution module integration', () => {
       return { run: run.expiresAt, slot: slot.expiresAt, workspace: workspace.expiresAt }
     }
     const before = readExpiries()
-    await waitUntil(
-      () => {
-        const after = readExpiries()
-        return (
-          after.run > before.run &&
-          after.slot > before.slot &&
-          after.workspace > before.workspace
-        )
-      },
-      'all Execution lease layers should be refreshed during the provider wait'
-    )
+    await waitUntil(() => {
+      const after = readExpiries()
+      return (
+        after.run > before.run && after.slot > before.slot && after.workspace > before.workspace
+      )
+    }, 'all Execution lease layers should be refreshed during the provider wait')
 
     releaseTask()
     await waitUntil(
@@ -586,9 +586,8 @@ describe('execution module integration', () => {
       .prepare(`SELECT content_hash, execution_tree_json FROM job_snapshots WHERE job_id = ?`)
       .get(accepted.jobId) as { content_hash: string; execution_tree_json: string }
 
-    const { createInjectRepairWorkService } = await import(
-      '../../packages/server-core/src/modules/execution/recovery/application/inject-repair-work.ts'
-    )
+    const { createInjectRepairWorkService } =
+      await import('../../packages/server-core/src/modules/execution/recovery/application/inject-repair-work.ts')
     const repair = createInjectRepairWorkService({ db })
     const result = repair.inject({
       jobId: accepted.jobId,
@@ -690,7 +689,9 @@ describe('execution slice/milestone verification', () => {
     assert.equal(detail.state, 'succeeded')
 
     const attempts = db
-      .prepare(`SELECT COUNT(*) AS n FROM verification_attempts WHERE job_id = ? AND scope_type = 'slice'`)
+      .prepare(
+        `SELECT COUNT(*) AS n FROM verification_attempts WHERE job_id = ? AND scope_type = 'slice'`
+      )
       .get(accepted.jobId) as { n: number }
     assert.ok(Number(attempts.n) >= 1)
 
@@ -703,7 +704,9 @@ describe('execution slice/milestone verification', () => {
     // Force another coordinator tick — bundle hash guard must not grow attempts forever
     await settleExecution(execution)
     const after = db
-      .prepare(`SELECT COUNT(*) AS n FROM verification_attempts WHERE job_id = ? AND scope_type = 'slice'`)
+      .prepare(
+        `SELECT COUNT(*) AS n FROM verification_attempts WHERE job_id = ? AND scope_type = 'slice'`
+      )
       .get(accepted.jobId) as { n: number }
     assert.equal(Number(after.n), before)
 
@@ -717,9 +720,8 @@ describe('execution slice/milestone verification', () => {
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
 
-    const { ScriptedAgentRuntime } = await import(
-      '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
-    )
+    const { ScriptedAgentRuntime } =
+      await import('../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts')
     const runtime = new ScriptedAgentRuntime(async (input) => {
       if (input.role === 'task-worker') {
         return [{ type: 'failed', message: 'boom' }]
@@ -815,9 +817,8 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
 
-    const { ScriptedAgentRuntime } = await import(
-      '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
-    )
+    const { ScriptedAgentRuntime } =
+      await import('../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts')
     const runtime = new ScriptedAgentRuntime(async (input) => {
       if (input.role === 'slice-verifier') {
         return [
@@ -887,9 +888,8 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
 
-    const { ScriptedAgentRuntime } = await import(
-      '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
-    )
+    const { ScriptedAgentRuntime } =
+      await import('../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts')
     const runtime = new ScriptedAgentRuntime(async (input) => {
       if (input.role === 'slice-verifier') {
         return [
@@ -978,10 +978,7 @@ describe('execution ScriptedAgentRuntime provider path', () => {
          WHERE job_id = ?`
       )
       .all(accepted.jobId) as Array<{ scopeType: string; evidenceBundleJson: string }>
-    assert.deepEqual(
-      bundles.map((row) => row.scopeType).sort(),
-      ['milestone', 'slice']
-    )
+    assert.deepEqual(bundles.map((row) => row.scopeType).sort(), ['milestone', 'slice'])
     assert.ok(bundles.every((row) => JSON.parse(row.evidenceBundleJson).schemaVersion === 1))
 
     execution.drain()
@@ -1042,7 +1039,6 @@ describe('execution ScriptedAgentRuntime provider path', () => {
   })
 })
 
-
 describe('execution MCP report_task_result path', () => {
   it('report_task_result persists work_results and succeeds job', async () => {
     const db = new Database(':memory:')
@@ -1050,9 +1046,8 @@ describe('execution MCP report_task_result path', () => {
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
 
-    const { ScriptedAgentRuntime } = await import(
-      '../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts'
-    )
+    const { ScriptedAgentRuntime } =
+      await import('../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts')
     const runtime = new ScriptedAgentRuntime(async (input) => {
       if (input.role === 'slice-verifier') {
         return [
@@ -1132,15 +1127,13 @@ describe('execution MCP report_task_result path', () => {
   })
 })
 
-
 describe('execution migration 047', () => {
   it('drop_control_plane_tables removes control_jobs', async () => {
     const db = new Database(':memory:')
     db.exec(`CREATE TABLE control_jobs (id TEXT PRIMARY KEY NOT NULL)`)
     db.exec(`INSERT INTO control_jobs (id) VALUES ('cj-1')`)
-    const { migration047DropControlPlaneTables } = await import(
-      '../../packages/database/src/migrations/drop-control-plane.ts'
-    )
+    const { migration047DropControlPlaneTables } =
+      await import('../../packages/database/src/migrations/drop-control-plane.ts')
     migration047DropControlPlaneTables.up(db)
     const row = db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'control_jobs'`)

@@ -1,4 +1,5 @@
-import type { PlanProgressDto, TaskProgressDto } from '../../shared/contracts/jobs.ts'
+import type { PlanProgressDto, TaskProgressDto } from '@codetask/contracts'
+
 import type {
   PlannerRegisteredPlan,
   PlannerRegisteredTaskContext,

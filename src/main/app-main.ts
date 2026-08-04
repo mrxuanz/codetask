@@ -3,22 +3,10 @@ import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { parseCliArgs } from './cli'
-import { startAppServer, gracefulShutdown, type ServerInfo } from './server'
-import { SafeLoggerImpl } from '../server/application/safe-logger'
-import { createElectronServerPlatform } from './electron-server-platform'
 import { createShutdownSignalHandler } from './shutdown-signal'
-import { initializeProcessHostEnvironment } from '../server/host-environment'
+import { startDesktopService, type DesktopServiceHandle } from './desktop-service'
 
 const ALLOWED_EXTERNAL_SCHEMES = new Set(['http:', 'https:', 'mailto:'])
-
-let logDir: string | undefined
-try {
-  logDir = join(app.getPath('userData'), 'logs')
-} catch {
-  logDir = undefined
-}
-const earlyLogger = new SafeLoggerImpl(logDir ? { logDir } : undefined)
-earlyLogger.info('SafeLogger installed on main process')
 
 const cli = parseCliArgs()
 if (cli.mode === 'server') {
@@ -27,7 +15,7 @@ if (cli.mode === 'server') {
   app.commandLine.appendSwitch('disable-gpu-compositing')
 }
 
-let serverInfo: ServerInfo | null = null
+let service: DesktopServiceHandle | null = null
 
 function isAllowedExternalUrl(rawUrl: string): boolean {
   try {
@@ -81,12 +69,17 @@ function createWindow(serverUrl: string): void {
 
 let shutdownPromise: Promise<void> | null = null
 function gracefulShutdownFromApp(): Promise<void> {
-  shutdownPromise ??= gracefulShutdown()
+  shutdownPromise ??= (async () => {
+    if (service) {
+      await service.stop()
+      service = null
+    }
+  })()
   return shutdownPromise
 }
 
-async function runPackagedSmoke(server: ServerInfo): Promise<void> {
-  const response = await fetch(`${server.url}/api/health`, {
+async function runPackagedSmoke(handle: DesktopServiceHandle): Promise<void> {
+  const response = await fetch(`${handle.url}/api/health`, {
     signal: AbortSignal.timeout(15_000)
   })
   if (!response.ok) {
@@ -98,7 +91,9 @@ async function runPackagedSmoke(server: ServerInfo): Promise<void> {
     throw new Error('Smoke health check returned an unexpected response')
   }
 
-  console.log(`CODETASK_SMOKE_READY ${JSON.stringify({ url: server.url, health: 'ok' })}`)
+  console.log(
+    `CODETASK_SMOKE_READY ${JSON.stringify({ url: handle.url, health: 'ok', instanceId: handle.instanceId })}`
+  )
   await gracefulShutdownFromApp()
   app.exit(0)
 }
@@ -107,20 +102,31 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
-    await initializeProcessHostEnvironment()
-    serverInfo = await startAppServer(cli, createElectronServerPlatform())
-    ipcMain.handle('get-server-info', () => serverInfo)
+    // Thin shell: spawn/monitor Hono Service; do not import server/database/provider.
+    service = await startDesktopService()
+    ipcMain.handle('get-server-info', () =>
+      service
+        ? {
+            host: '127.0.0.1',
+            port: service.port,
+            url: service.url,
+            requestedPort: 0,
+            portChanged: true,
+            mode: cli.mode
+          }
+        : null
+    )
     if (cli.smokeTest) {
-      await runPackagedSmoke(serverInfo)
+      await runPackagedSmoke(service)
       return
     }
     if (cli.mode === 'desktop') {
-      createWindow(serverInfo.url)
+      createWindow(service.url)
       app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0 && serverInfo) createWindow(serverInfo.url)
+        if (BrowserWindow.getAllWindows().length === 0 && service) createWindow(service.url)
       })
     } else {
-      console.log(`[server] headless  open in browser: ${serverInfo.url}`)
+      console.log(`[server] headless open in browser: ${service.url}`)
     }
   } catch (error) {
     console.error(`[app] startup failed: ${error instanceof Error ? error.message : String(error)}`)

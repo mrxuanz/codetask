@@ -16,14 +16,14 @@ import { OPENCODE_DESCRIPTOR } from '../../src/shared/providers/descriptors/open
 import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
 import type { ProviderInstallation } from '../../src/shared/providers/installation.ts'
 import type { AgentTurnChunk, AgentTurnInput } from '../../src/server/agent-runtime/types.ts'
-import { buildProviderTurnContext } from '../../src/server/providers/driver.ts'
-import { resolveProviderExecutable } from '../../src/server/providers/executable.ts'
-import { createProviderRegistry } from '../../src/server/providers/composition.ts'
+import { buildProviderTurnContext } from '../../packages/provider-runtime-node/src/providers/driver.ts'
+import { resolveProviderExecutable } from '../../packages/provider-runtime-node/src/providers/executable.ts'
+import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
 import {
   OpenCodeDriver,
   createOpenCodeStreamFactory
-} from '../../src/server/providers/opencode/driver.ts'
-import { buildOpenCodeServerPlan } from '../../src/server/providers/opencode/server-plan.ts'
+} from '../../packages/provider-runtime-node/src/providers/opencode/driver.ts'
+import { buildOpenCodeServerPlan } from '../../packages/provider-runtime-node/src/providers/opencode/server-plan.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -43,6 +43,7 @@ function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
     role: 'conversation',
     cwd: '/workspace',
     runtimeRoot: '/runtime/opencode',
+    providerRuntimeScopeId: 'conversation:test-opencode',
     prompt: 'delegate-me',
     ...overrides
   }
@@ -91,17 +92,20 @@ test('OpenCodeDriver prepareTurn delegates to stream factory without altering ch
   assert.equal(prepared.reusePolicy, 'conversation-scoped')
 })
 
-test('default OpenCode stream factory delegates to legacy streamOpencodeTurn', () => {
-  const source = readFileSync(join(root, 'src/server/providers/opencode/driver.ts'), 'utf8')
+test('default OpenCode stream factory delegates to the canonical SDK streamer', () => {
+  const source = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/opencode/driver.ts'),
+    'utf8'
+  )
   assert.match(source, /createOpenCodeStreamFactory/)
   assert.match(source, /streamOpencodeTurn/)
-  assert.match(source, /agent-runtime\/providers\/opencode-sdk/)
+  assert.match(source, /streamers\/opencode-sdk/)
   assert.equal(typeof createOpenCodeStreamFactory, 'function')
 })
 
 test('Registry OpenCode entry uses the shared descriptor without a parallel runtime catalog', () => {
   const descriptorSource = readFileSync(
-    join(root, 'src/server/providers/opencode/descriptor.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/opencode/descriptor.ts'),
     'utf8'
   )
   assert.equal(existsSync(join(root, 'src/server/providers/catalog.ts')), false)
@@ -146,9 +150,12 @@ test('OpenCodeDriver.discover returns a stable installationId matching the resol
 })
 
 test('central preflight switch no longer handles OpenCode; driver owns preflight', () => {
-  const driverSource = readFileSync(join(root, 'src/server/providers/opencode/driver.ts'), 'utf8')
+  const driverSource = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/opencode/driver.ts'),
+    'utf8'
+  )
   const openCodePreflight = readFileSync(
-    join(root, 'src/server/providers/opencode/preflight.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/opencode/preflight.ts'),
     'utf8'
   )
 
@@ -162,16 +169,19 @@ test('central preflight switch no longer handles OpenCode; driver owns preflight
 
 test('buildOpenCodeServerPlan lives in OpenCode driver module; structured serve args', () => {
   const serverPlan = readFileSync(
-    join(root, 'src/server/providers/opencode/server-plan.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/opencode/server-plan.ts'),
     'utf8'
   )
-  const sdk = readFileSync(join(root, 'src/server/agent-runtime/providers/opencode-sdk.ts'), 'utf8')
+  const sdk = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/streamers/opencode-sdk.ts'),
+    'utf8'
+  )
 
   assert.match(serverPlan, /export function buildOpenCodeServerPlan/)
   assert.match(serverPlan, /hostname/)
   assert.match(serverPlan, /pure/)
   assert.match(serverPlan, /logLevel/)
-  assert.match(sdk, /from '\.\.\/\.\.\/providers\/opencode\/server-plan'/)
+  assert.match(sdk, /from '\.\.\/providers\/opencode\/server-plan'/)
   assert.match(sdk, /buildOpenCodeServerPlan/)
   assert.match(sdk, /plan\.buildServeArgs/)
   assert.doesNotMatch(sdk, /function buildOpencodeConfig/)
@@ -216,7 +226,7 @@ test('detect installation path is used for OpenCode server spawn with same insta
     )
 
     const sdk = readFileSync(
-      join(root, 'src/server/agent-runtime/providers/opencode-sdk.ts'),
+      join(root, 'packages/provider-runtime-node/src/streamers/opencode-sdk.ts'),
       'utf8'
     )
     assert.match(sdk, /executable:\s*plan\.executable/)
@@ -227,7 +237,8 @@ test('detect installation path is used for OpenCode server spawn with same insta
 })
 
 test('OpenCodeDriver turn handle uses RuntimeManager cancel/close contract', async () => {
-  const { ProviderRuntimeManager } = await import('../../src/server/providers/lifecycle.ts')
+  const { ProviderRuntimeManager } =
+    await import('../../packages/provider-runtime-node/src/providers/lifecycle.ts')
   const events: string[] = []
 
   async function* factory(
@@ -306,7 +317,7 @@ test('OpenCodeDriver turn handle uses RuntimeManager cancel/close contract', asy
 
 test('production OpenCode streamOpencodeTurn routes through getAgentTurnProvider / RuntimeManager', () => {
   const indexSource = readFileSync(
-    join(root, 'src/server/agent-runtime/providers/index.ts'),
+    join(root, 'packages/provider-runtime-node/src/streamers/index.ts'),
     'utf8'
   )
   assert.match(indexSource, /getAgentTurnProvider\('opencode'\)\.streamTurn/)

@@ -42,10 +42,7 @@ describe('OpenCode transport classification', () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       assert.equal(message.includes('parse URL'), false, message)
-      assert.ok(
-        message.toLowerCase().includes('fetch failed') || /econn/i.test(message),
-        message
-      )
+      assert.ok(message.toLowerCase().includes('fetch failed') || /econn/i.test(message), message)
     } finally {
       longTurn.close()
     }

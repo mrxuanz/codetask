@@ -41,7 +41,10 @@ function mapError(error: unknown): { status: number; code: string; message: stri
   }
 }
 
-function fail(c: { json: (body: unknown, status: number) => Response; get: (k: 'requestId') => string }, error: unknown) {
+function fail(
+  c: { json: (body: unknown, status: number) => Response; get: (k: 'requestId') => string },
+  error: unknown
+): Response {
   const mapped = mapError(error)
   return c.json(
     {
@@ -53,7 +56,11 @@ function fail(c: { json: (body: unknown, status: number) => Response; get: (k: '
   )
 }
 
-function ok(c: { json: (body: unknown, status?: number) => Response; get: (k: 'requestId') => string }, data: unknown, status = 200) {
+function ok(
+  c: { json: (body: unknown, status?: number) => Response; get: (k: 'requestId') => string },
+  data: unknown,
+  status = 200
+): Response {
   return c.json({ success: true, data, requestId: c.get('requestId') ?? 'unknown' }, status as 200)
 }
 
@@ -157,7 +164,9 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
         raw.createTaskMode != null ||
         (raw.kind != null && raw.kind !== 'chat')
       ) {
-        throw new ConversationValidationError('Draft/Plan fields are not accepted on conversation turns')
+        throw new ConversationValidationError(
+          'Draft/Plan fields are not accepted on conversation turns'
+        )
       }
       const accepted = app.enqueueTurn(c.get('actor'), c.req.param('conversationId'), {
         message: body.message ?? '',

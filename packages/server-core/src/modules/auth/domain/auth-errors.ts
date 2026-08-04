@@ -22,7 +22,11 @@ export class AuthError extends Error {
     return new AuthError(code, message, 401, { code })
   }
 
-  static badRequest(code: string, message: string, details: Record<string, unknown> = {}): AuthError {
+  static badRequest(
+    code: string,
+    message: string,
+    details: Record<string, unknown> = {}
+  ): AuthError {
     return new AuthError(code, message, 400, { code, ...details })
   }
 
@@ -30,7 +34,11 @@ export class AuthError extends Error {
     return new AuthError(code, message, 409, { code, ...details })
   }
 
-  static forbidden(code: string, message: string, details: Record<string, unknown> = {}): AuthError {
+  static forbidden(
+    code: string,
+    message: string,
+    details: Record<string, unknown> = {}
+  ): AuthError {
     return new AuthError(code, message, 403, { code, ...details })
   }
 

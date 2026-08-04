@@ -193,6 +193,7 @@ npm run test:sandbox:tdd      # native sandbox TDD（build:sandbox 必須）
 npm run test:sandbox
 npm run typecheck
 npm run test:ci               # typecheck + 高速テストスイート
+npm run release:test-gate     # リリースと同じ JavaScript/TypeScript ゲート
 ```
 
 ## アーキテクチャドキュメント

@@ -58,7 +58,7 @@ export default defineConfig(
     files: [
       'src/server/application/**/*.{ts,tsx}',
       'packages/server-core/src/modules/execution/**/*.{ts,tsx}',
-      'src/renderer/src/stores/**/*.{ts,tsx}'
+      'apps/web/src/stores/**/*.{ts,tsx}'
     ],
     rules: {
       '@typescript-eslint/ban-ts-comment': [

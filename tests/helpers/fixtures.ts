@@ -11,12 +11,12 @@ export const FIXTURE_ABILITIES = [
   {
     abilityCode: 'frontend-implementation',
     reason: '实现前端界面与交互',
-    recommendedCoreCode: 'cursorcli' as SupportedCoreCode
+    recommendedCoreCode: 'cursor' as SupportedCoreCode
   },
   {
     abilityCode: 'testing-validation',
     reason: '运行验证并整理证据',
-    recommendedCoreCode: 'claude-code' as SupportedCoreCode
+    recommendedCoreCode: 'claude' as SupportedCoreCode
   }
 ]
 

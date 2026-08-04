@@ -1,12 +1,11 @@
+import { resolveReusePolicy } from './provider-runtime.ts'
+
 /**
  * Shared Agent Runtime — infrastructure for Conversation, Design Planner, and Execution.
  * Business modules must not import concrete Provider SDKs; they only use AgentRuntime.
  */
 
 export type ProviderCode = 'codex' | 'claude' | 'opencode' | 'cursor'
-
-/** Host CLI codes used by legacy src/server provider registry. */
-export type HostProviderCode = 'codex' | 'claude-code' | 'opencode' | 'cursorcli'
 
 export type AgentRole =
   | 'conversation'
@@ -113,19 +112,8 @@ const HOST_TO_CANONICAL: Record<string, ProviderCode> = {
   cursor_cli: 'cursor'
 }
 
-const CANONICAL_TO_HOST: Record<ProviderCode, HostProviderCode> = {
-  codex: 'codex',
-  claude: 'claude-code',
-  opencode: 'opencode',
-  cursor: 'cursorcli'
-}
-
 export function toCanonicalProviderCode(value: string): ProviderCode | null {
   return HOST_TO_CANONICAL[value.trim().toLowerCase()] ?? null
-}
-
-export function toHostProviderCode(code: ProviderCode): HostProviderCode {
-  return CANONICAL_TO_HOST[code]
 }
 
 export function buildConversationScopeId(
@@ -135,18 +123,9 @@ export function buildConversationScopeId(
   return `conversation:${conversationId}:provider:${providerCode}`
 }
 
-export function resolveReusePolicy(
-  role: AgentRole,
-  capabilityProfile: string
-): 'one-shot' | 'conversation-scoped' {
-  if (role !== 'conversation' || capabilityProfile === 'chat-write') return 'one-shot'
-  return 'conversation-scoped'
-}
+export { resolveReusePolicy, resolveProviderReusePolicy } from './provider-runtime.ts'
 
-export function contextPolicyFor(
-  role: AgentRole,
-  capabilityProfile: string
-): RuntimeContextPolicy {
+export function contextPolicyFor(role: AgentRole, capabilityProfile: string): RuntimeContextPolicy {
   const reuse = resolveReusePolicy(role, capabilityProfile)
   return {
     sessionReusable: reuse === 'conversation-scoped',
@@ -160,8 +139,12 @@ export class UnsupportedAgentRuntime implements AgentRuntime {
     yield { type: 'failed', message: 'AgentRuntime adapter not wired; use createAgentRuntime.' }
   }
 
-  async abort(): Promise<void> {}
-  async closeScope(): Promise<void> {}
+  async abort(): Promise<void> {
+    // Unsupported runtimes never start work, so there is nothing to abort.
+  }
+  async closeScope(): Promise<void> {
+    // Unsupported runtimes never allocate a reusable scope.
+  }
   async inspectScope(): Promise<RuntimeScopeState | null> {
     return null
   }
@@ -180,7 +163,7 @@ export type HostTurnChunk =
   | { type: 'error'; message: string }
 
 export type HostTurnStreamer = (
-  input: AgentTurnInput & { hostProvider: HostProviderCode },
+  input: AgentTurnInput,
   options: { signal?: AbortSignal }
 ) => AsyncIterable<HostTurnChunk>
 
@@ -203,7 +186,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
 
   return {
     async *runTurn(input: AgentTurnInput): AsyncIterable<AgentTurnEvent> {
-      const hostProvider = toHostProviderCode(input.provider)
       const controller = new AbortController()
       active.set(input.turnId, controller)
       const signal = input.signal
@@ -229,10 +211,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
       deps.onBindingUpsert?.(binding)
 
       try {
-        for await (const chunk of deps.streamTurn(
-          { ...input, hostProvider },
-          { signal }
-        )) {
+        for await (const chunk of deps.streamTurn(input, { signal })) {
           if (chunk.type === 'delta') {
             yield { type: 'text_delta', text: chunk.content }
           } else if (chunk.type === 'thinking_delta') {
@@ -274,7 +253,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
       await deps.closeScopeImpl?.(scopeId)
       const existing = scopes.get(scopeId)
       if (existing) {
-        const stopped = { ...existing, status: 'stopped' as const, lastSeenAt: new Date().toISOString() }
+        const stopped = {
+          ...existing,
+          status: 'stopped' as const,
+          lastSeenAt: new Date().toISOString()
+        }
         scopes.set(scopeId, stopped)
         deps.onBindingUpsert?.(stopped)
       }
@@ -283,8 +266,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
     async inspectScope(scopeId: string): Promise<RuntimeScopeState | null> {
       const binding = scopes.get(scopeId) ?? null
       if (!binding) return null
-      const profile =
-        binding.ownerType === 'conversation' ? 'chat-read' : 'planner-read'
+      const profile = binding.ownerType === 'conversation' ? 'chat-read' : 'planner-read'
       return {
         scopeId,
         binding,
@@ -305,9 +287,4 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
 
 export { createAgentRuntime as createSharedAgentRuntime }
 
-export {
-  CODETEAM_MANAGER_MCP_SERVER,
-  MCP_HTTP_ACCEPT_HEADER_VALUE
-} from './mcp-constants.ts'
-
-export { resolveProviderReusePolicy } from './provider-runtime.ts'
+export { CODETEAM_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from './mcp-constants.ts'

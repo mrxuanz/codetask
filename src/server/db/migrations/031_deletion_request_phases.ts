@@ -7,7 +7,11 @@ function tableExists(db: import('better-sqlite3').Database, table: string): bool
   return Boolean(row)
 }
 
-function columnExists(db: import('better-sqlite3').Database, table: string, column: string): boolean {
+function columnExists(
+  db: import('better-sqlite3').Database,
+  table: string,
+  column: string
+): boolean {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
   return rows.some((row) => row.name === column)
 }

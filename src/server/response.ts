@@ -1,36 +1,33 @@
-import type { ApiResponse } from '../shared/contracts/api.ts'
+/**
+ * HTTP response helpers — pure ApiSuccess / ApiFailure (Batch R4).
+ */
+import type { ApiFailure, ApiSuccess } from '@codetask/contracts'
 
-export type { ApiResponse } from '../shared/contracts/api.ts'
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure
 
-export function ok<T>(
-  data: T,
-  message = 'success',
-  extra: Record<string, unknown> = {}
-): ApiResponse<T> {
+export function ok<T>(data: T, requestId = 'local'): ApiSuccess<T> {
   return {
+    success: true,
     data,
-    status: 0,
-    extra,
-    message,
-    success: true
+    requestId
   }
 }
 
-export function okWithExtra<T>(data: T, extra: Record<string, unknown>): ApiResponse<T> {
-  return ok(data, 'success', extra)
-}
-
-export function fail<T = null>(
-  status: number,
+export function fail(
+  code: number | string,
   message: string,
-  data: T = null as T,
-  extra: Record<string, unknown> = {}
-): ApiResponse<T> {
+  details: Record<string, unknown> = {},
+  requestId = 'local'
+): ApiFailure {
   return {
-    data,
-    status,
-    extra,
-    message,
-    success: false
+    success: false,
+    error: {
+      code: String(code),
+      message,
+      ...(Object.keys(details).length > 0 ? { details } : {})
+    },
+    requestId
   }
 }
+
+export type { ApiSuccess, ApiFailure }

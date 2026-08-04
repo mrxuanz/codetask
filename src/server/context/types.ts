@@ -30,6 +30,8 @@ export interface AppContext {
   security: SecurityContext
   bootId: string
   applicationRuntime: ApplicationRuntime | null
+  /** Optional recovery master key file path from CLI. */
+  masterKeyFile?: string
   storage?: {
     source: string
   }

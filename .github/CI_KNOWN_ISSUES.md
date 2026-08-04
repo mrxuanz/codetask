@@ -28,55 +28,37 @@ Each BUSINESS entry should include:
   allowance removed after the source fix in this remediation batch.
 - Decision needed: none (resolved by changing `let` to `const`).
 
-## BUSINESS-002: legacy Cursor core aliases bypass normalization
+## BUSINESS-002: legacy Cursor provider aliases bypass normalization
 
-- Status: open
+- Status: resolved (2026-08-04)
 - Target phase: Phase 5 (shared contracts and data migration)
-- Exit criteria: persisted legacy aliases are normalized at the system boundary
-  before capability checks; regression tests cover historical `cursor` rows.
-- Locations: `src/server/conversation/service.ts:198` and
-  `src/server/conversation/cores.ts:45`
-- Finding: the capability check casts the persisted `thread.coreCode` directly,
-  while the canonical normalizer maps historical `cursor` aliases to
-  `cursorcli`.
-- Impact: historical rows containing `cursor` may be rejected for read-only chat
-  with `provider.capability_unsupported`.
-- CI handling: tests now use the canonical `cursorcli` fixture so the workspace
-  lease test exercises its intended behavior instead of an unrelated stale
-  alias.
-- Decision needed: confirm whether persisted legacy aliases must remain
-  supported and, if so, choose a business-code normalization/migration strategy.
+- Exit criteria: met. Persisted aliases are normalized to canonical `cursor`
+  before capability checks and migration 061 rewrites legacy rows.
+- Locations: `src/shared/providers/codes.ts`,
+  `packages/agent-runtime/src/index.ts`, and migration 061.
+- Resolution: the canonical provider set is `codex | claude | opencode |
+cursor`; `cursorcli`, `cursor-cli`, and `cursor-agent` are accepted only by
+  boundary normalizers. Regression tests assert canonical settings and registry
+  values.
+- CI handling: no allowance.
+- Decision needed: none.
 
 ## Warning baseline
 
-After excluding generated runtime data, the clean baseline contains 459
-non-blocking ESLint warnings. CI permits the count to decrease but fails if it
-grows above that baseline.
+The clean baseline is 0 ESLint errors and 0 warnings. CI fails on any warning or
+error; generated runtime data remains excluded explicitly.
 
 ## BUSINESS-003: control-plane exact optional property diagnostics
 
-- Status: open (narrowed during Provider Runtime Unification)
+- Status: resolved (2026-08-04)
 - Target phase: Phase 6 (control plane convergence)
-- Exit criteria: control-plane typecheck baseline is empty; callers omit
-  undefined optional properties or types explicitly admit `undefined`.
-- Locations (remaining):
-  - `src/server/agent-runtime/cursor-acp/acp-shared.ts` (`TS2375`)
-  - `src/server/agent-runtime/runner.ts` (`TS2379`)
-  - `src/server/conversation/service.ts` (`TS2379`)
-- Resolved during PRU:
-  - `resolveInputCapabilityProfile` now admits `capabilityProfile?: … | undefined`,
-    clearing former Claude/Codex/Cursor/OpenCode turn-plan call sites (including
-    deleted `cursor-policy.ts`).
-  - Provider launch/preflight optionals widened similarly where required.
-- Finding: optional values are passed as explicit `undefined` while
-  `exactOptionalPropertyTypes` requires omission or an explicitly widened type.
-- Impact: the stricter control-plane TypeScript project does not compile cleanly.
-- CI handling: `scripts/ci/check-control-plane-typecheck-baseline.mjs` permits
-  only these file/error-code/source-line signatures at their exact occurrence
-  counts. New diagnostics and stale allowances fail CI, while unrelated line
-  movement does not invalidate the baseline.
-- Decision needed: choose whether callers should omit undefined properties or
-  the receiving types should explicitly admit `undefined`.
+- Exit criteria: met. The normal Node and Web TypeScript projects compile with
+  no diagnostics.
+- Resolution: affected optional-property call sites/types were corrected. The
+  orphan baseline script was removed because it referenced the already-deleted
+  `tsconfig.control-plane.json` and was not called by package scripts or CI.
+- CI handling: `npm run typecheck` is the sole, zero-baseline TypeScript gate.
+- Decision needed: none.
 
 ## BUSINESS-011: `delete-user-draft.test.ts` hangs under `node --test`
 
@@ -121,76 +103,67 @@ grows above that baseline.
 
 ## BUSINESS-004: macOS Seatbelt tests no longer compile
 
-- Status: open
+- Status: resolved (2026-08-04)
 - Target phase: Phase 7 (open-source release gate / native platform matrix)
-- Exit criteria: `cargo test --manifest-path native/Cargo.toml` compiles and
-  passes Seatbelt tests on macOS CI or a documented macOS job.
-- Locations: `native/codeteam-sandboxing/src/seatbelt_tests.rs:14`, `:84`, and
-  `:609`; `native/codeteam-network-proxy/src/lib.rs:43`
-- Finding: the macOS-only tests import the public `ConfigReloader` struct as if
-  it were the runtime trait, and their package does not declare the
-  `async-trait` or `tokio` test dependencies used by the file.
-- Impact: `cargo test --manifest-path native/Cargo.toml` fails to compile on
-  macOS. The current GitHub Rust jobs run on Ubuntu, where the Seatbelt module is
-  excluded by `cfg(target_os = "macos")`.
-- CI handling: none. The Ubuntu workspace test remains intact; no package or
-  test is excluded to hide the platform-specific failure.
-- Decision needed: reconcile the stub/runtime network-proxy API and restore the
-  macOS test dependencies when native business code is next in scope.
+- Exit criteria: met. `cargo test --manifest-path native/Cargo.toml` passes on
+  macOS, and CI/release packaging now execute the macOS-native test path.
+- Locations: `native/codeteam-sandboxing/src/seatbelt_tests.rs`,
+  `.github/workflows/ci.yml`, and `.github/workflows/build.yml`
+- Resolution: the test now exercises the active disabled managed-proxy stub
+  instead of importing the unreachable full proxy runtime API. Metadata
+  carveout assertions verify protected paths and behavior rather than relying
+  on incidental `-D...EXCLUDED_n` ordering. The `dot_codex_canonical` variable
+  that actually pointed to `.codeteam` was renamed.
+- Validation: the sandboxing crate passes 63/63 tests, and the full native
+  workspace passes on macOS with serialized execution.
+- CI handling: a `macos-15` Rust job runs on pushes/PRs; both macOS release
+  targets run the native workspace before packaging.
+- Decision needed: none.
 
 ## BUSINESS-005: inherited-fd PTY tests fail on macOS
 
-- Status: open
+- Status: resolved (2026-08-04)
 - Target phase: Phase 7 (open-source release gate / native platform matrix)
-- Exit criteria: the two inherited-fd PTY cases pass on a clean macOS runner
-  without skipping or weakening the Ubuntu native suite.
+- Exit criteria: met. Both cases pass without skipping or changing the fd
+  preservation implementation.
 - Locations: `native/codeteam-utils-pty/src/tests.rs:820` and `:1058`
-- Finding: the PTY and pipe children both exit with status 1 when the tests ask
-  `/bin/sh` to write through a preserved `/dev/fd/<n>` descriptor.
-- Impact: after excluding only the separately documented Seatbelt compile
-  failure, the macOS workspace test still fails these two cases; the other 100+
-  native tests reached in that run pass or are ignored as declared.
-- CI handling: none. The GitHub jobs run the complete native workspace on
-  Ubuntu, and the CI workflow does not weaken or skip these tests.
-- Decision needed: reproduce on a clean macOS runner and decide whether the
-  descriptor-preservation implementation or the cross-platform test command
-  needs adjustment.
+- Finding: fd inheritance worked, but macOS `/bin/sh` rejected reopening the
+  already-inherited descriptor through `/dev/fd/<n>`. That tested a filesystem
+  alias, not the promised exec inheritance contract.
+- Resolution: the child shell now writes through direct descriptor duplication
+  (`>&"$PRESERVED_FD"`). The PTY and pipe paths still have to preserve the fd
+  across exec for the assertions to pass.
+- Validation: `codeteam-utils-pty` passes 16/16 tests and the full native
+  workspace passes on macOS.
+- CI handling: covered by the macOS CI and release-native jobs added with
+  BUSINESS-004.
+- Decision needed: none.
 
 ## BUSINESS-006: production bundle has circular chunk ordering risk
 
-- Status: open
+- Status: resolved (2026-08-04)
 - Target phase: Phase 3 (unreachable / packaging hygiene) or Phase 6
-- Exit criteria: production build no longer warns about circular chunk ordering
-  for the retention/legacy-control-plane cycle; mixed static/dynamic import
-  boundaries reviewed.
-- Locations: `src/server/retention/lifecycle.ts`,
-  `src/server/retention/index.ts`, and
-  `src/server/legacy-control-plane/repository.ts`
-- Finding: Rollup reports that `onJobStatusTransition` is re-exported through a
-  module cycle while the modules are placed in different chunks. The build also
-  reports several server modules that are both statically and dynamically
-  imported, so those dynamic imports do not create separate chunks.
-- Impact: the build succeeds, but Rollup warns that the circular chunk graph can
-  produce a broken execution order.
-- CI handling: none; this is kept visible here instead of changing business
-  imports or hiding bundler warnings.
-- Decision needed: import the retention symbol directly or deliberately group
-  the cycle in one chunk, then review the mixed static/dynamic import boundaries.
+- Exit criteria: met. The legacy control-plane module was removed and the
+  production build no longer emits a circular chunk ordering warning.
+- Validation: `npm run build` completes. Rollup still reports non-fatal mixed
+  static/dynamic-import optimization notices for `bootstrap.ts` and the Web
+  Design client; these no longer describe a broken execution-order cycle.
+- CI handling: package smoke and all release builds execute the production
+  build, so unresolved entries and renderer parse errors fail the workflow.
+- Decision needed: none for correctness; remaining chunk optimization is a
+  release-polish item.
 
 ## BUSINESS-007: native test target has an unused import
 
-- Status: open
+- Status: resolved (2026-08-04)
 - Target phase: Phase 2 (engineering hygiene / native)
-- Exit criteria: unused import removed or used; Linux/macOS native test compile
-  no longer emits `unused_imports` for this site.
+- Exit criteria: met; the import is compiled only on Windows where it is used.
 - Location: `native/codeteam-sandbox/src/attestation.rs:179`
-- Finding: the test module imports `std::path::Path` without using it.
-- Impact: Linux-target and macOS native test compilation emits an
-  `unused_imports` warning.
+- Resolution: added `#[cfg(windows)]` to the test-only `Path` import.
+- Validation: `cargo check --manifest-path native/Cargo.toml --release` passes.
 - CI handling: none; Rust warnings remain visible and are not globally allowed
   or suppressed.
-- Decision needed: remove or use the import when native business code is in
-  scope.
+- Decision needed: none.
 
 ## BUSINESS-008: Rust cache cannot parse several native manifests
 
@@ -267,7 +240,7 @@ grows above that baseline.
 
 - Status: resolved (2026-08-02)
 - Target phase: Architecture 03 follow-up
-- Exit criteria: create_task-era G4–G8 / DRAFT-* / JOB-CHAT-RO cases removed from
+- Exit criteria: create_task-era G4–G8 / DRAFT-\* / JOB-CHAT-RO cases removed from
   catalog; draft-job defaults to Design smoke; no ARCH03 skip stubs remain.
 - Resolution: permanently deleted retired create_task catalog entries and Fake/
   OpenCode stubs. Friendly CLI aliases (`notes-search`, `draft-multiturn`, …)

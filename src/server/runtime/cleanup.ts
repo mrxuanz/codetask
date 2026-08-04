@@ -43,11 +43,7 @@ export async function wipeLegacyRuntimesRoot(dataDir: string): Promise<{ removed
   return { removed: 1 }
 }
 
-export type CleanupJobRuntimeResult =
-  | 'deleted'
-  | 'absent'
-  | 'deferred_active'
-  | 'deferred_slot'
+export type CleanupJobRuntimeResult = 'deleted' | 'absent' | 'deferred_active' | 'deferred_slot'
 
 /**
  * Delete a legacy Job runtime tree when present.
@@ -68,10 +64,6 @@ export async function cleanupJobRuntimeTree(
     const ctx = getAppContext()
     if (ctx.executionRuntime.isLoopActive(jobId)) {
       return 'deferred_active'
-    }
-    const { listActiveWorkloadSlots } = await import('../infra/workload-lease-stub')
-    if ((await listActiveWorkloadSlots()).some((slot) => slot.ownerId === jobId)) {
-      return 'deferred_slot'
     }
   } catch {
     // Standalone retention tests may not have a bootstrapped application context.

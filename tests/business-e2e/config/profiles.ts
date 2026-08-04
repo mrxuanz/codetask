@@ -1,6 +1,6 @@
 export type DriverProvider = 'opencode' | 'fake' | 'supervisor'
 
-export type SutCoreCode = 'opencode' | 'cursorcli' | 'claude-code' | 'codex'
+export type SutCoreCode = 'opencode' | 'cursor' | 'claude' | 'codex'
 
 export type RoleProviders = {
   conversation: string
@@ -37,12 +37,12 @@ export const PROFILES: Record<ProfileName, Profile> = {
   'fixed-cursor': {
     name: 'fixed-cursor',
     driverProvider: 'opencode',
-    roleProviders: fixedRoles('cursorcli')
+    roleProviders: fixedRoles('cursor')
   },
   'fixed-claude': {
     name: 'fixed-claude',
     driverProvider: 'opencode',
-    roleProviders: fixedRoles('claude-code')
+    roleProviders: fixedRoles('claude')
   },
   'fixed-codex': {
     name: 'fixed-codex',
@@ -52,8 +52,8 @@ export const PROFILES: Record<ProfileName, Profile> = {
 }
 
 export function fixedProfileForCore(core: SutCoreCode): Profile {
-  if (core === 'cursorcli') return PROFILES['fixed-cursor']
-  if (core === 'claude-code') return PROFILES['fixed-claude']
+  if (core === 'cursor') return PROFILES['fixed-cursor']
+  if (core === 'claude') return PROFILES['fixed-claude']
   if (core === 'codex') return PROFILES['fixed-codex']
   return PROFILES['fixed-opencode']
 }

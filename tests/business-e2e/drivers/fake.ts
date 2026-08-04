@@ -18,10 +18,7 @@ import {
   IMAGE_UPLOAD_FILE_NAME,
   resolveImageFixturePath
 } from '../oracles/image-attachment'
-import {
-  htmlFileSatisfied,
-  runChatWithClarificationLoop
-} from './chat-clarify-loop'
+import { htmlFileSatisfied, runChatWithClarificationLoop } from './chat-clarify-loop'
 
 type Push = (type: string, detail?: unknown) => void
 
@@ -30,7 +27,6 @@ function selectedConversationCore(input: DriverStartInput): string {
   if (!core) throw new Error('conversation_core_required')
   return core
 }
-
 
 /**
  * Deterministic driver used to validate Test MCP + public API surfaces
@@ -142,8 +138,7 @@ export class FakeDriver implements AgentDriver {
         const loop = await runChatWithClarificationLoop(mcp, {
           threadId: thread.id,
           initialMessage: message,
-          clarifyMessage:
-            '不需要更多细节。请直接用中文只回复数字答案，不要解释、不要追问。',
+          clarifyMessage: '不需要更多细节。请直接用中文只回复数字答案，不要解释、不要追问。',
           push
         })
         await mcp.callTool('codetask_list_messages', { threadId: thread.id })
@@ -364,8 +359,7 @@ export class FakeDriver implements AgentDriver {
     await mcp.callTool('report_case_result', {
       caseId: input.caseId,
       status: 'completed',
-      summary:
-        'Design draft: chat clarify-loop → create → abilities → execution profile → confirm',
+      summary: 'Design draft: chat clarify-loop → create → abilities → execution profile → confirm',
       observations: [
         {
           step: 'confirm',

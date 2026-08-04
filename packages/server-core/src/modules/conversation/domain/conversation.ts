@@ -119,7 +119,10 @@ export function toMessageDto(row: MessageRecord): ConversationMessageDto {
   }
 }
 
-export function toTurnDto(row: TurnRecord, queuePosition: number | null = null): ConversationTurnDto {
+export function toTurnDto(
+  row: TurnRecord,
+  queuePosition: number | null = null
+): ConversationTurnDto {
   return {
     id: row.id,
     conversationId: row.conversationId,
@@ -132,7 +135,9 @@ export function toTurnDto(row: TurnRecord, queuePosition: number | null = null):
     stateRevision: row.stateRevision,
     ...(row.userMessageId ? { userMessageId: row.userMessageId } : {}),
     ...(row.assistantMessageId ? { assistantMessageId: row.assistantMessageId } : {}),
-    lastError: row.lastErrorJson ? (JSON.parse(row.lastErrorJson) as ConversationTurnDto['lastError']) : null,
+    lastError: row.lastErrorJson
+      ? (JSON.parse(row.lastErrorJson) as ConversationTurnDto['lastError'])
+      : null,
     createdAt: row.createdAt,
     ...(row.admittedAt ? { admittedAt: row.admittedAt } : {}),
     ...(row.startedAt ? { startedAt: row.startedAt } : {}),

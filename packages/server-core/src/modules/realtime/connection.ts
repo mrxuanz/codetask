@@ -1,8 +1,4 @@
-import type {
-  DurableRealtimeEnvelope,
-  RealtimeEnvelope,
-  RealtimeTopic
-} from '@codetask/contracts'
+import type { DurableRealtimeEnvelope, RealtimeEnvelope, RealtimeTopic } from '@codetask/contracts'
 import type { RealtimeEventLog } from './event-log.ts'
 import { LiveFanout, type RealtimeConnectionState } from './live-fanout.ts'
 

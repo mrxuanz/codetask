@@ -26,7 +26,7 @@ function defaultProviderSettings(code: SupportedCoreCode): ProviderSettings {
   return {
     enabled: true,
     executable: { mode: 'auto' },
-    approveMcps: code === 'cursorcli'
+    approveMcps: code === 'cursor'
   }
 }
 

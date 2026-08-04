@@ -113,46 +113,6 @@ export const projects = sqliteTable(
   (table) => [uniqueIndex('idx_projects_actor_workspace').on(table.actorId, table.workspaceRoot)]
 )
 
-export const threads = sqliteTable('threads', {
-  id: text('id').primaryKey(),
-  actorId: text('actor_id').notNull(),
-  projectId: text('project_id')
-    .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
-  title: text('title').notNull(),
-  status: text('status').notNull(),
-  conversationId: text('conversation_id').notNull(),
-  coreCode: text('core_code').notNull(),
-  runtimeStatus: text('runtime_status').notNull(),
-  runtimeSessionId: text('runtime_session_id'),
-  coreRuntimeJson: text('core_runtime_json').notNull().default('{}'),
-  lastError: text('last_error'),
-  lastUsedAt: integer('last_used_at'),
-  titleSource: text('title_source').notNull().default('auto'),
-  /** Live CHECK is chat-only after migration 056. */
-  threadKind: text('thread_kind').notNull().default('chat'),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull()
-})
-
-export const threadMessages = sqliteTable('thread_messages', {
-  id: text('id').primaryKey(),
-  threadId: text('thread_id')
-    .notNull()
-    .references(() => threads.id, { onDelete: 'cascade' }),
-  actorId: text('actor_id').notNull(),
-  role: text('role').notNull(),
-  kind: text('kind').notNull(),
-  content: text('content').notNull(),
-  coreCode: text('core_code').notNull(),
-  conversationId: text('conversation_id').notNull(),
-  runtimeSessionId: text('runtime_session_id'),
-  payloadJson: text('payload_json'),
-  payloadArtifactId: text('payload_artifact_id'),
-  attachmentsJson: text('attachments_json'),
-  createdAt: text('created_at').notNull()
-})
-
 /** Conversation-module turns (migration 048+). Host drizzle mirror for cross-module reads. */
 export const conversationTurns = sqliteTable('conversation_turns', {
   id: text('id').primaryKey(),
@@ -222,9 +182,8 @@ export const messageArtifacts = sqliteTable(
   'message_artifacts',
   {
     id: text('id').primaryKey(),
-    messageId: text('message_id')
-      .notNull()
-      .references(() => threadMessages.id, { onDelete: 'cascade' }),
+    /** Opaque message id (conversation_messages / historical thread_messages). */
+    messageId: text('message_id').notNull(),
     kind: text('kind').notNull().default('payload'),
     contentHash: text('content_hash').notNull(),
     byteSize: integer('byte_size').notNull(),
@@ -281,8 +240,6 @@ export const deletionRequests = sqliteTable('deletion_requests', {
 export type AuthUser = typeof authUsers.$inferSelect
 export type AuthSession = typeof authSessions.$inferSelect
 export type Project = typeof projects.$inferSelect
-export type Thread = typeof threads.$inferSelect
-export type ThreadMessage = typeof threadMessages.$inferSelect
 export type JobArtifact = typeof jobArtifacts.$inferSelect
 export type ConversationTurn = typeof conversationTurns.$inferSelect
 export type JobCounter = typeof jobCounters.$inferSelect

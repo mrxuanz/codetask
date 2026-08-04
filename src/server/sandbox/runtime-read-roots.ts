@@ -2,10 +2,7 @@ import { execFileSync } from 'child_process'
 import { dirname, join, normalize } from 'path'
 import { existsSync, realpathSync } from 'fs'
 import { resolveMainSandboxScript } from './packaged-paths'
-import {
-  processHostEnvironmentSource,
-  type HostEnvironmentSnapshot
-} from '../host-environment'
+import { processHostEnvironmentSource, type HostEnvironmentSnapshot } from '../host-environment'
 import { getShellChildEnvironment } from '../shell-child-environment'
 
 function safeRealpath(path: string): string {

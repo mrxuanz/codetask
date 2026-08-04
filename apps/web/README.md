@@ -1,4 +1,5 @@
 # @codetask/web
 
-Vue renderer lives in `src/renderer` during the 01 cutover.
-Use `apps/web/vite.config.ts` via `npm run dev:service` for source-direct Service + Vite.
+Browser/Electron renderer client. Source of truth for UI lives under `apps/web/src`
+(Batch H2). Vite config is rooted here; Electron renderer alias `@renderer` points at
+`apps/web/src`.

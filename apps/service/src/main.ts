@@ -13,9 +13,9 @@ function shutdown(): Promise<void> {
 
 async function main(): Promise<void> {
   await initializeProcessHostEnvironment()
-  const port = process.env.CODETASK_SERVICE_PORT || '8080'
-  const cli = parseServerCliArgs([...process.argv, '--port', port])
-  const platform = createNodeServerPlatform()
+  // Product config comes from CLI (Batch C); no CODETASK_* reads in this entry.
+  const cli = parseServerCliArgs(process.argv)
+  const platform = createNodeServerPlatform(cli.dataDir ? { dataDir: cli.dataDir } : undefined)
   if (!platform.isDev && !platform.staticDir) {
     throw new Error('Renderer assets not found. Run the standalone entry from a complete build.')
   }
@@ -23,11 +23,12 @@ async function main(): Promise<void> {
   const servicePlatform = {
     ...platform,
     isDev: true,
-    rendererDevUrl: process.env.CODETASK_WEB_URL || 'http://127.0.0.1:5173'
+    rendererDevUrl: cli.rendererDevUrl ?? 'http://127.0.0.1:5173'
   }
 
   const server = await startAppServer(cli, servicePlatform)
   console.log(`[dev:service] Hono Server Core ready: ${server.url}`)
+  console.log(`[dev:service] instanceId=${server.instanceId}`)
   console.log(`[dev:service] Web (Vite): ${servicePlatform.rendererDevUrl}`)
 }
 

@@ -177,7 +177,12 @@ const CLAUDE_SETTINGS_BLOCKED_ENV_KEYS = new Set([
   'CLAUDE_CONFIG_DIR'
 ])
 
-const CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES = ['CODETASK_', 'ELECTRON_', 'CHROME_', 'CRASHPAD_'] as const
+const CLAUDE_SETTINGS_BLOCKED_ENV_PREFIXES = [
+  'CODETASK_',
+  'ELECTRON_',
+  'CHROME_',
+  'CRASHPAD_'
+] as const
 
 /**
  * Whitelist for Claude settings.json `env` injection into outer-sandbox turns.

@@ -31,7 +31,7 @@ test('Provider settings persist with CAS and apply only after restart', async (t
           model: 'gpt-test',
           approveMcps: false
         },
-        cursorcli: { enabled: true, executable: { mode: 'auto' }, approveMcps: false }
+        cursor: { enabled: true, executable: { mode: 'auto' }, approveMcps: false }
       }
     },
     { providers: ctx.config.providers }
@@ -39,23 +39,36 @@ test('Provider settings persist with CAS and apply only after restart', async (t
   assert.equal(saved.revision, 1)
   assert.equal(saved.restartRequired, true)
   assert.equal(saved.settings.providers.codex.model, 'gpt-test')
-  assert.equal(app.getProviders({ providers: ctx.config.providers }).saved.providers.codex.model, 'gpt-test')
+  assert.equal(
+    app.getProviders({ providers: ctx.config.providers }).saved.providers.codex.model,
+    'gpt-test'
+  )
 
   assert.equal(ctx.providerRegistry.get('codex').settings.model, undefined)
   await assert.rejects(
     () =>
       app.updateProviders(
         0,
-        { providers: { codex: { enabled: true, executable: { mode: 'auto' }, approveMcps: false, model: 'stale' } } },
+        {
+          providers: {
+            codex: {
+              enabled: true,
+              executable: { mode: 'auto' },
+              approveMcps: false,
+              model: 'stale'
+            }
+          }
+        },
         { providers: ctx.config.providers }
       ),
-    (error: unknown) => error instanceof SettingsError && error.code === 'settings.revision_conflict'
+    (error: unknown) =>
+      error instanceof SettingsError && error.code === 'settings.revision_conflict'
   )
 
   await resetAppContextForTests()
   const restarted = bootstrapRuntime({ dataDir })
   assert.equal(restarted.providerRegistry.get('codex').settings.model, 'gpt-test')
-  assert.equal(restarted.providerRegistry.get('cursorcli').settings.approveMcps, false)
+  assert.equal(restarted.providerRegistry.get('cursor').settings.approveMcps, false)
 })
 
 test('Provider settings routes expose GET/PUT via settings module', () => {

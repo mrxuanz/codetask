@@ -1,11 +1,5 @@
 import type Database from 'better-sqlite3'
-import {
-  EXECUTION_POOL,
-  EXECUTION_SLOT,
-  LEASE_TTL_MS,
-  newId,
-  nowMs
-} from '../../shared.ts'
+import { EXECUTION_POOL, EXECUTION_SLOT, LEASE_TTL_MS, newId, nowMs } from '../../shared.ts'
 import { ExecutionOutbox } from '../../events/execution-outbox.ts'
 
 export type ClaimNextResult = { runId: string; jobId: string } | null
@@ -38,9 +32,7 @@ export function createClaimNextJobService(deps: {
         if (!job) return null
 
         const slot = deps.db
-          .prepare(
-            `SELECT status FROM execution_pool_slots WHERE pool = ? AND slot_number = ?`
-          )
+          .prepare(`SELECT status FROM execution_pool_slots WHERE pool = ? AND slot_number = ?`)
           .get(EXECUTION_POOL, EXECUTION_SLOT) as { status: string } | undefined
         if (!slot || slot.status !== 'free') return null
 
@@ -97,12 +89,7 @@ export function createClaimNextJobService(deps: {
           )
           .run(runId, now, now, entry.job_id)
 
-        deps.outbox.enqueue(
-          entry.job_id,
-          'job.started',
-          { jobId: entry.job_id, runId },
-          deps.db
-        )
+        deps.outbox.enqueue(entry.job_id, 'job.started', { jobId: entry.job_id, runId }, deps.db)
 
         return { runId, jobId: entry.job_id }
       })

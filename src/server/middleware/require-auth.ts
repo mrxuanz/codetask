@@ -21,8 +21,7 @@ const PUBLIC_ALLOWLIST: AllowlistEntry[] = [
   { method: 'POST', path: '/auth/captcha' }
 ]
 
-export const ATTACHMENT_GET_PATH =
-  /^\/(?:conversations|threads)\/[^/]+\/attachments\/[^/]+$/
+export const ATTACHMENT_GET_PATH = /^\/(?:conversations|threads)\/[^/]+\/attachments\/[^/]+$/
 const API_PREFIX = '/api'
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -52,18 +51,17 @@ export function isAttachmentAssetTokenGet(
   )
 }
 
-function authError(message: string, status = 401, errorCode = 'auth.unauthorized'): Response {
+function authError(
+  message: string,
+  requestId: string,
+  status = 401,
+  errorCode = 'auth.unauthorized'
+): Response {
   return new Response(
     JSON.stringify({
-      data: {
-        error: message,
-        code: errorCode,
-        turnErrorCode: errorCode
-      },
-      status: status === 403 ? 40301 : 40101,
-      extra: {},
-      message: errorCode,
-      success: false
+      success: false,
+      error: { code: errorCode, message, details: { turnErrorCode: errorCode } },
+      requestId
     }),
     {
       status,
@@ -93,19 +91,24 @@ export function requireAuth(security?: SecurityContext): MiddlewareHandler {
     }
 
     const credential = readSessionCredential(c)
-    if (!credential.token) return authError('Authentication required', 401, 'auth.unauthorized')
-    if (!security) return authError('Invalid or expired session', 401, 'auth.session_expired')
+    const requestId = c.get('requestId') ?? 'unknown'
+    if (!credential.token) {
+      return authError('Authentication required', requestId, 401, 'auth.unauthorized')
+    }
+    if (!security) {
+      return authError('Invalid or expired session', requestId, 401, 'auth.session_expired')
+    }
     const principal = security.auth.authenticateToken(credential.token)
     if (!principal) {
       if (credential.transport === 'cookie') clearSessionCookies(c)
-      return authError('Invalid or expired session', 401, 'auth.session_expired')
+      return authError('Invalid or expired session', requestId, 401, 'auth.session_expired')
     }
     if (
       credential.transport === 'cookie' &&
       !SAFE_METHODS.has(c.req.method) &&
       !requestHasValidCsrf(c, security.authSecret)
     ) {
-      return authError('Invalid CSRF token', 403, 'auth.csrf_invalid')
+      return authError('Invalid CSRF token', requestId, 403, 'auth.csrf_invalid')
     }
 
     return runWithAuthPrincipal(principal, next)

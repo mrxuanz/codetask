@@ -84,7 +84,7 @@ function designActorMiddleware() {
 /** Gone stub for removed /api/threads surface (03/06 — no forwarding or alias layer). */
 function createRemovedThreadsStub(): Hono {
   const routes = new Hono()
-  const gone = () => {
+  const gone = (): never => {
     throw AppError.gone(
       'Thread APIs removed; use /api/conversations, /api/drafts, /api/planning-sessions, and /api/jobs',
       'conversation.moved'

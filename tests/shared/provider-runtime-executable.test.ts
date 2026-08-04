@@ -37,7 +37,7 @@ function installation(
 }
 
 function runtimeProfile(
-  provider: 'claude-code' | 'codex',
+  provider: 'claude' | 'codex',
   authMaterialPresent: boolean
 ): ProviderRuntimeProfile {
   return {
@@ -57,12 +57,12 @@ function runtimeProfile(
 }
 
 test('SDK-bundled providers override only an explicit app-config executable', () => {
-  for (const provider of ['claude-code', 'codex'] as const) {
+  for (const provider of ['claude', 'codex'] as const) {
     assert.equal(resolveProviderExecutableStrategy(provider, 'path'), 'sdk-bundled')
     assert.equal(resolveProviderExecutableStrategy(provider, 'install-dir'), 'sdk-bundled')
     assert.equal(resolveProviderExecutableStrategy(provider, 'app-config'), 'installation')
   }
-  for (const provider of ['cursorcli', 'opencode'] as const) {
+  for (const provider of ['cursor', 'opencode'] as const) {
     assert.equal(resolveProviderExecutableStrategy(provider, 'path'), 'installation')
     assert.equal(resolveProviderExecutableStrategy(provider, 'install-dir'), 'installation')
     assert.equal(resolveProviderExecutableStrategy(provider, 'app-config'), 'installation')
@@ -82,11 +82,11 @@ test('SDK native package roots are discovered from installed optional dependenci
 test('SDK native CLIs launch with an isolated profile and no toolchain-manager state', () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'cctask-sdk-native-launch-'))
   const executableNames = {
-    'claude-code': process.platform === 'win32' ? 'claude.exe' : 'claude',
+    claude: process.platform === 'win32' ? 'claude.exe' : 'claude',
     codex: process.platform === 'win32' ? 'codex.exe' : 'codex'
   } as const
   const installDirs = {
-    'claude-code': resolveClaudeInstallDirs(),
+    claude: resolveClaudeInstallDirs(),
     codex: resolveCodexInstallDirs()
   } as const
   const env: Record<string, string> = {
@@ -100,7 +100,7 @@ test('SDK native CLIs launch with an isolated profile and no toolchain-manager s
   }
 
   try {
-    for (const provider of ['claude-code', 'codex'] as const) {
+    for (const provider of ['claude', 'codex'] as const) {
       const executable = installDirs[provider]
         .map((directory) => join(directory, executableNames[provider]))
         .find((candidate) => existsSync(candidate))
@@ -162,7 +162,7 @@ test('external CLI affinity is derived from executable paths on Linux, macOS, an
 test('SDK-bundled automatic providers do not inherit external executable affinity', () => {
   const path = '/home/user/.next-tool/bin/claude'
   const affinity = resolveExecutableEnvironmentAffinity(
-    installation('claude-code', path),
+    installation('claude', path),
     { NEXT_TOOL_ROOT: '/home/user/.next-tool' },
     'linux'
   )
@@ -173,7 +173,7 @@ test('SDK-bundled automatic providers do not inherit external executable affinit
 test('Claude and Codex preflight trust the compiled runtime profile, not a host shim', () => {
   const failingHostShim = process.execPath
   const claudeInstallation = {
-    ...installation('claude-code', failingHostShim),
+    ...installation('claude', failingHostShim),
     invocation: { executable: failingHostShim, prefixArgs: ['-e', 'process.exit(91)'] }
   }
   const codexInstallation = {
@@ -182,12 +182,12 @@ test('Claude and Codex preflight trust the compiled runtime profile, not a host 
   }
 
   assert.doesNotThrow(() =>
-    runClaudeAuthPreflight(runtimeProfile('claude-code', true), claudeInstallation)
+    runClaudeAuthPreflight(runtimeProfile('claude', true), claudeInstallation)
   )
   assert.doesNotThrow(() => runCodexAuthPreflight(runtimeProfile('codex', true), codexInstallation))
 
   assert.throws(
-    () => runClaudeAuthPreflight(runtimeProfile('claude-code', false), claudeInstallation),
+    () => runClaudeAuthPreflight(runtimeProfile('claude', false), claudeInstallation),
     (error) =>
       error instanceof ProviderAuthError && error.code === 'provider.claude.not_authenticated'
   )

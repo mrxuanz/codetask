@@ -66,29 +66,29 @@ test('acquireWorkspaceLease is exclusive across owners for overlapping paths', a
     const first = acquireWorkspaceLease({
       workspacePath: root,
       ownerKind: 'conversation',
-      ownerId: 'thread-a'
+      ownerId: 'conversation-a'
     })
     assert.ok(first)
 
     const childAttempt = acquireWorkspaceLease({
       workspacePath: child,
-      ownerKind: 'thread_job',
+      ownerKind: 'job-run',
       ownerId: 'job-b'
     })
     assert.equal(childAttempt, null)
 
     const conflict = findWorkspaceLeaseConflict(child, {
-      ownerKind: 'thread_job',
+      ownerKind: 'job-run',
       ownerId: 'job-c'
     })
     assert.ok(conflict)
     assert.equal(conflict?.ownerKind, 'conversation')
-    assert.equal(conflict?.ownerId, 'thread-a')
+    assert.equal(conflict?.ownerId, 'conversation-a')
 
-    releaseWorkspaceLeaseForOwner('conversation', 'thread-a')
+    releaseWorkspaceLeaseForOwner('conversation', 'conversation-a')
     const afterRelease = acquireWorkspaceLease({
       workspacePath: child,
-      ownerKind: 'thread_job',
+      ownerKind: 'job-run',
       ownerId: 'job-b'
     })
     assert.ok(afterRelease)
@@ -110,16 +110,16 @@ test('owner release with a stale runId keeps the in-memory and durable lease', a
   try {
     const acquired = acquireWorkspaceLease({
       workspacePath: workspaceRoot,
-      ownerKind: 'thread_job',
+      ownerKind: 'job-run',
       ownerId: 'job-1',
       runId: 'run-current'
     })
     assert.ok(acquired)
 
-    releaseWorkspaceLeaseForOwner('thread_job', 'job-1', 'run-stale')
+    releaseWorkspaceLeaseForOwner('job-run', 'job-1', 'run-stale')
     assert.equal(findWorkspaceLeaseConflict(workspaceRoot)?.runId, 'run-current')
 
-    releaseWorkspaceLeaseForOwner('thread_job', 'job-1', 'run-current')
+    releaseWorkspaceLeaseForOwner('job-run', 'job-1', 'run-current')
     assert.equal(findWorkspaceLeaseConflict(workspaceRoot), null)
   } finally {
     await teardown()
@@ -143,7 +143,7 @@ test('reclaimStaleWorkspaceLeasesOnStartup releases leases from prior boot', asy
     ).$client
     assert.ok(client)
     client
-      .prepare(`UPDATE workspace_leases SET boot_id = ? WHERE id = ?`)
+      .prepare(`UPDATE workspace_leases SET lease_owner = ? WHERE id = ?`)
       .run('stale-boot-id', acquired.leaseId)
 
     const reclaimed = reclaimStaleWorkspaceLeasesOnStartup()
@@ -162,7 +162,7 @@ test('BEGIN IMMEDIATE acquire path uses normalized realpath', async () => {
     const acquired = acquireWorkspaceLease({
       workspacePath: workspaceRoot,
       ownerKind: 'conversation',
-      ownerId: 'thread-1'
+      ownerId: 'conversation-1'
     })
     assert.ok(acquired)
     const rows = getDb()
@@ -170,7 +170,7 @@ test('BEGIN IMMEDIATE acquire path uses normalized realpath', async () => {
       .from((await import('../../src/server/db/schema')).workspaceLeases)
       .all()
     assert.equal(rows.length, 1)
-    assert.equal(rows[0]?.canonicalPath, normalizeWorkspaceLeasePath(workspaceRoot))
+    assert.equal(rows[0]?.canonicalWorkspaceRoot, normalizeWorkspaceLeasePath(workspaceRoot))
   } finally {
     await teardown()
   }

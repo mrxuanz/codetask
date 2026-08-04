@@ -208,4 +208,5 @@ npm run test:sandbox:tdd      # native sandbox TDD (requires build:sandbox)
 npm run test:sandbox
 npm run typecheck
 npm run test:ci               # typecheck + fast test suite
+npm run release:test-gate     # same JavaScript/TypeScript gate used by releases
 ```

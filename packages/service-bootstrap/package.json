@@ -1,0 +1,11 @@
+{
+  "name": "@codetask/service-bootstrap",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ready": "./src/ready.ts",
+    "./cli": "./src/cli.ts"
+  }
+}

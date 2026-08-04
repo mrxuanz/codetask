@@ -44,7 +44,7 @@ test('Claude direct write uses only the native workspace boundary', () => {
   try {
     const plan = buildClaudeTurnOptions(
       {
-        provider: 'claude-code',
+        provider: 'claude',
         role: 'conversation',
         cwd: runtimeRoot,
         runtimeRoot,
@@ -63,7 +63,7 @@ test('Claude direct write uses only the native workspace boundary', () => {
 
     const readOnly = buildClaudeTurnOptions(
       {
-        provider: 'claude-code',
+        provider: 'claude',
         role: 'planner',
         cwd: runtimeRoot,
         runtimeRoot,

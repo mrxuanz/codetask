@@ -1,5 +1,5 @@
 import { desc, eq } from 'drizzle-orm'
-import { isTerminalJobStatus } from '../../shared/contracts/retention.ts'
+import { isTerminalJobStatus } from '@codetask/contracts'
 import { getDb } from '../db'
 import { designPlanRevisions } from '../db/schema'
 import {
@@ -16,6 +16,7 @@ import {
   pruneOrphanJobArtifactFiles,
   pruneOrphanMessageArtifactDirs,
   pruneStaleThreadAttachmentDirs,
+  processPendingAssetDeletes,
   wipeLegacyProductRuntimes
 } from './janitor'
 import {
@@ -132,6 +133,7 @@ export async function onJobReachedTerminal(
 export async function runRetentionJanitorPass(): Promise<{
   expiredArtifacts: number
   orphanAttachments: number
+  pendingAssetDeletes: number
   legacyRuntimesRemoved: number
   orphanMessageArtifacts: number
   staleAttachmentDirs: number
@@ -146,6 +148,7 @@ export async function runRetentionJanitorPass(): Promise<{
   const [
     artifacts,
     attachments,
+    pendingAssets,
     legacyRuntimes,
     messageArtifacts,
     staleAttachmentDirs,
@@ -153,6 +156,7 @@ export async function runRetentionJanitorPass(): Promise<{
   ] = await Promise.all([
     deleteExpiredArtifacts(db, ctx.dataDir),
     pruneOrphanAttachments(ctx.dataDir, db),
+    processPendingAssetDeletes(ctx.dataDir, db),
     wipeLegacyProductRuntimes(ctx.dataDir),
     pruneOrphanMessageArtifactDirs(ctx.dataDir, db),
     pruneStaleThreadAttachmentDirs(ctx.dataDir, db),
@@ -171,6 +175,7 @@ export async function runRetentionJanitorPass(): Promise<{
   return {
     expiredArtifacts: artifacts.deleted,
     orphanAttachments: attachments.removed,
+    pendingAssetDeletes: pendingAssets.removed,
     legacyRuntimesRemoved: legacyRuntimes.removed,
     orphanMessageArtifacts: messageArtifacts.removed,
     staleAttachmentDirs: staleAttachmentDirs.removed,

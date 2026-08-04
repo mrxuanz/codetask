@@ -20,9 +20,9 @@ test('PROVIDER_CLI_CANDIDATES covers every supported provider with stable non-em
   }
 
   assert.deepEqual([...PROVIDER_CLI_CANDIDATES.codex], ['codex'])
-  assert.deepEqual([...PROVIDER_CLI_CANDIDATES['claude-code']], ['claude', 'claude-code'])
+  assert.deepEqual([...PROVIDER_CLI_CANDIDATES.claude], ['claude', 'claude-code'])
   assert.deepEqual([...PROVIDER_CLI_CANDIDATES.opencode], ['opencode'])
-  assert.deepEqual([...PROVIDER_CLI_CANDIDATES.cursorcli], ['agent', 'cursor-agent'])
+  assert.deepEqual([...PROVIDER_CLI_CANDIDATES.cursor], ['agent', 'cursor-agent'])
 })
 
 test('typed OpenCode executable path is used for detect resolution', () => {
@@ -56,7 +56,7 @@ test('typed Cursor executable path is used for detect resolution', () => {
   chmodSync(bin, 0o755)
 
   try {
-    const resolved = resolveProviderExecutable('cursorcli', {
+    const resolved = resolveProviderExecutable('cursor', {
       settings: {
         enabled: true,
         executable: { mode: 'path', path: bin },
@@ -65,7 +65,7 @@ test('typed Cursor executable path is used for detect resolution', () => {
       env: {},
       installDirs: []
     })
-    assert.ok(resolved, 'expected cursorcli executable to resolve')
+    assert.ok(resolved, 'expected Cursor executable to resolve')
     assert.equal(resolved.executable, bin)
     assert.equal(resolved.source, 'app-config')
   } finally {
@@ -131,8 +131,8 @@ test('repeated detect resolution returns the same Cursor installation identity',
       env: {},
       installDirs: []
     }
-    const first = resolveProviderExecutable('cursorcli', options)
-    const second = resolveProviderExecutable('cursorcli', options)
+    const first = resolveProviderExecutable('cursor', options)
+    const second = resolveProviderExecutable('cursor', options)
     assert.ok(first)
     assert.ok(second)
     assert.equal(first.installationId, second.installationId)
