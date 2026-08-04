@@ -32,6 +32,8 @@ export default defineConfig({
     }
   },
   server: {
+    // Bind IPv4 explicitly so Hono's rendererDevUrl (127.0.0.1) can proxy HTML in Electron serve.
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {

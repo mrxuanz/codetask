@@ -103,6 +103,7 @@ app.whenReady().then(async () => {
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   try {
     // Thin shell: spawn/monitor Hono Service; do not import server/database/provider.
+    // Service binds ephemeral (--port 0); ready handshake returns the real origin before UI loads.
     service = await startDesktopService()
     ipcMain.handle('get-server-info', () =>
       service
