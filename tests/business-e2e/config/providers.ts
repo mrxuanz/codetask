@@ -1,6 +1,6 @@
 /**
  * --providers CLI: single / comma-list / all → fixed SUT role profiles.
- * Aliases: cursor → cursorcli, claude → claude-code.
+ * Aliases normalize to canonical cores: cursor, claude, opencode, codex.
  * Naming a provider (or `all`) opts it in; no BUSINESS_ALLOW_* env.
  */
 
@@ -29,10 +29,10 @@ const ALL_PROVIDERS = Object.keys(ALIAS_TO_CORE) as ProviderAlias[]
 export function normalizeProviderAlias(raw: string): ProviderAlias {
   const v = raw.trim().toLowerCase()
   if (v === 'opencode' || v === 'oc') return 'opencode'
-  if (v === 'cursor' || v === 'cursor' || v === 'cursor-acp' || v === 'cursoracp') {
+  if (v === 'cursor' || v === 'cursorcli' || v === 'cursor-acp' || v === 'cursoracp') {
     return 'cursor'
   }
-  if (v === 'claude' || v === 'claude' || v === 'claudecode') return 'claude'
+  if (v === 'claude' || v === 'claude-code' || v === 'claudecode') return 'claude'
   if (v === 'codex') return 'codex'
   throw new Error(`unknown_provider:${raw}:use opencode|cursor|claude|codex|all (comma-separated)`)
 }
@@ -50,8 +50,8 @@ export function parseProvidersList(raw: string | undefined): ProviderAlias[] | n
 }
 
 function aliasForCore(core: string): ProviderAlias {
-  if (core === 'cursor') return 'cursor'
-  if (core === 'claude') return 'claude'
+  if (core === 'cursor' || core === 'cursorcli') return 'cursor'
+  if (core === 'claude' || core === 'claude-code') return 'claude'
   if (core === 'codex') return 'codex'
   return 'opencode'
 }
@@ -91,7 +91,7 @@ export function resolveProviderQueue(input: {
 /** OpenCode / Cursor / Claude CLI fragment root keys for settings MCP. */
 export const CLI_MCP_ROOT_KEY: Record<SutCoreCode, string> = {
   opencode: 'mcp',
-  cursorcli: 'mcpServers',
+  cursor: 'mcpServers',
   claude: 'mcpServers',
   codex: 'mcp_servers'
 }

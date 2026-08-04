@@ -5,10 +5,10 @@ import type {
   CommandInvocation,
   ProviderInstallation,
   ProviderInstallationSource
-} from '@shared/providers/installation'
-import type { SupportedCoreCode } from '@shared/providers/codes'
-import type { ProviderSettings } from '@shared/providers/settings'
-import { getProviderDescriptor } from '@shared/providers/descriptors'
+} from '../spec/installation'
+import type { SupportedCoreCode } from '../spec/codes'
+import type { ProviderSettings } from '../spec/settings'
+import { getProviderDescriptor } from '../spec/descriptors'
 
 export interface ProviderDiscoveryContext {
   readonly settings: ProviderSettings

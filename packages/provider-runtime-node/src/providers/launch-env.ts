@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '@shared/providers/codes'
+import type { SupportedCoreCode } from '../spec/codes'
 import {
   applyProviderOverlay,
   CODETASK_TRANSIENT_ENV_KEYS,

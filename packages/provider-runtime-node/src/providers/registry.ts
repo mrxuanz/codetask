@@ -1,6 +1,6 @@
-import type { SupportedCoreCode } from '@shared/providers/codes'
-import { SUPPORTED_CORE_CODES } from '@shared/providers/codes'
-import type { ProviderDescriptor } from '@shared/providers/descriptor'
+import type { SupportedCoreCode } from '../spec/codes'
+import { SUPPORTED_CORE_CODES } from '../spec/codes'
+import type { ProviderDescriptor } from '../spec/descriptor'
 import type { ProviderDriver } from './driver'
 
 export class ProviderRegistry {

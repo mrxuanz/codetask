@@ -1,4 +1,4 @@
-import type { ProviderSettings } from '@shared/providers/settings'
+import type { ProviderSettings } from '../../spec/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { OPENCODE_DESCRIPTOR } from './descriptor'
 import { runOpenCodeAuthPreflight } from './preflight'

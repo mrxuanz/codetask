@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import type { ProviderReusePolicy } from '@shared/providers/capabilities'
+import type { ProviderReusePolicy } from '../spec/capabilities'
 import type { AgentTurnChunk } from '@server/agent-runtime/types'
 import type { ConversationRole } from '@server/agent-runtime/roles'
 import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
 import type { PreparedProviderTurn, ProviderDriver, ProviderTurnContext } from './driver'
-import type { ProviderRuntimeScope } from '@shared/providers/capabilities'
+import type { ProviderRuntimeScope } from '../spec/capabilities'
 
 export function resolveProviderReusePolicy(
   role: ConversationRole,

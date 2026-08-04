@@ -9,7 +9,7 @@ import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
 import {
   buildConversationProviderRuntimeScopeId,
   type ProviderConversationScopeKind
-} from '@shared/providers/capabilities'
+} from '../spec/capabilities'
 
 export interface JobCursorRuntimeKeyInput {
   jobId: string

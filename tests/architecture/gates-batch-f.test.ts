@@ -3,8 +3,8 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { ProviderCodeSchema, SettingsProviderCodeSchema } from '@codetask/contracts'
 import { PROVIDER_CODES } from '@codetask/server-core/modules/settings'
 import { RuntimeRegistry } from '../../src/server/context/runtime-registry'
@@ -81,6 +81,7 @@ describe('architecture gates — Batch F', () => {
 
   it('provider-runtime-node owns registry and uses canonical driver codes only', () => {
     assert.equal(existsSync(join(root, 'packages/provider-runtime-node/src/index.ts')), true)
+    assert.equal(existsSync(join(root, 'packages/provider-runtime-node/src/spec/index.ts')), true)
     assert.deepEqual([...SUPPORTED_CORE_CODES], ['codex', 'claude', 'opencode', 'cursor'])
     const registry = createProviderRegistry()
     const codes = registry
@@ -103,6 +104,26 @@ describe('architecture gates — Batch F', () => {
     assert.equal(manifest.exports?.['./providers/*'], './src/providers/*.ts')
     assert.equal(manifest.exports?.['./streamers/*'], './src/streamers/*.ts')
     assert.equal(manifest.exports?.['./cursor-acp/*'], './src/cursor-acp/*.ts')
+    assert.equal(manifest.exports?.['./spec'], './src/spec/index.ts')
+    assert.equal(manifest.exports?.['./spec/*'], './src/spec/*.ts')
+  })
+
+  it('provider-runtime-node does not import host @shared/providers aliases', () => {
+    const offenders: string[] = []
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const full = join(dir, name)
+        if (statSync(full).isDirectory()) {
+          walk(full)
+          continue
+        }
+        if (!/\.ts$/.test(name)) continue
+        const source = readFileSync(full, 'utf8')
+        if (/@shared\/providers/.test(source)) offenders.push(relative(root, full))
+      }
+    }
+    walk(join(root, 'packages/provider-runtime-node/src'))
+    assert.deepEqual(offenders, [], offenders.join('\n'))
   })
 
   it('src/server/providers and agent-runtime providers are re-export shims only', () => {

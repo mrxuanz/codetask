@@ -1,5 +1,5 @@
-import type { SupportedCoreCode } from '@shared/providers/codes'
-import { getProviderDescriptors } from '@shared/providers/descriptors'
+import type { SupportedCoreCode } from '../spec/codes'
+import { getProviderDescriptors } from '../spec/descriptors'
 
 /** Single source of PATH / CLI name candidates for detect, preflight, and read-roots. */
 export const PROVIDER_CLI_CANDIDATES: Readonly<Record<SupportedCoreCode, readonly string[]>> =

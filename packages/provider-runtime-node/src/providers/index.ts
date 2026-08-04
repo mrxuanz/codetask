@@ -1,5 +1,5 @@
-export type { SupportedCoreCode } from '@shared/providers/codes'
-export { SUPPORTED_CORE_CODES, isSupportedCoreCode } from '@shared/providers/codes'
+export type { SupportedCoreCode } from '../spec/codes'
+export { SUPPORTED_CORE_CODES, isSupportedCoreCode } from '../spec/codes'
 
 export type {
   ExecutableSource,

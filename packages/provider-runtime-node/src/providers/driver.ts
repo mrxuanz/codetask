@@ -1,12 +1,12 @@
-import type { ProviderDescriptor } from '@shared/providers/descriptor'
-import type { ProviderInstallation } from '@shared/providers/installation'
+import type { ProviderDescriptor } from '../spec/descriptor'
+import type { ProviderInstallation } from '../spec/installation'
 import type {
   ProviderAuthMode,
   ProviderCapabilityProfile,
   ProviderReusePolicy,
   ProviderRuntimeScope
-} from '@shared/providers/capabilities'
-import type { ProviderSettings } from '@shared/providers/settings'
+} from '../spec/capabilities'
+import type { ProviderSettings } from '../spec/settings'
 import type { AgentTurnChunk, AgentTurnInput, AgentTurnOptions } from '@server/agent-runtime/types'
 import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
 import type { HostEnvironmentSnapshot } from '@server/host-environment'
