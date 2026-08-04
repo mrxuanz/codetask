@@ -1,5 +1,5 @@
-import type { ProvidersConfig } from '@shared/providers/settings'
-import { DEFAULT_PROVIDERS_CONFIG } from '@shared/providers/settings'
+import type { ProvidersConfig } from '../spec/settings'
+import { DEFAULT_PROVIDERS_CONFIG } from '../spec/settings'
 import { ClaudeDriver } from './claude/driver'
 import { CodexDriver } from './codex/driver'
 import { CursorDriver } from './cursor/driver'

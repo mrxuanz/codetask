@@ -1,8 +1,8 @@
 import { dirname } from 'node:path'
-import type { ProviderDescriptor } from '@shared/providers/descriptor'
-import type { ProviderInstallation } from '@shared/providers/installation'
-import type { ProviderCapabilityProfile } from '@shared/providers/capabilities'
-import type { ProviderSettings } from '@shared/providers/settings'
+import type { ProviderDescriptor } from '../spec/descriptor'
+import type { ProviderInstallation } from '../spec/installation'
+import type { ProviderCapabilityProfile } from '../spec/capabilities'
+import type { ProviderSettings } from '../spec/settings'
 import type {
   AgentTurnChunk,
   AgentTurnInput,

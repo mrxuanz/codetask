@@ -1,6 +1,6 @@
 import { ProviderAuthError } from '@server/sandbox/provider-auth/errors'
 import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
-import type { ProviderInstallation } from '@shared/providers/installation'
+import type { ProviderInstallation } from '../../spec/installation'
 
 const CODEX_LABEL = 'Codex'
 const CODEX_LOGIN_HINT = 'Run `codex login` in a terminal and retry.'

@@ -1,6 +1,6 @@
-import type { SupportedCoreCode } from '@shared/providers/codes'
-import { SUPPORTED_CORE_CODES } from '@shared/providers/codes'
-import { getProviderDescriptor } from '@shared/providers/descriptors'
+import type { SupportedCoreCode } from '../spec/codes'
+import { SUPPORTED_CORE_CODES } from '../spec/codes'
+import { getProviderDescriptor } from '../spec/descriptors'
 
 /**
  * Per-provider env keys adapters may inject into the child process.

@@ -1,6 +1,6 @@
 import { ProviderAuthError } from '@server/sandbox/provider-auth/errors'
 import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
-import type { ProviderInstallation } from '@shared/providers/installation'
+import type { ProviderInstallation } from '../../spec/installation'
 
 const CLAUDE_LABEL = 'Claude Code'
 const CLAUDE_LOGIN_HINT = 'Run `claude auth login` in a terminal and retry.'

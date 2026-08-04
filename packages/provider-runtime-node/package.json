@@ -5,6 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./spec": "./src/spec/index.ts",
+    "./spec/*": "./src/spec/*.ts",
+    "./spec/descriptors/*": "./src/spec/descriptors/*.ts",
     "./providers/*": "./src/providers/*.ts",
     "./streamers": "./src/streamers/index.ts",
     "./streamers/*": "./src/streamers/*.ts",

@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '@shared/providers/codes'
+import type { SupportedCoreCode } from '../spec/codes'
 import type { HostEnvironmentSnapshot } from '@server/host-environment'
 import { SERIALIZED_SHELL_CHILD_ENV } from '@server/shell-child-environment'
 import { PROVIDER_OWNED_ENV_KEYS } from './owned-env'

@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
-import type { ProviderInstallationSource } from '@shared/providers/installation'
-import type { SupportedCoreCode } from '@shared/providers/codes'
-import { DEFAULT_PROVIDERS_CONFIG, type ProviderSettings } from '@shared/providers/settings'
+import type { ProviderInstallationSource } from '../spec/installation'
+import type { SupportedCoreCode } from '../spec/codes'
+import { DEFAULT_PROVIDERS_CONFIG, type ProviderSettings } from '../spec/settings'
 import {
   providerInstallationResolver,
   type ProviderDiscoveryContext,

@@ -1,6 +1,6 @@
-import type { SupportedCoreCode } from '@shared/providers/codes'
-import type { ProviderInstallation } from '@shared/providers/installation'
-import type { ProviderSettings } from '@shared/providers/settings'
+import type { SupportedCoreCode } from '../spec/codes'
+import type { ProviderInstallation } from '../spec/installation'
+import type { ProviderSettings } from '../spec/settings'
 
 export type { SupportedCoreCode }
 

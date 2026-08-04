@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import { extname } from 'node:path'
-import type { CommandInvocation } from '@shared/providers/installation'
+import type { CommandInvocation } from '../../spec/installation'
 import { spawnProviderInvocation } from '../spawn'
 
 export interface ClaudeSdkSpawnRequest {

@@ -5,7 +5,7 @@ import type {
   SpawnSyncReturns
 } from 'node:child_process'
 import { createRequire } from 'node:module'
-import type { CommandInvocation } from '@shared/providers/installation'
+import type { CommandInvocation } from '../spec/installation'
 import type { LaunchSpec } from './types'
 
 type NodeSpawn = typeof import('node:child_process').spawn

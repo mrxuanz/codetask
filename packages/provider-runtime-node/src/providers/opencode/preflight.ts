@@ -1,7 +1,7 @@
 import { spawnProviderCommandSync } from '../spawn'
 import { ProviderAuthError } from '@server/sandbox/provider-auth/errors'
 import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
-import type { ProviderInstallation } from '@shared/providers/installation'
+import type { ProviderInstallation } from '../../spec/installation'
 
 const PREFLIGHT_TIMEOUT_MS = 15_000
 const OPENCODE_LABEL = 'OpenCode'

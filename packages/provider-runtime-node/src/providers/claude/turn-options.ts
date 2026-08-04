@@ -8,7 +8,7 @@ import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '@server/
 import { buildClaudeMcpServers } from '@server/agent-runtime/mcp'
 import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '@server/agent-runtime/roles'
 import type { AgentTurnInput } from '@server/agent-runtime/types'
-import type { CommandInvocation } from '@shared/providers/installation'
+import type { CommandInvocation } from '../../spec/installation'
 import { createTurnError } from '@shared/turn-errors/index.ts'
 import { resolveProviderExecutable } from '../executable'
 import {
