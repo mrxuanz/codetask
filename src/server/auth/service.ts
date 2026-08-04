@@ -15,13 +15,13 @@ import { validateSetupCredentials } from '../../shared/auth/credentials-policy'
 import { formatTurnErrorMessage } from '../../shared/turn-errors/turn-error'
 import { AppError, code } from '../error'
 
-function sqliteClient(db: AppDatabase) {
+function sqliteClient(db: AppDatabase): import('better-sqlite3').Database {
   const client = (db as AppDatabase & { $client?: import('better-sqlite3').Database }).$client
   if (!client) throw new Error('Database client is not available')
   return client
 }
 
-function credentialsPolicy() {
+function credentialsPolicy(): { assertAllowed(username: string, password: string): void } {
   return {
     assertAllowed(username: string, password: string): void {
       const violation = validateSetupCredentials(username, password)
@@ -43,11 +43,7 @@ export class SecureAuthService {
   readonly module: AuthModule
   private readonly app: AuthApplication
 
-  constructor(
-    db: AppDatabase,
-    authSecret: string,
-    clock: () => number = Date.now
-  ) {
+  constructor(db: AppDatabase, authSecret: string, clock: () => number = Date.now) {
     this.module = composeAuthModule({
       db: sqliteClient(db),
       authSecret,
@@ -69,7 +65,7 @@ export class SecureAuthService {
     return sessionIssueToAuthData(await this.app.login(options))
   }
 
-  authenticateToken(token: string) {
+  authenticateToken(token: string): ReturnType<AuthApplication['authenticateToken']> {
     return this.app.authenticateToken(token)
   }
 

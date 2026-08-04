@@ -14,10 +14,7 @@ import { getRuntimeFeatures } from '../config/runtime-features'
 import { getShellChildEnvironment } from '../shell-child-environment'
 import { resolveMainSandboxScript } from './packaged-paths'
 import { SandboxError } from './types'
-import {
-  SUPERVISOR_BOOTSTRAP_ARG_PREFIX,
-  SUPERVISOR_WORKER_ARG
-} from './supervisor-args'
+import { SUPERVISOR_BOOTSTRAP_ARG_PREFIX, SUPERVISOR_WORKER_ARG } from './supervisor-args'
 
 export { SUPERVISOR_BOOTSTRAP_ARG_PREFIX, SUPERVISOR_WORKER_ARG } from './supervisor-args'
 
@@ -89,14 +86,18 @@ export class SandboxSupervisorManager extends EventEmitter {
       const entry = resolveSupervisorEntryPath()
       const hostEnv = processHostEnvironmentSource.snapshot()
       const bootstrapPath = writeSupervisorBootstrapFile()
-      const child = fork(entry, [SUPERVISOR_WORKER_ARG, `${SUPERVISOR_BOOTSTRAP_ARG_PREFIX}${bootstrapPath}`], {
-        execPath: process.execPath,
-        env: {
-          ...hostEnv,
-          ...getShellChildEnvironment()
-        },
-        stdio: ['pipe', 'pipe', 'pipe', 'ipc']
-      })
+      const child = fork(
+        entry,
+        [SUPERVISOR_WORKER_ARG, `${SUPERVISOR_BOOTSTRAP_ARG_PREFIX}${bootstrapPath}`],
+        {
+          execPath: process.execPath,
+          env: {
+            ...hostEnv,
+            ...getShellChildEnvironment()
+          },
+          stdio: ['pipe', 'pipe', 'pipe', 'ipc']
+        }
+      )
 
       this.child = child
       this.ready = false

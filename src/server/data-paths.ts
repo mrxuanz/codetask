@@ -46,6 +46,23 @@ export function attachmentDir(dataDir: string, threadId: string, attachmentId: s
   return join(dataPaths(dataDir).attachments, threadId, attachmentId)
 }
 
+/**
+ * Resolve an assets.storage_key to an absolute directory under dataDir/assets.
+ * storage_key uses POSIX form like `attachments/{ownerId}/{assetId}`.
+ */
+export function resolveAssetStoragePath(dataDir: string, storageKey: string): string {
+  const normalized = storageKey.replace(/^\/+/, '').split('/').filter(Boolean)
+  if (normalized.length === 0) {
+    throw new Error('storage_key must not be empty')
+  }
+  return join(dataDir, 'assets', ...normalized)
+}
+
+/** Canonical attachment storage_key (no filename). */
+export function attachmentStorageKey(ownerId: string, assetId: string): string {
+  return posix.join('attachments', ownerId, assetId)
+}
+
 export function messageArtifactDir(dataDir: string, messageId: string): string {
   return join(dataPaths(dataDir).artifactsMessages, messageId)
 }

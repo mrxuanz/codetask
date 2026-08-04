@@ -48,8 +48,8 @@ Avoid mixing unrelated cleanup into the same change.
 
 Before opening a pull request:
 
-1. Run `npm run typecheck`.
-2. Run the smallest relevant test set for your change.
+1. Run `npm run release:test-gate` for JavaScript/TypeScript changes.
+2. Run the smallest focused test while iterating and report it in the PR.
 3. If you touched sandbox or native code, run the relevant sandbox tests.
 4. Update docs when behavior, setup, or operator workflow changed.
 

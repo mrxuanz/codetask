@@ -5,9 +5,7 @@ export const migration025RuntimeBytes: Migration = {
   name: 'runtime_bytes',
   up(db) {
     const columnExists = db
-      .prepare(
-        `SELECT 1 FROM pragma_table_info('thread_jobs') WHERE name = 'runtime_bytes'`
-      )
+      .prepare(`SELECT 1 FROM pragma_table_info('thread_jobs') WHERE name = 'runtime_bytes'`)
       .get()
 
     if (!columnExists) {

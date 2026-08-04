@@ -3,6 +3,21 @@ import type { SecurityContext } from '../context/types'
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
+function originForbidden(message: string, requestId: string): Response {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: {
+        code: 'auth.origin_forbidden',
+        message,
+        details: { turnErrorCode: 'auth.origin_forbidden' }
+      },
+      requestId
+    }),
+    { status: 403, headers: { 'Content-Type': 'application/json' } }
+  )
+}
+
 function isLoopbackHost(host: string): boolean {
   const normalized = host.split(':')[0]?.toLowerCase() ?? ''
   return (
@@ -24,22 +39,9 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
 
     if (security.mode === 'desktop') {
       if (host && !isLoopbackHost(host)) {
-        return new Response(
-          JSON.stringify({
-            data: {
-              error: 'External host not allowed in desktop mode',
-              code: 'auth.origin_forbidden',
-              turnErrorCode: 'auth.origin_forbidden'
-            },
-            status: 40301,
-            extra: {},
-            message: 'auth.origin_forbidden',
-            success: false
-          }),
-          {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' }
-          }
+        return originForbidden(
+          'External host not allowed in desktop mode',
+          c.get('requestId') ?? 'unknown'
         )
       }
     }
@@ -57,22 +59,9 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
 
         if (security.mode === 'desktop') {
           if (!isLoopbackHost(originHost)) {
-            return new Response(
-              JSON.stringify({
-                data: {
-                  error: 'Cross-origin write requests not allowed',
-                  code: 'auth.origin_forbidden',
-                  turnErrorCode: 'auth.origin_forbidden'
-                },
-                status: 40301,
-                extra: {},
-                message: 'auth.origin_forbidden',
-                success: false
-              }),
-              {
-                status: 403,
-                headers: { 'Content-Type': 'application/json' }
-              }
+            return originForbidden(
+              'Cross-origin write requests not allowed',
+              c.get('requestId') ?? 'unknown'
             )
           }
         }
@@ -80,22 +69,9 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
         if (security.mode === 'server') {
           const sameOriginAsHost = Boolean(host && originHost === host)
           if (!sameOriginAsHost) {
-            return new Response(
-              JSON.stringify({
-                data: {
-                  error: 'Cross-origin write requests not allowed',
-                  code: 'auth.origin_forbidden',
-                  turnErrorCode: 'auth.origin_forbidden'
-                },
-                status: 40301,
-                extra: {},
-                message: 'auth.origin_forbidden',
-                success: false
-              }),
-              {
-                status: 403,
-                headers: { 'Content-Type': 'application/json' }
-              }
+            return originForbidden(
+              'Cross-origin write requests not allowed',
+              c.get('requestId') ?? 'unknown'
             )
           }
         }

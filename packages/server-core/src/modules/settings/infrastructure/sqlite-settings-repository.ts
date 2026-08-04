@@ -96,7 +96,10 @@ export class SqliteSettingsRepository implements SettingsRepository {
 
   private assertNamespace(namespace: SettingNamespace): void {
     if (!ALLOWED_NAMESPACES.has(namespace)) {
-      throw SettingsError.notFound('settings.namespace_not_found', `Unknown namespace: ${namespace}`)
+      throw SettingsError.notFound(
+        'settings.namespace_not_found',
+        `Unknown namespace: ${namespace}`
+      )
     }
   }
 }

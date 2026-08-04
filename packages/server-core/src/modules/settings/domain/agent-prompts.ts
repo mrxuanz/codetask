@@ -3,12 +3,7 @@ import { SettingsError } from './settings-errors.ts'
 
 export const MAX_PROMPT_BODY_LENGTH = 100_000
 
-const PROMPT_ROLES = [
-  'conversation',
-  'planner',
-  'sliceVerifier',
-  'milestoneVerifier'
-] as const
+const PROMPT_ROLES = ['conversation', 'planner', 'sliceVerifier', 'milestoneVerifier'] as const
 
 type PromptRole = (typeof PROMPT_ROLES)[number]
 
@@ -78,7 +73,10 @@ export function validateAgentPromptSettings(value: AgentPromptSettings): AgentPr
     const entry = value[role as PromptRole]
     if (entry.mode === 'custom') {
       if (!entry.body.trim()) {
-        throw SettingsError.badRequest('settings.prompt_empty', `${role} custom prompt body cannot be empty`)
+        throw SettingsError.badRequest(
+          'settings.prompt_empty',
+          `${role} custom prompt body cannot be empty`
+        )
       }
       if (entry.body.length > MAX_PROMPT_BODY_LENGTH) {
         throw SettingsError.badRequest(

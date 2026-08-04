@@ -11,7 +11,9 @@ import {
 } from '../../packages/server-core/src/modules/design/planning/mcp/index.ts'
 import { registeredPlanToExecutionTree } from '../../packages/server-core/src/modules/design/planning/domain/registered-plan-to-tree.ts'
 
-function minimalOutline(abilityCode = 'backend-implementation') {
+function minimalOutline(
+  abilityCode = 'backend-implementation'
+): Parameters<typeof registeredPlanToExecutionTree>[0]['plan'] {
   return {
     milestones: [
       {
@@ -121,7 +123,9 @@ describe('design planner MCP', () => {
           assert.equal(input.fencingToken, 'fence-1')
           assert.ok(input.tree.milestones[0]?.slices[0]?.tasks.length === 3)
         },
-        notifyPlannerProgress() {}
+        notifyPlannerProgress() {
+          // Progress notifications are outside this protocol assertion.
+        }
       },
       taskContexts: new Map(),
       planOutline: null

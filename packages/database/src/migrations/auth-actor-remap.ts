@@ -53,9 +53,11 @@ export const migration051ActorIdRemap: AuthMigration = {
     db.transaction(() => {
       for (const table of tables) {
         if (!tableExists(db, table) || !columnExists(db, table, 'actor_id')) continue
-        db.prepare(
-          `UPDATE ${table} SET actor_id = ? WHERE actor_id = ? OR actor_id = ?`
-        ).run(user.id, user.username, user.id)
+        db.prepare(`UPDATE ${table} SET actor_id = ? WHERE actor_id = ? OR actor_id = ?`).run(
+          user.id,
+          user.username,
+          user.id
+        )
       }
 
       // Legacy threads.username remapped to actor_id in migration 056.

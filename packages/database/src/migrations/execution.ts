@@ -328,7 +328,9 @@ export const migration045ExecutionModuleTables: ExecutionMigration = {
 
     // Best-effort copy of still-active leases from the 030 shape (seconds → ms).
     const legacy = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_leases_v030'`)
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_leases_v030'`
+      )
       .get() as { name: string } | undefined
     if (legacy) {
       db.exec(`
@@ -358,6 +360,4 @@ export const migration045ExecutionModuleTables: ExecutionMigration = {
   }
 }
 
-export const executionSchemaMigrations: ExecutionMigration[] = [
-  migration045ExecutionModuleTables
-]
+export const executionSchemaMigrations: ExecutionMigration[] = [migration045ExecutionModuleTables]

@@ -60,9 +60,7 @@ export function assertProviderWorkspace(
   })
 }
 
-export function resolveWorkspaceBinding(input: {
-  workspaceRoot: string
-}): WorkspaceBinding {
+export function resolveWorkspaceBinding(input: { workspaceRoot: string }): WorkspaceBinding {
   const workspaceRoot = canonicalDirectory(input.workspaceRoot, 'workspaceRoot')
   const fingerprint = createHash('sha256').update(pathComparisonKey(workspaceRoot)).digest('hex')
 

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use codeteam_sandbox_adapter::{effective_roots_attestation, parse_task_policy_json};
 
 use crate::attestation::{apply_attestation_env, write_attestation_artifact};
-use crate::protocol::{sha256_policy_json, SandboxEvidence, SandboxPolicy};
+use crate::protocol::{SandboxEvidence, SandboxPolicy, sha256_policy_json};
 
 #[cfg(windows)]
 pub struct SpawnedSandbox {

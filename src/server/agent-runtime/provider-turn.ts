@@ -1,8 +1,6 @@
 import { createTurnError, TURN_CANCELLED } from '../../shared/turn-errors.ts'
 import type { AgentTurnOptions } from './types'
 import type { ConversationRole } from './roles'
-import { getExecutionRunContext } from '../infra/execution-run-context'
-import { refreshWorkloadLease } from '../infra/workload-lease-stub'
 import { refreshWorkspaceLease } from '../infra/workspace-lease-store'
 import { getWorkspaceLeaseContext } from '../infra/workspace-lease-context'
 import { ProgressGuard } from './progress-guard'
@@ -33,7 +31,6 @@ export function createProviderTurnScope(
   ctx: ProviderTurnContext
 ): TurnScope {
   const turnConfig = getAppConfig().turn
-  const executionContext = getExecutionRunContext()
   const workspaceContext = getWorkspaceLeaseContext()
   const turnScope = new TurnScope({
     role,
@@ -42,9 +39,6 @@ export function createProviderTurnScope(
     noFirstSignalMs: turnConfig.noFirstSignalMs,
     progressGuard: new ProgressGuard(role, turnConfig),
     onKeepAlive: async () => {
-      if (executionContext?.runId) {
-        await refreshWorkloadLease(executionContext.runId)
-      }
       if (workspaceContext) {
         if (!refreshWorkspaceLease(workspaceContext.leaseId)) {
           throw createTurnError('workspace.lease_lost')

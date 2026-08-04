@@ -90,7 +90,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
     })
     if (!fresh.ok) {
       return c.json(
-        fail(400, fresh.issue ?? existing.issue ?? 'storage_target_invalid', fresh),
+        fail(400, fresh.issue ?? existing.issue ?? 'storage_target_invalid', { ...fresh }),
         400
       )
     }
@@ -112,7 +112,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
       allowLowSpace: body.allowLowSpace === true
     })
     if (!validation.ok) {
-      return c.json(fail(400, validation.issue ?? 'storage_target_invalid', validation), 400)
+      return c.json(fail(400, validation.issue ?? 'storage_target_invalid', { ...validation }), 400)
     }
     if (
       !body.validationNonce ||
@@ -151,7 +151,7 @@ export function createSetupShell(options: SetupShellOptions): Hono {
       forbiddenRoots: options.forbiddenRoots
     })
     if (!validation.ok) {
-      return c.json(fail(400, validation.issue ?? 'storage_target_invalid', validation), 400)
+      return c.json(fail(400, validation.issue ?? 'storage_target_invalid', { ...validation }), 400)
     }
     if (
       !body.validationNonce ||

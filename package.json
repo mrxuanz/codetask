@@ -1,9 +1,23 @@
 {
-  "name": "task",
+  "name": "codetask",
   "version": "0.1.0-beta",
   "private": true,
-  "description": "An Electron application with Vue and TypeScript",
+  "description": "Local-first AI task orchestration with pluggable agent CLIs and OS sandboxing",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrxuanz/codetask.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mrxuanz/codetask/issues"
+  },
+  "homepage": "https://github.com/mrxuanz/codetask#readme",
+  "keywords": [
+    "ai-agents",
+    "task-orchestration",
+    "electron",
+    "sandbox"
+  ],
   "engines": {
     "node": ">=24 <25"
   },
@@ -73,7 +87,7 @@
     "test:claude:light": "node --import ./tests/tsx-tsconfig.mjs --import tsx tests/sandbox/diagnose-claude-light.ts",
     "test:opencode:light": "node --import ./tests/tsx-tsconfig.mjs --import tsx tests/sandbox/diagnose-opencode-light.ts",
     "test:providers:light": "npm run test:codex:light -- --case static --skip-live --role all && npm run test:cursor:light -- --case static --skip-live && npm run test:claude:light -- --case static --skip-live && npm run test:opencode:light -- --case static --skip-live",
-    "test:unit": "node scripts/check-node-major.mjs && node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/agent-runtime/*.test.ts tests/architecture/*.test.ts tests/auth/*.test.ts tests/business-e2e/*.test.ts tests/conversation/*.test.ts tests/db/*.test.ts tests/design/*.test.ts tests/events/*.test.ts tests/execution/*.test.ts tests/jobs/*.test.ts tests/mcp/*.test.ts tests/retention/*.test.ts tests/shared/*.test.ts tests/threads/*.test.ts tests/sandbox/*.test.mjs tests/sandbox/*.test.ts",
+    "test:unit": "node scripts/check-node-major.mjs && node tests/run-unit.mjs",
     "test:workflow": "node tests/run-workflow.mjs",
     "test:provider-contract": "node scripts/check-node-major.mjs && node --import ./tests/tsx-tsconfig.mjs --import tsx --test tests/provider-contract/*.test.ts",
     "test:fast": "node scripts/check-node-major.mjs && node scripts/ensure-node-native.mjs && npm run test:unit && npm run test:provider-contract && npm run test:workflow",
@@ -88,6 +102,7 @@
     "@codetask/agent-runtime": "*",
     "@codetask/contracts": "*",
     "@codetask/database": "*",
+    "@codetask/provider-runtime-node": "*",
     "@codetask/server-core": "*",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",

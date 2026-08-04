@@ -9,9 +9,11 @@
     "src/sandbox/**/*",
     "src/shared/**/*",
     "packages/**/*",
-    "apps/**/*",
+    "apps/desktop/**/*",
+    "apps/service/**/*",
     "native/codeteam-sandbox/index.d.ts"
   ],
+  "exclude": ["apps/web/**/*"],
   "compilerOptions": {
     "composite": true,
     "strict": true,
@@ -30,8 +32,12 @@
       "@codetask/database": ["packages/database/src/index.ts"],
       "@codetask/database/*": ["packages/database/src/*"],
       "@codetask/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@codetask/provider-runtime-node": ["packages/provider-runtime-node/src/index.ts"],
+      "@codetask/provider-runtime-node/*": ["packages/provider-runtime-node/src/*"],
       "@codetask/server-core": ["packages/server-core/src/index.ts"],
-      "@codetask/server-core/*": ["packages/server-core/src/*"]
+      "@codetask/server-core/*": ["packages/server-core/src/*"],
+      "@codetask/service-bootstrap": ["packages/service-bootstrap/src/index.ts"],
+      "@codetask/service-bootstrap/*": ["packages/service-bootstrap/src/*"]
     }
   }
 }

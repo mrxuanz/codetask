@@ -168,10 +168,9 @@ export const migration026UnifyThreadJobs: Migration = {
           updated_at: row.updated_at
         })
         // Retarget draft_references / design_runs from ds-* → job-*
-        db.prepare(`UPDATE draft_references SET design_session_id = ? WHERE design_session_id = ?`).run(
-          jobId,
-          dsId
-        )
+        db.prepare(
+          `UPDATE draft_references SET design_session_id = ? WHERE design_session_id = ?`
+        ).run(jobId, dsId)
         db.prepare(`UPDATE design_runs SET design_session_id = ? WHERE design_session_id = ?`).run(
           jobId,
           dsId
@@ -220,9 +219,7 @@ export const migration026UnifyThreadJobs: Migration = {
       }
 
       // Fix stale pointers still pointing at launched ds-*
-      db.prepare(
-        `UPDATE threads SET active_plan_id = ? WHERE active_plan_id = ?`
-      ).run(jobId, dsId)
+      db.prepare(`UPDATE threads SET active_plan_id = ? WHERE active_plan_id = ?`).run(jobId, dsId)
       db.prepare(
         `UPDATE thread_messages
          SET payload_json = json_set(payload_json, '$.linkedPlanId', ?)
@@ -233,10 +230,14 @@ export const migration026UnifyThreadJobs: Migration = {
 
     // 3) Workload owner_kind design_session → thread_job
     if (tableExists(db, 'workload_slots')) {
-      db.exec(`UPDATE workload_slots SET owner_kind = 'thread_job' WHERE owner_kind = 'design_session'`)
+      db.exec(
+        `UPDATE workload_slots SET owner_kind = 'thread_job' WHERE owner_kind = 'design_session'`
+      )
     }
     if (tableExists(db, 'workload_runs')) {
-      db.exec(`UPDATE workload_runs SET owner_kind = 'thread_job' WHERE owner_kind = 'design_session'`)
+      db.exec(
+        `UPDATE workload_runs SET owner_kind = 'thread_job' WHERE owner_kind = 'design_session'`
+      )
     }
 
     // 4) Rebuild draft_references / design_runs to FK thread_jobs

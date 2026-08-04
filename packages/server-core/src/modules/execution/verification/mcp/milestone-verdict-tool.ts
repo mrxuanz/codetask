@@ -19,7 +19,9 @@ export function parseCompleteMilestoneVerification(
   options?: { milestoneId?: string }
 ): MilestoneVerdict {
   const raw =
-    args && typeof args === 'object' ? (args as Record<string, unknown>) : ({} as Record<string, unknown>)
+    args && typeof args === 'object'
+      ? (args as Record<string, unknown>)
+      : ({} as Record<string, unknown>)
 
   const status = nonEmpty(raw.status)
   if (!status || !MILESTONE_STATUSES.has(status)) {
@@ -43,7 +45,9 @@ export function parseCompleteMilestoneVerification(
             ? row.evidence[0]
             : claim)
         if (!claim || !traceStatus || !evidenceRef) {
-          throw new Error(`requirementTrace[${index}] requires claim/requirement, status, evidenceRef`)
+          throw new Error(
+            `requirementTrace[${index}] requires claim/requirement, status, evidenceRef`
+          )
         }
         return { claim, evidenceRef, status: traceStatus }
       })
@@ -60,7 +64,8 @@ export function parseCompleteMilestoneVerification(
         return {
           sliceId,
           status: assessmentStatus,
-          summary: nonEmpty(row.summary) ?? nonEmpty(row.reason) ?? `Slice ${sliceId}: ${assessmentStatus}`
+          summary:
+            nonEmpty(row.summary) ?? nonEmpty(row.reason) ?? `Slice ${sliceId}: ${assessmentStatus}`
         }
       })
     : []
@@ -74,17 +79,16 @@ export function parseCompleteMilestoneVerification(
   const repairTasks = repairSource.map((item, index) => {
     const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>
     const kindRaw = nonEmpty(row.kind) ?? 'implementation-repair'
-    const kind = (WORK_KINDS.has(kindRaw as WorkKind) ? kindRaw : 'implementation-repair') as WorkKind
+    const kind = (
+      WORK_KINDS.has(kindRaw as WorkKind) ? kindRaw : 'implementation-repair'
+    ) as WorkKind
     const title =
       nonEmpty(row.title) ??
       nonEmpty(row.instruction) ??
       nonEmpty(row.evidenceGap) ??
       `Repair ${index + 1}`
     const description =
-      nonEmpty(row.description) ??
-      nonEmpty(row.instruction) ??
-      nonEmpty(row.evidenceGap) ??
-      title
+      nonEmpty(row.description) ?? nonEmpty(row.instruction) ?? nonEmpty(row.evidenceGap) ?? title
     const successCriteria = nonEmpty(row.successCriteria) ?? 'Repair completed'
     const targetSliceId = nonEmpty(row.targetSliceId) ?? undefined
     const targetWorkId = nonEmpty(row.targetWorkId) ?? nonEmpty(row.targetTaskId) ?? undefined

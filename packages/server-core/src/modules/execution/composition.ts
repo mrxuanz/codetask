@@ -61,12 +61,7 @@ export type ExecutionModule = {
 export function composeExecutionModule(deps: {
   db: Database.Database
   agentRuntime?: AgentRuntime
-  onEvent?: (
-    jobId: string,
-    eventType: string,
-    payload: unknown,
-    outboxId: string
-  ) => void
+  onEvent?: (jobId: string, eventType: string, payload: unknown, outboxId: string) => void
   leaseOwner?: string
   /** Test override; production refreshes at one third of the lease TTL. */
   heartbeatIntervalMs?: number
@@ -312,17 +307,10 @@ export function composeExecutionModule(deps: {
   registerWakeScheduler(wake)
 
   const query = new QueryJobService(jobs, queue, work, verification)
-  const control = new ControlJobService(
-    deps.db,
-    jobs,
-    queue,
-    outbox,
-    wake,
-    (jobId, reason) => {
-      if (!activeRun || activeRun.jobId !== jobId) return
-      abortActiveTurn(reason)
-    }
-  )
+  const control = new ControlJobService(deps.db, jobs, queue, outbox, wake, (jobId, reason) => {
+    if (!activeRun || activeRun.jobId !== jobId) return
+    abortActiveTurn(reason)
+  })
   const deleteJob = new DeleteJobService(deps.db, jobs, outbox)
 
   const routes = new Hono<ExecutionHttpEnv>()
@@ -330,10 +318,11 @@ export function composeExecutionModule(deps: {
   routes.route('/execution-queue', createExecutionQueueRoute({ queue }))
 
   const submitJobPort: JobSubmissionPort = {
-    accept: (submission) => submitJobService.accept(submission).then((result) => {
-      wake()
-      return result
-    })
+    accept: (submission) =>
+      submitJobService.accept(submission).then((result) => {
+        wake()
+        return result
+      })
   }
 
   return {

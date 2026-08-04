@@ -38,9 +38,13 @@ test('settings namespaces use independent CAS revisions', (t) => {
   const store = new SettingsStore(dataDir, db)
 
   assert.equal(
-    store.writeNamespace('agent_prompts', { conversation: { mode: 'default', body: '' } }, {
-      expectedRevision: 0
-    }),
+    store.writeNamespace(
+      'agent_prompts',
+      { conversation: { mode: 'default', body: '' } },
+      {
+        expectedRevision: 0
+      }
+    ),
     1
   )
   assert.equal(
@@ -48,16 +52,24 @@ test('settings namespaces use independent CAS revisions', (t) => {
     1
   )
   assert.equal(
-    store.writeNamespace('agent_prompts', { conversation: { mode: 'custom', body: 'x' } }, {
-      expectedRevision: 1
-    }),
+    store.writeNamespace(
+      'agent_prompts',
+      { conversation: { mode: 'custom', body: 'x' } },
+      {
+        expectedRevision: 1
+      }
+    ),
     2
   )
   assert.throws(
     () =>
-      store.writeNamespace('agent_prompts', { conversation: { mode: 'custom', body: 'y' } }, {
-        expectedRevision: 1
-      }),
+      store.writeNamespace(
+        'agent_prompts',
+        { conversation: { mode: 'custom', body: 'y' } },
+        {
+          expectedRevision: 1
+        }
+      ),
     SettingsRevisionConflictError
   )
   assert.deepEqual(store.readNamespace('agent_prompts').value, {

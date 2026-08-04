@@ -1,7 +1,5 @@
-import type {
-  BusinessSkillSnapshot,
-  JobExecutionProfile
-} from '../shared/contracts/plan.ts'
+import type { BusinessSkillSnapshot, JobExecutionProfile } from '@codetask/contracts'
+
 import { isSupportedCoreCode } from '../shared/providers/codes.ts'
 
 const EXECUTION_PROFILE_KEYS = new Set([

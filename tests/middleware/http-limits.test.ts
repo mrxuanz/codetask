@@ -36,9 +36,14 @@ test('requestTimeout returns 408 when handler exceeds limit', async () => {
     const response = await responsePromise
 
     assert.equal(response.status, 408)
-    const body = (await response.json()) as { status: number; message: string }
-    assert.equal(body.status, 40801)
-    assert.equal(body.message, 'Request timed out')
+    const body = (await response.json()) as {
+      success: boolean
+      error: { code: string; message: string }
+      requestId: string
+    }
+    assert.equal(body.success, false)
+    assert.equal(body.error.code, '40801')
+    assert.equal(body.error.message, 'Request timed out')
   } finally {
     mock.timers.reset()
   }

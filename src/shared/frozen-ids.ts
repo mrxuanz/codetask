@@ -1,12 +1,12 @@
 const MAX_FROZEN_ID_LEN = 128
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /** Conversation module ids: `conv_` + uuid hex without dashes. */
 const CONVERSATION_ID_RE = /^conv_[0-9a-f]{32}$/i
 
-const ATTACHMENT_ID_RE = /^att-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const ATTACHMENT_ID_RE =
+  /^att-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export type FrozenIdKind = 'thread' | 'attachment' | 'conversation'
 
@@ -31,7 +31,11 @@ function decodeTraversalAttempts(raw: string): string {
 
 function assertNoTraversalSegments(raw: string, kind: FrozenIdKind): void {
   if (raw.includes('/') || raw.includes('\\')) {
-    throw new FrozenIdError(kind, `${kind}.id_invalid`, `${kind} id must not contain path separators`)
+    throw new FrozenIdError(
+      kind,
+      `${kind}.id_invalid`,
+      `${kind} id must not contain path separators`
+    )
   }
   const decoded = decodeTraversalAttempts(raw)
   if (decoded.includes('..') || decoded.includes('/') || decoded.includes('\\')) {
@@ -73,10 +77,18 @@ export function assertFrozenThreadId(threadId: string): string {
 export function assertAttachmentOwnerId(ownerId: string): string {
   const trimmed = ownerId.trim()
   if (!trimmed) {
-    throw new FrozenIdError('conversation', 'conversation.id_required', 'conversation id is required')
+    throw new FrozenIdError(
+      'conversation',
+      'conversation.id_required',
+      'conversation id is required'
+    )
   }
   if (trimmed.length > MAX_FROZEN_ID_LEN) {
-    throw new FrozenIdError('conversation', 'conversation.id_invalid', 'conversation id is too long')
+    throw new FrozenIdError(
+      'conversation',
+      'conversation.id_invalid',
+      'conversation id is too long'
+    )
   }
   assertNoTraversalSegments(trimmed, 'conversation')
   if (UUID_RE.test(trimmed) || CONVERSATION_ID_RE.test(trimmed)) {

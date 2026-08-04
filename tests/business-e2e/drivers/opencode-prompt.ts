@@ -202,7 +202,12 @@ export async function waitForCapabilityReport(
   mcpUrl: string,
   capabilityId: string,
   timeoutMs: number,
-  options?: { signal?: AbortSignal; pollMs?: number; noTimeout?: boolean }
+  options?: {
+    signal?: AbortSignal
+    pollMs?: number
+    noTimeout?: boolean
+    fetchImpl?: typeof globalThis.fetch
+  }
 ): Promise<{ status?: string; summary?: string } | null> {
   const statusUrl = new URL(mcpUrl)
   statusUrl.pathname = '/capability-report'
@@ -217,11 +222,12 @@ export async function waitForCapabilityReport(
     ? null
     : Date.now() + (Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0)
   let lastError: unknown
+  const fetchImpl = options?.fetchImpl ?? globalThis.fetch
 
   for (;;) {
     if (options?.signal?.aborted) throw new Error('timeout:capability_report_aborted')
     try {
-      const response = await fetch(statusUrl)
+      const response = await fetchImpl(statusUrl)
       if (!response.ok) throw new Error(`http_${response.status}`)
       const body = (await response.json()) as {
         report?: { status?: string; summary?: string } | null

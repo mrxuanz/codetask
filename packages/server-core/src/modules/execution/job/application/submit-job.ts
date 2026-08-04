@@ -307,13 +307,7 @@ export function createSubmitJobService(deps: {
                 job_id, generation, from_work_id, depends_on_work_id, reason
               ) VALUES (?, ?, ?, ?, ?)`
             )
-            .run(
-              dep.jobId,
-              dep.generation,
-              dep.fromWorkId,
-              dep.dependsOnWorkId,
-              dep.reason
-            )
+            .run(dep.jobId, dep.generation, dep.fromWorkId, dep.dependsOnWorkId, dep.reason)
         }
 
         deps.db

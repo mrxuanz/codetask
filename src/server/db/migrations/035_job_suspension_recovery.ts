@@ -1,6 +1,10 @@
 import type { Migration } from './types'
 
-function hasColumn(db: { prepare: (sql: string) => { all: () => Array<{ name: string }> } }, table: string, column: string): boolean {
+function hasColumn(
+  db: { prepare: (sql: string) => { all: () => Array<{ name: string }> } },
+  table: string,
+  column: string
+): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
   return columns.some((entry) => entry.name === column)
 }
@@ -13,9 +17,7 @@ export const migration035JobSuspensionRecovery: Migration = {
       db.exec(`ALTER TABLE thread_jobs ADD COLUMN suspension_kind TEXT`)
     }
     if (!hasColumn(db, 'thread_jobs', 'continue_after_pause')) {
-      db.exec(
-        `ALTER TABLE thread_jobs ADD COLUMN continue_after_pause INTEGER NOT NULL DEFAULT 0`
-      )
+      db.exec(`ALTER TABLE thread_jobs ADD COLUMN continue_after_pause INTEGER NOT NULL DEFAULT 0`)
     }
     if (!hasColumn(db, 'thread_jobs', 'recovery_reason')) {
       db.exec(`ALTER TABLE thread_jobs ADD COLUMN recovery_reason TEXT`)

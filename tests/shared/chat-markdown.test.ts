@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { renderChatMarkdown, stabilizeStreamingMarkdown } from '../../src/renderer/src/lib/chatMarkdown'
+import { renderChatMarkdown, stabilizeStreamingMarkdown } from '../../apps/web/src/lib/chatMarkdown'
 
 test('stabilizeStreamingMarkdown closes an open fence', () => {
   const input = 'before\n```ts\nconst x = 1'

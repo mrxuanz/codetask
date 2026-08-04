@@ -1,7 +1,4 @@
-import {
-  DEFAULT_RETENTION_SETTINGS,
-  type RetentionSettings
-} from '../../shared/contracts/retention.ts'
+import { DEFAULT_RETENTION_SETTINGS, type RetentionSettings } from '@codetask/contracts'
 import type { AppConfig } from '../config/app-config'
 
 /** Retention is deploy/code config — not a user Settings namespace (05 §18). */

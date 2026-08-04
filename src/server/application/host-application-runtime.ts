@@ -90,7 +90,8 @@ async function startConversationCursorReaper(
   try {
     const module = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
     module.configureConversationCursorReaper({
-      isThreadInflight: (threadId) => ctx.runtimeRegistry.isThreadInflight(threadId)
+      isConversationInflight: (conversationId) =>
+        ctx.runtimeRegistry.isConversationInflight(conversationId)
     })
     module.startConversationCursorReaper()
   } catch (error: unknown) {
@@ -100,9 +101,7 @@ async function startConversationCursorReaper(
   }
 }
 
-export async function startHostApplicationRuntime(
-  runtime: ApplicationRuntime
-): Promise<void> {
+export async function startHostApplicationRuntime(runtime: ApplicationRuntime): Promise<void> {
   if (runtime.startPromise !== null) {
     return runtime.startPromise
   }

@@ -1,5 +1,1 @@
-import { normalizeTurnError } from '../../../shared/turn-errors.ts'
-
-export function classifyCursorAcpErrorLite(error: unknown): string {
-  return normalizeTurnError(error).message
-}
+export * from '@codetask/provider-runtime-node/cursor-acp/classify-lite'

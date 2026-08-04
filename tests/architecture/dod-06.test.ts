@@ -88,9 +88,15 @@ describe('architecture 06 DoD', () => {
   })
 
   it('legacy hub snapshot-on-subscribe and linger are gone', () => {
-    const ownership = readFileSync(join(root, 'src/server/events/realtime-job-ownership.ts'), 'utf8')
+    const ownership = readFileSync(
+      join(root, 'src/server/events/realtime-job-ownership.ts'),
+      'utf8'
+    )
     assert.match(ownership, /getOwnedRealtimeJob/)
-    assert.doesNotMatch(ownership, /tryReplayFromLastEventId|pushJobSnapshots|lingerByKey|getRealtimeJobSnapshot/)
+    assert.doesNotMatch(
+      ownership,
+      /tryReplayFromLastEventId|pushJobSnapshots|lingerByKey|getRealtimeJobSnapshot/
+    )
     assert.match(ownership, /authorize topic subscription|never pushes business snapshots/i)
     assert.equal(exists('src/server/events/job-event-hub.ts'), false)
     assert.equal(exists('src/server/events/sse-session-registry.ts'), false)
@@ -107,25 +113,28 @@ describe('architecture 06 DoD', () => {
   })
 
   it('frontend uses unified realtime client with header connection id', () => {
-    assert.equal(exists('src/renderer/src/api/realtime.ts'), true)
-    assert.equal(exists('src/renderer/src/realtime/reducer.ts'), true)
-    const client = readFileSync(join(root, 'src/renderer/src/api/realtime.ts'), 'utf8')
+    assert.equal(exists('apps/web/src/api/realtime.ts'), true)
+    assert.equal(exists('apps/web/src/realtime/reducer.ts'), true)
+    const client = readFileSync(join(root, 'apps/web/src/api/realtime.ts'), 'utf8')
     assert.match(client, /REALTIME_CONNECTION_ID_HEADER/)
     assert.match(client, /Value\.Check\(RealtimeEnvelopeSchema/)
     assert.doesNotMatch(client, /connectionId=\$\{|x-hub-connection-id/)
     assert.doesNotMatch(client, /onEnvelope\(envelope as RealtimeEnvelope\)/)
-    const hub = readFileSync(join(root, 'src/renderer/src/composables/useRealtimeGateway.ts'), 'utf8')
+    const hub = readFileSync(join(root, 'apps/web/src/composables/useRealtimeGateway.ts'), 'utf8')
     assert.match(hub, /putRealtimeSubscriptions|connectRealtimeStream/)
     assert.doesNotMatch(hub, /HubEnvelope|toHubEnvelope|onAnyEvent|useJobRealtimeWatch|JobEventHub/)
-    assert.equal(exists('src/renderer/src/composables/useJobEventHub.ts'), false)
+    assert.equal(exists('apps/web/src/composables/useJobEventHub.ts'), false)
     assert.equal(exists('src/shared/contracts/sse.ts'), false)
-    assert.equal(exists('src/renderer/src/components/create/ReferenceCorpusPanel.vue'), false)
-    const jobsStore = readFileSync(join(root, 'src/renderer/src/composables/useControlPlaneJobsStore.ts'), 'utf8')
+    assert.equal(exists('apps/web/src/components/create/ReferenceCorpusPanel.vue'), false)
+    const jobsStore = readFileSync(
+      join(root, 'apps/web/src/composables/useControlPlaneJobsStore.ts'),
+      'utf8'
+    )
     assert.match(jobsStore, /startRealtimePolling|handleRealtimeEvent/)
     assert.doesNotMatch(jobsStore, /startHubPolling|handleHubEvent/)
-    const apiClient = readFileSync(join(root, 'src/renderer/src/api/client.ts'), 'utf8')
+    const apiClient = readFileSync(join(root, 'apps/web/src/api/client.ts'), 'utf8')
     assert.match(apiClient, /Value\.Check|schema/)
-    const homeChat = readFileSync(join(root, 'src/renderer/src/composables/useHomeChat.ts'), 'utf8')
+    const homeChat = readFileSync(join(root, 'apps/web/src/composables/useHomeChat.ts'), 'utf8')
     assert.match(homeChat, /conversationTurnTopic|conversationTopic/)
     assert.doesNotMatch(
       homeChat,
@@ -145,14 +154,14 @@ describe('architecture 06 DoD', () => {
       const source = readFileSync(file, 'utf8')
       assert.doesNotMatch(source, /\/api\/v3\/events|new WebSocket|EventSource\(/)
     }
-    for (const file of walk(join(root, 'src/renderer/src'))) {
+    for (const file of walk(join(root, 'apps/web/src'))) {
       const source = readFileSync(file, 'utf8')
       assert.doesNotMatch(source, /new WebSocket\(|new EventSource\(/)
     }
   })
 
   it('Electron has no business IPC query/command proxy in renderer', () => {
-    for (const file of walk(join(root, 'src/renderer/src'))) {
+    for (const file of walk(join(root, 'apps/web/src'))) {
       const source = readFileSync(file, 'utf8')
       assert.doesNotMatch(source, /ipcRenderer\.(invoke|send)|window\.electronAPI/)
     }
@@ -188,7 +197,7 @@ describe('architecture 06 DoD', () => {
   })
 
   it('entity revision gate lives in client RealtimeReducer', () => {
-    const reducer = readFileSync(join(root, 'src/renderer/src/realtime/reducer.ts'), 'utf8')
+    const reducer = readFileSync(join(root, 'apps/web/src/realtime/reducer.ts'), 'utf8')
     assert.match(reducer, /entityRevision/)
     assert.match(reducer, /lastEventId/)
   })

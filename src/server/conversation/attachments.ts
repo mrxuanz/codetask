@@ -2,10 +2,12 @@ import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
 import { join, extname, basename, dirname } from 'path'
 import { getAppContext } from '../bootstrap'
-import { attachmentDir, threadAttachmentsDir } from '../data-paths'
+import { attachmentDir, attachmentStorageKey, threadAttachmentsDir } from '../data-paths'
 import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
 import { assertAttachmentOwnerId, assertFrozenAttachmentId } from '../../shared/frozen-ids'
+import { registerAttachmentAsset } from '../assets/registry'
 import type { MessageAttachment } from './types'
+import type { AppDatabase } from '../db'
 
 export function initAttachmentStore(_dir: string): void {
   getAppContext()
@@ -82,6 +84,19 @@ export function saveThreadAttachment(input: {
   const absolutePath = join(isolatedDir, filename)
   writeFileSync(absolutePath, input.buffer)
   const relativePath = `${id}/${filename}`
+
+  const client = (
+    getAppContext().db as AppDatabase & { $client?: import('better-sqlite3').Database }
+  ).$client
+  if (client) {
+    registerAttachmentAsset(client, {
+      assetId: id,
+      ownerType: 'conversation',
+      ownerId: threadId,
+      storageKey: attachmentStorageKey(threadId, id),
+      sizeBytes: input.buffer.length
+    })
+  }
 
   return {
     id,

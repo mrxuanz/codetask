@@ -6,7 +6,13 @@ import { composeExecutionModule } from '../../packages/server-core/src/modules/e
 import { migration043DesignModuleTables } from '../../packages/database/src/migrations/index.ts'
 import { migration045ExecutionModuleTables } from '../../packages/database/src/migrations/execution.ts'
 
-function composeTestModules(db: Database.Database, options?: { startup?: boolean }) {
+function composeTestModules(
+  db: Database.Database,
+  options?: { startup?: boolean }
+): {
+  design: ReturnType<typeof composeDesignModule>
+  execution: ReturnType<typeof composeExecutionModule>
+} {
   const execution = composeExecutionModule({ db })
   const design = composeDesignModule({
     db,
@@ -104,14 +110,14 @@ describe('design module (01)', () => {
     assert.equal(first.jobId, second.jobId)
     assert.equal(first.session.status, 'published')
 
-    const accepted = db
-      .prepare(`SELECT COUNT(*) AS c FROM jobs WHERE id = ?`)
-      .get(first.jobId) as { c: number }
+    const accepted = db.prepare(`SELECT COUNT(*) AS c FROM jobs WHERE id = ?`).get(first.jobId) as {
+      c: number
+    }
     assert.equal(accepted.c, 1)
 
-    const jobRow = db
-      .prepare(`SELECT state FROM jobs WHERE id = ?`)
-      .get(first.jobId) as { state: string }
+    const jobRow = db.prepare(`SELECT state FROM jobs WHERE id = ?`).get(first.jobId) as {
+      state: string
+    }
     assert.ok(['queued', 'running'].includes(jobRow.state))
 
     await execution.scheduler.tick()
@@ -129,24 +135,18 @@ describe('design module (01)', () => {
 
     const execution = composeExecutionModule({ db })
 
-    const { SqliteDraftRepository } = await import(
-      '../../packages/server-core/src/modules/design/draft/infrastructure/sqlite-draft-repository.ts'
-    )
-    const { SqlitePlanningRepository } = await import(
-      '../../packages/server-core/src/modules/design/planning/infrastructure/sqlite-planning-repository.ts'
-    )
-    const { SqlitePlanningCapacity } = await import(
-      '../../packages/server-core/src/modules/design/planning/infrastructure/planning-capacity.ts'
-    )
-    const { JobSubmissionOutbox } = await import(
-      '../../packages/server-core/src/modules/design/handoff/job-submission-outbox.ts'
-    )
-    const { DraftApplication } = await import(
-      '../../packages/server-core/src/modules/design/draft/application/draft-application.ts'
-    )
-    const { PlanningApplication } = await import(
-      '../../packages/server-core/src/modules/design/planning/application/planning-application.ts'
-    )
+    const { SqliteDraftRepository } =
+      await import('../../packages/server-core/src/modules/design/draft/infrastructure/sqlite-draft-repository.ts')
+    const { SqlitePlanningRepository } =
+      await import('../../packages/server-core/src/modules/design/planning/infrastructure/sqlite-planning-repository.ts')
+    const { SqlitePlanningCapacity } =
+      await import('../../packages/server-core/src/modules/design/planning/infrastructure/planning-capacity.ts')
+    const { JobSubmissionOutbox } =
+      await import('../../packages/server-core/src/modules/design/handoff/job-submission-outbox.ts')
+    const { DraftApplication } =
+      await import('../../packages/server-core/src/modules/design/draft/application/draft-application.ts')
+    const { PlanningApplication } =
+      await import('../../packages/server-core/src/modules/design/planning/application/planning-application.ts')
 
     const draftRepo = new SqliteDraftRepository(db)
     const planningRepo = new SqlitePlanningRepository(db)
@@ -166,7 +166,11 @@ describe('design module (01)', () => {
       planningRepo,
       capacity,
       outbox.asPort(),
-      { publish() {} },
+      {
+        publish() {
+          // This test does not observe planning events.
+        }
+      },
       hang
     )
 

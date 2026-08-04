@@ -1,5 +1,5 @@
-import { DEFAULT_RETENTION_SETTINGS } from '../../shared/contracts/retention.ts'
-import type { RetentionSettings } from '../../shared/contracts/retention.ts'
+import { DEFAULT_RETENTION_SETTINGS } from '@codetask/contracts'
+import type { RetentionSettings } from '@codetask/contracts'
 import type { getDb } from '../db'
 import { getMessageArtifactPayload, putMessageArtifact } from './message-artifacts'
 

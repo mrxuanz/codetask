@@ -13,6 +13,7 @@ export interface AgentCoreAvailability {
   description: string
   available: boolean
   readOnlyCapable?: boolean | undefined
+  supportedProfiles?: readonly string[] | undefined
   reason?: string | null | undefined
   detectedCommand?: string | null | undefined
   launchCommand?: string | null | undefined
@@ -66,6 +67,7 @@ export async function getAgentCore(code: string): Promise<AgentCoreAvailability 
       description: descriptor.description,
       available: true,
       readOnlyCapable: driver.supports('chat-read'),
+      supportedProfiles: descriptor.capabilities.supportedProfiles,
       detectedCommand: installation.command,
       launchCommand: installation.command,
       executablePath: installation.resolvedPath
@@ -79,6 +81,7 @@ export async function getAgentCore(code: string): Promise<AgentCoreAvailability 
     description: descriptor.description,
     available: false,
     readOnlyCapable: driver.supports('chat-read'),
+    supportedProfiles: descriptor.capabilities.supportedProfiles,
     reason: `${descriptor.label} is not installed or not on PATH`,
     launchCommand: fallbackCommand
   }

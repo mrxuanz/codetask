@@ -106,9 +106,7 @@ function readVerifierProvider(
       milestoneVerifierCoreCode?: string
     }
     const raw =
-      kind === 'milestone'
-        ? profile.milestoneVerifierCoreCode
-        : profile.sliceVerifierCoreCode
+      kind === 'milestone' ? profile.milestoneVerifierCoreCode : profile.sliceVerifierCoreCode
     return normalizeProvider(raw ?? 'opencode') as ProviderCode
   } catch {
     return 'opencode'
@@ -373,13 +371,7 @@ export function createVerifySliceService(deps: {
       const evidenceBundleJson = serializeVerificationEvidence(evidenceBundle)
       const bundleHash = hashEvidenceBundle(evidenceBundleJson)
 
-      const prior = findSucceededBundle(
-        deps.db,
-        input.jobId,
-        'slice',
-        input.sliceId,
-        bundleHash
-      )
+      const prior = findSucceededBundle(deps.db, input.jobId, 'slice', input.sliceId, bundleHash)
       if (prior) {
         deps.verification.updateSliceVerification(
           input.jobId,
@@ -576,9 +568,7 @@ async function runSliceVerifierAgent(input: {
       }
     }
   } catch (error) {
-    verdictWait.cancel(
-      error instanceof Error ? error.message : 'Slice verifier agent failed'
-    )
+    verdictWait.cancel(error instanceof Error ? error.message : 'Slice verifier agent failed')
   }
 
   try {
@@ -708,7 +698,10 @@ export function createVerifyMilestoneService(deps: {
         }
       }
 
-      if (verdict.status === 'inconclusive' && attempts + 1 >= MAX_MILESTONE_VERIFICATION_ATTEMPTS) {
+      if (
+        verdict.status === 'inconclusive' &&
+        attempts + 1 >= MAX_MILESTONE_VERIFICATION_ATTEMPTS
+      ) {
         verdict = {
           ...verdict,
           status: 'blocked',
@@ -840,9 +833,7 @@ async function runMilestoneVerifierAgent(input: {
       }
     }
   } catch (error) {
-    verdictWait.cancel(
-      error instanceof Error ? error.message : 'Milestone verifier agent failed'
-    )
+    verdictWait.cancel(error instanceof Error ? error.message : 'Milestone verifier agent failed')
   }
 
   try {

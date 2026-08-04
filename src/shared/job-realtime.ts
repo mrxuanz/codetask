@@ -1,4 +1,4 @@
-import type { PlanningSessionStatus } from './contracts/planning-session-view'
+import type { PlanningSessionViewStatus } from '@codetask/contracts'
 
 /** Canonical execution job states that benefit from realtime push (hub/SSE). */
 export function jobNeedsRealtimeWatch(status: string): boolean {
@@ -14,7 +14,7 @@ export function jobNeedsRealtimeWatch(status: string): boolean {
 }
 
 /** Stop forwarding hub events once the job reaches a settled control state. */
-export function jobHubTerminalStatus(status: PlanningSessionStatus | string): boolean {
+export function jobHubTerminalStatus(status: PlanningSessionViewStatus | string): boolean {
   return (
     status === 'plan_editing' ||
     status === 'plan_ready' ||

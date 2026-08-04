@@ -47,23 +47,22 @@ export class SqliteDraftRepository implements DraftRepository {
     completion?: 'all' | 'incomplete' | 'complete'
   }): Promise<DraftRecord[]> {
     const rows = this.db
-      .prepare(
-        `SELECT * FROM drafts WHERE actor_id = ? ORDER BY updated_at DESC LIMIT 500`
-      )
+      .prepare(`SELECT * FROM drafts WHERE actor_id = ? ORDER BY updated_at DESC LIMIT 500`)
       .all(input.actorId) as DraftRow[]
     let drafts = rows.map((row) => this.hydrate(row))
     if (input.q?.trim()) {
       const q = input.q.trim().toLowerCase()
       drafts = drafts.filter(
-        (d) =>
-          d.title.toLowerCase().includes(q) ||
-          d.summary.toLowerCase().includes(q)
+        (d) => d.title.toLowerCase().includes(q) || d.summary.toLowerCase().includes(q)
       )
     }
     if (input.completion === 'incomplete') {
       drafts = drafts.filter((d) => d.status !== 'confirmed' && d.status !== 'archived')
     } else if (input.completion === 'complete') {
       drafts = drafts.filter((d) => d.status === 'confirmed')
+    } else {
+      // Default / all: hide soft-deleted (archived) drafts from the primary list.
+      drafts = drafts.filter((d) => d.status !== 'archived')
     }
     return drafts
   }
@@ -234,9 +233,7 @@ export class SqliteDraftRepository implements DraftRepository {
       sort_order: number
     }>
     const references = this.db
-      .prepare(
-        `SELECT * FROM design_draft_references WHERE draft_id = ? ORDER BY sort_order ASC`
-      )
+      .prepare(`SELECT * FROM design_draft_references WHERE draft_id = ? ORDER BY sort_order ASC`)
       .all(row.id) as Array<{
       id: string
       source: string | null

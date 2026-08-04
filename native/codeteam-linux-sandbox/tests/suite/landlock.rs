@@ -84,7 +84,11 @@ async fn run_cmd(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) {
 }
 
 #[expect(clippy::expect_used)]
-async fn run_cmd_output(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) -> CommandOutput {
+async fn run_cmd_output(
+    cmd: &[&str],
+    writable_roots: &[PathBuf],
+    timeout_ms: u64,
+) -> CommandOutput {
     run_cmd_result_with_writable_roots(
         cmd,
         writable_roots,
@@ -215,13 +219,12 @@ async fn run_cmd_result_with_permission_profile_for_cwd(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
-        .await
-    {
-        Ok(Ok(output)) => output,
-        Ok(Err(err)) => panic!("sandbox command should execute: {err}"),
-        Err(_) => return Err(RunError::Timeout),
-    };
+    let output =
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), command.output()).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(err)) => panic!("sandbox command should execute: {err}"),
+            Err(_) => return Err(RunError::Timeout),
+        };
 
     Ok(CommandOutput {
         exit_code: output.status.code().unwrap_or(1),

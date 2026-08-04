@@ -99,7 +99,8 @@ export class SafeLoggerImpl implements SafeLogger {
 
   private writeToConsole(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
     try {
-      const logFn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
+      const logFn =
+        level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
       if (meta) {
         logFn(`[${level.toUpperCase()}] ${message}`, meta)
       } else {
@@ -113,12 +114,13 @@ export class SafeLoggerImpl implements SafeLogger {
 
   private writeToFile(entry: LogEntry): void {
     try {
-      const line = JSON.stringify({
-        ts: entry.timestamp,
-        level: entry.level,
-        msg: entry.message,
-        ...entry.meta
-      }) + '\n'
+      const line =
+        JSON.stringify({
+          ts: entry.timestamp,
+          level: entry.level,
+          msg: entry.message,
+          ...entry.meta
+        }) + '\n'
       appendFileSync(this.logFilePath!, line)
     } catch {
       // Disable file sink on failure - do not throw
@@ -146,7 +148,11 @@ export class SafeLoggerImpl implements SafeLogger {
   private installStreamErrorHandlers(): void {
     const handleStreamError = (stream: NodeJS.WriteStream, name: string): void => {
       stream.on('error', (error: NodeJS.ErrnoException) => {
-        if (error.code === 'EIO' || error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
+        if (
+          error.code === 'EIO' ||
+          error.code === 'EPIPE' ||
+          error.code === 'ERR_STREAM_DESTROYED'
+        ) {
           if (name === 'stdout') {
             // stdout EIO - disable console transport
             this.consoleDisabled = true
@@ -157,12 +163,13 @@ export class SafeLoggerImpl implements SafeLogger {
           // Log to file if available (avoid recursion)
           if (!this.fileSinkDisabled && this.logFilePath) {
             try {
-              const line = JSON.stringify({
-                ts: Date.now(),
-                level: 'warn',
-                msg: `${name} stream error disabled`,
-                code: error.code
-              }) + '\n'
+              const line =
+                JSON.stringify({
+                  ts: Date.now(),
+                  level: 'warn',
+                  msg: `${name} stream error disabled`,
+                  code: error.code
+                }) + '\n'
               appendFileSync(this.logFilePath, line)
             } catch {
               // Silently ignore

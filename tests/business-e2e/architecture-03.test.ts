@@ -5,18 +5,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import {
-  toCanonicalProviderCode,
-  toHostCoreCode
-} from './api/operations.ts'
+import { toCanonicalProviderCode, toHostCoreCode } from './api/operations.ts'
 import { PART_DEFAULT_CASES } from './cases/selection.ts'
 
 describe('business-e2e architecture 03 cutover', () => {
   it('maps host CLI codes to canonical conversation providers', () => {
-    assert.equal(toCanonicalProviderCode('claude-code'), 'claude')
-    assert.equal(toCanonicalProviderCode('cursorcli'), 'cursor')
-    assert.equal(toHostCoreCode('claude'), 'claude-code')
-    assert.equal(toHostCoreCode('cursor'), 'cursorcli')
+    assert.equal(toCanonicalProviderCode('claude'), 'claude')
+    assert.equal(toCanonicalProviderCode('cursor'), 'cursor')
+    assert.equal(toHostCoreCode('claude'), 'claude')
+    assert.equal(toHostCoreCode('cursor'), 'cursor')
   })
 
   it('operations chat path uses /api/conversations, not /api/threads', () => {

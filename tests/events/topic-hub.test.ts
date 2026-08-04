@@ -85,7 +85,10 @@ test('LiveFanout coalesces progress events and broadcasts settings:self', () => 
     occurredAt: 3,
     payload: { namespace: 'agent_defaults', revision: 3 }
   })
-  assert.equal(conn.queue.some((item) => item.type === 'settings.changed'), true)
+  assert.equal(
+    conn.queue.some((item) => item.type === 'settings.changed'),
+    true
+  )
   conn.closed = true
   fanout.unregister(LiveFanout.connectionKey('a1', 's1', 'c1'))
 })

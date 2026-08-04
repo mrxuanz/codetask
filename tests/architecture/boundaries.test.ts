@@ -81,7 +81,6 @@ describe('architecture boundaries (01+02)', () => {
     assert.match(execution, /WorkStateSchema/)
   })
 
-  
   it('legacy thread_job Planner HTTP MCP is removed', () => {
     const plannerMcp = join(root, 'src/server/planner/mcp')
     let exists = true
@@ -93,7 +92,7 @@ describe('architecture boundaries (01+02)', () => {
     assert.equal(exists, false)
   })
 
-it('legacy-control-plane directory is removed', () => {
+  it('legacy-control-plane directory is removed', () => {
     const legacy = join(root, 'src/server/legacy-control-plane')
     let exists = true
     try {
@@ -126,11 +125,11 @@ it('legacy-control-plane directory is removed', () => {
     }
   })
 
-  it('ThreadJobDto is removed from shared contracts', () => {
-    const jobs = readFileSync(join(root, 'src/shared/contracts/jobs.ts'), 'utf8')
-    assert.equal(/export interface ThreadJobDto/.test(jobs), false)
-    const planning = readFileSync(join(root, 'src/shared/contracts/planning-session-view.ts'), 'utf8')
-    assert.match(planning, /export interface PlanningSessionViewDto/)
+  it('ThreadJobDto is removed; PlanningSessionViewDto lives in @codetask/contracts', () => {
+    const jobs = readFileSync(join(root, 'packages/contracts/src/ui-jobs.ts'), 'utf8')
+    assert.equal(/export (interface|type) ThreadJobDto/.test(jobs), false)
+    const planning = readFileSync(join(root, 'packages/contracts/src/ui-planning.ts'), 'utf8')
+    assert.match(planning, /export type PlanningSessionViewDto/)
   })
 
   it('migration 047 drops control_* tables', () => {
@@ -145,7 +144,7 @@ it('legacy-control-plane directory is removed', () => {
   })
 
   it('execution UI uses ExecutionJob type alias, not ThreadJob', () => {
-    const jobsApi = readFileSync(join(root, 'src/renderer/src/api/jobs-api.ts'), 'utf8')
+    const jobsApi = readFileSync(join(root, 'apps/web/src/api/jobs-api.ts'), 'utf8')
     assert.equal(/export type ThreadJob\s*=/.test(jobsApi), false)
     assert.equal(/export type ExecutionJob\s*=/.test(jobsApi), true)
   })

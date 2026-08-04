@@ -1,4 +1,4 @@
-import type { TurnErrorDto } from '../../src/shared/contracts/turn-errors'
+import type { TurnErrorDto } from '../../src/shared/turn-errors'
 import { coerceTurnErrorField } from '../../src/shared/turn-errors/storage.ts'
 
 export function readTurnErrorCode(value: unknown): string | null {

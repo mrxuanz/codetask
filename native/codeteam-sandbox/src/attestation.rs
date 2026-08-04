@@ -139,19 +139,17 @@ pub fn wrap_windows_command(
     command: &str,
     args: &[String],
 ) -> (String, Vec<String>) {
-    let runtime_root = emitter_script
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let runtime_root = emitter_script.parent().unwrap_or_else(|| Path::new("."));
     let launcher = runtime_root.join(ATTESTATION_LAUNCHER_SCRIPT);
-    let mut wrapped_args = vec![
-        launcher.to_string_lossy().into_owned(),
-        command.to_string(),
-    ];
+    let mut wrapped_args = vec![launcher.to_string_lossy().into_owned(), command.to_string()];
     wrapped_args.extend(args.iter().cloned());
     (node_exe.to_string(), wrapped_args)
 }
 
-pub fn strip_attestation_lines(buffer: &mut Vec<u8>, on_attestation: &mut dyn FnMut(SandboxEvidence)) {
+pub fn strip_attestation_lines(
+    buffer: &mut Vec<u8>,
+    on_attestation: &mut dyn FnMut(SandboxEvidence),
+) {
     loop {
         let Some(newline) = buffer.iter().position(|&b| b == b'\n') else {
             break;
@@ -176,6 +174,7 @@ pub fn strip_attestation_lines(buffer: &mut Vec<u8>, on_attestation: &mut dyn Fn
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
     use std::path::Path;
 
     use super::*;

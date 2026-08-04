@@ -8,6 +8,7 @@
     "start": "tsx --import ../../tests/tsx-tsconfig.mjs src/main.ts"
   },
   "dependencies": {
-    "@codetask/server-core": "*"
+    "@codetask/server-core": "*",
+    "@codetask/service-bootstrap": "*"
   }
 }

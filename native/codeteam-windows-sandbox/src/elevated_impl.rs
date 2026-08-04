@@ -1,4 +1,4 @@
-﻿use codeteam_utils_absolute_path::AbsolutePathBuf;
+use codeteam_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -116,7 +116,9 @@ mod windows_impl {
 
     fn force_terminate_pid(pid: u32) {
         use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
+        };
         unsafe {
             let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
             if handle != 0 {
@@ -540,11 +542,11 @@ mod windows_impl {
 }
 
 #[cfg(target_os = "windows")]
+pub use windows_impl::StreamingCaptureControl;
+#[cfg(target_os = "windows")]
 pub use windows_impl::run_windows_sandbox_capture;
 #[cfg(target_os = "windows")]
 pub use windows_impl::run_windows_sandbox_capture_streaming;
-#[cfg(target_os = "windows")]
-pub use windows_impl::StreamingCaptureControl;
 
 #[cfg(not(target_os = "windows"))]
 mod stub {

@@ -20,11 +20,15 @@ export type ExecutionHttpEnv = {
   }
 }
 
-function ok<T>(data: T, requestId: string) {
+function ok<T>(data: T, requestId: string): { success: true; data: T; requestId: string } {
   return { success: true as const, data, requestId }
 }
 
-function fail(code: string, message: string, requestId: string) {
+function fail(
+  code: string,
+  message: string,
+  requestId: string
+): { success: false; error: { code: string; message: string }; requestId: string } {
   return {
     success: false as const,
     error: { code, message },
@@ -32,7 +36,13 @@ function fail(code: string, message: string, requestId: string) {
   }
 }
 
-function mapError(error: unknown, requestId: string) {
+function mapError(
+  error: unknown,
+  requestId: string
+): {
+  body: ReturnType<typeof fail>
+  status: 400 | 403 | 404 | 409 | 500
+} {
   if (error instanceof ExecutionConflictError) {
     return { body: fail(error.code, error.message, requestId), status: 409 as const }
   }
@@ -116,11 +126,7 @@ export function createJobRoutes(deps: {
   app.get('/:jobId/work/:workId/evidence', async (c) => {
     try {
       const actor = requireActor(c)
-      const data = await deps.query.getEvidence(
-        actor,
-        c.req.param('jobId'),
-        c.req.param('workId')
-      )
+      const data = await deps.query.getEvidence(actor, c.req.param('jobId'), c.req.param('workId'))
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
       const mapped = mapError(error, c.get('requestId'))
@@ -202,7 +208,9 @@ export function createJobRoutes(deps: {
   return app
 }
 
-export function createExecutionQueueRoute(deps: { queue: QueueRepository }): Hono<ExecutionHttpEnv> {
+export function createExecutionQueueRoute(deps: {
+  queue: QueueRepository
+}): Hono<ExecutionHttpEnv> {
   const app = new Hono<ExecutionHttpEnv>()
   app.get('/', async (c) => {
     try {

@@ -12,9 +12,7 @@ import test from 'node:test'
 
 const SCAN_ROOTS = [join(process.cwd(), 'src/server'), join(process.cwd(), 'src/sandbox')]
 
-const ALLOWED_PROCESS_ENV_FILES = new Set([
-  join(process.cwd(), 'src/server/host-environment.ts')
-])
+const ALLOWED_PROCESS_ENV_FILES = new Set([join(process.cwd(), 'src/server/host-environment.ts')])
 
 /** Files that may mention historical CODETASK_* names only as strip/denylist literals. */
 const ALLOWED_CODETASK_KEY_LITERAL_FILES = new Set([

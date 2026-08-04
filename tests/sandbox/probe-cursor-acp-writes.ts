@@ -73,7 +73,10 @@ function walkRel(root: string): TreeSnap {
   return { dirs: dirs.sort(), files: files.sort(), totalBytes }
 }
 
-function diff(before: TreeSnap, after: TreeSnap) {
+function diff(
+  before: TreeSnap,
+  after: TreeSnap
+): { newDirs: string[]; newFiles: string[]; bytesDelta: number } {
   const bd = new Set(before.dirs)
   const bf = new Set(before.files)
   return {
@@ -143,11 +146,13 @@ function resolveSandboxRunner(probeScript: string): {
 } {
   const tsxLoader = join(process.cwd(), 'node_modules/tsx/dist/loader.mjs')
   const tsxTsconfig = join(process.cwd(), 'tests/tsx-tsconfig.mjs')
-  const extraReadRoots: string[] = [process.cwd(), join(process.cwd(), 'node_modules'), dirname(tsxLoader)]
+  const extraReadRoots: string[] = [
+    process.cwd(),
+    join(process.cwd(), 'node_modules'),
+    dirname(tsxLoader)
+  ]
   const nodeCandidates = [
-    process.env.VOLTA_HOME
-      ? join(process.env.VOLTA_HOME, 'tools/image/node/24.18.0/bin/node')
-      : '',
+    process.env.VOLTA_HOME ? join(process.env.VOLTA_HOME, 'tools/image/node/24.18.0/bin/node') : '',
     '/Users/xhz/.volta/tools/image/node/24.18.0/bin/node',
     '/usr/local/bin/node',
     '/usr/bin/node'
@@ -203,7 +208,7 @@ async function main(): Promise<void> {
 
   const hostPlan = buildCursorTurnPlan(
     {
-      provider: 'cursorcli',
+      provider: 'cursor',
       role: 'conversation',
       cwd: workspace,
       runtimeRoot: hostRuntime,
@@ -228,12 +233,12 @@ async function main(): Promise<void> {
 
   // ── Outer sandbox ─────────────────────────────────────────────────
   const sandboxEmpty = walkRel(sandboxRuntime)
-  const prepared = prepareProviderRuntimeForTest('cursorcli', {
+  const prepared = prepareProviderRuntimeForTest('cursor', {
     workspaceRoot: workspace
   })
   const sandboxPlan = buildCursorTurnPlan(
     {
-      provider: 'cursorcli',
+      provider: 'cursor',
       role: 'task-worker',
       cwd: workspace,
       runtimeRoot: sandboxRuntime,
@@ -257,7 +262,7 @@ async function main(): Promise<void> {
   })
   const runner = resolveSandboxRunner(join(process.cwd(), 'tests/sandbox/acp-bootstrap-probe.ts'))
   policy = applyProviderReadRoots(policy, [
-    ...resolveProviderReadRoots('cursorcli'),
+    ...resolveProviderReadRoots('cursor'),
     ...providerRuntimeReadRoots(prepared),
     ...runner.extraReadRoots,
     process.cwd(),
@@ -358,7 +363,7 @@ async function main(): Promise<void> {
     newFiles: sandboxAcpDiffRaw.newFiles.filter((f) => !ignoreNames.has(f)),
     bytesDelta: sandboxAcpDiffRaw.bytesDelta
   }
-  const underCursor = (paths: string[]) =>
+  const underCursor = (paths: string[]): string[] =>
     paths.filter((f) => f === '.cursor' || f.startsWith('.cursor/'))
   const sandboxCursorNewFiles = underCursor(sandboxAcpDiff.newFiles)
   const sandboxCursorNewDirs = underCursor(sandboxAcpDiff.newDirs)

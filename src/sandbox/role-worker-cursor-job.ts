@@ -7,7 +7,7 @@ import type { AgentTurnChunk, AgentTurnInput } from '../server/agent-runtime/typ
 import { formatSdkTurnError } from '../server/agent-runtime/errors'
 
 const TURN_DONE_MARKER = '{"type":"_turn_done"}'
-const cursorProvider = getAgentTurnProvider('cursorcli')
+const cursorProvider = getAgentTurnProvider('cursor')
 
 function writeChunk(role: AgentTurnInput['role'], chunk: AgentTurnChunk): void {
   const compact = compactTurnChunkForIpc(role, chunk)
@@ -22,8 +22,8 @@ function writeTurnDone(): void {
 async function runTurn(input: AgentTurnInput): Promise<void> {
   // Role workers are only launched inside the OS outer sandbox; pass the control
   // explicitly on the turn options (PRU-12-05) — do not read CODETASK_OUTER_SANDBOX.
-  if (input.provider !== 'cursorcli') {
-    throw new Error(`role-worker-cursor-job only supports cursorcli, got ${input.provider}`)
+  if (input.provider !== 'cursor') {
+    throw new Error(`role-worker-cursor-job only supports cursor, got ${input.provider}`)
   }
   if (!input.jobId?.trim()) {
     throw new Error('role-worker-cursor-job requires jobId on input')

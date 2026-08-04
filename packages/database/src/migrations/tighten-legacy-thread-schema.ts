@@ -13,18 +13,15 @@ function columnNames(db: Database.Database, table: string): Set<string> {
   return new Set(cols.map((c) => c.name))
 }
 
-function resolveActorId(
-  db: Database.Database,
-  owner: string
-): string {
+function resolveActorId(db: Database.Database, owner: string): string {
   if (!tableExists(db, 'auth_users')) return owner
   const byId = db.prepare(`SELECT id FROM auth_users WHERE id = ? LIMIT 1`).get(owner) as
     | { id: string }
     | undefined
   if (byId) return byId.id
-  const byName = db
-    .prepare(`SELECT id FROM auth_users WHERE username = ? LIMIT 1`)
-    .get(owner) as { id: string } | undefined
+  const byName = db.prepare(`SELECT id FROM auth_users WHERE username = ? LIMIT 1`).get(owner) as
+    | { id: string }
+    | undefined
   if (byName) return byName.id
   const singleton = db
     .prepare(`SELECT id FROM auth_users WHERE singleton_key = 1 LIMIT 1`)

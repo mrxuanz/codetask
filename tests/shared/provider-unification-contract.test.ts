@@ -27,8 +27,8 @@ import {
 import { spawnProviderCommandSync } from '../../src/server/providers/spawn.ts'
 
 test('provider aliases normalize from one shared source', () => {
-  assert.equal(normalizeProviderCode(' CLAUDE_CODE '), 'claude-code')
-  assert.equal(normalizeProviderCode('cursor-agent'), 'cursorcli')
+  assert.equal(normalizeProviderCode(' CLAUDE_CODE '), 'claude')
+  assert.equal(normalizeProviderCode('cursor-agent'), 'cursor')
   assert.equal(normalizeProviderCode('not-a-provider'), null)
 })
 
@@ -83,7 +83,7 @@ test('typed provider config rejects empty paths and non-string models', () => {
 test('startup overrides win over persisted settings without mutating either source', () => {
   const persisted = {
     codex: { model: 'persisted-model', enabled: false },
-    cursorcli: { endpoint: 'https://persisted.example' }
+    cursor: { endpoint: 'https://persisted.example' }
   }
   const startup = {
     codex: { model: 'startup-model' }
@@ -92,7 +92,7 @@ test('startup overrides win over persisted settings without mutating either sour
   const config = createProvidersConfig(merged)
   assert.equal(config.codex.model, 'startup-model')
   assert.equal(config.codex.enabled, false)
-  assert.equal(config.cursorcli.endpoint, 'https://persisted.example')
+  assert.equal(config.cursor.endpoint, 'https://persisted.example')
   assert.equal(persisted.codex.model, 'persisted-model')
 })
 
@@ -198,7 +198,7 @@ test('Windows PATH resolution represents cmd shims without shell strings', () =>
   writeFileSync(path, '@echo off\r\nexit /b 0\r\n')
   const resolver = new DefaultProviderInstallationResolver()
   try {
-    const installation = resolver.resolve('cursorcli', {
+    const installation = resolver.resolve('cursor', {
       settings: {
         enabled: true,
         executable: { mode: 'auto' },
@@ -226,7 +226,7 @@ test('Windows PATH ignores an extensionless POSIX shim and selects the PATHEXT l
   writeFileSync(cmdShim, '@echo off\r\nnode cli.js %*\r\n')
   const resolver = new DefaultProviderInstallationResolver()
   try {
-    const installation = resolver.resolve('claude-code', {
+    const installation = resolver.resolve('claude', {
       settings: {
         enabled: true,
         executable: { mode: 'auto' },
@@ -250,7 +250,7 @@ test('Windows auto discovery rejects a lone extensionless POSIX shim', () => {
   writeFileSync(join(root, 'claude'), '#!/bin/sh\nexit 0\n')
   const resolver = new DefaultProviderInstallationResolver()
   try {
-    const installation = resolver.resolve('claude-code', {
+    const installation = resolver.resolve('claude', {
       settings: {
         enabled: true,
         executable: { mode: 'auto' },
@@ -272,7 +272,7 @@ test('an explicitly configured Windows extensionless executable remains authorit
   writeFileSync(path, 'explicit executable')
   const resolver = new DefaultProviderInstallationResolver()
   try {
-    const installation = resolver.resolve('claude-code', {
+    const installation = resolver.resolve('claude', {
       settings: {
         enabled: true,
         executable: { mode: 'path', path },

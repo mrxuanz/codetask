@@ -4,10 +4,13 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { parseJobReferenceManifest } from '../../shared/job-references.ts'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
-import { deletionRequests, projects, threads } from '../db/schema'
+import { deletionRequests, projects } from '../db/schema'
+
 import { attachmentDir } from '../data-paths'
 import { AppError } from '../error'
 import { closeConversationCursorRuntime } from '../agent-runtime/cursor-acp/stream-session-turn'
+import { removeThreadAttachmentsDir } from '../retention/janitor'
+import { releaseOwnerAssetReferences } from '../assets/registry'
 import {
   collectThreadPurgeTargets,
   purgeJobFilesystemStrict,
@@ -53,12 +56,18 @@ export interface DeletionFrozenSnapshot {
   /** Execution module `jobs.id` rows owned by a project. */
   childExecutionJobIds?: string[]
   childThreadIds?: string[]
+  /** Conversation module `conversation_threads.id` rows owned by a project. */
+  childConversationIds?: string[]
+  /** Design module `drafts.id` rows owned by a project. */
+  childDraftIds?: string[]
+  /** Design module `planning_sessions.id` rows owned by a project. */
+  childPlanningSessionIds?: string[]
 }
 
 export type CleanupTargets =
   | { kind: 'job'; threadId: string; jobId: string; attachmentIds?: string[] }
   | { kind: 'thread'; threadId: string; targets: ThreadPurgeTargets }
-  | { kind: 'project' }
+  | { kind: 'project'; conversationIds?: string[] }
 
 export interface LoadedDeletionRequest {
   id: string
@@ -198,12 +207,8 @@ export async function isThreadProjectDeletionBlocked(threadId: string): Promise<
     .all()
   if (pendingJobDeletion.length > 0) return true
 
-  const rows = await getDb()
-    .select({ projectId: threads.projectId })
-    .from(threads)
-    .where(eq(threads.id, threadId))
-    .limit(1)
-  const projectId = rows[0]?.projectId
+  const rows = getConversationProjectId(threadId)
+  const projectId = rows
   if (!projectId) {
     const pending = getDb()
       .select({ projectId: deletionRequests.projectId })
@@ -399,7 +404,7 @@ async function ensureChildJobsDeleted(actorId: string, childJobIds: string[]): P
       await executeDeletionRequest(active.id)
       continue
     }
-    if (readExecutionJobRow(jobId, actorId) || readLegacyThreadJobRow(jobId, actorId)) {
+    if (readExecutionJobRow(jobId, actorId)) {
       await drainAndDeleteJob(actorId, jobId)
     }
   }
@@ -410,28 +415,11 @@ function sqliteClient(): import('better-sqlite3').Database | null {
   return (db as { $client?: import('better-sqlite3').Database }).$client ?? null
 }
 
-
 function tableExists(client: import('better-sqlite3').Database, name: string): boolean {
   const row = client
     .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`)
     .get(name) as { 1: number } | undefined
   return Boolean(row)
-}
-
-function listLegacyThreadJobIds(threadId: string, actorId: string): string[] {
-  const client = sqliteClient()
-  if (!client || !tableExists(client, 'thread_jobs')) return []
-  return (
-    client
-      .prepare(`SELECT id FROM thread_jobs WHERE thread_id = ? AND actor_id = ?`)
-      .all(threadId, actorId) as Array<{ id: string }>
-  ).map((row) => row.id)
-}
-
-function deleteLegacyThreadJobRow(jobId: string): void {
-  const client = sqliteClient()
-  if (!client || !tableExists(client, 'thread_jobs')) return
-  client.prepare(`DELETE FROM thread_jobs WHERE id = ?`).run(jobId)
 }
 
 function readExecutionJobRow(
@@ -465,35 +453,6 @@ function readExecutionJobRow(
   return row ?? null
 }
 
-function readLegacyThreadJobRow(
-  jobId: string,
-  actorId: string
-): {
-  id: string
-  threadId: string
-  workspacePath: string | null
-  referenceManifestJson: string | null
-} | null {
-  const client = sqliteClient()
-  if (!client || !tableExists(client, 'thread_jobs')) return null
-  const row = client
-    .prepare(
-      `SELECT id, thread_id AS threadId, workspace_path AS workspacePath,
-              reference_manifest_json AS referenceManifestJson
-       FROM thread_jobs WHERE id = ? AND actor_id = ? LIMIT 1`
-    )
-    .get(jobId, actorId) as
-    | {
-        id: string
-        threadId: string
-        workspacePath: string | null
-        referenceManifestJson: string | null
-      }
-    | undefined
-  return row ?? null
-}
-
-
 /** Force-delete Execution `jobs` rows for a project (cascade cleans snapshots/tree/work). */
 async function ensureProjectExecutionJobsDeleted(
   actorId: string,
@@ -523,24 +482,150 @@ async function ensureProjectExecutionJobsDeleted(
   }
 }
 
-async function ensureChildThreadsDeleted(
-  actorId: string,
-  childThreadIds: string[]
-): Promise<void> {
+async function ensureChildThreadsDeleted(actorId: string, childThreadIds: string[]): Promise<void> {
   for (const threadId of childThreadIds) {
     const active = findActiveDeletionRequest('thread', threadId)
     if (active) {
       await executeDeletionRequest(active.id)
       continue
     }
-    const threadExists = await getDb()
-      .select({ id: threads.id })
-      .from(threads)
-      .where(and(eq(threads.id, threadId), eq(threads.actorId, actorId)))
-      .limit(1)
-    if (threadExists.length > 0) {
+    const threadExists = conversationExists(threadId, actorId)
+    if (threadExists) {
       await drainAndDeleteThread(actorId, threadId)
     }
+  }
+}
+
+function listProjectConversationIds(projectId: string): string[] {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'conversation_threads')) return []
+  return (
+    client
+      .prepare(`SELECT id FROM conversation_threads WHERE project_id = ?`)
+      .all(projectId) as Array<{ id: string }>
+  ).map((row) => row.id)
+}
+
+function getConversationProjectId(conversationId: string): string | null {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'conversation_threads')) return null
+  const row = client
+    .prepare(`SELECT project_id AS projectId FROM conversation_threads WHERE id = ? LIMIT 1`)
+    .get(conversationId) as { projectId: string } | undefined
+  return row?.projectId ?? null
+}
+
+function getOwnedConversation(
+  conversationId: string,
+  actorId: string
+): { id: string; projectId: string } | null {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'conversation_threads')) return null
+  const row = client
+    .prepare(
+      `SELECT id, project_id AS projectId
+         FROM conversation_threads
+        WHERE id = ? AND actor_id = ?
+        LIMIT 1`
+    )
+    .get(conversationId, actorId) as { id: string; projectId: string } | undefined
+  return row ?? null
+}
+
+function conversationExists(conversationId: string, actorId: string): boolean {
+  return getOwnedConversation(conversationId, actorId) !== null
+}
+
+function deleteConversationRow(conversationId: string, actorId: string): void {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'conversation_threads')) return
+  client
+    .prepare(`DELETE FROM conversation_threads WHERE id = ? AND actor_id = ?`)
+    .run(conversationId, actorId)
+}
+
+function listProjectDraftIds(projectId: string, actorId: string): string[] {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'drafts')) return []
+  return (
+    client
+      .prepare(`SELECT id FROM drafts WHERE project_id = ? AND actor_id = ?`)
+      .all(projectId, actorId) as Array<{ id: string }>
+  ).map((row) => row.id)
+}
+
+function listProjectPlanningSessionIds(projectId: string, actorId: string): string[] {
+  const client = sqliteClient()
+  if (!client || !tableExists(client, 'planning_sessions')) return []
+  return (
+    client
+      .prepare(`SELECT id FROM planning_sessions WHERE project_id = ? AND actor_id = ?`)
+      .all(projectId, actorId) as Array<{ id: string }>
+  ).map((row) => row.id)
+}
+
+/**
+ * Delete Design + Conversation aggregates owned by a project.
+ * Order matters: job_handoffs → planning_sessions → drafts → conversations
+ * (planning_sessions.source_draft_id and job_handoffs lack ON DELETE CASCADE).
+ */
+async function ensureProjectOwnedAggregatesDeleted(input: {
+  actorId: string
+  projectId: string
+  childConversationIds?: string[]
+  childDraftIds?: string[]
+  childPlanningSessionIds?: string[]
+}): Promise<void> {
+  const client = sqliteClient()
+  if (!client) return
+
+  const conversationIds = input.childConversationIds ?? listProjectConversationIds(input.projectId)
+  const draftIds = input.childDraftIds ?? listProjectDraftIds(input.projectId, input.actorId)
+  const planningSessionIds =
+    input.childPlanningSessionIds ?? listProjectPlanningSessionIds(input.projectId, input.actorId)
+
+  for (const conversationId of conversationIds) {
+    await closeConversationCursorRuntime(conversationId).catch(() => {})
+  }
+
+  for (const conversationId of conversationIds) {
+    releaseOwnerAssetReferences(client, 'conversation', conversationId)
+  }
+
+  if (planningSessionIds.length > 0 && tableExists(client, 'job_handoffs')) {
+    const placeholders = planningSessionIds.map(() => '?').join(',')
+    client
+      .prepare(`DELETE FROM job_handoffs WHERE planning_session_id IN (${placeholders})`)
+      .run(...planningSessionIds)
+  }
+
+  if (planningSessionIds.length > 0 && tableExists(client, 'planning_sessions')) {
+    const placeholders = planningSessionIds.map(() => '?').join(',')
+    client
+      .prepare(`DELETE FROM planning_sessions WHERE id IN (${placeholders})`)
+      .run(...planningSessionIds)
+  } else if (tableExists(client, 'planning_sessions')) {
+    client
+      .prepare(`DELETE FROM planning_sessions WHERE project_id = ? AND actor_id = ?`)
+      .run(input.projectId, input.actorId)
+  }
+
+  if (draftIds.length > 0 && tableExists(client, 'drafts')) {
+    const placeholders = draftIds.map(() => '?').join(',')
+    client.prepare(`DELETE FROM drafts WHERE id IN (${placeholders})`).run(...draftIds)
+  } else if (tableExists(client, 'drafts')) {
+    client
+      .prepare(`DELETE FROM drafts WHERE project_id = ? AND actor_id = ?`)
+      .run(input.projectId, input.actorId)
+  }
+
+  if (conversationIds.length > 0 && tableExists(client, 'conversation_threads')) {
+    const placeholders = conversationIds.map(() => '?').join(',')
+    client
+      .prepare(`DELETE FROM conversation_threads WHERE id IN (${placeholders})`)
+      .run(...conversationIds)
+  } else if (tableExists(client, 'conversation_threads')) {
+    client.prepare(`DELETE FROM conversation_threads WHERE project_id = ?`).run(input.projectId)
   }
 }
 
@@ -551,16 +636,11 @@ async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise
     client
       ?.prepare(`DELETE FROM jobs WHERE id = ? AND actor_id = ?`)
       .run(request.entityId, request.actorId)
-    deleteLegacyThreadJobRow(request.entityId)
     return
   }
 
   if (request.entityKind === 'thread') {
-    db.transaction((tx) => {
-      tx.delete(threads)
-        .where(and(eq(threads.actorId, request.actorId), eq(threads.id, request.entityId)))
-        .run()
-    })
+    deleteConversationRow(request.entityId, request.actorId)
     return
   }
 
@@ -575,9 +655,16 @@ async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise
 
 async function purgeCleanupTargets(request: LoadedDeletionRequest): Promise<void> {
   const targets = parseCleanupTargets(request.cleanupTargetsJson)
-  if (!targets || targets.kind === 'project') return
+  if (!targets) return
 
   const dataDir = getAppContext().dataDir
+  if (targets.kind === 'project') {
+    for (const conversationId of targets.conversationIds ?? []) {
+      await removeThreadAttachmentsDir(dataDir, conversationId)
+    }
+    return
+  }
+
   if (targets.kind === 'job') {
     await purgeJobFilesystemStrictHook(dataDir, targets.threadId, targets.jobId)
     for (const attachmentId of targets.attachmentIds ?? []) {
@@ -619,7 +706,11 @@ async function runPostDeletionHooks(request: LoadedDeletionRequest): Promise<voi
     try {
       getOrComposeExecution(getAppContext()).scheduler.wake()
     } catch (error) {
-      console.warn('[deletion] wake execution queue after job delete failed', request.entityId, error)
+      console.warn(
+        '[deletion] wake execution queue after job delete failed',
+        request.entityId,
+        error
+      )
     }
     return
   }
@@ -643,6 +734,16 @@ export async function executeDeletionRequest(requestId: string): Promise<void> {
       const frozen = parseFrozenSnapshot(request.frozenJson)
 
       if (request.entityKind === 'project') {
+        const frozenProject = frozen
+        if (request.projectId) {
+          await ensureProjectOwnedAggregatesDeleted({
+            actorId: request.actorId,
+            projectId: request.projectId,
+            childConversationIds: frozenProject.childConversationIds,
+            childDraftIds: frozenProject.childDraftIds,
+            childPlanningSessionIds: frozenProject.childPlanningSessionIds
+          })
+        }
         if (frozen.childThreadIds?.length) {
           await ensureChildThreadsDeleted(request.actorId, frozen.childThreadIds)
         }
@@ -714,26 +815,15 @@ export async function drainAndDeleteJob(actorId: string, jobId: string): Promise
   }
 
   const execution = readExecutionJobRow(jobId, actorId)
-  const legacy = execution ? null : readLegacyThreadJobRow(jobId, actorId)
-  if (!execution && !legacy) {
+  if (!execution) {
     throw AppError.notFound('Job not found', 'job.not_found')
   }
 
-  const projectId = execution?.projectId ?? null
-  let threadId: string | null = legacy?.threadId ?? null
-  if (!threadId && projectId) {
-    const threadRows = await getDb()
-      .select({ id: threads.id })
-      .from(threads)
-      .where(eq(threads.projectId, projectId))
-      .limit(1)
-    threadId = threadRows[0]?.id ?? null
-  }
-  const workspacePath = execution?.workspaceRoot ?? legacy?.workspacePath ?? null
+  const projectId = execution.projectId
+  const threadId = listProjectConversationIds(projectId)[0] ?? null
+  const workspacePath = execution.workspaceRoot
   const frozen = await freezeJobRuntimeIdentity(jobId)
-  const ownedAttachmentIds = collectJobOwnedAttachmentIds(
-    execution?.referenceManifestJson ?? legacy?.referenceManifestJson
-  )
+  const ownedAttachmentIds = collectJobOwnedAttachmentIds(execution.referenceManifestJson)
 
   const requestId = await createDeletionRequest({
     entityKind: 'thread_job',
@@ -779,18 +869,12 @@ export async function drainAndDeleteThread(actorId: string, threadId: string): P
     return executeDeletionRequest(active.id)
   }
 
-  const threadRows = await getDb()
-    .select()
-    .from(threads)
-    .where(and(eq(threads.actorId, actorId), eq(threads.id, threadId)))
-    .limit(1)
-  const existing = threadRows[0]
+  const existing = getOwnedConversation(threadId, actorId)
   if (!existing) {
     throw AppError.notFound('Thread not found', 'thread.not_found')
   }
 
   const db = getDb()
-  const legacyJobIds = listLegacyThreadJobIds(threadId, actorId)
   const purgeTargets = await collectThreadPurgeTargets(db, threadId)
 
   const requestId = await createDeletionRequest({
@@ -800,7 +884,7 @@ export async function drainAndDeleteThread(actorId: string, threadId: string): P
     threadId,
     projectId: existing.projectId,
     frozenJson: JSON.stringify({
-      childJobIds: legacyJobIds
+      childJobIds: []
     } satisfies DeletionFrozenSnapshot),
     cleanupTargetsJson: JSON.stringify({
       kind: 'thread',
@@ -828,10 +912,7 @@ export async function drainAndDeleteProject(actorId: string, projectId: string):
     throw AppError.notFound('Project not found', 'project.not_found')
   }
 
-  const threadRows = await getDb()
-    .select({ id: threads.id })
-    .from(threads)
-    .where(eq(threads.projectId, projectId))
+  const threadRows = listProjectConversationIds(projectId).map((id) => ({ id }))
 
   const client = sqliteClient()
   const executionJobIds = client
@@ -842,6 +923,10 @@ export async function drainAndDeleteProject(actorId: string, projectId: string):
       ).map((row) => row.id)
     : []
 
+  const childConversationIds = listProjectConversationIds(projectId)
+  const childDraftIds = listProjectDraftIds(projectId, actorId)
+  const childPlanningSessionIds = listProjectPlanningSessionIds(projectId, actorId)
+
   const requestId = await createDeletionRequest({
     entityKind: 'project',
     entityId: projectId,
@@ -849,9 +934,15 @@ export async function drainAndDeleteProject(actorId: string, projectId: string):
     projectId,
     frozenJson: JSON.stringify({
       childThreadIds: threadRows.map((row) => row.id),
-      childExecutionJobIds: executionJobIds
+      childExecutionJobIds: executionJobIds,
+      childConversationIds,
+      childDraftIds,
+      childPlanningSessionIds
     } satisfies DeletionFrozenSnapshot),
-    cleanupTargetsJson: JSON.stringify({ kind: 'project' } satisfies CleanupTargets)
+    cleanupTargetsJson: JSON.stringify({
+      kind: 'project',
+      conversationIds: childConversationIds
+    } satisfies CleanupTargets)
   })
 
   await executeDeletionRequest(requestId)

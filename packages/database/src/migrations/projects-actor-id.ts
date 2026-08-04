@@ -31,9 +31,9 @@ export const migration052ProjectsActorId: AuthMigration = {
     }
 
     const user = tableExists(db, 'auth_users')
-      ? (db
-          .prepare(`SELECT id, username FROM auth_users WHERE singleton_key = 1 LIMIT 1`)
-          .get() as { id: string; username: string } | undefined)
+      ? (db.prepare(`SELECT id, username FROM auth_users WHERE singleton_key = 1 LIMIT 1`).get() as
+          | { id: string; username: string }
+          | undefined)
       : undefined
 
     db.pragma('foreign_keys = OFF')
@@ -73,14 +73,7 @@ export const migration052ProjectsActorId: AuthMigration = {
           if (user && (row.username === user.username || row.username === user.id)) {
             actorId = user.id
           }
-          insert.run(
-            row.id,
-            actorId,
-            row.title,
-            row.workspace_root,
-            row.created_at,
-            row.updated_at
-          )
+          insert.run(row.id, actorId, row.title, row.workspace_root, row.created_at, row.updated_at)
         }
       } else if (columnExists(db, 'projects', 'actor_id')) {
         db.exec(`

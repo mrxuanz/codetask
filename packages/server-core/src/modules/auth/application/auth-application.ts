@@ -50,9 +50,10 @@ function safeEqual(left: string, right: string): boolean {
 
 function randomCaptchaCode(): string {
   const bytes = randomBytes(5)
-  return Array.from(bytes, (byte) => LoginPolicy.captchaCharset[byte % LoginPolicy.captchaCharset.length]).join(
-    ''
-  )
+  return Array.from(
+    bytes,
+    (byte) => LoginPolicy.captchaCharset[byte % LoginPolicy.captchaCharset.length]
+  ).join('')
 }
 
 function captchaSvg(code: string): string {

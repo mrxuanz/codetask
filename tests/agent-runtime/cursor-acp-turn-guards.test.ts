@@ -90,10 +90,15 @@ test('assertCursorAcpCompletion rejects resource_exhausted for planner', () => {
 
 test('stderrIndicatesCursorCloudFailure covers capacity and keepalive', () => {
   assert.equal(
-    stderrIndicatesCursorCloudFailure('ConnectError: [resource_exhausted] Unable to reach the model provider'),
+    stderrIndicatesCursorCloudFailure(
+      'ConnectError: [resource_exhausted] Unable to reach the model provider'
+    ),
     true
   )
-  assert.equal(stderrIndicatesCursorCloudFailure('RetriableError: HTTP/2 keepalive ping timed out'), true)
+  assert.equal(
+    stderrIndicatesCursorCloudFailure('RetriableError: HTTP/2 keepalive ping timed out'),
+    true
+  )
   assert.equal(stderrIndicatesCursorCloudFailure('normal agent log line'), false)
 })
 
@@ -107,10 +112,7 @@ test('normalizeTurnError maps resource_exhausted ConnectError to capacity_limite
 
 test('cursor acp guard errors are retryable at CODETASK turn layer', () => {
   assert.equal(isRetryableTurnError(createTurnError('provider.cursor.acp_empty_turn')), true)
-  assert.equal(
-    isRetryableTurnError(createTurnError('provider.cursor.acp_keepalive_timeout')),
-    true
-  )
+  assert.equal(isRetryableTurnError(createTurnError('provider.cursor.acp_keepalive_timeout')), true)
   assert.equal(isRetryableTurnError(createTurnError('turn.capacity_limited')), true)
   assert.equal(isRetryableTurnError(createTurnError('turn.incomplete')), true)
 })

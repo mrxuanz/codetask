@@ -1,11 +1,4 @@
-import {
-  integer,
-  primaryKey,
-  sqliteTable,
-  text,
-  uniqueIndex,
-  index
-} from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
 
 export const jobs = sqliteTable(
   'jobs',

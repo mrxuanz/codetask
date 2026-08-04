@@ -11,9 +11,9 @@ export type SettingNamespace = (typeof SETTING_NAMESPACES)[number]
 
 export const SettingsProviderCodeSchema = Type.Union([
   Type.Literal('codex'),
-  Type.Literal('claude-code'),
+  Type.Literal('claude'),
   Type.Literal('opencode'),
-  Type.Literal('cursorcli')
+  Type.Literal('cursor')
 ])
 
 export type SettingsProviderCode = Static<typeof SettingsProviderCodeSchema>

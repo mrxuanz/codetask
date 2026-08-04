@@ -1,8 +1,10 @@
-import type { PlanningSessionViewDto } from './contracts/planning-session-view.ts'
+import type { PlanningSessionViewDto } from '@codetask/contracts'
 import { coerceTurnErrorField } from './turn-errors/storage.ts'
 import { deriveJobRecoveryState } from './job-recovery-state.ts'
 
-export function isRecoverableWorkflowBlock(lastError: PlanningSessionViewDto['lastError']): boolean {
+export function isRecoverableWorkflowBlock(
+  lastError: PlanningSessionViewDto['lastError']
+): boolean {
   if (!lastError) return false
   const dto = typeof lastError === 'object' ? lastError : coerceTurnErrorField(lastError)
   return dto?.code === 'workflow.deadlock'

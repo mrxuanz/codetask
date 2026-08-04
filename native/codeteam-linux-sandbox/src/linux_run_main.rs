@@ -1489,8 +1489,10 @@ fn emit_sandbox_attestation_if_requested(backend: &str) {
         return;
     };
     let expected = std::env::var("CODETASK_POLICY_SHA256").ok();
-    if let (Ok(value), Some(expected)) = (serde_json::from_str::<serde_json::Value>(&contents), expected)
-    {
+    if let (Ok(value), Some(expected)) = (
+        serde_json::from_str::<serde_json::Value>(&contents),
+        expected,
+    ) {
         if value.get("policy_sha256").and_then(|v| v.as_str()) != Some(expected.as_str()) {
             return;
         }
@@ -1506,7 +1508,10 @@ fn emit_sandbox_attestation_if_requested(backend: &str) {
         })
     });
     if let Some(obj) = value.as_object_mut() {
-        obj.insert("backend".to_string(), serde_json::Value::String(backend.to_string()));
+        obj.insert(
+            "backend".to_string(),
+            serde_json::Value::String(backend.to_string()),
+        );
         obj.insert(
             "sandbox_pid".to_string(),
             serde_json::Value::Number(std::process::id().into()),

@@ -4,10 +4,9 @@ import {
   MCP_HTTP_ACCEPT_HEADER_VALUE,
   createAgentRuntime,
   toCanonicalProviderCode,
-  type AgentTurnInput,
-  type HostTurnChunk,
   type ProviderSummary
 } from '@codetask/agent-runtime'
+import { hostAgentTurnStreamer } from './agent-runtime/host-streamer'
 import { contentHash } from '@codetask/server-core/modules/settings'
 import {
   composeConversationModule,
@@ -21,10 +20,7 @@ import type { AppContext } from './bootstrap'
 import type { AppDatabase } from './db'
 import { AppError } from './error'
 import { getProject } from './projects/service'
-import {
-  acquireWorkspaceLease,
-  releaseWorkspaceLease
-} from './infra/workspace-lease-store'
+import { acquireWorkspaceLease, releaseWorkspaceLease } from './infra/workspace-lease-store'
 import { listChatCores } from './conversation/cores'
 import {
   buildAttachmentReferenceMarkdown,
@@ -35,10 +31,7 @@ import {
   registerConversationMcpSession,
   unregisterConversationMcpSession
 } from './conversation/mcp/session'
-import {
-  buildConversationMcpUrl,
-  getConversationMcpBackendPort
-} from './conversation/mcp/url'
+import { buildConversationMcpUrl, getConversationMcpBackendPort } from './conversation/mcp/url'
 import { getOrComposeSettings } from './settings/service'
 
 const designByDb = new WeakMap<object, DesignModule>()
@@ -58,7 +51,7 @@ function getSqliteClient(ctx: AppContext): Database.Database {
 
 /**
  * Shared AgentRuntime for Conversation + Execution (+ future Design planner).
- * Adapts host Provider SDK/ACP streamers behind the package port.
+ * streamTurn delegates to the host streamer (provider-runtime-node drivers via runner).
  */
 export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof createAgentRuntime> {
   const rawDb = getSqliteClient(ctx)
@@ -66,78 +59,52 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
   if (runtime) return runtime
 
   runtime = createAgentRuntime({
-    async *streamTurn(
-      input: AgentTurnInput & { hostProvider: string },
-      options: { signal?: AbortSignal }
-    ): AsyncIterable<HostTurnChunk> {
-      const { streamAgentTurn } = await import('./agent-runtime/runner')
-      for await (const chunk of streamAgentTurn(
-        {
-          role:
-            input.role === 'slice-verifier' || input.role === 'milestone-verifier'
-              ? input.role
-              : input.role === 'task-worker'
-                ? 'task-worker'
-                : input.role === 'planner'
-                  ? 'planner'
-                  : 'conversation',
-          provider: input.hostProvider as 'codex' | 'claude-code' | 'opencode' | 'cursorcli',
-          workspaceRoot: input.workspaceRoot ?? '',
-          prompt: input.prompt,
-          systemPrompt: input.systemPrompt,
-          capabilityProfile: input.capabilityProfile as
-            | 'chat-read'
-            | 'chat-write'
-            | 'planner-read'
-            | 'task-sandbox'
-            | 'verifier-sandbox',
-          providerRuntimeScopeId: input.scopeId,
-          readRoots: input.readRoots,
-          signal: options.signal,
-          mcpUrl: input.mcpServers?.[0]?.url,
-          userMcpServers: input.userMcpServers ?? {},
-          model: input.model,
-          ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {}),
-          ...(input.workspaceLease
-            ? {
-                workspaceLease: {
-                  leaseId: input.workspaceLease.leaseId,
-                  ownerKind: input.workspaceLease.ownerKind as
-                    | 'conversation'
-                    | 'planner'
-                    | 'thread_job'
-                    | 'job-run',
-                  ownerId: input.workspaceLease.ownerId
-                }
-              }
-            : {})
+    async *streamTurn(input, options) {
+      const conversationMatch = /^conversation:([^:]+)(?::provider:|$)/.exec(input.scopeId)
+      const conversationId = conversationMatch?.[1]
+      const planningScope = input.role === 'planner' ? input.scopeId : null
+
+      if (conversationId) {
+        ctx.runtimeRegistry.addInflightConversation(conversationId)
+      }
+      if (planningScope) {
+        ctx.runtimeRegistry.tryStartJobPlanning(planningScope)
+      }
+
+      try {
+        yield* hostAgentTurnStreamer(input, options)
+      } finally {
+        if (conversationId) {
+          ctx.runtimeRegistry.removeInflightConversation(conversationId)
         }
-        // runner takes signal on input only
-      )) {
-        if (chunk.type === 'delta') yield { type: 'delta', content: chunk.content }
-        else if (chunk.type === 'thinking_delta')
-          yield { type: 'thinking_delta', content: chunk.content }
-        else if (chunk.type === 'completed')
-          yield {
-            type: 'completed',
-            reply: chunk.reply,
-            runtimeSessionId: chunk.runtimeSessionId
-          }
-        else if (chunk.type === 'error') yield { type: 'error', message: chunk.message }
+        if (planningScope) {
+          ctx.runtimeRegistry.endJobPlanning(planningScope)
+        }
       }
     },
     async listProviders(): Promise<ProviderSummary[]> {
       const cores = await listChatCores()
       return cores.map((core) => {
         const code = toCanonicalProviderCode(core.code) ?? 'codex'
+        const profiles = (core.supportedProfiles ?? []).filter(
+          (profile): profile is ProviderSummary['supportedProfiles'][number] =>
+            profile === 'chat-read' ||
+            profile === 'chat-write' ||
+            profile === 'planner-read' ||
+            profile === 'task-sandbox' ||
+            profile === 'verifier-sandbox'
+        )
         return {
           code,
           label: core.label,
           description: core.description,
           available: core.available,
-          supportedProfiles: core.readOnlyCapable
-            ? (['chat-read'] as const)
-            : (['chat-read', 'chat-write'] as const),
+          supportedProfiles:
+            profiles.length > 0
+              ? profiles
+              : core.readOnlyCapable
+                ? (['chat-read'] as const)
+                : (['chat-read', 'chat-write'] as const),
           ...(core.reason ? { unavailableReason: core.reason } : {}),
           installation: {
             ...(core.launchCommand ? { command: core.launchCommand } : {}),
@@ -148,10 +115,8 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
     },
     async closeScopeImpl(scopeId: string) {
       try {
-        const { closeConversationCursorRuntime } = await import(
-          './agent-runtime/cursor-acp/stream-session-turn'
-        )
-        // Scope id format conversation:{id}:provider:{code} — extract conversation id
+        const { closeConversationCursorRuntime } =
+          await import('./agent-runtime/cursor-acp/stream-session-turn')
         const match = /^conversation:([^:]+):provider:/.exec(scopeId)
         if (match) await closeConversationCursorRuntime(match[1]!)
       } catch {
@@ -205,9 +170,9 @@ function resolveJobActorId(db: Database.Database, jobId: string): string {
 }
 
 function resolvePlanningActorId(db: Database.Database, sessionId: string): string {
-  const row = db
-    .prepare(`SELECT actor_id FROM planning_sessions WHERE id = ?`)
-    .get(sessionId) as { actor_id: string } | undefined
+  const row = db.prepare(`SELECT actor_id FROM planning_sessions WHERE id = ?`).get(sessionId) as
+    | { actor_id: string }
+    | undefined
   return row?.actor_id ?? 'unknown'
 }
 
@@ -344,18 +309,16 @@ export function getOrComposeConversation(ctx: AppContext): ConversationModule {
     },
     realtime: {
       publish(topic, event, payload) {
-        const ephemeral =
-          event === 'assistant.thinking.delta' || event === 'assistant.text.delta'
+        const ephemeral = event === 'assistant.thinking.delta' || event === 'assistant.text.delta'
         const actorId =
           typeof payload.actorId === 'string'
             ? payload.actorId
             : resolveConversationActorFromTopic(rawDb, topic)
-        const entityId =
-          topic.startsWith('conversation-turn:')
-            ? topic.slice('conversation-turn:'.length)
-            : topic.startsWith('conversation:')
-              ? topic.slice('conversation:'.length)
-              : topic
+        const entityId = topic.startsWith('conversation-turn:')
+          ? topic.slice('conversation-turn:'.length)
+          : topic.startsWith('conversation:')
+            ? topic.slice('conversation:'.length)
+            : topic
         const entityRevision =
           typeof payload.stateRevision === 'number'
             ? payload.stateRevision

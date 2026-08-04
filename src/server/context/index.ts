@@ -1,5 +1,4 @@
 export type { AppContext } from './types'
-export { JobExecutionRuntimeRegistry } from './job-execution-runtime'
-export type { JobControlState, JobExecutionRuntime } from './job-execution-runtime'
-export { RuntimeRegistry } from './runtime-registry'
+export { JobExecutionRuntimeRegistry, RuntimeRegistry } from './process-runtime-state'
+export type { JobControlState, JobExecutionRuntime } from './process-runtime-state'
 export { SettingsStore } from './settings-store'

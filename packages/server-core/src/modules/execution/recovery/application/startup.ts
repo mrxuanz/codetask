@@ -1,7 +1,19 @@
 import type Database from 'better-sqlite3'
 import { nowMs } from '../../shared.ts'
 
-export function createRecoverWorkService(deps: { db: Database.Database }) {
+export type RecoverWorkService = {
+  markInterruptedAttempts(now?: number): number
+}
+
+export type ReconcileInterruptedRunService = {
+  reconcile(): void
+}
+
+export type StartupReconcileService = {
+  run(): void
+}
+
+export function createRecoverWorkService(deps: { db: Database.Database }): RecoverWorkService {
   return {
     markInterruptedAttempts(now = nowMs()): number {
       const result = deps.db
@@ -17,7 +29,9 @@ export function createRecoverWorkService(deps: { db: Database.Database }) {
 
 export { createInjectRepairWorkService } from './inject-repair-work.ts'
 
-export function createReconcileInterruptedRunService(deps: { db: Database.Database }) {
+export function createReconcileInterruptedRunService(deps: {
+  db: Database.Database
+}): ReconcileInterruptedRunService {
   return {
     reconcile(): void {
       const now = nowMs()
@@ -31,7 +45,9 @@ export function createReconcileInterruptedRunService(deps: { db: Database.Databa
   }
 }
 
-export function createStartupReconcileService(deps: { db: Database.Database }) {
+export function createStartupReconcileService(deps: {
+  db: Database.Database
+}): StartupReconcileService {
   return {
     run(): void {
       const now = nowMs()

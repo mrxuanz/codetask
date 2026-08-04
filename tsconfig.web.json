@@ -1,9 +1,9 @@
 {
   "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
   "include": [
-    "src/renderer/src/env.d.ts",
-    "src/renderer/src/**/*",
-    "src/renderer/src/**/*.vue",
+    "apps/web/src/env.d.ts",
+    "apps/web/src/**/*",
+    "apps/web/src/**/*.vue",
     "src/preload/*.d.ts",
     "src/shared/**/*",
     "packages/contracts/src/**/*"
@@ -16,13 +16,9 @@
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@renderer/*": [
-        "src/renderer/src/*"
-      ],
+      "@renderer/*": ["apps/web/src/*"],
       "@shared/turn-errors": ["src/shared/turn-errors.ts"],
-      "@shared/*": [
-        "src/shared/*"
-      ],
+      "@shared/*": ["src/shared/*"],
       "@codetask/contracts": ["packages/contracts/src/index.ts"],
       "@codetask/contracts/*": ["packages/contracts/src/*"]
     }

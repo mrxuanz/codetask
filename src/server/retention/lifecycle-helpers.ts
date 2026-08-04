@@ -1,6 +1,6 @@
-import { DEFAULT_RETENTION_SETTINGS } from '../../shared/contracts/retention.ts'
-import type { TaskEvidenceDto } from '../../shared/contracts/evidence.ts'
-import type { SliceVerificationRecordDto } from '../../shared/contracts/evidence.ts'
+import { DEFAULT_RETENTION_SETTINGS } from '@codetask/contracts'
+import type { TaskEvidenceDto } from '@codetask/contracts'
+import type { SliceVerificationRecordDto } from '@codetask/contracts'
 
 export function shouldExternalizeEvidence(
   evidence: TaskEvidenceDto,

@@ -425,7 +425,7 @@ async function runStatic(
   authIssue: string | null
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderRuntimeForTest('cursorcli', {
+  const prepared = prepareProviderRuntimeForTest('cursor', {
     workspaceRoot: workspace
   })
   const cliArgs = buildCursorAcpCliArgs({ outerSandbox: true, cwd: workspace })
@@ -485,7 +485,7 @@ async function main(): Promise<void> {
     failures: [] as string[]
   }
 
-  const prepared = prepareProviderRuntimeForTest('cursorcli', {
+  const prepared = prepareProviderRuntimeForTest('cursor', {
     workspaceRoot: workspace
   })
 

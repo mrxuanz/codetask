@@ -1,6 +1,6 @@
 import { dirname, resolve } from 'path'
 
-export type DataDirSource = 'config' | 'candidate'
+export type DataDirSource = 'config' | 'candidate' | 'cli'
 
 export interface DataDirResolution {
   phase: 'ready' | 'selection_required'

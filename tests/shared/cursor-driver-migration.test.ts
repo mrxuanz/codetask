@@ -16,24 +16,24 @@ import { CURSOR_DESCRIPTOR } from '../../src/shared/providers/descriptors/cursor
 import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
 import type { ProviderInstallation } from '../../src/shared/providers/installation.ts'
 import type { AgentTurnChunk, AgentTurnInput } from '../../src/server/agent-runtime/types.ts'
-import { buildProviderTurnContext } from '../../src/server/providers/driver.ts'
-import { resolveProviderExecutable } from '../../src/server/providers/executable.ts'
-import { createProviderRegistry } from '../../src/server/providers/composition.ts'
+import { buildProviderTurnContext } from '../../packages/provider-runtime-node/src/providers/driver.ts'
+import { resolveProviderExecutable } from '../../packages/provider-runtime-node/src/providers/executable.ts'
+import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
 import {
   CursorDriver,
   createCursorStreamFactory
-} from '../../src/server/providers/cursor/driver.ts'
+} from '../../packages/provider-runtime-node/src/providers/cursor/driver.ts'
 import {
   buildCursorAcpCliArgs,
   buildCursorTurnPlan
-} from '../../src/server/providers/cursor/turn-plan.ts'
-import { providerInstallationResolver } from '../../src/server/providers/installation.ts'
+} from '../../packages/provider-runtime-node/src/providers/cursor/turn-plan.ts'
+import { providerInstallationResolver } from '../../packages/provider-runtime-node/src/providers/installation.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
 const installation: ProviderInstallation = Object.freeze({
-  id: 'cursorcli:test-delegation',
-  provider: 'cursorcli',
+  id: 'cursor:test-delegation',
+  provider: 'cursor',
   command: 'agent',
   source: 'path',
   invocation: Object.freeze({ executable: '/bin/agent', prefixArgs: Object.freeze([]) }),
@@ -43,21 +43,22 @@ const installation: ProviderInstallation = Object.freeze({
 
 function baseInput(overrides: Partial<AgentTurnInput> = {}): AgentTurnInput {
   return {
-    provider: 'cursorcli',
+    provider: 'cursor',
     role: 'conversation',
     cwd: '/workspace',
     runtimeRoot: '/runtime/cursor',
+    providerRuntimeScopeId: 'conversation:test-cursor',
     prompt: 'delegate-me',
     ...overrides
   }
 }
 
 test('CursorDriver shell uses shared Cursor descriptor and production kind', () => {
-  const driver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursorcli)
+  const driver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursor)
   assert.equal(driver.kind, 'production')
   assert.equal(driver.descriptor, CURSOR_DESCRIPTOR)
-  assert.equal(driver.descriptor.code, 'cursorcli')
-  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG.cursorcli)
+  assert.equal(driver.descriptor.code, 'cursor')
+  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG.cursor)
 })
 
 test('CursorDriver prepareTurn delegates to stream factory without altering chunks', async () => {
@@ -71,7 +72,7 @@ test('CursorDriver prepareTurn delegates to stream factory without altering chun
     yield { type: 'completed', reply: 'hi', runtimeSessionId: 'sess-1' }
   }
 
-  const driver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursorcli, factory)
+  const driver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursor, factory)
   const prepared = await driver.prepareTurn(
     buildProviderTurnContext({
       input: baseInput(),
@@ -95,21 +96,24 @@ test('CursorDriver prepareTurn delegates to stream factory without altering chun
   assert.equal(prepared.reusePolicy, 'conversation-scoped')
 })
 
-test('default Cursor stream factory delegates to legacy streamCursorAcpTurn', () => {
-  const source = readFileSync(join(root, 'src/server/providers/cursor/driver.ts'), 'utf8')
+test('default Cursor stream factory delegates to the canonical ACP streamer', () => {
+  const source = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/cursor/driver.ts'),
+    'utf8'
+  )
   assert.match(source, /createCursorStreamFactory/)
   assert.match(source, /streamCursorAcpTurn/)
-  assert.match(source, /agent-runtime\/providers\/cursor-acp/)
+  assert.match(source, /streamers\/cursor-acp/)
   assert.equal(typeof createCursorStreamFactory, 'function')
 })
 
 test('Registry Cursor entry uses the shared descriptor without a parallel runtime catalog', () => {
   const descriptorSource = readFileSync(
-    join(root, 'src/server/providers/cursor/descriptor.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/cursor/descriptor.ts'),
     'utf8'
   )
   assert.equal(existsSync(join(root, 'src/server/providers/catalog.ts')), false)
-  assert.equal(createProviderRegistry().get('cursorcli').descriptor, CURSOR_DESCRIPTOR)
+  assert.equal(createProviderRegistry().get('cursor').descriptor, CURSOR_DESCRIPTOR)
   assert.doesNotMatch(descriptorSource, /label:|description:|defaultCommands:/)
 })
 
@@ -129,7 +133,7 @@ test('CursorDriver.discover returns a stable installationId matching the resolve
     const hostEnvironment = Object.freeze({ PATH: '/usr/bin' })
     const first = await driver.discover({ hostEnvironment, installDirs: [] })
     const second = await driver.discover({ hostEnvironment, installDirs: [] })
-    const viaResolver = resolveProviderExecutable('cursorcli', {
+    const viaResolver = resolveProviderExecutable('cursor', {
       settings,
       env: hostEnvironment,
       installDirs: []
@@ -143,7 +147,7 @@ test('CursorDriver.discover returns a stable installationId matching the resolve
     assert.equal(first.resolvedPath, bin)
     assert.equal(first.canonicalPath, realpathSync(bin))
     assert.equal(first.source, 'app-config')
-    assert.equal(first.provider, 'cursorcli')
+    assert.equal(first.provider, 'cursor')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -160,7 +164,7 @@ test('CursorDriver.discover keeps Windows .cmd shim prefixArgs empty and stable 
       executable: { mode: 'path' as const, path: cmd },
       approveMcps: true
     }
-    const installation = providerInstallationResolver.resolve('cursorcli', {
+    const installation = providerInstallationResolver.resolve('cursor', {
       settings,
       hostEnv: Object.freeze({ PATH: dir }),
       platform: 'win32',
@@ -186,9 +190,12 @@ test('CursorDriver.discover keeps Windows .cmd shim prefixArgs empty and stable 
 })
 
 test('central preflight switch no longer handles Cursor; driver owns preflight', () => {
-  const driverSource = readFileSync(join(root, 'src/server/providers/cursor/driver.ts'), 'utf8')
+  const driverSource = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/cursor/driver.ts'),
+    'utf8'
+  )
   const cursorPreflight = readFileSync(
-    join(root, 'src/server/providers/cursor/preflight.ts'),
+    join(root, 'packages/provider-runtime-node/src/providers/cursor/preflight.ts'),
     'utf8'
   )
 
@@ -201,9 +208,12 @@ test('central preflight switch no longer handles Cursor; driver owns preflight',
 })
 
 test('buildCursorTurnPlan lives in Cursor driver module; outer layers do not read Cursor env', () => {
-  const turnPlan = readFileSync(join(root, 'src/server/providers/cursor/turn-plan.ts'), 'utf8')
+  const turnPlan = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/cursor/turn-plan.ts'),
+    'utf8'
+  )
   const stream = readFileSync(
-    join(root, 'src/server/agent-runtime/cursor-acp/stream-session-turn.ts'),
+    join(root, 'packages/provider-runtime-node/src/cursor-acp/stream-session-turn.ts'),
     'utf8'
   )
   const runner = readFileSync(join(root, 'src/server/agent-runtime/runner.ts'), 'utf8')
@@ -215,9 +225,12 @@ test('buildCursorTurnPlan lives in Cursor driver module; outer layers do not rea
   assert.match(turnPlan, /export function buildCursorTurnPlan/)
   assert.doesNotMatch(turnPlan, /CODETASK_CURSOR_API_ENDPOINT/)
   assert.doesNotMatch(turnPlan, /CODETASK_CURSOR_APPROVE_MCPS/)
-  assert.match(stream, /from '\.\.\/\.\.\/providers\/cursor\/turn-plan'/)
+  assert.match(stream, /from '\.\.\/providers\/cursor\/turn-plan'/)
   assert.doesNotMatch(runner, /CODETASK_CURSOR_API_ENDPOINT|CODETASK_CURSOR_APPROVE_MCPS/)
-  assert.equal(existsSync(join(root, 'src/server/agent-runtime/providers/cursor-policy.ts')), false)
+  assert.equal(
+    existsSync(join(root, 'packages/provider-runtime-node/src/streamers/cursor-policy.ts')),
+    false
+  )
   assert.doesNotMatch(providerPolicy, /buildCursorAcpCliArgs/)
   assert.doesNotMatch(providerPolicy, /CODETASK_CURSOR/)
 })
@@ -244,7 +257,7 @@ test('detect installation path is passed into ACP spawn plan with same installat
 
     const plan = buildCursorTurnPlan(
       {
-        provider: 'cursorcli',
+        provider: 'cursor',
         role: 'conversation',
         cwd: '/workspace',
         runtimeRoot: dir,
@@ -262,7 +275,7 @@ test('detect installation path is passed into ACP spawn plan with same installat
     assert.ok(plan.cliArgs.includes('acp'))
 
     const stream = readFileSync(
-      join(root, 'src/server/agent-runtime/cursor-acp/stream-session-turn.ts'),
+      join(root, 'packages/provider-runtime-node/src/cursor-acp/stream-session-turn.ts'),
       'utf8'
     )
     assert.match(stream, /executable:\s*plan\.executable/)
@@ -273,7 +286,8 @@ test('detect installation path is passed into ACP spawn plan with same installat
 })
 
 test('CursorDriver turn handle uses RuntimeManager cancel/close and manager-selected scope', async () => {
-  const { ProviderRuntimeManager } = await import('../../src/server/providers/lifecycle.ts')
+  const { ProviderRuntimeManager } =
+    await import('../../packages/provider-runtime-node/src/providers/lifecycle.ts')
   const events: string[] = []
 
   async function* factory(
@@ -298,7 +312,7 @@ test('CursorDriver turn handle uses RuntimeManager cancel/close and manager-sele
     yield { type: 'completed', reply: 'done', runtimeSessionId: null }
   }
 
-  const driver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursorcli, factory)
+  const driver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursor, factory)
   const prepared = await driver.prepareTurn(
     buildProviderTurnContext({
       input: baseInput({ role: 'task-worker', prompt: 'managed', jobId: 'job-1' }),
@@ -331,7 +345,7 @@ test('CursorDriver turn handle uses RuntimeManager cancel/close and manager-sele
     yield { type: 'delta', content: 'a' }
     yield { type: 'completed', reply: 'a', runtimeSessionId: 's1' }
   }
-  const completingDriver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursorcli, completingFactory)
+  const completingDriver = new CursorDriver(DEFAULT_PROVIDERS_CONFIG.cursor, completingFactory)
   const chunks: AgentTurnChunk[] = []
   for await (const chunk of manager.stream(
     completingDriver,
@@ -360,16 +374,16 @@ test('CursorDriver turn handle uses RuntimeManager cancel/close and manager-sele
 
 test('production Cursor streamCursorAcpTurn routes through getAgentTurnProvider / RuntimeManager', () => {
   const indexSource = readFileSync(
-    join(root, 'src/server/agent-runtime/providers/index.ts'),
+    join(root, 'packages/provider-runtime-node/src/streamers/index.ts'),
     'utf8'
   )
-  assert.match(indexSource, /getAgentTurnProvider\('cursorcli'\)\.streamTurn/)
+  assert.match(indexSource, /getAgentTurnProvider\('cursor'\)\.streamTurn/)
   assert.doesNotMatch(indexSource, /streamCursorAcpTurn[\s\S]*await import\('\.\/cursor-acp'\)/)
 })
 
 test('role-worker-cursorcli production entry uses Registry CursorDriver', () => {
   const worker = readFileSync(join(root, 'src/sandbox/role-worker-cursorcli.ts'), 'utf8')
-  assert.match(worker, /getAgentTurnProvider\('cursorcli'\)/)
+  assert.match(worker, /getAgentTurnProvider\('cursor'\)/)
   assert.doesNotMatch(worker, /providers\/cursor-acp/)
 })
 
@@ -382,10 +396,10 @@ test('sandbox orchestrator uses CursorDriver.preflight for Cursor', () => {
 
 test('Cursor registry production driver matches descriptor and settings slot', () => {
   const registry = createProviderRegistry(DEFAULT_PROVIDERS_CONFIG)
-  const driver = registry.get('cursorcli')
+  const driver = registry.get('cursor')
   assert.equal(driver.kind, 'production')
   assert.equal(driver.descriptor, CURSOR_DESCRIPTOR)
-  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG.cursorcli)
+  assert.equal(driver.settings, DEFAULT_PROVIDERS_CONFIG.cursor)
   assert.equal(driver.descriptor.capabilities.protocol, 'acp')
   assert.equal(driver.descriptor.capabilities.authMode, 'host-identity')
 })

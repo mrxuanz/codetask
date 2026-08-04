@@ -14,9 +14,6 @@ describe('threads suite retirement (03)', () => {
     assert.equal(existsSync(join(root, 'src/server/threads')), false)
     assert.equal(existsSync(join(root, 'src/server/legacy-wizard')), false)
     assert.equal(existsSync(join(root, 'src/server/legacy-draft')), false)
-    assert.equal(
-      existsSync(join(root, 'tests/threads/update-thread-context-phase.test.ts')),
-      false
-    )
+    assert.equal(existsSync(join(root, 'tests/threads/update-thread-context-phase.test.ts')), false)
   })
 })

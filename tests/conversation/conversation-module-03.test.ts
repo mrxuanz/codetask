@@ -6,8 +6,7 @@ import Database from 'better-sqlite3'
 import {
   buildConversationScopeId,
   createAgentRuntime,
-  toCanonicalProviderCode,
-  toHostProviderCode
+  toCanonicalProviderCode
 } from '@codetask/agent-runtime'
 import { composeConversationModule } from '@codetask/server-core'
 import { migration048ConversationModuleTables } from '../../packages/database/src/migrations/conversation.ts'
@@ -118,10 +117,10 @@ describe('conversation module (03)', () => {
 })
 
 describe('agent-runtime shared port (03)', () => {
-  it('maps host provider codes and builds conversation scopes without create_task', () => {
+  it('maps canonical provider codes and builds conversation scopes without create_task', () => {
+    assert.equal(toCanonicalProviderCode('claude'), 'claude')
     assert.equal(toCanonicalProviderCode('claude-code'), 'claude')
-    assert.equal(toHostProviderCode('claude'), 'claude-code')
-    assert.equal(toCanonicalProviderCode('cursorcli'), 'cursor')
+    assert.equal(toCanonicalProviderCode('cursor'), 'cursor')
     const scope = buildConversationScopeId('conv1', 'codex')
     assert.equal(scope, 'conversation:conv1:provider:codex')
     assert.doesNotMatch(scope, /create_task/)

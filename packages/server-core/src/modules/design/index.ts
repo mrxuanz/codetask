@@ -64,13 +64,17 @@ export function composeDesignModule(deps: DesignModuleDeps): DesignModule {
     }
   }
 
-  let planningApp!: PlanningApplication
+  const planningHolder: { app?: PlanningApplication } = {}
+  const getPlanningApp = (): PlanningApplication => {
+    if (!planningHolder.app) throw new Error('Planning application is not initialized')
+    return planningHolder.app
+  }
   const planner = deps.agentRuntime
-    ? new AgentRuntimePlannerRunner(() => planningApp, deps.agentRuntime, {
+    ? new AgentRuntimePlannerRunner(getPlanningApp, deps.agentRuntime, {
         ...(deps.getMcpBackendPort ? { getMcpBackendPort: deps.getMcpBackendPort } : {})
       })
-    : new SnapshotPlannerRunner(() => planningApp)
-  planningApp = new PlanningApplication(
+    : new SnapshotPlannerRunner(getPlanningApp)
+  const planningApp = new PlanningApplication(
     planningRepo,
     capacity,
     outbox.asPort(),
@@ -85,6 +89,7 @@ export function composeDesignModule(deps: DesignModuleDeps): DesignModule {
         : {})
     }
   )
+  planningHolder.app = planningApp
   const drafts = new DraftApplication(draftRepo, {
     resolveWorkspaceRoot: deps.resolveWorkspaceRoot
   })

@@ -15,16 +15,20 @@ export type InjectRepairInput = {
   verdictId?: string
 }
 
+export type InjectRepairWorkService = {
+  inject(input: InjectRepairInput): { workId: string; contentHash: string }
+}
+
 /**
  * Inject Repair Work as new job_work_items. Never mutates job_snapshots.execution_tree_json.
  */
-export function createInjectRepairWorkService(deps: { db: Database.Database }) {
+export function createInjectRepairWorkService(deps: {
+  db: Database.Database
+}): InjectRepairWorkService {
   return {
     inject(input: InjectRepairInput): { workId: string; contentHash: string } {
       const parent = deps.db
-        .prepare(
-          `SELECT * FROM job_work_items WHERE job_id = ? AND id = ? AND generation = ?`
-        )
+        .prepare(`SELECT * FROM job_work_items WHERE job_id = ? AND id = ? AND generation = ?`)
         .get(input.jobId, input.parentWorkId, input.generation) as
         | Record<string, unknown>
         | undefined

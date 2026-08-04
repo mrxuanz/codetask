@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use codeteam_sandbox_adapter::{legacy_policy_json, parse_task_policy_json, ParsedTaskPolicy};
+use codeteam_sandbox_adapter::{ParsedTaskPolicy, legacy_policy_json, parse_task_policy_json};
 use codeteam_windows_sandbox::{
-    apply_electron_node_env, resolve_host_launcher, run_windows_sandbox_capture_streaming_elevated,
-    sandbox_setup_is_complete, ElevatedSandboxCaptureRequest, StreamingCaptureControl,
+    ElevatedSandboxCaptureRequest, StreamingCaptureControl, apply_electron_node_env,
+    resolve_host_launcher, run_windows_sandbox_capture_streaming_elevated,
+    sandbox_setup_is_complete,
 };
 
-use crate::attestation::{wrap_windows_command, ATTESTATION_EMITTER_SCRIPT};
+use crate::attestation::{ATTESTATION_EMITTER_SCRIPT, wrap_windows_command};
 use crate::protocol::{SandboxEvidence, SandboxPolicy};
 use crate::windows::setup::resolve_sandbox_home;
 
@@ -71,10 +72,7 @@ impl ElevatedChild {
         {
             command.to_string()
         } else {
-            host_launcher
-                .host_exe
-                .to_string_lossy()
-                .into_owned()
+            host_launcher.host_exe.to_string_lossy().into_owned()
         };
         let (wrapped_command, wrapped_args) =
             wrap_windows_command(&node_exe, &emitter_script, command, args);
@@ -171,10 +169,7 @@ impl ElevatedChild {
                 deny_write_paths_override: &[],
             };
             let result = run_windows_sandbox_capture_streaming_elevated(
-                request,
-                &control_t,
-                stdout_t,
-                stderr_t,
+                request, &control_t, stdout_t, stderr_t,
             )?;
             *exit_t.lock().unwrap() = Some(result.exit_code);
             Ok(())

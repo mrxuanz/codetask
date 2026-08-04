@@ -268,7 +268,7 @@ export function prepareCursorRuntimeProfile(
   )
 
   return makeProfile({
-    provider: 'cursorcli',
+    provider: 'cursor',
     context,
     environment,
     hostPathGrants: [
@@ -286,7 +286,7 @@ export function prepareCursorRuntimeProfile(
       ...executableGrants(resolveCursorAgentInstallDirs(hostProfile, context.platform), 'Cursor')
     ],
     diagnostics: {
-      provider: 'cursorcli',
+      provider: 'cursor',
       mode: 'host-identity',
       authMaterialPresent,
       primaryIdentityPath: hostIdentity.authPath,
@@ -338,7 +338,7 @@ export function prepareClaudeRuntimeProfile(
   }
 
   return makeProfile({
-    provider: 'claude-code',
+    provider: 'claude',
     context,
     environment,
     hostPathGrants: [
@@ -369,7 +369,7 @@ export function prepareClaudeRuntimeProfile(
       ...executableGrants(resolveClaudeInstallDirs(), 'Claude Code')
     ],
     diagnostics: {
-      provider: 'claude-code',
+      provider: 'claude',
       mode: 'host-identity',
       authMaterialPresent,
       primaryIdentityPath: hasSettingsAuthEnv
@@ -470,9 +470,9 @@ export function prepareProviderRuntimeProfile(
   switch (provider) {
     case 'codex':
       return prepareCodexRuntimeProfile(input)
-    case 'cursorcli':
+    case 'cursor':
       return prepareCursorRuntimeProfile(input)
-    case 'claude-code':
+    case 'claude':
       return prepareClaudeRuntimeProfile(input)
     case 'opencode':
       return prepareOpenCodeRuntimeProfile(input)

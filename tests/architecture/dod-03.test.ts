@@ -76,10 +76,7 @@ describe('architecture 03 DoD', () => {
   })
 
   it('AgentRuntime scope is conversation:{id}:provider:{code}', () => {
-    assert.equal(
-      buildConversationScopeId('c1', 'cursor'),
-      'conversation:c1:provider:cursor'
-    )
+    assert.equal(buildConversationScopeId('c1', 'cursor'), 'conversation:c1:provider:cursor')
   })
 
   it('legacy chat/job SSE envelope contracts are removed', () => {
@@ -89,7 +86,9 @@ describe('architecture 03 DoD', () => {
   it('AgentRuntimePlannerRunner exercises shared runtime port (Scripted)', async () => {
     initPlannerMcpBackend(9_001)
 
-    const runtime = new ScriptedAgentRuntime(async function* (input): AsyncIterable<AgentTurnEvent> {
+    const runtime = new ScriptedAgentRuntime(async function* (
+      input
+    ): AsyncIterable<AgentTurnEvent> {
       const mcpUrl = input.mcpServers?.[0]?.url ?? ''
       const sessionId = decodeURIComponent(mcpUrl.split('/planner/')[1]?.split('?')[0] ?? '')
       assert.ok(sessionId, 'expected planner mcp session id in mcpServers url')
@@ -170,7 +169,9 @@ describe('architecture 03 DoD', () => {
         async commitExecutionTree() {
           committed = true
         },
-        notifyPlannerProgress() {}
+        notifyPlannerProgress() {
+          // This architecture test only observes the committed plan.
+        }
       }),
       runtime,
       { maxSilentEmptyAttempts: 1, getMcpBackendPort: () => 9_001 }

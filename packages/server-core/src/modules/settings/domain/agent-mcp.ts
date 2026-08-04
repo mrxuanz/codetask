@@ -1,14 +1,18 @@
 import type { AgentMcpRole, SettingsProviderCode, SecretReference } from '@codetask/contracts'
 import { AGENT_MCP_ROLES } from '@codetask/contracts'
 import { SettingsError } from './settings-errors.ts'
-import { AGENT_MCP_ROLE_LIST, PROVIDER_CODES } from './setting-namespace.ts'
+import {
+  AGENT_MCP_ROLE_LIST,
+  PROVIDER_CODES,
+  trySettingsProviderCode
+} from './setting-namespace.ts'
 
 /** Provider MCP config root keys — aligned with shared provider descriptors. */
 export const MCP_ROOT_KEYS: Record<SettingsProviderCode, string> = {
   codex: 'mcp_servers',
-  'claude-code': 'mcpServers',
+  claude: 'mcpServers',
   opencode: 'mcp',
-  cursorcli: 'mcpServers'
+  cursor: 'mcpServers'
 }
 
 export const RESERVED_MCP_SERVER_NAMES = new Set([
@@ -67,7 +71,12 @@ export function isSecretReference(value: unknown): value is SecretReference {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   const keys = Object.keys(record)
-  return keys.length === 1 && keys[0] === '$secret' && typeof record.$secret === 'string' && record.$secret.length > 0
+  return (
+    keys.length === 1 &&
+    keys[0] === '$secret' &&
+    typeof record.$secret === 'string' &&
+    record.$secret.length > 0
+  )
 }
 
 export function isRedactedSecretReference(value: unknown): value is RedactedSecretReference {
@@ -99,7 +108,10 @@ function sanitizeServerMap(value: unknown, path: string): Record<string, unknown
   return cleaned
 }
 
-function parseProviderFragment(providerCode: SettingsProviderCode, value: unknown): McpProviderFragment {
+function parseProviderFragment(
+  providerCode: SettingsProviderCode,
+  value: unknown
+): McpProviderFragment {
   const rootKey = MCP_ROOT_KEYS[providerCode]
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return emptyFragment(providerCode)
@@ -123,9 +135,13 @@ function parseRoleSettings(value: unknown): RoleMcpSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return defaults
   const object = value as Record<string, unknown>
   const parsed = { ...defaults }
-  for (const code of PROVIDER_CODES) {
-    if (object[code] !== undefined) {
-      parsed[code] = parseProviderFragment(code, object[code])
+  for (const [rawCode, rawValue] of Object.entries(object)) {
+    const code = trySettingsProviderCode(rawCode)
+    if (!code) {
+      throw SettingsError.badRequest('settings.provider_unknown', `Unknown provider: ${rawCode}`)
+    }
+    if (rawValue !== undefined) {
+      parsed[code] = parseProviderFragment(code, rawValue)
     }
   }
   return parsed

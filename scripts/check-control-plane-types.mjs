@@ -17,7 +17,7 @@ const CONTROL_PLANE_DIRS = [
   'src/server/application',
   'src/server/infra/sqlite/control-plane',
   'packages/server-core/src/modules/execution',
-  'src/renderer/src/stores',
+  'apps/web/src/stores',
   'tests/control-plane'
 ]
 

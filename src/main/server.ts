@@ -1,5 +1,6 @@
 import { serve, type ServerType } from '@hono/node-server'
 import type { ExecutionContext, Hono } from 'hono'
+import { announceServiceReady, createServiceReadyMessage } from '@codetask/service-bootstrap'
 import { bootstrapRuntime, createApp, ensureRuntimeReady, shutdownRuntime } from '../server'
 import { initConversationMcpBackend } from '../server/conversation/mcp/url'
 import { initExecutionMcpBackend, initPlannerMcpBackend } from '@codetask/server-core'
@@ -21,6 +22,7 @@ export interface ServerInfo {
   requestedPort: number
   portChanged: boolean
   mode: CliOptions['mode']
+  instanceId: string
 }
 
 /**
@@ -90,6 +92,29 @@ function listen(fetch: NodeFetch, host: string, port: number): Promise<ServerTyp
   })
 }
 
+function readBoundPort(server: ServerType, fallback: number): number {
+  const address = server.address()
+  if (address && typeof address === 'object' && typeof address.port === 'number') {
+    return address.port
+  }
+  return fallback
+}
+
+function buildServerInfo(cli: CliOptions, boundPort: number, bindChanged: boolean): ServerInfo {
+  const url = formatUrl(cli.host, boundPort)
+  const ready = createServiceReadyMessage({ origin: url })
+  announceServiceReady(cli.readyFd, ready)
+  return {
+    host: cli.host,
+    port: boundPort,
+    url,
+    requestedPort: cli.port,
+    portChanged: bindChanged || cli.port !== boundPort,
+    mode: cli.mode,
+    instanceId: ready.instanceId
+  }
+}
+
 /** Hot-swap wrapper: keep serve() env bindings (incoming socket) while swapping activeApp. */
 function activeFetch(getApp: () => Hono): NodeFetch {
   return (request, env, executionCtx) => getApp().fetch(request, env, executionCtx)
@@ -107,6 +132,7 @@ async function createReadyApp(
     dataDir,
     mode: cli.mode,
     shellChildEnvironment: platform.shellChildEnvironment,
+    masterKeyFile: cli.masterKeyFile,
     storage: {
       source: storage.source
     }
@@ -180,12 +206,7 @@ export async function startAppServer(
           if (resolved.phase !== 'ready') {
             throw new Error(resolved.issue ?? 'Storage is not ready after initialization')
           }
-          const { app, dataDir } = await createReadyApp(
-            cli,
-            resolved,
-            platform,
-            http
-          )
+          const { app, dataDir } = await createReadyApp(cli, resolved, platform, http)
           activeApp = app
           initConversationMcpBackend(boundPort)
           initExecutionMcpBackend(boundPort)
@@ -229,14 +250,9 @@ export async function startAppServer(
     if (!activeServer) {
       throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
     }
-    const info: ServerInfo = {
-      host: cli.host,
-      port: boundPort,
-      url: formatUrl(cli.host, boundPort),
-      requestedPort: cli.port,
-      portChanged: bindChanged,
-      mode: cli.mode
-    }
+    boundPort = readBoundPort(activeServer, boundPort)
+    bindChanged = cli.port !== boundPort
+    const info = buildServerInfo(cli, boundPort, bindChanged)
     console.log(`[server] ${cli.mode} storage setup listening on ${info.url}`)
     console.log(`[storage] default candidate: ${storage.dataDir}`)
     if (cli.mode === 'server') {
@@ -266,9 +282,6 @@ export async function startAppServer(
       )
       boundPort = port
       bindChanged = cli.port !== port
-      initConversationMcpBackend(port)
-      initExecutionMcpBackend(port)
-      initPlannerMcpBackend(port)
       break
     } catch (error) {
       if (!isAddressInUse(error)) throw error
@@ -279,18 +292,17 @@ export async function startAppServer(
     throw new Error(`No available port found starting from ${cli.port} on ${cli.host}`)
   }
 
-  if (bindChanged) {
+  boundPort = readBoundPort(activeServer, boundPort)
+  bindChanged = cli.port !== boundPort
+  initConversationMcpBackend(boundPort)
+  initExecutionMcpBackend(boundPort)
+  initPlannerMcpBackend(boundPort)
+
+  if (bindChanged && cli.port !== 0) {
     console.log(`[server] Port ${cli.port} is in use, using ${boundPort} instead`)
   }
 
-  const info: ServerInfo = {
-    host: cli.host,
-    port: boundPort,
-    url: formatUrl(cli.host, boundPort),
-    requestedPort: cli.port,
-    portChanged: bindChanged,
-    mode: cli.mode
-  }
+  const info = buildServerInfo(cli, boundPort, bindChanged)
 
   console.log(`[server] ${cli.mode} mode listening on ${info.url}`)
   console.log(`[storage] data root: ${dataDir} (source=${storage.source})`)

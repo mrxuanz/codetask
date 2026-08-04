@@ -3,8 +3,4 @@ export type {
   ConversationAccessDecision,
   ConversationWorkspaceLease
 } from './types'
-export {
-  releaseChatWorkspaceLease,
-  resolveChatAccess
-} from './chat'
-
+export { releaseChatWorkspaceLease, resolveChatAccess } from './chat'

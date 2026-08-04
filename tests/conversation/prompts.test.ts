@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildConversationSystemPrompt } from '../../src/server/conversation/prompts.ts'
 import { conversationMcpToolDefinitions } from '../../src/server/conversation/mcp/tools.ts'

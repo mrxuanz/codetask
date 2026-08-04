@@ -47,7 +47,7 @@ function planSnapshot(plan: ReturnType<typeof buildCodexTurnPlan>): Record<strin
 }
 
 test('production Codex streamCodexTurn routes through getAgentTurnProvider / RuntimeManager', () => {
-  const indexSource = readSource('src/server/agent-runtime/providers/index.ts')
+  const indexSource = readSource('packages/provider-runtime-node/src/streamers/index.ts')
   assert.match(indexSource, /getAgentTurnProvider\('codex'\)\.streamTurn/)
   assert.doesNotMatch(indexSource, /streamCodexTurn[\s\S]*await import\('\.\/codex-sdk'\)/)
 })

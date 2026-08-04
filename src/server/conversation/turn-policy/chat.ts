@@ -1,10 +1,11 @@
 import { providerSupportsCapability } from '../../agent-runtime/capabilities'
 import type { SupportedCoreCode } from '../cores'
-import {
-  acquireWorkspaceLease,
-  releaseWorkspaceLease
-} from '../../infra/workspace-lease-store'
-import type { ChatAccessInput, ConversationAccessDecision, ConversationWorkspaceLease } from './types'
+import { acquireWorkspaceLease, releaseWorkspaceLease } from '../../infra/workspace-lease-store'
+import type {
+  ChatAccessInput,
+  ConversationAccessDecision,
+  ConversationWorkspaceLease
+} from './types'
 
 /**
  * Ordinary chat module access policy.

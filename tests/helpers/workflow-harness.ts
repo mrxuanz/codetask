@@ -25,8 +25,9 @@ import {
 } from '../../src/server/agent-runtime/providers/test-overrides'
 import { getOrComposeExecution } from '../../src/server/design-module'
 import { getOrComposeSettings } from '../../src/server/settings/service'
-import { THREAD_KIND_CHAT } from '../../src/shared/contracts/threads.ts'
-import { DEFAULT_RETENTION_SETTINGS } from '../../src/shared/contracts/retention'
+import { DEFAULT_RETENTION_SETTINGS } from '@codetask/contracts'
+
+const THREAD_KIND_CHAT = 'chat' as const
 import {
   buildProposeTaskDraftArgs,
   FIXTURE_TASK_EVIDENCE,
@@ -56,8 +57,11 @@ export class WorkflowHarness {
   username = TEST_USERNAME
   projectId = ''
   private server: ServerType | null = null
+  private app: ReturnType<typeof createApp> | null = null
   private ctx: AppContext | null = null
   private draftMessageId: string | null = null
+
+  constructor(private readonly options: { inMemory?: boolean } = {}) {}
 
   async setup(): Promise<void> {
     await resetAppContextForTests()
@@ -83,12 +87,14 @@ export class WorkflowHarness {
         }
       }
     })
-    const app = createApp(this.ctx, { isDev: false })
-    this.server = await this.listen(app)
+    this.app = createApp(this.ctx, { isDev: false })
+    if (!this.options.inMemory) {
+      this.server = await this.listen(this.app)
+    }
 
-    const address = this.server.address()
+    const address = this.server?.address()
     const port = typeof address === 'object' && address ? address.port : 0
-    this.baseUrl = `http://127.0.0.1:${port}`
+    this.baseUrl = this.options.inMemory ? 'http://localhost' : `http://127.0.0.1:${port}`
     initConversationMcpBackend(port)
     initExecutionMcpBackend(port)
     initPlannerMcpBackend(port)
@@ -124,6 +130,7 @@ export class WorkflowHarness {
       })
       this.server = null
     }
+    this.app = null
     resetTestAgentTurnProviders()
     setTaskEvidenceWaitTimeoutForTests(undefined)
     resetCoreAvailabilityStubForTests()
@@ -344,6 +351,14 @@ export class WorkflowHarness {
     }
   }
 
+  private request(path: string, init: RequestInit): Promise<Response> {
+    if (this.options.inMemory) {
+      if (!this.app) throw new Error('harness not set up')
+      return this.app.request(path, init)
+    }
+    return fetch(`${this.baseUrl}${path}`, init)
+  }
+
   private async setupAccount(): Promise<void> {
     const setup = await this.json<{
       token: string
@@ -358,7 +373,7 @@ export class WorkflowHarness {
   }
 
   async json<T>(method: string, path: string, body?: unknown, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await this.request(path, {
       method,
       headers: this.authHeaders(),
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -395,7 +410,7 @@ export class WorkflowHarness {
   }
 
   async createThread(
-    kind: typeof THREAD_KIND_CHAT = THREAD_KIND_CHAT,
+    _kind: typeof THREAD_KIND_CHAT = THREAD_KIND_CHAT,
     coreCode: SupportedCoreCode = 'codex',
     title?: string
   ): Promise<{ id: string; coreCode: string; threadKind: string }> {
@@ -403,11 +418,7 @@ export class WorkflowHarness {
       await this.createProject()
     }
     const providerCode =
-      coreCode === 'claude-code'
-        ? 'claude'
-        : coreCode === 'cursorcli'
-          ? 'cursor'
-          : coreCode
+      coreCode === 'claude' ? 'claude' : coreCode === 'cursor' ? 'cursor' : coreCode
     const created = await this.json<{ id: string; providerCode: string }>(
       'POST',
       `/api/projects/${this.projectId}/conversations`,
@@ -428,20 +439,15 @@ export class WorkflowHarness {
   }
 
   async listMessages(threadId: string): Promise<Array<Record<string, unknown>>> {
-    const data = await this.json<Array<Record<string, unknown>> | { messages: Array<Record<string, unknown>> }>(
-      'GET',
-      `/api/conversations/${threadId}/messages`
-    )
+    const data = await this.json<
+      Array<Record<string, unknown>> | { messages: Array<Record<string, unknown>> }
+    >('GET', `/api/conversations/${threadId}/messages`)
     return Array.isArray(data) ? data : data.messages
   }
 
   async switchCore(threadId: string, coreCode: SupportedCoreCode): Promise<void> {
     const providerCode =
-      coreCode === 'claude-code'
-        ? 'claude'
-        : coreCode === 'cursorcli'
-          ? 'cursor'
-          : coreCode
+      coreCode === 'claude' ? 'claude' : coreCode === 'cursor' ? 'cursor' : coreCode
     await this.json('PATCH', `/api/conversations/${threadId}/provider`, { providerCode })
   }
 
@@ -451,7 +457,7 @@ export class WorkflowHarness {
     options?: { createTaskMode?: boolean; generateDraft?: boolean; attachmentIds?: string[] }
   ): Promise<Record<string, unknown>> {
     if (options?.createTaskMode || options?.generateDraft) {
-      const response = await fetch(`${this.baseUrl}/api/conversations/${threadId}/turns`, {
+      const response = await this.request(`/api/conversations/${threadId}/turns`, {
         method: 'POST',
         headers: this.authHeaders(),
         body: JSON.stringify({
@@ -577,7 +583,7 @@ export class WorkflowHarness {
     path: string,
     body?: unknown
   ): Promise<{ message: string; code: string | null }> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const response = await this.request(path, {
       method,
       headers: this.authHeaders(),
       body: body !== undefined ? JSON.stringify(body) : undefined
@@ -597,7 +603,6 @@ export class WorkflowHarness {
     const data = await this.json<{ job: Record<string, unknown> }>('GET', `/api/jobs/${jobId}`)
     return data.job
   }
-
 
   async pauseJob(jobId: string): Promise<Record<string, unknown>> {
     const data = await this.json<{ job: Record<string, unknown> }>(
@@ -634,7 +639,7 @@ export class WorkflowHarness {
   ): Promise<{ id: string; name: string }> {
     const form = new FormData()
     form.append('file', new Blob([content], { type: mimeType }), name)
-    const response = await fetch(`${this.baseUrl}/api/conversations/${threadId}/attachments`, {
+    const response = await this.request(`/api/conversations/${threadId}/attachments`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.token}` },
       body: form
@@ -666,7 +671,6 @@ export class WorkflowHarness {
       `waitForJob timeout: status=${String(last.status)} phase=${String((last.taskProgress as Record<string, unknown>)?.phase)}`
     )
   }
-
 }
 
 function sleep(ms: number): Promise<void> {

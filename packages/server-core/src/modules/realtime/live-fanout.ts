@@ -162,7 +162,8 @@ export class LiveFanout {
         const resync: RealtimeEnvelope = {
           eventId: null,
           ephemeral: true,
-          topic: (conn.topics.values().next().value as RealtimeTopic | undefined) ?? 'settings:self',
+          topic:
+            (conn.topics.values().next().value as RealtimeTopic | undefined) ?? 'settings:self',
           type: 'realtime.resync-required',
           entityId: conn.connectionId,
           occurredAt: Date.now(),

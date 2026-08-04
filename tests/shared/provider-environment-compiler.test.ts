@@ -86,7 +86,7 @@ test('EnvironmentCompiler rejects non-owned provider overlay keys', () => {
 
 test('EnvironmentCompiler accepts typed provider configuration without accepting env credentials', () => {
   const env = defaultEnvironmentCompiler.compile({
-    provider: 'claude-code',
+    provider: 'claude',
     hostEnvironment: freezeHost({
       ANTHROPIC_MODEL: 'host-model',
       ANTHROPIC_BASE_URL: 'https://host.invalid',

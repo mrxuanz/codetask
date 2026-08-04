@@ -1,4 +1,4 @@
-import type { PlannerRegisteredMilestone } from '../../shared/contracts/plan.ts'
+import type { PlannerRegisteredMilestone } from '@codetask/contracts'
 
 export type {
   FlatTaskPlan,
@@ -7,7 +7,7 @@ export type {
   PlannerRegisteredSlice,
   PlannerRegisteredTask,
   SavedJobPlan
-} from '../../shared/contracts/plan.ts'
+} from '@codetask/contracts'
 
 export interface PlannerRegisteredTaskContext {
   taskTitle: string

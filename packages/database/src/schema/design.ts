@@ -1,11 +1,4 @@
-import {
-  integer,
-  primaryKey,
-  sqliteTable,
-  text,
-  uniqueIndex,
-  index
-} from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, sqliteTable, text, uniqueIndex, index } from 'drizzle-orm/sqlite-core'
 
 export const drafts = sqliteTable(
   'drafts',
@@ -158,10 +151,7 @@ export const executionPlans = sqliteTable(
     createdAt: integer('created_at').notNull()
   },
   (table) => [
-    uniqueIndex('idx_execution_plans_session_revision').on(
-      table.planningSessionId,
-      table.revision
-    )
+    uniqueIndex('idx_execution_plans_session_revision').on(table.planningSessionId, table.revision)
   ]
 )
 
@@ -254,9 +244,7 @@ export const executionPlanRevisions = sqliteTable(
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at')
   },
-  (table) => [
-    primaryKey({ columns: [table.planningSessionId, table.revision] })
-  ]
+  (table) => [primaryKey({ columns: [table.planningSessionId, table.revision] })]
 )
 
 export const jobHandoffs = sqliteTable(
@@ -301,7 +289,5 @@ export const planningCapacityLeases = sqliteTable(
     acquiredAt: integer('acquired_at').notNull(),
     releasedAt: integer('released_at')
   },
-  (table) => [
-    uniqueIndex('idx_planning_capacity_active').on(table.pool, table.releasedAt)
-  ]
+  (table) => [uniqueIndex('idx_planning_capacity_active').on(table.pool, table.releasedAt)]
 )

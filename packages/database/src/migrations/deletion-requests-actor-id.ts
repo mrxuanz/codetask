@@ -33,8 +33,10 @@ export const migration058DeletionRequestsActorId: ConversationMigration = {
       .get() as { id: string; username: string } | undefined
     if (!user) return
 
-    db.prepare(
-      `UPDATE deletion_requests SET actor_id = ? WHERE actor_id = ? OR actor_id = ?`
-    ).run(user.id, user.username, user.id)
+    db.prepare(`UPDATE deletion_requests SET actor_id = ? WHERE actor_id = ? OR actor_id = ?`).run(
+      user.id,
+      user.username,
+      user.id
+    )
   }
 }

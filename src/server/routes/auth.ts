@@ -12,7 +12,9 @@ import { closeRealtimeForSession, closeRealtimeForUser } from '../events/realtim
 /**
  * Auth routes at `/api/auth/*` (04 cutover — no root-path dual mount).
  */
-export function createAuthRoutes(ctx: AppContext) {
+export function createAuthRoutes(
+  ctx: AppContext
+): ReturnType<AppContext['security']['auth']['module']['createRoutes']> {
   return ctx.security.auth.module.createRoutes({
     mode: ctx.security.mode,
     getClientIp,

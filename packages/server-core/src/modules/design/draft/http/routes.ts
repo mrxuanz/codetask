@@ -29,46 +29,61 @@ export type DesignHttpEnv = {
   }
 }
 
-function ok<T>(data: T) {
-  return {
-    success: true as const,
-    data,
-    status: 0,
-    message: 'success',
-    extra: {} as Record<string, unknown>
-  }
+function ok<T>(
+  data: T,
+  requestId: string
+): {
+  success: true
+  data: T
+  requestId: string
+} {
+  return { success: true as const, data, requestId }
 }
 
-function fail(code: string, message: string, status: number) {
+function fail(
+  code: string,
+  message: string,
+  status: number,
+  requestId: string
+): {
+  body: {
+    success: false
+    error: { code: string; message: string }
+    requestId: string
+  }
+  status: number
+} {
   return {
     body: {
       success: false as const,
-      data: { error: message, code },
-      status: status === 409 ? 40901 : status === 404 ? 40401 : status === 403 ? 40101 : 40001,
-      message,
-      extra: { code }
+      error: { code, message },
+      requestId
     },
     status
   }
 }
 
-function mapError(error: unknown): { body: ReturnType<typeof fail>['body']; status: number } {
+function mapError(
+  error: unknown,
+  requestId: string
+): { body: ReturnType<typeof fail>['body']; status: number } {
   if (error instanceof DesignConflictError) {
-    return fail(error.code, error.message, 409)
+    return fail(error.code, error.message, 409, requestId)
   }
   if (error instanceof DesignValidationError) {
-    return fail(error.code, error.message, 400)
+    return fail(error.code, error.message, 400, requestId)
   }
   if (error instanceof DesignNotFoundError) {
-    return fail(error.code, error.message, 404)
+    return fail(error.code, error.message, 404, requestId)
   }
   if (error instanceof DesignForbiddenError) {
-    return fail(error.code, error.message, 403)
+    return fail(error.code, error.message, 403, requestId)
   }
   return fail(
     'design.internal',
     error instanceof Error ? error.message : String(error),
-    500
+    500,
+    requestId
   )
 }
 
@@ -88,11 +103,12 @@ export function createDraftRoutes(
     try {
       const actor = requireActor(c)
       const q = c.req.query('q') ?? undefined
-      const completion = (c.req.query('completion') as 'all' | 'incomplete' | 'complete' | undefined) ?? 'all'
+      const completion =
+        (c.req.query('completion') as 'all' | 'incomplete' | 'complete' | undefined) ?? 'all'
       const data = await drafts.list(actor, { q, completion })
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -102,12 +118,15 @@ export function createDraftRoutes(
       const actor = requireActor(c)
       const body = await c.req.json()
       if (!Value.Check(CreateDraftBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid create draft body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid create draft body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.create(actor, body)
-      return c.json(ok(data), 201)
+      return c.json(ok(data, c.get('requestId')), 201)
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -115,9 +134,9 @@ export function createDraftRoutes(
   app.get('/:draftId', async (c) => {
     try {
       const data = await drafts.get(requireActor(c), c.req.param('draftId'))
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -126,12 +145,15 @@ export function createDraftRoutes(
     try {
       const body = await c.req.json()
       if (!Value.Check(PatchDraftBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid patch body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid patch body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.patch(requireActor(c), c.req.param('draftId'), body)
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -139,9 +161,9 @@ export function createDraftRoutes(
   app.delete('/:draftId', async (c) => {
     try {
       await drafts.archive(requireActor(c), c.req.param('draftId'))
-      return c.json(ok({ archived: true }))
+      return c.json(ok({ archived: true }, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -150,16 +172,19 @@ export function createDraftRoutes(
     try {
       const body = await c.req.json()
       if (!Value.Check(ConfirmDraftBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid confirm body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid confirm body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.confirm(
         requireActor(c),
         c.req.param('draftId'),
         body.expectedRevision
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -168,7 +193,10 @@ export function createDraftRoutes(
     try {
       const body = await c.req.json()
       if (!Value.Check(UnlockDraftBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid unlock body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid unlock body', 400, c.get('requestId')).body,
+          400
+        )
       }
       if (body.cancelActivePlanning) {
         // Active sessions must be cancelled explicitly via planning API; unlock enforces zero active.
@@ -178,9 +206,9 @@ export function createDraftRoutes(
         c.req.param('draftId'),
         body.expectedRevision
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -191,7 +219,10 @@ export function createDraftRoutes(
       const expectedRevision =
         typeof body?.expectedRevision === 'number' ? body.expectedRevision : -1
       if (expectedRevision < 0) {
-        return c.json(fail('design.validation', 'expectedRevision required', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'expectedRevision required', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.confirmSection(
         requireActor(c),
@@ -199,9 +230,9 @@ export function createDraftRoutes(
         c.req.param('section'),
         expectedRevision
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -210,7 +241,10 @@ export function createDraftRoutes(
     try {
       const body = await c.req.json()
       if (!Value.Check(PatchAbilitiesBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid abilities body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid abilities body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.patchAbilities(
         requireActor(c),
@@ -218,9 +252,9 @@ export function createDraftRoutes(
         body.expectedRevision,
         body.abilities
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -229,7 +263,10 @@ export function createDraftRoutes(
     try {
       const body = await c.req.json()
       if (!Value.Check(PatchExecutionProfileBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid execution profile body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid execution profile body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.patchExecutionProfile(
         requireActor(c),
@@ -237,9 +274,9 @@ export function createDraftRoutes(
         body.expectedRevision,
         body.executionProfile
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -247,9 +284,9 @@ export function createDraftRoutes(
   app.get('/:draftId/references', async (c) => {
     try {
       const data = await drafts.listReferences(requireActor(c), c.req.param('draftId'))
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -260,7 +297,10 @@ export function createDraftRoutes(
       const expectedRevision =
         typeof body?.expectedRevision === 'number' ? body.expectedRevision : -1
       if (expectedRevision < 0 || !body?.name || !body?.kind || !body?.description) {
-        return c.json(fail('design.validation', 'Invalid reference body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid reference body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.addReference(
         requireActor(c),
@@ -278,9 +318,9 @@ export function createDraftRoutes(
         },
         expectedRevision
       )
-      return c.json(ok(data), 201)
+      return c.json(ok(data, c.get('requestId')), 201)
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -291,7 +331,10 @@ export function createDraftRoutes(
       const expectedRevision =
         typeof body?.expectedRevision === 'number' ? body.expectedRevision : -1
       if (expectedRevision < 0) {
-        return c.json(fail('design.validation', 'expectedRevision required', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'expectedRevision required', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.patchReference(
         requireActor(c),
@@ -300,9 +343,9 @@ export function createDraftRoutes(
         { name: body.name, description: body.description },
         expectedRevision
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -313,7 +356,10 @@ export function createDraftRoutes(
       const expectedRevision =
         typeof body?.expectedRevision === 'number' ? body.expectedRevision : -1
       if (expectedRevision < 0) {
-        return c.json(fail('design.validation', 'expectedRevision required', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'expectedRevision required', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await drafts.deleteReference(
         requireActor(c),
@@ -321,9 +367,9 @@ export function createDraftRoutes(
         c.req.param('referenceId'),
         expectedRevision
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -333,11 +379,17 @@ export function createDraftRoutes(
       const actor = requireActor(c)
       const body = await c.req.json()
       if (!Value.Check(CreatePlanningSessionBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid planning session body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid planning session body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const draft = await drafts.get(actor, c.req.param('draftId'))
       if (draft.lockRevision !== body.expectedRevision) {
-        return c.json(fail('design.conflict', 'Revision conflict', 409).body, 409)
+        return c.json(
+          fail('design.conflict', 'Revision conflict', 409, c.get('requestId')).body,
+          409
+        )
       }
       const snapshot = await drafts.captureConfirmedSnapshot(actor, draft.id)
       const session = await planning.createSession({
@@ -345,9 +397,9 @@ export function createDraftRoutes(
         draftSnapshot: snapshot,
         references: draft.references
       })
-      return c.json(ok(session), 201)
+      return c.json(ok(session, c.get('requestId')), 201)
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -357,9 +409,9 @@ export function createDraftRoutes(
       const actor = requireActor(c)
       await drafts.get(actor, c.req.param('draftId'))
       const sessions = await planning.listForDraft(actor, c.req.param('draftId'))
-      return c.json(ok(sessions))
+      return c.json(ok(sessions, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -373,9 +425,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
   app.get('/:sessionId', async (c) => {
     try {
       const data = await planning.get(requireActor(c), c.req.param('sessionId'))
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -383,9 +435,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
   app.post('/:sessionId/retry', async (c) => {
     try {
       const data = await planning.retry(requireActor(c), c.req.param('sessionId'))
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -393,9 +445,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
   app.post('/:sessionId/cancel', async (c) => {
     try {
       const data = await planning.cancel(requireActor(c), c.req.param('sessionId'))
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -403,9 +455,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
   app.post('/:sessionId/regenerate', async (c) => {
     try {
       const data = await planning.regenerate(requireActor(c), c.req.param('sessionId'))
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -414,7 +466,10 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
     try {
       const body = await c.req.json()
       if (!Value.Check(PatchTreeNodeBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid tree patch body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid tree patch body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await planning.patchNode(
         requireActor(c),
@@ -422,9 +477,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
         c.req.param('nodeId'),
         body
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -433,7 +488,10 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
     try {
       const body = await c.req.json()
       if (!Value.Check(ConfirmTreeNodeBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid confirm node body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid confirm node body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await planning.confirmNode(
         requireActor(c),
@@ -441,9 +499,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
         c.req.param('nodeId'),
         body.expectedRevision
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })
@@ -452,7 +510,10 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
     try {
       const body = await c.req.json()
       if (!Value.Check(PublishPlanningBodySchema, body)) {
-        return c.json(fail('design.validation', 'Invalid publish body', 400).body, 400)
+        return c.json(
+          fail('design.validation', 'Invalid publish body', 400, c.get('requestId')).body,
+          400
+        )
       }
       const data = await planning.publish(
         requireActor(c),
@@ -460,9 +521,9 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
         body.expectedRevision,
         body.idempotencyKey
       )
-      return c.json(ok(data))
+      return c.json(ok(data, c.get('requestId')))
     } catch (error) {
-      const mapped = mapError(error)
+      const mapped = mapError(error, c.get('requestId'))
       return c.json(mapped.body, mapped.status as 400)
     }
   })

@@ -80,7 +80,11 @@ export function labelForStep(step: string): string {
 export function partForCaseId(caseId: string): AcceptancePart | null {
   if (caseId.startsWith('G3') || caseId.startsWith('CHAT')) return 'conversation'
   if (caseId.startsWith('SETTINGS-MCP') || caseId.startsWith('SETTINGS')) return 'settings-mcp'
-  if (caseId.startsWith('DESIGN') || caseId.startsWith('FOUNDATION') || caseId.startsWith('DRAFT')) {
+  if (
+    caseId.startsWith('DESIGN') ||
+    caseId.startsWith('FOUNDATION') ||
+    caseId.startsWith('DRAFT')
+  ) {
     return 'draft-job'
   }
   if (caseId.startsWith('G0') || caseId.startsWith('G1') || caseId.startsWith('G2')) {

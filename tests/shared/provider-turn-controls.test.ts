@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { buildProviderTurnContext } from '../../src/server/providers/driver.ts'
-import { defaultEnvironmentCompiler } from '../../src/server/providers/environment.ts'
+import { buildProviderTurnContext } from '../../packages/provider-runtime-node/src/providers/driver.ts'
+import { defaultEnvironmentCompiler } from '../../packages/provider-runtime-node/src/providers/environment.ts'
 import type { AgentTurnInput } from '../../src/server/agent-runtime/types.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -46,12 +46,18 @@ test('buildProviderTurnContext carries controls without reading process.env', ()
 })
 
 test('PreparedProviderTurn forwards controls.outerSandbox', () => {
-  const source = readFileSync(join(root, 'src/server/providers/delegating-driver.ts'), 'utf8')
+  const source = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/providers/delegating-driver.ts'),
+    'utf8'
+  )
   assert.match(source, /outerSandbox:\s*input\.turn\.controls\.outerSandbox/)
 })
 
 test('registry streamTurn builds ProviderTurnContext with descriptor authMode', () => {
-  const source = readFileSync(join(root, 'src/server/agent-runtime/providers/index.ts'), 'utf8')
+  const source = readFileSync(
+    join(root, 'packages/provider-runtime-node/src/streamers/index.ts'),
+    'utf8'
+  )
   assert.match(source, /buildProviderTurnContext/)
   assert.match(source, /authMode:\s*driver\.descriptor\.capabilities\.authMode/)
 })

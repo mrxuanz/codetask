@@ -59,11 +59,7 @@ export const ProviderCodeSchema = Type.Union([
 ])
 
 export const TaskEvidenceSchema = Type.Object({
-  status: Type.Union([
-    Type.Literal('completed'),
-    Type.Literal('blocked'),
-    Type.Literal('failed')
-  ]),
+  status: Type.Union([Type.Literal('completed'), Type.Literal('blocked'), Type.Literal('failed')]),
   summary: Type.String(),
   changedFiles: Type.Array(Type.String()),
   evidence: Type.Array(Type.String()),

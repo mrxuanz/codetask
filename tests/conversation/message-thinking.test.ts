@@ -78,7 +78,7 @@ test('shouldSeedConversationHistory always seeds fragile CLI adapters', () => {
     kind: 'text',
     content: 'Remember this',
     attachments: [],
-    coreCode: 'cursorcli',
+    coreCode: 'cursor',
     createdAt: '2026-07-01T00:00:00.000Z'
   }
   const assistantMessage: ConversationMessageDto = {
@@ -87,13 +87,13 @@ test('shouldSeedConversationHistory always seeds fragile CLI adapters', () => {
     kind: 'text',
     content: 'I will remember it',
     attachments: [],
-    coreCode: 'cursorcli',
+    coreCode: 'cursor',
     runtimeSessionId: 'cursor-session-1',
     createdAt: '2026-07-01T00:00:01.000Z'
   }
   const prior = [userMessage, assistantMessage]
 
-  assert.equal(shouldSeedConversationHistory('cursor-session-1', 'cursorcli', prior), true)
+  assert.equal(shouldSeedConversationHistory('cursor-session-1', 'cursor', prior), true)
   assert.equal(
     shouldSeedConversationHistory('opencode-session-1', 'opencode', [
       { ...userMessage, coreCode: 'opencode' },

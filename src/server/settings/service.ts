@@ -1,9 +1,8 @@
 import type Database from 'better-sqlite3'
 import type { AgentPromptSettings, SettingsProviderCode } from '@codetask/contracts'
-import {
-  composeSettingsModule,
-  type SettingsModule
-} from '@codetask/server-core/modules/settings'
+import { composeSettingsModule, type SettingsModule } from '@codetask/server-core/modules/settings'
+import { createFileSecretKeyProvider, keyBytesToHex } from '@codetask/service-bootstrap'
+import { toCanonicalProviderCode } from '@codetask/agent-runtime'
 import type { AppContext } from '../bootstrap'
 import type { AppDatabase } from '../db'
 import { buildChatConversationBody } from '../conversation/prompts'
@@ -35,7 +34,12 @@ function buildDefaultPromptBodies(): AgentPromptSettings {
 }
 
 export function composeSettingsForContext(ctx: AppContext): SettingsModule {
-  const masterKey = process.env.CODETASK_SETTINGS_MASTER_KEY ?? ctx.security.authSecret
+  const secrets = createFileSecretKeyProvider({
+    dataDir: ctx.dataDir,
+    authSecretHex: ctx.security.authSecret,
+    masterKeyFile: ctx.masterKeyFile
+  })
+  const masterKey = keyBytesToHex(secrets.getOrCreateInstallationKeySync())
   return composeSettingsModule({
     db: sqliteClient(ctx.db),
     masterKey,
@@ -61,7 +65,7 @@ export function composeSettingsForContext(ctx: AppContext): SettingsModule {
       async listProviders() {
         const cores = await listChatCores()
         return cores.map((core) => ({
-          code: core.code as SettingsProviderCode,
+          code: (toCanonicalProviderCode(core.code) ?? 'codex') as SettingsProviderCode,
           label: core.label,
           available: core.available
         }))

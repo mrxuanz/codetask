@@ -43,10 +43,7 @@ test('release builds package and smoke an ncc + SEA service artifact', () => {
 })
 
 test('CI package-smoke passes a real platform label for SEA packaging', () => {
-  assert.match(
-    ciWorkflow,
-    /package-smoke:[\s\S]*?artifact-name:\s*linux-amd64/u
-  )
+  assert.match(ciWorkflow, /package-smoke:[\s\S]*?artifact-name:\s*linux-amd64/u)
   assert.match(
     buildWorkflow,
     /npm run package:server:sea -- --platform \$\{\{ inputs\.artifact-name \}\}/u
@@ -88,9 +85,13 @@ test('GitHub Release publish avoids basename-colliding evidence logs', () => {
   assert.doesNotMatch(releaseWorkflow, /dist\/release-evidence\/\*\*\/\*\.manifest\.json/u)
 })
 
-test('Rust workspace tests are serialized without skipping failures', () => {
+test('Rust workspace tests are serialized on every platform-specific CI path', () => {
   assert.ok(ciWorkflow.includes(serialRustTest))
   assert.ok(sandboxWorkflow.includes(serialRustTest))
+  assert.ok(buildWorkflow.includes(serialRustTest))
+  assert.match(ciWorkflow, /rust-macos:[\s\S]*?runs-on: macos-15/u)
+  assert.match(ciWorkflow, /rust-windows:[\s\S]*?runs-on: windows-2025/u)
+  assert.match(buildWorkflow, /runner\.os != 'Linux'[\s\S]*?Test platform-native modules/u)
   assert.match(
     sandboxWorkflow,
     /cargo test --manifest-path native\/Cargo\.toml --release --no-fail-fast -- --test-threads=1/

@@ -27,7 +27,9 @@ if (process.platform === 'win32') {
 } else {
   run('npm', ['run', 'typecheck'])
 }
-run(process.execPath, [electronVite, 'build'], {
-  ...process.env,
-  CODETASK_BUILD_TARGET: 'standalone'
-})
+run(process.execPath, [
+  electronVite,
+  'build',
+  '--config',
+  join(root, 'electron.vite.standalone.config.ts')
+])

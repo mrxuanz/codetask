@@ -6,7 +6,7 @@ test('shared server composition and standalone adapters do not import Electron',
   const sources = [
     new URL('../../src/main/server.ts', import.meta.url),
     new URL('../../src/standalone/data-dir.ts', import.meta.url),
-    new URL('../../src/standalone/app-secret.ts', import.meta.url),
+    new URL('../../src/main/storage-selection.ts', import.meta.url),
     new URL('../../src/standalone/platform.ts', import.meta.url),
     new URL('../../src/standalone/standalone-main.ts', import.meta.url)
   ]

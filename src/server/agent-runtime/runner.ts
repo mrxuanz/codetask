@@ -11,11 +11,7 @@ import type { AgentTurnChunk, AgentTurnRunnerInput, RoleWorkerInput } from './ty
 import { resolveDownstreamAbortSignal } from '../context/request-abort'
 import { getAppConfig } from '../bootstrap'
 import { getWorkspaceLeaseContext } from '../infra/workspace-lease-context'
-import {
-  isWorkspaceLeaseActive,
-  refreshWorkspaceLease
-} from '../infra/workspace-lease-store'
-import { getExecutionRunContext } from '../infra/execution-run-context'
+import { isWorkspaceLeaseActive, refreshWorkspaceLease } from '../infra/workspace-lease-store'
 import {
   assertCapabilityProfileMatchesRole,
   assertProviderSupportsCapability,
@@ -28,14 +24,12 @@ import { appendWorkspaceAuthorityPrompt, resolveWorkspaceBinding } from './works
 async function* withSandboxLeaseRefresh<T>(
   stream: AsyncGenerator<T>,
   input: {
-    workloadRunId?: string
     workspaceLease?: { leaseId: string }
     controller: AbortController
     externalSignal?: AbortSignal
   }
 ): AsyncGenerator<T> {
   const KEEPALIVE_INTERVAL_MS = 60_000
-  const { refreshWorkloadLease } = await import('../infra/workload-lease-stub')
   let refreshPending = false
   const abortForLeaseLoss = (error: unknown): void => {
     const cause =
@@ -48,7 +42,6 @@ async function* withSandboxLeaseRefresh<T>(
     if (refreshPending || input.controller.signal.aborted) return
     refreshPending = true
     try {
-      if (input.workloadRunId) await refreshWorkloadLease(input.workloadRunId)
       if (input.workspaceLease && !refreshWorkspaceLease(input.workspaceLease.leaseId)) {
         throw new SandboxError('Workspace lease was lost', 'workspace.lease_lost')
       }
@@ -140,7 +133,6 @@ async function* streamAgentTurnOnce(
   const useFakeInProcess = isTestFakeProvider(provider)
   const driver = useFakeInProcess ? null : getProviderRegistry().get(input.provider)
   const workspaceLease = input.workspaceLease ?? getWorkspaceLeaseContext()
-  const workloadRunId = input.workloadRunId ?? getExecutionRunContext()?.runId
   assertCapabilityProfileMatchesRole(input.role, input.capabilityProfile)
   if (!useFakeInProcess) {
     assertProviderSupportsCapability(input.provider, input.capabilityProfile)
@@ -225,7 +217,6 @@ async function* streamAgentTurnOnce(
     })
     try {
       yield* withSandboxLeaseRefresh(sandboxStream, {
-        ...(workloadRunId !== undefined ? { workloadRunId } : {}),
         ...(workspaceLease !== undefined ? { workspaceLease } : {}),
         controller: sandboxAbort,
         ...(input.signal !== undefined ? { externalSignal: input.signal } : {})

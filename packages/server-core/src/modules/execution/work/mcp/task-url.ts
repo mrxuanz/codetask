@@ -1,7 +1,5 @@
 import { buildTaskMcpCapabilityToken } from './task-session.ts'
-import {
-  getExecutionMcpBackendPort
-} from '../../verification/mcp/backend-port.ts'
+import { getExecutionMcpBackendPort } from '../../verification/mcp/backend-port.ts'
 
 export function buildTaskWorkerMcpUrl(input: {
   sessionId: string

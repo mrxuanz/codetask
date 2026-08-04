@@ -76,7 +76,7 @@ async function runStatic(runtimeRoot: string): Promise<{
   injectedAuthKeys: string[]
   runtimeIsolated: boolean
 }> {
-  const prepared = prepareProviderRuntimeForTest('claude-code')
+  const prepared = prepareProviderRuntimeForTest('claude')
   const env = buildMergedEnv(prepared.environment)
   const claudeDir = env.CLAUDE_CONFIG_DIR ?? join(runtimeRoot, '.claude')
   const hostConfigDir = resolveClaudeHostConfigDir().toLowerCase()
@@ -122,7 +122,7 @@ async function runStatic(runtimeRoot: string): Promise<{
 }
 
 async function runHello(runtimeRoot: string, workspace: string): Promise<unknown> {
-  const prepared = prepareProviderRuntimeForTest('claude-code')
+  const prepared = prepareProviderRuntimeForTest('claude')
   const env = buildMergedEnv(prepared.environment)
   if (!claudeAuthPresent(env)) {
     return { skipped: true, reason: 'no ANTHROPIC_* / CLAUDE_CODE_OAUTH_TOKEN' }

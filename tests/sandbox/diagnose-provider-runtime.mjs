@@ -104,7 +104,7 @@ function isPathWithin(parent, candidate) {
   return fromParent === '' || (!fromParent.startsWith('..') && !isAbsolute(fromParent))
 }
 
-function providerAuthStatus(prod, provider, _scratchRoot, workspaceRoot) {
+function providerAuthStatus(prod, provider) {
   const profile = prod.prepareProviderRuntimeProfile(provider)
   return {
     present: profile.diagnostics.authMaterialPresent,
@@ -589,7 +589,7 @@ async function main() {
         for (const provider of providers) {
           const providerScratch = join(scratchRoot, provider)
           mkdirSync(providerScratch, { recursive: true })
-          const auth = providerAuthStatus(prod, provider, providerScratch, workspacePath)
+          const auth = providerAuthStatus(prod, provider)
           report.live[provider] = { auth, hello: null, mcp: null }
 
           if (!auth.present) {

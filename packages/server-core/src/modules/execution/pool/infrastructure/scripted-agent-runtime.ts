@@ -1,8 +1,4 @@
-import type {
-  AgentRuntime,
-  AgentTurnEvent,
-  AgentTurnInput
-} from '@codetask/agent-runtime'
+import type { AgentRuntime, AgentTurnEvent, AgentTurnInput } from '@codetask/agent-runtime'
 
 export type ScriptedTurnHandler = (
   input: AgentTurnInput
@@ -30,8 +26,12 @@ export class ScriptedAgentRuntime implements AgentRuntime {
     }
   }
 
-  async abort(): Promise<void> {}
-  async closeScope(): Promise<void> {}
+  async abort(): Promise<void> {
+    // Scripted handlers do not retain a cancellable process between events.
+  }
+  async closeScope(): Promise<void> {
+    // Scripted runtimes do not allocate reusable scopes.
+  }
   async inspectScope(): Promise<null> {
     return null
   }

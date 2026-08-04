@@ -1,7 +1,13 @@
 import type { createIsolatedTestDatabase } from '../../src/server/db'
-import { projects, threadMessages, threads } from '../../src/server/db/schema'
+import { projects } from '../../src/server/db/schema'
 
-/** Seed project/thread/message graph for retention fixtures (no legacy thread_jobs). */
+function sqliteClient(
+  db: ReturnType<typeof createIsolatedTestDatabase>
+): import('better-sqlite3').Database | null {
+  return (db as { $client?: import('better-sqlite3').Database }).$client ?? null
+}
+
+/** Seed project + conversation_threads for retention fixtures. */
 export async function seedMinimalJob(
   db: ReturnType<typeof createIsolatedTestDatabase>,
   _jobId: string,
@@ -16,28 +22,14 @@ export async function seedMinimalJob(
     createdAt: now,
     updatedAt: now
   })
-  await db.insert(threads).values({
-    id: 'thread-1',
-    actorId: 'user',
-    projectId: 'proj-1',
-    title: 'T',
-    status: 'draft',
-    conversationId: 'conv-1',
-    coreCode: 'cursor',
-    runtimeStatus: 'idle',
-    coreRuntimeJson: '{}',
-    createdAt: now,
-    updatedAt: now
-  })
-  await db.insert(threadMessages).values({
-    id: 'draft-1',
-    threadId: 'thread-1',
-    actorId: 'user',
-    role: 'assistant',
-    kind: 'text',
-    content: '{}',
-    coreCode: 'cursor',
-    conversationId: 'conv-1',
-    createdAt: new Date().toISOString()
-  })
+  const client = sqliteClient(db)
+  const iso = new Date(now * 1000).toISOString()
+  client
+    ?.prepare(
+      `INSERT INTO conversation_threads (
+         id, actor_id, project_id, title, title_source, provider_code, state,
+         state_revision, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, 'auto', 'cursor', 'active', 0, ?, ?)`
+    )
+    .run('thread-1', 'user', 'proj-1', 'T', iso, iso)
 }

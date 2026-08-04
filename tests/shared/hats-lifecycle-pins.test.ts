@@ -74,8 +74,8 @@ test('dependency-human recovery classifies human blockers distinctly from infra'
 // H6-09 / H7-09 — one-shot work never enters the reusable Cursor ACP pool
 test('RuntimeManager makes sandbox job Cursor turns one-shot and ephemeral', () => {
   const worker = readSource('src/sandbox/role-worker.ts')
-  const manager = readSource('src/server/providers/lifecycle.ts')
-  const stream = readSource('src/server/agent-runtime/cursor-acp/stream-session-turn.ts')
+  const manager = readSource('packages/provider-runtime-node/src/providers/lifecycle.ts')
+  const stream = readSource('packages/provider-runtime-node/src/cursor-acp/stream-session-turn.ts')
   assert.match(worker, /getAgentTurnProvider\(input\.provider\)/)
   assert.doesNotMatch(worker, /closeJobCursorRuntime/)
   assert.match(manager, /reusePolicy === 'one-shot'/)
@@ -88,31 +88,31 @@ test('RuntimeManager makes sandbox job Cursor turns one-shot and ephemeral', () 
 
 // H6-10 — only manager-selected conversation scopes may enter the reusable pool
 test('conversation Cursor reuse follows ProviderRuntimeScope selected by RuntimeManager', () => {
-  const registry = readSource('src/server/agent-runtime/cursor-acp/runtime-registry.ts')
+  const registry = readSource('packages/provider-runtime-node/src/cursor-acp/runtime-registry.ts')
   assert.match(registry, /buildConversationCursorRuntimeScope/)
-  const stream = readSource('src/server/agent-runtime/cursor-acp/stream-session-turn.ts')
+  const stream = readSource('packages/provider-runtime-node/src/cursor-acp/stream-session-turn.ts')
   assert.match(stream, /input\.providerRuntimeScope/)
   assert.match(stream, /reusePolicy === 'conversation-scoped'/)
-  const cursorDriver = readSource('src/server/providers/cursor/driver.ts')
+  const cursorDriver = readSource('packages/provider-runtime-node/src/providers/cursor/driver.ts')
   assert.match(cursorDriver, /ProviderRuntimeManager selects one-shot vs conversation reuse/)
   assert.match(cursorDriver, /getCursorProviderRuntimeRegistry/)
-  const designModule = readSource('src/server/design-module.ts')
-  assert.match(designModule, /providerRuntimeScopeId/)
+  const hostStreamer = readSource('src/server/agent-runtime/host-streamer.ts')
+  assert.match(hostStreamer, /providerRuntimeScopeId:\s*input\.scopeId/)
   const runner = readSource('src/server/agent-runtime/runner.ts')
   assert.match(runner, /providerRuntimeScopeId/)
 })
 
 // H6-02 / H7-05 — preflight failure must not write credential files
 test('provider auth preflight is read-only and probes only external CLI runtimes', () => {
-  const spawnSource = readSource('src/server/providers/spawn.ts')
-  const driver = readSource('src/server/providers/driver.ts')
+  const spawnSource = readSource('packages/provider-runtime-node/src/providers/spawn.ts')
+  const driver = readSource('packages/provider-runtime-node/src/providers/driver.ts')
   const sdkPreflights = [
-    readSource('src/server/providers/codex/preflight.ts'),
-    readSource('src/server/providers/claude/preflight.ts')
+    readSource('packages/provider-runtime-node/src/providers/codex/preflight.ts'),
+    readSource('packages/provider-runtime-node/src/providers/claude/preflight.ts')
   ]
   const externalCliPreflights = [
-    readSource('src/server/providers/cursor/preflight.ts'),
-    readSource('src/server/providers/opencode/preflight.ts')
+    readSource('packages/provider-runtime-node/src/providers/cursor/preflight.ts'),
+    readSource('packages/provider-runtime-node/src/providers/opencode/preflight.ts')
   ]
   assert.match(driver, /preflight\(context:/)
   assert.match(spawnSource, /shell:\s*false/)
@@ -159,7 +159,7 @@ test('buildLaunchEnv isolates concurrent provider overlays and strips auth token
     providerOverlay: { OPENAI_API_KEY: 'codex-key-a' }
   })
   const claude = buildLaunchEnv({
-    provider: 'claude-code',
+    provider: 'claude',
     hostEnv: host,
     providerOverlay: { ANTHROPIC_API_KEY: 'claude-key-b' }
   })

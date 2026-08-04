@@ -92,9 +92,7 @@ function readJobContext(db: Database.Database, jobId: string): JobVerificationCo
        JOIN job_snapshots js ON js.job_id = j.id
        WHERE j.id = ?`
     )
-    .get(jobId) as
-    | { title: string; summary: string; draftSnapshotJson: string }
-    | undefined
+    .get(jobId) as { title: string; summary: string; draftSnapshotJson: string } | undefined
   if (!row) throw new Error(`Verification job not found: ${jobId}`)
 
   const draft = parseJson<Record<string, unknown>>(row.draftSnapshotJson, {})
@@ -251,14 +249,14 @@ export function buildMilestoneVerificationEvidence(input: {
        ORDER BY sort_order, id`
     )
     .all(input.jobId, input.generation, input.milestoneId) as Array<{
-      id: string
-      sourceSliceId: string
-      title: string
-      description: string
-      successCriteria: string
-      state: string
-      verificationState: string
-    }>
+    id: string
+    sourceSliceId: string
+    title: string
+    description: string
+    successCriteria: string
+    state: string
+    verificationState: string
+  }>
 
   return {
     schemaVersion: 1,

@@ -54,9 +54,7 @@ export class ConversationApplication {
   }
 
   listForProject(actor: Actor, projectId: string): ConversationDto[] {
-    return this.ports.conversations
-      .listForProject(actor.userId, projectId)
-      .map(toConversationDto)
+    return this.ports.conversations.listForProject(actor.userId, projectId).map(toConversationDto)
   }
 
   get(actor: Actor, conversationId: string): ConversationDto {
@@ -141,14 +139,12 @@ export class ConversationApplication {
 
   async delete(actor: Actor, conversationId: string): Promise<void> {
     const row = this.requireOwned(actor, conversationId)
-    const active = this.ports.turns
-      .listQueued(actor.userId)
-      .concat(
-        ...ACTIVE_TURN_STATES.flatMap((state) => {
-          const turn = this.ports.turns.get(conversationId)
-          return turn && turn.state === state ? [turn] : []
-        })
-      )
+    const active = this.ports.turns.listQueued(actor.userId).concat(
+      ...ACTIVE_TURN_STATES.flatMap((state) => {
+        const turn = this.ports.turns.get(conversationId)
+        return turn && turn.state === state ? [turn] : []
+      })
+    )
     void active
     // Cancel in-flight via abort map
     for (const [turnId, controller] of this.abortControllers) {
@@ -206,7 +202,9 @@ export class ConversationApplication {
     const existing = this.ports.turns.getByIdempotency(actor.userId, input.idempotencyKey)
     if (existing) {
       if (existing.conversationId !== conversationId) {
-        throw new ConversationConflictError('Idempotency key was already used for another conversation')
+        throw new ConversationConflictError(
+          'Idempotency key was already used for another conversation'
+        )
       }
       const requestHash = stableHash(
         JSON.stringify({
@@ -324,7 +322,9 @@ export class ConversationApplication {
       const queued = this.ports.turns.listQueued(actorId)
       for (const row of queued) {
         if (this.ports.turns.hasActiveForConversation(row.conversationId)) continue
-        if (this.ports.turns.countActiveForActor(row.actorId) >= this.ports.maxConcurrentTurnsPerUser) {
+        if (
+          this.ports.turns.countActiveForActor(row.actorId) >= this.ports.maxConcurrentTurnsPerUser
+        ) {
           continue
         }
         const admittedAt = nowIso()
@@ -515,9 +515,7 @@ export class ConversationApplication {
             .map((m) => `${m.role}: ${m.content}`)
             .join('\n')
         : ''
-      const basePrompt = historyBlock
-        ? `${historyBlock}\nuser: ${turn.inputText}`
-        : turn.inputText
+      const basePrompt = historyBlock ? `${historyBlock}\nuser: ${turn.inputText}` : turn.inputText
       const prompt = resolvedAttachments.promptAppendix
         ? `${basePrompt}\n\n${resolvedAttachments.promptAppendix}`
         : basePrompt

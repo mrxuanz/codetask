@@ -1,4 +1,4 @@
-import type { SavedJobPlan } from '@shared/contracts/plan'
+import type { SavedJobPlan } from '@codetask/contracts'
 
 export function clearPlanConfirmedFlags(plan: SavedJobPlan): SavedJobPlan {
   return {

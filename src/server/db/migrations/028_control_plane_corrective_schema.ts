@@ -6,11 +6,7 @@ function tableExists(db: Parameters<Migration['up']>[0], table: string): boolean
   )
 }
 
-function columnExists(
-  db: Parameters<Migration['up']>[0],
-  table: string,
-  column: string
-): boolean {
+function columnExists(db: Parameters<Migration['up']>[0], table: string, column: string): boolean {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(
     (row) => row.name === column
   )
@@ -30,8 +26,7 @@ export const migration028ControlPlaneCorrectiveSchema: Migration = {
 
     const needsRunRebuild = columnExists(db, 'control_job_runs', 'pending_attempt_id')
     const needsAttemptRebuild =
-      !columnExists(db, 'control_task_attempts', 'must_pause_at_commit') ||
-      needsRunRebuild
+      !columnExists(db, 'control_task_attempts', 'must_pause_at_commit') || needsRunRebuild
     const needsDedupRebuild = !indexExists(db, 'idx_control_command_dedup_pk')
     const needsOutboxRebuild = !indexExists(db, 'idx_control_outbox_entity_revision')
     const needsSchemaMetaRebuild = !columnExists(db, 'control_schema_meta', 'source_schema_version')

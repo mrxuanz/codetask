@@ -19,7 +19,7 @@ test.after(() => {
 
 function baseInput(role: AgentTurnInput['role']): AgentTurnInput {
   return {
-    provider: 'cursorcli',
+    provider: 'cursor',
     role,
     cwd: '/workspace',
     runtimeRoot,

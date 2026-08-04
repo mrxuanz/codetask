@@ -157,7 +157,7 @@ export const migration049ConversationDataMigrate: ConversationMigration = {
             thinkingMs,
             typeof msg.created_at === 'string' && msg.created_at.includes('T')
               ? msg.created_at
-              : toIsoFromSec(Number(msg.created_at)) ?? nowIso()
+              : (toIsoFromSec(Number(msg.created_at)) ?? nowIso())
           )
         }
       }

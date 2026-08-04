@@ -1,7 +1,6 @@
 import { generateAssetToken } from './asset-token'
 
-const ASSET_URL_PATTERN =
-  /\/api\/(?:conversations|threads)\/([^/?#]+)\/attachments\/([^/?#]+)/
+const ASSET_URL_PATTERN = /\/api\/(?:conversations|threads)\/([^/?#]+)\/attachments\/([^/?#]+)/
 const AUTH_QUERY_KEYS = ['asset_token', 'access_token'] as const
 const AUTH_QUERY_PATTERN = /[?&](?:asset_token|access_token)(?:=|&|$)/
 
@@ -51,11 +50,7 @@ export function signAssetUrl(authSecret: string, assetUrl: string, owner?: strin
   return assetUrlWithToken(cleanAssetUrl, token)
 }
 
-export function signAssetUrlsInValue(
-  authSecret: string,
-  value: unknown,
-  owner?: string
-): unknown {
+export function signAssetUrlsInValue(authSecret: string, value: unknown, owner?: string): unknown {
   if (value === null || value === undefined) return value
 
   if (Array.isArray(value)) {

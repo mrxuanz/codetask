@@ -41,10 +41,8 @@ export function createHonoApp(options: CreateHonoAppOptions): Hono {
         return c.json(
           {
             success: false,
-            status: 40401,
-            message: 'Not Found',
-            data: { error: 'Not Found' },
-            extra: {}
+            error: { code: 'http.not_found', message: 'Not Found' },
+            requestId: c.req.header('x-request-id') ?? 'unmatched'
           },
           404
         )

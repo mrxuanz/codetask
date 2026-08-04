@@ -29,10 +29,7 @@ import {
 } from '../../shared.ts'
 
 export interface PlanningCapacityPort {
-  acquire(input: {
-    planningSessionId: string
-    pool: string
-  }): Promise<{ leaseId: string } | null>
+  acquire(input: { planningSessionId: string; pool: string }): Promise<{ leaseId: string } | null>
   release(leaseId: string): Promise<void>
 }
 
@@ -41,11 +38,7 @@ export interface JobSubmissionPort {
 }
 
 export interface PlanningEventPort {
-  publish(
-    sessionId: string,
-    event: DesignRealtimeEventName,
-    payload: Record<string, unknown>
-  ): void
+  publish(sessionId: string, event: DesignRealtimeEventName, payload: Record<string, unknown>): void
 }
 
 export interface PlanningRepository {
@@ -166,7 +159,10 @@ export class PlanningApplication {
     return sessions.filter((s) => s.actorId === actor.userId)
   }
 
-  async get(actor: Actor, sessionId: string): Promise<{
+  async get(
+    actor: Actor,
+    sessionId: string
+  ): Promise<{
     session: PlanningSessionRecord
     tree: ExecutionTreeSnapshot | null
   }> {
@@ -298,10 +294,7 @@ export class PlanningApplication {
         plannerSettingsSnapshotJson: session.plannerSettingsSnapshotJson
       })
     } catch (error) {
-      await this.failSession(
-        session.id,
-        error instanceof Error ? error.message : String(error)
-      )
+      await this.failSession(session.id, error instanceof Error ? error.message : String(error))
     } finally {
       await this.capacity.release(lease.leaseId)
     }

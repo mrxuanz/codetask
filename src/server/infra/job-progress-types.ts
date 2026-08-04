@@ -1,3 +1,5 @@
+import type { PlanningSessionViewStatus } from '@codetask/contracts'
+
 export type {
   PlanProgressDto,
   TaskProgressDto,
@@ -7,6 +9,9 @@ export type {
   ThreadDraftSummaryDto,
   ThreadJobAbilityDto,
   PlanningSessionViewDto,
-  UserDraftListItemDto
-} from '../../shared/contracts/jobs.ts'
-export type { PlanningSessionStatus } from '../../shared/contracts/planning-session-view.ts'
+  UserDraftListItemDto,
+  PlanningSessionViewStatus
+} from '@codetask/contracts'
+
+/** @deprecated Prefer PlanningSessionViewStatus — UI planning status, not Design session status. */
+export type PlanningSessionStatus = PlanningSessionViewStatus

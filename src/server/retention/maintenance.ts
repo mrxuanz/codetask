@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { getDb } from '../db'
 import type { SettingsStore } from '../context/settings-store'
-import type { RetentionSettings } from '../../shared/contracts/retention.ts'
+import type { RetentionSettings } from '@codetask/contracts'
 
 type AppDatabase = ReturnType<typeof getDb>
 

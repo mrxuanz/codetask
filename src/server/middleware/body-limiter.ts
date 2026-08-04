@@ -4,16 +4,12 @@ export const MAX_JSON_BODY_BYTES = 1 * 1024 * 1024
 export const MAX_FORM_BODY_BYTES = 32 * 1024 * 1024
 export const MAX_DEFAULT_BODY_BYTES = MAX_JSON_BODY_BYTES
 
-const PAYLOAD_TOO_LARGE_STATUS = 41301
-
-function payloadTooLarge(): Response {
+function payloadTooLarge(requestId: string): Response {
   return new Response(
     JSON.stringify({
-      data: null,
-      status: PAYLOAD_TOO_LARGE_STATUS,
-      extra: {},
-      message: 'Request body too large',
-      success: false
+      success: false,
+      error: { code: 'http.payload_too_large', message: 'Request body too large' },
+      requestId
     }),
     {
       status: 413,
@@ -77,7 +73,7 @@ export function bodySizeLimit(maxBytes?: number): MiddlewareHandler {
     if (contentLength) {
       const size = Number.parseInt(contentLength, 10)
       if (!Number.isNaN(size) && size > limit) {
-        return payloadTooLarge()
+        return payloadTooLarge(c.get('requestId') ?? 'unknown')
       }
     }
 
@@ -85,7 +81,7 @@ export function bodySizeLimit(maxBytes?: number): MiddlewareHandler {
     if (rawBody) {
       const { body, tooLarge } = await readBodyWithLimit(rawBody, limit)
       if (tooLarge) {
-        return payloadTooLarge()
+        return payloadTooLarge(c.get('requestId') ?? 'unknown')
       }
 
       c.req.raw = new Request(c.req.raw.url, {

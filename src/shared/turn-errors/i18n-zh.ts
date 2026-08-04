@@ -160,7 +160,7 @@ const zhMessages: Record<TurnErrorCode, string> = {
   'plan.cancelled': '计划生成已取消',
   'plan.confirm_conflict': '确认执行树时计划已变更',
   'plan.sandbox_timeout': '沙箱任务超时，可稍后重试或更换更快的 Planner CLI',
-  'plan.sandbox_cleanup_failed': '沙箱进程异常退出。请完全退出应用后重新启动，再试一次生成计划。',
+  'plan.sandbox_cleanup_failed': '沙箱进程异常退出。请完全退出应用后重新启动，再试一次生成计划。'
 }
 
 export const turnErrorsZh = buildTurnErrorI18nTree(zhMessages)

@@ -13,11 +13,12 @@ export class JobSubmissionDedup {
   checkIdempotency(
     idempotencyKey: string,
     submissionHash: string
-  ): { kind: 'new' } | { kind: 'replay'; jobId: string; acceptedAt: number } | { kind: 'conflict' } {
+  ):
+    | { kind: 'new' }
+    | { kind: 'replay'; jobId: string; acceptedAt: number }
+    | { kind: 'conflict' } {
     const row = this.db
-      .prepare(
-        `SELECT id, submission_hash, created_at FROM jobs WHERE idempotency_key = ?`
-      )
+      .prepare(`SELECT id, submission_hash, created_at FROM jobs WHERE idempotency_key = ?`)
       .get(idempotencyKey) as
       | { id: string; submission_hash: string; created_at: number }
       | undefined

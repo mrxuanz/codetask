@@ -17,9 +17,7 @@ import {
   jobCounters,
   messageArtifacts,
   projects,
-  threadMessages,
   conversationTurns,
-  threads,
   workspaceLeases,
   deletionRequests
 } from './schema'
@@ -34,8 +32,6 @@ const schema = {
   authThrottles,
   authAudit,
   projects,
-  threads,
-  threadMessages,
   conversationTurns,
   jobArtifacts,
   jobCounters,

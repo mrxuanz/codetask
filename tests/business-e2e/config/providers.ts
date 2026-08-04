@@ -18,8 +18,8 @@ export type ProviderRunSlot = {
 
 const ALIAS_TO_CORE: Record<ProviderAlias, SutCoreCode> = {
   opencode: 'opencode',
-  cursor: 'cursorcli',
-  claude: 'claude-code',
+  cursor: 'cursor',
+  claude: 'claude',
   codex: 'codex'
 }
 
@@ -29,10 +29,10 @@ const ALL_PROVIDERS = Object.keys(ALIAS_TO_CORE) as ProviderAlias[]
 export function normalizeProviderAlias(raw: string): ProviderAlias {
   const v = raw.trim().toLowerCase()
   if (v === 'opencode' || v === 'oc') return 'opencode'
-  if (v === 'cursor' || v === 'cursorcli' || v === 'cursor-acp' || v === 'cursoracp') {
+  if (v === 'cursor' || v === 'cursor' || v === 'cursor-acp' || v === 'cursoracp') {
     return 'cursor'
   }
-  if (v === 'claude' || v === 'claude-code' || v === 'claudecode') return 'claude'
+  if (v === 'claude' || v === 'claude' || v === 'claudecode') return 'claude'
   if (v === 'codex') return 'codex'
   throw new Error(`unknown_provider:${raw}:use opencode|cursor|claude|codex|all (comma-separated)`)
 }
@@ -50,8 +50,8 @@ export function parseProvidersList(raw: string | undefined): ProviderAlias[] | n
 }
 
 function aliasForCore(core: string): ProviderAlias {
-  if (core === 'cursorcli') return 'cursor'
-  if (core === 'claude-code') return 'claude'
+  if (core === 'cursor') return 'cursor'
+  if (core === 'claude') return 'claude'
   if (core === 'codex') return 'codex'
   return 'opencode'
 }
@@ -92,7 +92,7 @@ export function resolveProviderQueue(input: {
 export const CLI_MCP_ROOT_KEY: Record<SutCoreCode, string> = {
   opencode: 'mcp',
   cursorcli: 'mcpServers',
-  'claude-code': 'mcpServers',
+  claude: 'mcpServers',
   codex: 'mcp_servers'
 }
 

@@ -1,9 +1,4 @@
-import {
-  createCipheriv,
-  createHash,
-  randomBytes,
-  randomUUID
-} from 'node:crypto'
+import { createCipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 
 export type AuthMigration = {
@@ -12,15 +7,15 @@ export type AuthMigration = {
   up: (db: Database.Database) => void
 }
 
-const DEFAULT_PROVIDER = 'cursorcli'
-const PROVIDER_CODES = ['codex', 'claude-code', 'opencode', 'cursorcli'] as const
+const DEFAULT_PROVIDER = 'cursor'
+const PROVIDER_CODES = ['codex', 'claude', 'opencode', 'cursor'] as const
 type ProviderCode = (typeof PROVIDER_CODES)[number]
 
 const MCP_ROOT_KEYS: Record<ProviderCode, string> = {
   codex: 'mcp_servers',
-  'claude-code': 'mcpServers',
+  claude: 'mcpServers',
   opencode: 'mcp',
-  cursorcli: 'mcpServers'
+  cursor: 'mcpServers'
 }
 
 const PROMPT_ROLES = ['conversation', 'planner', 'sliceVerifier', 'milestoneVerifier'] as const
@@ -131,24 +126,15 @@ function isSecretReference(value: unknown): value is { $secret: string } {
   return keys.length === 1 && keys[0] === '$secret' && typeof record.$secret === 'string'
 }
 
-function deriveKey(masterKey: string): Buffer {
-  if (/^[0-9a-fA-F]{64}$/.test(masterKey)) {
-    return Buffer.from(masterKey, 'hex')
-  }
-  return createHash('sha256').update(masterKey, 'utf8').digest()
-}
-
-function resolveMasterKey(db: Database.Database): { key: Buffer; usedFallbackMigrationKey: boolean } {
-  const envSettings = process.env.CODETASK_SETTINGS_MASTER_KEY?.trim()
-  if (envSettings) {
-    return { key: deriveKey(envSettings), usedFallbackMigrationKey: false }
-  }
-
-  const envAuth = process.env.CODETASK_AUTH_SECRET?.trim()
-  if (envAuth) {
-    return { key: deriveKey(envAuth), usedFallbackMigrationKey: false }
-  }
-
+/**
+ * Settings migration key resolution (Batch E).
+ * Product must not read CODETASK_* env — use durable auth_secret, else fallback.
+ * Runtime Settings encryption uses SecretKeyProvider (installation.key / --master-key-file).
+ */
+function resolveMasterKey(db: Database.Database): {
+  key: Buffer
+  usedFallbackMigrationKey: boolean
+} {
   if (tableExists(db, 'auth_secret')) {
     try {
       const row = db
@@ -225,9 +211,9 @@ function insertEncryptedSecret(
   const authTag = cipher.getAuthTag()
   const now = Math.floor(Date.now() / 1000)
 
-  const existing = db
-    .prepare(`SELECT id FROM setting_secrets WHERE name = ?`)
-    .get(name) as { id: string } | undefined
+  const existing = db.prepare(`SELECT id FROM setting_secrets WHERE name = ?`).get(name) as
+    | { id: string }
+    | undefined
 
   if (existing) {
     db.prepare(
@@ -412,7 +398,7 @@ function migrateMcpJson(db: Database.Database): void {
 
   if (!namespaceExists(db, 'agent_mcp')) {
     const raw = parseNamespaceValue(row) ?? {}
-    let transformed = transformLegacyMcpJson(raw)
+    const transformed = transformLegacyMcpJson(raw)
 
     const { key, usedFallbackMigrationKey } = resolveMasterKey(db)
     const report: SecretReport = {

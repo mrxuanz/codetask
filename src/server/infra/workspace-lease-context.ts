@@ -9,10 +9,7 @@ export interface WorkspaceLeaseContext {
 
 const storage = new AsyncLocalStorage<WorkspaceLeaseContext>()
 
-export function runWithWorkspaceLeaseContext<T>(
-  context: WorkspaceLeaseContext,
-  fn: () => T
-): T {
+export function runWithWorkspaceLeaseContext<T>(context: WorkspaceLeaseContext, fn: () => T): T {
   return storage.run(context, fn)
 }
 
