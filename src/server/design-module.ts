@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import {
-  CODETEAM_MANAGER_MCP_SERVER,
+  CODETASK_MANAGER_MCP_SERVER,
   MCP_HTTP_ACCEPT_HEADER_VALUE,
   createAgentRuntime,
   toCanonicalProviderCode,
@@ -398,7 +398,7 @@ export function getOrComposeConversation(ctx: AppContext): ConversationModule {
         return {
           mcpServers: [
             {
-              name: CODETEAM_MANAGER_MCP_SERVER,
+              name: CODETASK_MANAGER_MCP_SERVER,
               url,
               headers: { Accept: MCP_HTTP_ACCEPT_HEADER_VALUE }
             }

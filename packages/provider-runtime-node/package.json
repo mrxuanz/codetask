@@ -2,6 +2,7 @@
   "name": "@codetask/provider-runtime-node",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -11,7 +12,13 @@
     "./providers/*": "./src/providers/*.ts",
     "./streamers": "./src/streamers/index.ts",
     "./streamers/*": "./src/streamers/*.ts",
-    "./cursor-acp/*": "./src/cursor-acp/*.ts"
+    "./cursor-acp/*": "./src/cursor-acp/*.ts",
+    "./agent-env": "./src/agent-env.ts",
+    "./agent-mcp": "./src/agent-mcp.ts",
+    "./provider-auth": "./src/provider-auth/index.ts",
+    "./provider-auth/*": "./src/provider-auth/*.ts",
+    "./cursor-models": "./src/cursor-models.ts",
+    "./toolchain-path": "./src/toolchain-path.ts"
   },
   "dependencies": {
     "@codetask/agent-runtime": "*"

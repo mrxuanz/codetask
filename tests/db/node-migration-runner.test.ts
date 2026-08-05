@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { allMigrations } from '../../src/server/db/migrations'
-import { currentMigrationVersion, runMigrations } from '../../src/server/db/migrations/runner'
+import { currentMigrationVersion, runMigrations } from '@codetask/database'
 import { NodeSqliteAdapter } from '../helpers/node-sqlite-adapter'
 
 test('the complete application migration chain runs on Node core SQLite', () => {

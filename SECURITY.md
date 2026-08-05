@@ -13,6 +13,16 @@ This project includes:
 
 Treat all security-impacting changes as sensitive until a fix is available.
 
+## Sandbox Threat Model
+
+The OS sandbox enforces filesystem whitelisting and process isolation with a
+fail-closed launcher and policy attestation. **Outbound network egress from
+sandboxed tasks is intentionally not restricted**: agent CLIs need internet
+access for model APIs, web research, and package installs. Consequently, data
+exfiltration over the network by code running inside the sandbox is a known,
+accepted limitation — not a reportable sandbox escape. Reports about bypassing
+the filesystem or process boundary are always in scope.
+
 ## Reporting a Vulnerability
 
 Please do not open a public issue for an unpatched vulnerability.

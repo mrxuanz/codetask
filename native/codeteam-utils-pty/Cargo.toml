@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 edition.workspace = true
 license.workspace = true
 name = "codeteam-utils-pty"

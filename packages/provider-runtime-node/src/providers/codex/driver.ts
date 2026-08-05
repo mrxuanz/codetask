@@ -2,8 +2,8 @@ import type { ProviderSettings } from '../../spec/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { CODEX_DESCRIPTOR } from './descriptor'
 import { runCodexAuthPreflight } from './preflight'
-import { prepareCodexRuntimeProfile } from '@server/sandbox/provider-auth/bridge'
-import { resolveCodexInstallDirs } from '@server/sandbox/provider-auth/paths'
+import { prepareCodexRuntimeProfile } from '../../provider-auth/bridge'
+import { resolveCodexInstallDirs } from '../../provider-auth/paths'
 
 export {
   buildCodexTurnPlan,

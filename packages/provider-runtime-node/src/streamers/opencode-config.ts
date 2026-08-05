@@ -3,11 +3,11 @@ import { resolve } from 'node:path'
 import {
   capabilityProfileIsReadOnly,
   type AgentCapabilityProfile
-} from '@server/agent-runtime/capabilities'
-import { allConversationMcpToolNames } from '@server/conversation/mcp/tools'
+} from '@codetask/agent-runtime/capabilities'
+import { allConversationMcpToolNames } from '@codetask/agent-runtime/mcp/tools'
 
 const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
-  'codeteam-manager',
+  'codetask-manager',
   ...allConversationMcpToolNames()
 ])
 
@@ -98,11 +98,11 @@ export function resolveOpencodePermissionConfig(
 
   const auditedMcpRules = Object.fromEntries(
     [...READ_ONLY_SYSTEM_MCP_TOOLS]
-      .filter((toolName) => toolName !== 'codeteam-manager')
+      .filter((toolName) => toolName !== 'codetask-manager')
       .flatMap((toolName) => [
         [toolName, 'allow' as const],
-        [`codeteam-manager_${toolName}`, 'allow' as const],
-        [`mcp__codeteam-manager__${toolName}`, 'allow' as const]
+        [`codetask-manager_${toolName}`, 'allow' as const],
+        [`mcp__codetask-manager__${toolName}`, 'allow' as const]
       ])
   )
   return {

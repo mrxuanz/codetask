@@ -11,9 +11,18 @@ const root = join(import.meta.dirname, '../..')
 
 describe('architecture residual DoD — M1', () => {
   it('wizard turn-error codes are gone', () => {
-    const codes = readFileSync(join(root, 'src/shared/turn-errors/codes.ts'), 'utf8')
-    const zh = readFileSync(join(root, 'src/shared/turn-errors/i18n-zh.ts'), 'utf8')
-    const ja = readFileSync(join(root, 'src/shared/turn-errors/i18n-ja.ts'), 'utf8')
+    const codes = readFileSync(
+      join(root, 'packages/contracts/src/legacy/turn-errors/codes.ts'),
+      'utf8'
+    )
+    const zh = readFileSync(
+      join(root, 'packages/contracts/src/legacy/turn-errors/i18n-zh.ts'),
+      'utf8'
+    )
+    const ja = readFileSync(
+      join(root, 'packages/contracts/src/legacy/turn-errors/i18n-ja.ts'),
+      'utf8'
+    )
     for (const text of [codes, zh, ja]) {
       assert.doesNotMatch(text, /thread\.wizard\./)
       assert.doesNotMatch(text, /'wizard\./)
@@ -21,7 +30,7 @@ describe('architecture residual DoD — M1', () => {
   })
 
   it('deletion_requests owner column is actor_id', () => {
-    const schema = readFileSync(join(root, 'src/server/db/schema.ts'), 'utf8')
+    const schema = readFileSync(join(root, 'packages/database/src/schema/host.ts'), 'utf8')
     assert.match(schema, /export const deletionRequests[\s\S]*?actorId:\s*text\('actor_id'\)/)
     assert.doesNotMatch(
       schema,
@@ -41,8 +50,8 @@ describe('architecture residual DoD — M1', () => {
     assert.match(migration, /version:\s*58/)
     assert.match(migration, /RENAME COLUMN username TO actor_id/)
 
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
-    assert.match(index, /migration058DeletionRequestsActorIdTables/)
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
+    assert.match(index, /migration058DeletionRequestsActorId/)
   })
 
   it('TaskLaunchDraftPayload has a single shared definition', () => {

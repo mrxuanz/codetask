@@ -2,20 +2,20 @@ import {
   applyLoopbackNoProxyEnv,
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv
-} from '@server/agent-runtime/env'
-import { buildCodexSdkConfig, type CodexSdkConfig } from '@server/agent-runtime/mcp'
-import type { AgentTurnInput } from '@server/agent-runtime/types'
-import { resolveProviderOuterSandbox } from '@server/agent-runtime/provider-policy'
+} from '../../agent-env'
+import { buildCodexSdkConfig, type CodexSdkConfig } from '../../agent-mcp'
+import type { AgentTurnInput } from '@codetask/agent-runtime/types'
+import { resolveProviderOuterSandbox } from '@codetask/agent-runtime/provider-policy'
 import {
   resolveRoleMcpToolNames,
   roleRequiresOuterSandbox,
   type ConversationRole
-} from '@server/agent-runtime/roles'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+} from '@codetask/agent-runtime/roles'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 import {
   capabilityProfileIsReadOnly,
   resolveInputCapabilityProfile
-} from '@server/agent-runtime/capabilities'
+} from '@codetask/agent-runtime/capabilities'
 import { resolveProviderExecutable } from '../executable'
 import {
   resolveProviderExecutableStrategy,

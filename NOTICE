@@ -7,10 +7,13 @@ Included upstream source
 - Project: OpenAI Codex
 - Repository: https://github.com/openai/codex
 - Component: `codex-rs`
-- Upstream license: Apache License 2.0
+- Upstream license: Apache License 2.0 (same license as this repository's root `LICENSE`)
+- Vendor history note: the pristine `native/vendor/codex-rs` mirror was removed from the
+  working tree; it remains available in this repository's git history at local commit
+  `3e0f84bdad62d49401b7b0604bfb8ac6e31df5ca` (hash valid unless history is rewritten
+  before publication). Local forks live under `native/codeteam-*`.
 
-Local paths
-- `native/vendor/codex-rs`
+Local paths (adapted forks)
 - `native/codeteam-sandbox*`
 - `native/codeteam-sandbox-policy`
 - `native/codeteam-process-hardening`
@@ -23,9 +26,14 @@ Local modifications include
 - adapting sandbox integration to this application's runtime and policy model
 - packaging and launcher changes for the desktop app
 
-For the upstream license and notice text, see:
-- `native/vendor/codex-rs/LICENSE`
-- `native/vendor/codex-rs/NOTICE`
+Naming note
+- The product and npm workspace packages use the `codetask` / `@codetask/*` names.
+- Native Rust crates and related packaging paths intentionally retain the historical
+  `codeteam-*` prefix from the Codex fork rename (`codex-*` → `codeteam-*`).
+  Treat `codeteam` in `native/` as a stable historical identifier, not a second product brand.
+
+The upstream Apache License 2.0 text is identical to this repository's root `LICENSE`
+and is also available from the upstream repository at https://github.com/openai/codex.
 
 Additional third-party notices
 - `native/codeteam-utils-absolute-path/src/absolutize.rs` retains notice for code derived from magiclen.org / Ron Li under the MIT License.

@@ -2,11 +2,8 @@ import type { ProviderSettings } from '../../spec/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { CURSOR_DESCRIPTOR } from './descriptor'
 import { runCursorAuthPreflight } from './preflight'
-import { prepareCursorRuntimeProfile } from '@server/sandbox/provider-auth/bridge'
-import {
-  resolveCursorAgentInstallDirs,
-  resolveHostProfilePaths
-} from '@server/sandbox/provider-auth/paths'
+import { prepareCursorRuntimeProfile } from '../../provider-auth/bridge'
+import { resolveCursorAgentInstallDirs, resolveHostProfilePaths } from '../../provider-auth/paths'
 
 export {
   appendCursorApiEndpointArgs,

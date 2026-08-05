@@ -9,9 +9,8 @@ reviewable.
 Each BUSINESS entry should include:
 
 - **Status:** `open` | `in_progress` | `resolved` | `wontfix`
-- **Target phase:** remediation phase from
-  `docs/OPEN_SOURCE_REMEDIATION_PLAN.zh-CN.md` (for example Phase 2 hygiene,
-  Phase 5 shared contracts, Phase 6 control plane)
+- **Target phase:** remediation phase label used for CI hygiene tracking
+  (for example Phase 2 hygiene, Phase 5 shared contracts, Phase 6 control plane)
 - **Exit criteria:** concrete condition that allows removing the CI allowance or
   closing the finding
 
@@ -167,10 +166,10 @@ error; generated runtime data remains excluded explicitly.
 
 ## BUSINESS-008: Rust cache cannot parse several native manifests
 
-- Status: open
+- Status: resolved
 - Target phase: Phase 1 (dev environment / packaging) or Phase 7
-- Exit criteria: `Swatinem/rust-cache` parses all `native/*/Cargo.toml` without
-  BOM-related fallback annotations.
+- Exit criteria: met; `Swatinem/rust-cache` parses all `native/*/Cargo.toml`
+  without BOM-related fallback annotations.
 - Locations: multiple `native/*/Cargo.toml` manifests
 - Finding: `Swatinem/rust-cache` reports TOML parse errors and falls back to
   caching each entire manifest file. Several manifests contain a leading UTF-8
@@ -178,13 +177,16 @@ error; generated runtime data remains excluded explicitly.
 - Impact: Rust tests and builds succeed, but cache invalidation is broader and
   the jobs emit repeated annotations.
 - CI handling: none; cache fallback remains enabled and visible.
-- Decision needed: normalize the manifest encodings when native build files are
-  in scope, then verify the cache parser warnings disappear.
+- Resolution: stripped leading UTF-8 BOM from affected `native/*/Cargo.toml`
+  manifests (excluding vendor).
+- Decision needed: none.
 
 ## BUSINESS-009: Linux sandbox integration tests use contention-sensitive timeouts
 
-- Status: open
+- Status: open (**intentionally deferred** with the sandbox remediation track;
+  not blocking non-sandbox open-source hygiene batches)
 - Target phase: Phase 7 (open-source release gate / native platform matrix)
+  — sandbox track deferred by owner decision (2026-08-05)
 - Exit criteria: flaky contention failures identified from authenticated logs and
   fixed via platform-aware timeouts or explicit serialization; suite is stable
   on CI.
@@ -222,7 +224,7 @@ error; generated runtime data remains excluded explicitly.
   reported HTTP 502 during MCP initialization, while the Codex process still
   exited successfully. Adding `127.0.0.1,localhost,::1` to both `NO_PROXY` and
   `no_proxy` made initialize, tools/list, and tools/call succeed. The internal
-  `codeteam-manager` MCP entry was not marked `required`, so the original startup
+  `codetask-manager` MCP entry was not marked `required`, so the original startup
   failure is not surfaced before the model turn.
 - Impact: Planner has no `register_plan_outline`, `register_task_context`, or
   `finalize_plan` tools and the job is later misclassified as

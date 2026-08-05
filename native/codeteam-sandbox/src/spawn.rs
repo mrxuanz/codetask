@@ -70,7 +70,6 @@ pub fn spawn_sandboxed(
         let child = crate::windows::spawn(
             &policy,
             policy_json,
-            &parsed,
             command,
             args,
             &child_env,

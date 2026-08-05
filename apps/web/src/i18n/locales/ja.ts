@@ -1,4 +1,4 @@
-import { turnErrorsJa } from '@shared/turn-errors/i18n-ja'
+import { turnErrorsJa } from '@codetask/contracts/turn-errors'
 
 export default {
   common: {
@@ -195,10 +195,18 @@ export default {
         resume: '再開',
         continue: '続行',
         restart: '進捗を消去して最初から実行',
+        restartExecution: '再実行',
+        replan: '再計画',
+        confirmPlan: '計画を確認',
+        editPlan: '計画を編集',
         cancel: 'キャンセル',
-        delete: '削除'
+        delete: '削除',
+        pausing: '一時停止中…'
       },
       actionFailed: 'タスク操作に失敗しました',
+      deleteFailed: '削除に失敗しました',
+      revisionConflict: 'タスク状態が変わりました。確認して再試行してください',
+      uploadInvalidResponse: 'アップロード応答が無効です',
       recovery: {
         retry: '続行すると、完了済みタスクを保持したまま失敗地点から再試行します。',
         remediate: '続行すると、補修タスクを先に実行してから失敗地点に戻ります。',

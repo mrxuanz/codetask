@@ -2,9 +2,9 @@ import { spawnSync } from 'child_process'
 import { dirname, delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-process.env.ELECTRON_MIRROR ??= 'https://npmmirror.com/mirrors/electron/'
-process.env.ELECTRON_BUILDER_BINARIES_MIRROR ??=
-  'https://npmmirror.com/mirrors/electron-builder-binaries/'
+// Do not default ELECTRON_MIRROR to a regional CDN. Set ELECTRON_MIRROR /
+// ELECTRON_BUILDER_BINARIES_MIRROR in the environment when a mirror is needed
+// (see CONTRIBUTING.md).
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const localBin = join(root, 'node_modules', '.bin')

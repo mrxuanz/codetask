@@ -62,9 +62,9 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
   assert.equal(conversation.threadOptions.additionalDirectories, undefined)
   assert.equal(conversation.mcpToolNames, undefined)
   assert.ok(
-    conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
+    conversation.sdkConfig?.mcp_servers && 'codetask-manager' in conversation.sdkConfig.mcp_servers
   )
-  const systemMcp = conversation.sdkConfig?.mcp_servers?.['codeteam-manager'] as
+  const systemMcp = conversation.sdkConfig?.mcp_servers?.['codetask-manager'] as
     | { required?: boolean }
     | undefined
   assert.equal(systemMcp?.required, true)
@@ -117,7 +117,7 @@ test('applyLoopbackNoProxyEnv preserves inherited entries and synchronizes both 
 
 test('resolveCodexMcpStartupTurnError maps required system MCP startup failures by role', () => {
   const failure = new Error(
-    'MCP startup failed: required MCP servers failed to initialize: codeteam-manager'
+    'MCP startup failed: required MCP servers failed to initialize: codetask-manager'
   )
 
   assert.equal(
@@ -168,9 +168,9 @@ test('buildCodexTurnPlan conversation MCP exposes chat attachment tools only (03
     { outerSandbox: false }
   )
   const tools =
-    conversation.sdkConfig?.mcp_servers && 'codeteam-manager' in conversation.sdkConfig.mcp_servers
+    conversation.sdkConfig?.mcp_servers && 'codetask-manager' in conversation.sdkConfig.mcp_servers
       ? (
-          conversation.sdkConfig.mcp_servers['codeteam-manager'] as {
+          conversation.sdkConfig.mcp_servers['codetask-manager'] as {
             tools?: Record<string, unknown>
           }
         ).tools

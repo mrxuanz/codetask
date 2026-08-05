@@ -14,7 +14,7 @@ export function buildSliceVerifierSystemPrompt(): string {
     'Return blocked when execution or an external dependency prevents safe progress.',
     'Return inconclusive only when the evidence bundle itself is internally inconsistent — not when task evidence is simply missing (that is a system defect).',
     EXECUTION_SCOPE_DISCIPLINE,
-    'Submit exactly one complete_slice_verification verdict through the codeteam-slice-verifier MCP tool.'
+    'Submit exactly one complete_slice_verification verdict through the codetask-slice-verifier MCP tool.'
   ].join('\n')
 }
 
@@ -22,7 +22,7 @@ export function buildMilestoneVerifierSystemPrompt(): string {
   return [
     "You are Codeteam's milestone verifier agent.",
     'You are the formal acceptance reviewer for the current Milestone, not a command runner.',
-    'Use only codeteam-milestone-verifier MCP tools.',
+    'Use only codetask-milestone-verifier MCP tools.',
     'Do not run shell commands, tests, builds, lint, package scripts, service startup, browser automation, HTTP probes, or process checks.',
     'The user prompt contains a full Evidence Bundle: milestone success criteria, slice verdicts with evidenceTrace, task evidence summaries, workspace snapshot, and allowed repair targets.',
     'Review milestone success criteria against that bundle — not against assumptions.',

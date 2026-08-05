@@ -1,11 +1,11 @@
-import type { SupportedCoreCode } from '@server/conversation/cores'
+import type { SupportedCoreCode } from '../spec/codes'
 import type {
   AgentTurnChunk,
   AgentTurnInput,
   AgentTurnOptions,
   AgentTurnProvider
-} from '@server/agent-runtime/types'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+} from '@codetask/agent-runtime/types'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 import { getTestProviderRegistryOverride } from './test-overrides'
 import { getProviderRegistry, getProviderRuntimeManager } from '../providers/access'
 import { buildProviderTurnContext } from '../providers/driver'

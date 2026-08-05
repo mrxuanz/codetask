@@ -52,7 +52,7 @@ function sandboxPolicyForRole(role, workspaceRoot, runtimeRoot) {
       defaultAccess: 'none',
       allowedReadRoots: [workspaceRoot, runtimeRoot],
       allowedWriteRoots: role === 'task-worker' ? [runtimeRoot, workspaceRoot] : [runtimeRoot],
-      protectedNames: ['.agents', '.codex', '.codeteam', '.git'],
+      protectedNames: ['.agents', '.codex', '.codeteam', '.codetask', '.git'],
       allowSystemRuntime: true
     },
     network: {

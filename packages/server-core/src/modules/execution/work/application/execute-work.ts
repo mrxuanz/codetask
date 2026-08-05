@@ -1,5 +1,5 @@
 import type { AgentRuntime, AgentTurnInput } from '@codetask/agent-runtime'
-import { CODETEAM_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from '@codetask/agent-runtime'
+import { CODETASK_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from '@codetask/agent-runtime'
 import type { TaskEvidence } from '@codetask/contracts'
 import type Database from 'better-sqlite3'
 import { newId, nowMs, stableHash } from '../../shared.ts'
@@ -161,7 +161,7 @@ export function createExecuteWorkService(deps: {
           ? {
               mcpServers: [
                 {
-                  name: CODETEAM_MANAGER_MCP_SERVER,
+                  name: CODETASK_MANAGER_MCP_SERVER,
                   url: mcpUrl,
                   headers: { Accept: MCP_HTTP_ACCEPT_HEADER_VALUE }
                 }

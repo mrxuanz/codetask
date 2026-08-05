@@ -29,6 +29,8 @@ import {
 } from '../shared/providers/settings'
 import { createProviderRegistry } from './providers/composition'
 import { ProviderRuntimeManager } from './providers/lifecycle'
+import { clearProviderAccess, setProviderAccess } from './providers/access'
+import { configureProviderExecutableSettings } from './providers/executable'
 import { SecureAuthService } from './auth/service'
 import { configureRuntimeMode, resetRuntimeMode } from './runtime-mode'
 import { configureRuntimeFeatures, resetRuntimeFeatures } from './config/runtime-features'
@@ -36,6 +38,13 @@ import {
   configureShellChildEnvironment,
   resetShellChildEnvironment
 } from './shell-child-environment'
+import { configureProviderTurn } from './agent-runtime/provider-turn'
+import { configureSandboxTurnDebug } from './debug/sandbox-turn'
+import { configureCursorModels } from '@codetask/provider-runtime-node/cursor-models'
+import { configureCursorResourceRelease } from '@codetask/provider-runtime-node/cursor-acp/stream-session-turn'
+import { createTurnError } from '@codetask/contracts/turn-errors'
+import { getWorkspaceLeaseContext } from './infra/workspace-lease-context'
+import { refreshWorkspaceLease } from './infra/workspace-lease-store'
 import { composeRealtimeModule } from '@codetask/server-core'
 import type Database from 'better-sqlite3'
 import type { AppDatabase } from './db'
@@ -119,6 +128,27 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       sandbox: config.sandbox,
       debug: config.debug
     })
+    configureSandboxTurnDebug({ enabled: Boolean(config.debug?.sandboxTurn) })
+    configureProviderTurn({
+      getTurnConfig: () => getAppConfig().turn,
+      getKeepAlive: () => {
+        const workspaceContext = getWorkspaceLeaseContext()
+        if (!workspaceContext) return null
+        return async () => {
+          if (!refreshWorkspaceLease(workspaceContext.leaseId)) {
+            throw createTurnError('workspace.lease_lost')
+          }
+        }
+      }
+    })
+    configureProviderExecutableSettings(
+      (provider) => getAppConfig().providers[provider] ?? config.providers[provider]
+    )
+    configureCursorModels((coreCode) => getAppConfig().providers[coreCode]?.model)
+    configureCursorResourceRelease(async (scopeId) => {
+      const { releaseJobCursorResources } = await import('./sandbox/orchestrator')
+      await releaseJobCursorResources(scopeId)
+    })
 
     const nextContext: AppContext = {
       config,
@@ -142,6 +172,10 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       applicationRuntime: null,
       ...(options.storage ? { storage: options.storage } : {})
     }
+    setProviderAccess({
+      getRegistry: () => nextContext.providerRegistry,
+      getRuntimeManager: () => nextContext.providerRuntimeManager
+    })
     appContext = nextContext
 
     startRetentionJanitor()
@@ -222,6 +256,7 @@ export async function resetAppContextForTests(): Promise<void> {
     appContext.settings.close()
   }
 
+  clearProviderAccess()
   appContext = null
   resetRuntimeMode()
   resetRuntimeFeatures()

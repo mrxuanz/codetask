@@ -3,7 +3,7 @@
  * This file remains only as a thin path for legacy diagnose imports of resolveCursorAgentBin.
  */
 import { resolveProviderExecutable } from '../providers/executable'
-import { processHostEnvironmentSource } from '@server/host-environment'
+import { processHostEnvironmentSource } from '@codetask/agent-runtime/host-environment'
 
 export {
   appendCursorApiEndpointArgs,

@@ -17,7 +17,7 @@ import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import { toastError } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
 
-const props = defineProps<{
+defineProps<{
   threadId: string
   messages: ConversationMessage[]
   cores: ConversationCore[]
@@ -93,10 +93,10 @@ watch(
 
 function planNodePatch(
   nodeRef: string,
-  fields: Omit<Parameters<typeof updateJobPlanNode>[2], 'nodeRef' | 'expectedPlanRevision'>
-): Parameters<typeof updateJobPlanNode>[2] {
+  fields: Omit<Parameters<typeof updateJobPlanNode>[1], 'nodeRef' | 'expectedPlanRevision'>
+): Parameters<typeof updateJobPlanNode>[1] {
   const plan = ws.selectedPlan.value
-  const patch: Parameters<typeof updateJobPlanNode>[2] = { nodeRef, ...fields }
+  const patch: Parameters<typeof updateJobPlanNode>[1] = { nodeRef, ...fields }
   if (plan && plan.planRevision != null) {
     patch.expectedPlanRevision = plan.planRevision
   }
@@ -115,7 +115,6 @@ async function handlePlanNodeFieldSave(payload: {
   ws.error.value = null
   try {
     const res = await updateJobPlanNode(
-      props.threadId,
       plan.id,
       planNodePatch(payload.nodeRef, { [payload.field]: payload.value })
     )
@@ -140,7 +139,6 @@ async function handleTaskReferencesSave(payload: {
   ws.error.value = null
   try {
     const res = await updateJobPlanNode(
-      props.threadId,
       plan.id,
       planNodePatch(payload.nodeRef, {
         referenceIds: payload.referenceIds,
@@ -168,7 +166,6 @@ async function handleTaskCliChange(payload: {
   ws.error.value = null
   try {
     const res = await updateJobPlanNode(
-      props.threadId,
       plan.id,
       planNodePatch(payload.taskId, { providerCode: payload.providerCode })
     )

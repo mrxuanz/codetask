@@ -1,4 +1,4 @@
-import { turnErrorsZh } from '@shared/turn-errors/i18n-zh'
+import { turnErrorsZh } from '@codetask/contracts/turn-errors'
 
 export default {
   common: {
@@ -216,10 +216,18 @@ export default {
         resume: '恢复',
         continue: '继续',
         restart: '清空进度从头执行',
+        restartExecution: '重新执行',
+        replan: '重新规划',
+        confirmPlan: '确认计划',
+        editPlan: '编辑计划',
         cancel: '取消',
-        delete: '删除'
+        delete: '删除',
+        pausing: '暂停中…'
       },
       actionFailed: '任务操作失败',
+      deleteFailed: '删除失败',
+      revisionConflict: '任务状态已变化，请确认后重试',
+      uploadInvalidResponse: '上传响应无效',
       recovery: {
         retry: '点击继续将从失败断点重试，已完成任务不会清空。',
         remediate: '点击继续将先执行补救任务，再回到失败断点。',

@@ -1,4 +1,4 @@
-import type { ConversationRole } from '@server/agent-runtime/roles'
+import type { ConversationRole } from '@codetask/agent-runtime/roles'
 import {
   createTurnError,
   indicatesCursorAcpKeepaliveTimeout,
@@ -6,7 +6,7 @@ import {
   isUserTurnCancellation,
   normalizeTurnError,
   type TurnError
-} from '@shared/turn-errors/index.ts'
+} from '@codetask/contracts/turn-errors'
 
 export function isEmptyAcpReply(reply: string): boolean {
   return !reply.trim()

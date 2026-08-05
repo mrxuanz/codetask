@@ -2,17 +2,17 @@ import {
   buildProviderChildEnv,
   buildSandboxPreparedProviderEnv,
   stripElectronInheritedEnv
-} from '@server/agent-runtime/env'
-import { buildCursorAcpMcpServers, type CursorAcpMcpServer } from '@server/agent-runtime/mcp'
-import { resolveProviderOuterSandbox } from '@server/agent-runtime/provider-policy'
-import type { AgentTurnInput } from '@server/agent-runtime/types'
+} from '../../agent-env'
+import { buildCursorAcpMcpServers, type CursorAcpMcpServer } from '../../agent-mcp'
+import { resolveProviderOuterSandbox } from '@codetask/agent-runtime/provider-policy'
+import type { AgentTurnInput } from '@codetask/agent-runtime/types'
 import {
   capabilityProfileIsReadOnly,
   resolveInputCapabilityProfile,
   type AgentCapabilityProfile
-} from '@server/agent-runtime/capabilities'
+} from '@codetask/agent-runtime/capabilities'
 import { resolveProviderExecutable } from '../executable'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 
 /**
  * Prefer typed settings / explicit options. No CODETASK_CURSOR_* env fallback (PRU-12-06).

@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import type { ProviderInstallationSource } from '../spec/installation'
 import type { SupportedCoreCode } from '../spec/codes'
 import { DEFAULT_PROVIDERS_CONFIG, type ProviderSettings } from '../spec/settings'
@@ -7,9 +6,7 @@ import {
   type ProviderDiscoveryContext,
   type ProviderInstallationResolver
 } from './installation'
-import { processHostEnvironmentSource } from '@server/host-environment'
-
-const nodeRequire = createRequire(import.meta.url)
+import { processHostEnvironmentSource } from '@codetask/agent-runtime/host-environment'
 
 export type ExecutableSource = ProviderInstallationSource
 
@@ -43,10 +40,17 @@ function isOptions(
   )
 }
 
+type ProviderSettingsLookup = (provider: SupportedCoreCode) => ProviderSettings
+
+let providerSettingsLookup: ProviderSettingsLookup | null = null
+
+/** Host wires live app provider settings during bootstrap. */
+export function configureProviderExecutableSettings(lookup: ProviderSettingsLookup): void {
+  providerSettingsLookup = lookup
+}
+
 function defaultProviderSettings(provider: SupportedCoreCode): ProviderSettings {
-  // Deferred import avoids executable → bootstrap → composition → drivers cycles.
-  const { getAppConfig } = nodeRequire('@server/bootstrap.ts') as typeof import('@server/bootstrap')
-  return getAppConfig().providers[provider] ?? DEFAULT_PROVIDERS_CONFIG[provider]
+  return providerSettingsLookup?.(provider) ?? DEFAULT_PROVIDERS_CONFIG[provider]
 }
 
 export function resolveProviderExecutable(

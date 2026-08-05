@@ -8,7 +8,7 @@ import { existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join, normalize } from 'node:path'
 import { spawnProviderCommandSync, spawnProviderInvocation } from '../providers/spawn'
-import { processHostEnvironmentSource } from '@server/host-environment'
+import { processHostEnvironmentSource } from '@codetask/agent-runtime/host-environment'
 
 type StringEnv = Record<string, string | undefined>
 

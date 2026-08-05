@@ -4,22 +4,26 @@ import { spawnSync, type ChildProcessWithoutNullStreams } from 'child_process'
 import { createServer } from 'net'
 import { buildOpenCodeServerPlan } from '../providers/opencode/server-plan'
 import { spawnProviderInvocation } from '../providers/spawn'
-import { throwSdkTurnError } from '@server/agent-runtime/errors'
+import { throwSdkTurnError } from '@codetask/agent-runtime/errors'
 import {
   createTurnError,
   isTurnError,
   TURN_CANCELLED,
   type TurnError
-} from '@shared/turn-errors/index.ts'
-import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '@server/agent-runtime/types'
-import { advanceTextSnapshot, appendTextPiece } from '@server/agent-runtime/delta-emit'
-import { extractLooseReasoningText } from '@server/agent-runtime/reasoning-text'
+} from '@codetask/contracts/turn-errors'
+import type {
+  AgentTurnInput,
+  AgentTurnChunk,
+  AgentTurnOptions
+} from '@codetask/agent-runtime/types'
+import { advanceTextSnapshot, appendTextPiece } from '@codetask/agent-runtime/delta-emit'
+import { extractLooseReasoningText } from '@codetask/agent-runtime/reasoning-text'
 import {
   assertRoleTurnReply,
   partialCompletedChunk,
   recordOpencodeToolPartActivity
-} from '@server/agent-runtime/turn-scope'
-import { abortReason, createProviderTurnScope } from '@server/agent-runtime/provider-turn'
+} from '@codetask/agent-runtime/turn-scope'
+import { abortReason, createProviderTurnScope } from '@codetask/agent-runtime/provider-turn'
 import {
   buildOpencodeAutoQuestionAnswers,
   parseOpencodeQuestions,
@@ -27,7 +31,7 @@ import {
   resolveOpencodeToolsConfig,
   type OpencodeQuestionDto
 } from './opencode-config'
-import { resolveInputCapabilityProfile } from '@server/agent-runtime/capabilities'
+import { resolveInputCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 import {
   createOpencodeLongTurnFetch,
   isTransientOpencodeTransportDetail
@@ -35,7 +39,7 @@ import {
 import {
   assertProviderWorkspace,
   workspacePathsEqual
-} from '@server/agent-runtime/workspace-binding'
+} from '@codetask/agent-runtime/workspace-binding'
 
 export { isTransientOpencodeTransportDetail } from './opencode-transport'
 

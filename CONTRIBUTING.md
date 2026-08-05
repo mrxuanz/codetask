@@ -12,6 +12,13 @@ Install dependencies:
 npm install
 ```
 
+Optional Electron download mirrors (not set by default):
+
+```bash
+export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+```
+
 ## Development
 
 Common commands:
@@ -62,11 +69,10 @@ PR descriptions should explain:
 
 ## Third-Party Code
 
-This repository vendors and adapts code derived from OpenAI Codex (`codex-rs`) and also retains notices for some MIT-licensed components.
+This repository adapts code derived from OpenAI Codex (`codex-rs`), forked as the `native/codeteam-*` crates, and also retains notices for some MIT-licensed components.
 
 If your change touches:
 
-- `native/vendor/codex-rs`
 - `native/codeteam-*`
 - files carrying third-party attribution headers
 

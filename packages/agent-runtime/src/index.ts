@@ -287,4 +287,4 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
 
 export { createAgentRuntime as createSharedAgentRuntime }
 
-export { CODETEAM_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from './mcp-constants.ts'
+export { CODETASK_MANAGER_MCP_SERVER, MCP_HTTP_ACCEPT_HEADER_VALUE } from './mcp-constants.ts'

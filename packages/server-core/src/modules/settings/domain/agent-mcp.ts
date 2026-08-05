@@ -16,11 +16,11 @@ export const MCP_ROOT_KEYS: Record<SettingsProviderCode, string> = {
 }
 
 export const RESERVED_MCP_SERVER_NAMES = new Set([
-  'codeteam-manager',
+  'codetask-manager',
   'codeteam-planner',
   'codeteam-worker',
-  'codeteam-milestone-verifier',
-  'codeteam-slice-verifier'
+  'codetask-milestone-verifier',
+  'codetask-slice-verifier'
 ])
 
 export type McpProviderFragment = Record<string, Record<string, unknown>>

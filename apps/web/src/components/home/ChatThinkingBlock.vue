@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
-import { thinkingDurationSeconds } from '@shared/message-thinking'
+import { thinkingDurationSeconds } from '@codetask/contracts/message-thinking'
 import { cn } from '@renderer/lib/utils'
 
 const props = defineProps<{

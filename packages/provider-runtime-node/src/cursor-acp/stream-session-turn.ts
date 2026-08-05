@@ -1,7 +1,11 @@
-import type { AgentTurnInput, AgentTurnChunk, AgentTurnOptions } from '@server/agent-runtime/types'
+import type {
+  AgentTurnInput,
+  AgentTurnChunk,
+  AgentTurnOptions
+} from '@codetask/agent-runtime/types'
 import { buildCursorTurnPlan } from '../providers/cursor/turn-plan'
 import { probeCursorAgentAuth } from './errors'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 import {
   buildConversationCursorRuntimeScope,
   buildCursorRuntimeKey,
@@ -14,6 +18,15 @@ import { materializeCursorMcpApprovals, removeInvalidCursorCliConfig } from './c
 import { debugCursor } from './acp-shared'
 import type { CursorPromptInput } from './session-runtime'
 import { shouldInvalidateCursorScopedRuntime } from './turn-guards'
+
+type CursorResourceReleaser = (scopeId: string) => Promise<void>
+
+let cursorResourceReleaser: CursorResourceReleaser | null = null
+
+/** Host wires sandbox orchestrator release during bootstrap. */
+export function configureCursorResourceRelease(releaser: CursorResourceReleaser): void {
+  cursorResourceReleaser = releaser
+}
 
 export interface StreamCursorSessionTurnInput extends AgentTurnInput {
   jobId?: string | undefined
@@ -142,11 +155,10 @@ export async function closeConversationCursorRuntime(conversationId: string): Pr
     buildConversationCursorRuntimeScope(conversationId, 'chat'),
     `conversation:${conversationId}`
   ]
-  const { releaseJobCursorResources } = await import('@server/sandbox/orchestrator')
   await Promise.all(
     scopes.flatMap((scopeId) => [
       closeCursorRuntimeScope(scopeId),
-      releaseJobCursorResources(scopeId)
+      cursorResourceReleaser?.(scopeId) ?? Promise.resolve()
     ])
   )
 }
@@ -164,5 +176,5 @@ export type JobCursorRuntimeKeyInput = {
   workspaceRoot: string
   model?: string
   mcpProfile: string
-  capabilityProfile?: import('@server/agent-runtime/capabilities').AgentCapabilityProfile
+  capabilityProfile?: import('@codetask/agent-runtime/capabilities').AgentCapabilityProfile
 }

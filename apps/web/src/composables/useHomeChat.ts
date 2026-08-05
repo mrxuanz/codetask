@@ -27,7 +27,7 @@ import {
 } from '@renderer/lib/conversationMessages'
 import { setPreferredProviderCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
-import type { WorkspaceAccessMode } from '@shared/workspace-access'
+import type { WorkspaceAccessMode } from '@codetask/contracts/workspace-access'
 
 export interface HomeChatContext {
   cores: Ref<ConversationCore[]>

@@ -441,7 +441,7 @@ test('Cursor turn plan parity snapshots stay stable for permissions/MCP/endpoint
 
     assert.equal(conversation.outerSandbox, false)
     assert.ok(conversation.cliArgs.includes('--approve-mcps'))
-    assert.equal(conversation.mcpServers[0]?.name, 'codeteam-manager')
+    assert.equal(conversation.mcpServers[0]?.name, 'codetask-manager')
 
     assert.deepEqual(planner.cliArgs.slice(0, 2), ['--mode', 'ask'])
     assert.equal(planner.cliArgs.includes('--approve-mcps'), false)

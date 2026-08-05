@@ -1,11 +1,11 @@
 import {
   capabilityProfileIsReadOnly,
   type AgentCapabilityProfile
-} from '@server/agent-runtime/capabilities'
-import { allConversationMcpToolNames } from '@server/conversation/mcp/tools'
+} from '@codetask/agent-runtime/capabilities'
+import { allConversationMcpToolNames } from '@codetask/agent-runtime/mcp/tools'
 
 const READ_ONLY_SYSTEM_MCP_TOOLS = new Set<string>([
-  'codeteam-manager',
+  'codetask-manager',
   ...allConversationMcpToolNames()
 ])
 
@@ -45,20 +45,20 @@ export function selectDenyOption(
 
 function isAuditedSystemMcpTitle(title: string): boolean {
   const normalized = title.trim().toLowerCase()
-  if (!normalized.includes('codeteam-manager')) return false
+  if (!normalized.includes('codetask-manager')) return false
 
   // Cursor ACP titles arrive in a few shapes, all of which glue server + tool:
-  //   "codeteam-manager read_reference_attachment"
-  //   "codeteam-manager-read_reference_attachment: read_reference_attachment"
+  //   "codetask-manager read_reference_attachment"
+  //   "codetask-manager-read_reference_attachment: read_reference_attachment"
   // Require an exact audited tool name after a server separator — never infer
   // safety from prose alone.
   return [...READ_ONLY_SYSTEM_MCP_TOOLS].some((toolName) => {
-    if (toolName === 'codeteam-manager') return false
+    if (toolName === 'codetask-manager') return false
     const tool = toolName.toLowerCase()
     return (
-      normalized.includes(`codeteam-manager-${tool}`) ||
-      normalized.includes(`codeteam-manager_${tool}`) ||
-      normalized.includes(`codeteam-manager ${tool}`)
+      normalized.includes(`codetask-manager-${tool}`) ||
+      normalized.includes(`codetask-manager_${tool}`) ||
+      normalized.includes(`codetask-manager ${tool}`)
     )
   })
 }

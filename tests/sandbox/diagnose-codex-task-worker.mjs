@@ -75,7 +75,7 @@ function buildCodexSdkConfig(input) {
   if (input.mcpUrl) {
     const toolNames = input.mcpToolNames ?? CODEX_CONVERSATION_MCP_TOOLS
     config.mcp_servers = {
-      'codeteam-manager': {
+      'codetask-manager': {
         url: input.mcpUrl,
         http_headers: { Accept: 'application/json, text/event-stream' },
         default_tools_approval_mode: 'approve',
@@ -195,17 +195,17 @@ function analyzeMcpConfigForTaskWorker(mcpUrl) {
   return {
     taskExecutorToday: {
       explicitToolApprovals: Object.keys(
-        withoutToolNames?.mcp_servers?.['codeteam-manager']?.tools ?? {}
+        withoutToolNames?.mcp_servers?.['codetask-manager']?.tools ?? {}
       ),
       includesReportTaskResult: Boolean(
-        withoutToolNames?.mcp_servers?.['codeteam-manager']?.tools?.report_task_result
+        withoutToolNames?.mcp_servers?.['codetask-manager']?.tools?.report_task_result
       ),
       defaultToolsApprovalMode:
-        withoutToolNames?.mcp_servers?.['codeteam-manager']?.default_tools_approval_mode ?? null
+        withoutToolNames?.mcp_servers?.['codetask-manager']?.default_tools_approval_mode ?? null
     },
     recommended: {
       explicitToolApprovals: Object.keys(
-        withReportTool?.mcp_servers?.['codeteam-manager']?.tools ?? {}
+        withReportTool?.mcp_servers?.['codetask-manager']?.tools ?? {}
       ),
       includesReportTaskResult: true
     }
@@ -763,7 +763,7 @@ async function main() {
             runtimeRoot,
             mcpUrl: probe.url,
             prompt:
-              'Call codeteam-manager report_task_result now with status "completed". Then reply: mcp-ok',
+              'Call codetask-manager report_task_result now with status "completed". Then reply: mcp-ok',
             prod
           })
           report.live.sandboxMcp = {
@@ -804,7 +804,7 @@ async function main() {
             mcpUrl: probe2.url,
             mcpToolNames: ['report_task_result'],
             prompt:
-              'Call codeteam-manager report_task_result now with status "completed". Then reply: mcp-ok',
+              'Call codetask-manager report_task_result now with status "completed". Then reply: mcp-ok',
             prod
           })
           report.live.sandboxMcpExplicitTools = {

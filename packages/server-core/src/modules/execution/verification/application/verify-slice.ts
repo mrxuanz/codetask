@@ -118,7 +118,7 @@ function buildSliceEvidencePrompt(bundle: SliceVerificationEvidenceBundle): stri
     'Review this frozen Slice verification evidence bundle.',
     'Base every claim on the supplied requirements, Work state, TaskEvidence, validation result, or workspace inspection.',
     JSON.stringify(bundle, null, 2),
-    'Submit exactly one complete_slice_verification verdict via the codeteam-slice-verifier MCP tool.'
+    'Submit exactly one complete_slice_verification verdict via the codetask-slice-verifier MCP tool.'
   ].join('\n')
 }
 
@@ -127,7 +127,7 @@ function buildMilestoneEvidencePrompt(bundle: MilestoneVerificationEvidenceBundl
     'Review this frozen Milestone verification evidence bundle.',
     'Evaluate the Milestone criteria against the complete child Slice verdicts and job requirements.',
     JSON.stringify(bundle, null, 2),
-    'Submit exactly one complete_milestone_verification verdict via the codeteam-milestone-verifier MCP tool.'
+    'Submit exactly one complete_milestone_verification verdict via the codetask-milestone-verifier MCP tool.'
   ].join('\n')
 }
 
@@ -535,7 +535,7 @@ async function runSliceVerifierAgent(input: {
         ? {
             mcpServers: [
               {
-                name: 'codeteam-slice-verifier',
+                name: 'codetask-slice-verifier',
                 url: mcpUrl,
                 headers: { Accept: MCP_HTTP_ACCEPT_HEADER_VALUE }
               }
@@ -798,7 +798,7 @@ async function runMilestoneVerifierAgent(input: {
         ? {
             mcpServers: [
               {
-                name: 'codeteam-milestone-verifier',
+                name: 'codetask-milestone-verifier',
                 url: mcpUrl,
                 headers: { Accept: MCP_HTTP_ACCEPT_HEADER_VALUE }
               }

@@ -2,8 +2,8 @@ import type { ProviderSettings } from '../../spec/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { OPENCODE_DESCRIPTOR } from './descriptor'
 import { runOpenCodeAuthPreflight } from './preflight'
-import { prepareOpenCodeRuntimeProfile } from '@server/sandbox/provider-auth/bridge'
-import { resolveOpencodeInstallDirs } from '@server/sandbox/provider-auth/paths'
+import { prepareOpenCodeRuntimeProfile } from '../../provider-auth/bridge'
+import { resolveOpencodeInstallDirs } from '../../provider-auth/paths'
 
 export {
   buildOpenCodeConfig,

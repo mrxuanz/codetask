@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
 import { allMigrations } from '../../src/server/db/migrations'
-import { currentMigrationVersion, runMigrations } from '../../src/server/db/migrations/runner'
+import { currentMigrationVersion, runMigrations } from '@codetask/database'
 import {
   runMigrationsUpTo,
   schemaFingerprint,

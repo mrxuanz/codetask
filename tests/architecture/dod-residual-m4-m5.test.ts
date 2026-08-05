@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { allMigrations } from '../../src/server/db/migrations'
-import { runMigrations } from '../../src/server/db/migrations/runner'
+import { runMigrations } from '@codetask/database'
 
 const root = join(import.meta.dirname, '../..')
 
@@ -34,8 +34,8 @@ describe('architecture residual DoD — M4', () => {
     assert.match(migration, /DROP TABLE thread_jobs/)
     assert.match(migration, /DROP TABLE draft_references/)
 
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
-    assert.match(index, /migration060DropThreadJobsGraphHost/)
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
+    assert.match(index, /migration060DropThreadJobsGraph/)
 
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')

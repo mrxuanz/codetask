@@ -2,6 +2,7 @@
   "name": "@codetask/database",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -9,9 +10,14 @@
     "./schema/execution": "./src/schema/execution.ts",
     "./migrations": "./src/migrations/index.ts",
     "./migrations/execution": "./src/migrations/execution.ts",
-    "./migrations/conversation": "./src/migrations/conversation.ts"
+    "./migrations/conversation": "./src/migrations/conversation.ts",
+    "./migrations/all": "./src/migrations/all.ts",
+    "./schema/host": "./src/schema/host.ts",
+    "./migrations/v001_042/constraints": "./src/migrations/v001_042/constraints.ts",
+    "./migrations/v001_042/*": "./src/migrations/v001_042/*.ts"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "better-sqlite3": "^12.11.1"
   }
 }

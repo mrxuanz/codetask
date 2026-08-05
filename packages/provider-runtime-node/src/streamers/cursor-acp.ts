@@ -1,4 +1,4 @@
-import type { AgentTurnInput, AgentTurnChunk } from '@server/agent-runtime/types'
+import type { AgentTurnInput, AgentTurnChunk } from '@codetask/agent-runtime/types'
 import {
   streamCursorSessionTurn,
   type StreamCursorSessionTurnOptions

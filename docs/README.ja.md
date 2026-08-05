@@ -14,6 +14,16 @@ codetask はソフトウェア納品向けのデスクトップ AI タスクオ�
 
 **Codex** / **Claude Code** / **OpenCode** / **Cursor CLI** に対応。**Electron** デスクトップ、または **Server** モードでブラウザから利用できます。
 
+## リポジトリ構成
+
+`src/` から `apps/` + `packages/` への移行途中です。
+
+- `apps/web` — Vue レンダラ
+- `apps/desktop` / `apps/service` — ホスト用プレースホルダ（Electron 入口は当面 `src/main`）
+- `packages/*` — `@codetask/*` 共有ライブラリ
+- `src/server` / `src/shared` / `src/main` — 合成ルートとホストアダプタ（packages へ移行中）
+- `native/codeteam-*` — OS サンドボックス crate。`codeteam` は upstream `codex-*` からの**歴史的リネーム**（`NOTICE` 参照）で、別ブランドではありません
+
 ## 解決する課題
 
 従来の「大きな 1 プロンプトで Agent を最後まで走らせる」方式は、長い要件で次の問題が起きやすいです。
@@ -70,11 +80,12 @@ Planner ルール（`src/server/planner/prompts.ts` 参照）:
 
 ### サンドボックス分離（Codex 参考）
 
-Task Worker / Verifier は OS レベルサンドボックスで動作。[OpenAI Codex](https://github.com/openai/codex) のサンドボックス設計を参考に、`native/vendor/codex-rs` と自前 `codeteam-*` crate で実装:
+Task Worker / Verifier は OS レベルサンドボックスで動作。[OpenAI Codex](https://github.com/openai/codex) のサンドボックス設計を参考に、適応済み `codeteam-*` crate（Codex `codex-rs` からの fork。ベースライン commit は `NOTICE`）で実装:
 
 - **Planner / チャット** — 外側 OS サンドボックスなし。SDK/ACP 層は読み取り専用
 - **Task Worker** — ワークスペース書き込み可、ホスト FS 読み取り専用、独立 `runtimeRoot`
 - **Fail closed** — サンドボックス helper またはポリシー失敗時は即終了。通常 `spawn()` へフォールバックしない
+- **ネットワークは制限しない（意図的な設計）** — サンドボックス境界はファイルシステムとプロセス分離のみ。Agent CLI はインターネット接続（モデル API、Web 検索、パッケージインストール）を前提とするため、サンドボックス内タスクの外向き通信は開放されています。サンドボックス内で読めるシークレットは外部送信され得るものとして扱ってください。
 
 ## ワークフロー
 
@@ -106,7 +117,7 @@ Task Worker / Verifier は OS レベルサンドボックスで動作。[OpenAI 
 ## 設計参考と謝辞
 
 - **GSD（Get Shit Done）** — Milestone / Slice / Task 階層、明確な完了基準、小ステップでコンテキスト腐敗を防止
-- **[OpenAI Codex](https://github.com/openai/codex)** — サンドボックス分離と OS helper。native 層は `native/vendor/codex-rs` を vendor
+- **[OpenAI Codex](https://github.com/openai/codex)** — サンドボックス分離と OS helper。native 層は適応済み `codeteam-*` forks（ベースラインはルート `NOTICE`）
 - **[t3code](https://github.com/pingdotgg/t3code)** — デスクトップ UX 参考：プロジェクト / チャット / タスク階層、マルチ Provider、ストリーミング状態
 
 ## 実行モード

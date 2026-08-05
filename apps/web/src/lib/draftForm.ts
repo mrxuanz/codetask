@@ -4,12 +4,12 @@ import {
   collectMissingReferenceDescriptions,
   referenceRequiresDescription,
   type DraftReferenceLike
-} from '@shared/draft-references'
+} from '@codetask/contracts/draft-references'
 import {
   isDraftListEntryLaunched,
   isLaunchedJobStatus,
   LAUNCHED_JOB_STATUSES
-} from '@shared/job-lifecycle'
+} from '@codetask/contracts/job-lifecycle'
 import type {
   TaskLaunchDraftAbility,
   TaskLaunchDraftPayload,

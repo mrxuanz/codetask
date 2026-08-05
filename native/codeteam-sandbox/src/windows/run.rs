@@ -1,8 +1,6 @@
 ﻿use std::collections::HashMap;
 use std::path::PathBuf;
 
-use codeteam_sandbox_adapter::ParsedTaskPolicy;
-
 use crate::protocol::SandboxPolicy;
 
 use super::elevated_child;
@@ -10,7 +8,6 @@ use super::elevated_child;
 pub fn spawn(
     policy: &SandboxPolicy,
     policy_json: &str,
-    parsed: &ParsedTaskPolicy,
     command: &str,
     args: &[String],
     env: &HashMap<String, String>,
@@ -21,7 +18,6 @@ pub fn spawn(
     elevated_child::ElevatedChild::spawn(
         policy,
         policy_json,
-        parsed,
         command,
         args,
         env,

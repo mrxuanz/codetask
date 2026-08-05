@@ -10,18 +10,21 @@ import {
   type UnifiedMilestoneNode,
   type UnifiedSliceNode,
   type UnifiedTaskNode
-} from '@shared/plan-tree'
-import { resolveJobLifecycleBucket, type JobLifecycleBucket } from '@shared/job-lifecycle'
+} from '@codetask/contracts/plan-tree'
+import {
+  resolveJobLifecycleBucket,
+  type JobLifecycleBucket
+} from '@codetask/contracts/job-lifecycle'
 import {
   formatExecutionQueueLabel,
   isExecutionDisplayStatus,
   resolveJobStatusBadgeClass,
   resolveJobStatusBadgeKey,
   resolveJobStatusDisplay
-} from '@shared/job-display'
+} from '@codetask/contracts/job-display'
 import { formatDateTimeValue, formatUnixTimestamp } from '@renderer/lib/formatDateTime'
-import { resolvePlanningPercent } from '@shared/plan-generation-progress'
-import { getProviderDescriptors } from '@shared/providers/descriptors'
+import { resolvePlanningPercent } from '@codetask/contracts/plan-generation-progress'
+import { getProviderDescriptors } from '@codetask/provider-runtime-node/spec/descriptors'
 
 export { resolveJobLifecycleBucket, type JobLifecycleBucket }
 

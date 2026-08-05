@@ -1,12 +1,15 @@
 import type { ChildProcess } from 'node:child_process'
 import { RequestError, type ClientContext, type InitializeResponse } from '@agentclientprotocol/sdk'
-import type { ConversationRole } from '@server/agent-runtime/roles'
-import type { CursorAcpMcpServer } from '@server/agent-runtime/mcp'
-import type { AgentTurnChunk } from '@server/agent-runtime/types'
-import { createTurnError, type TurnErrorDto } from '@shared/turn-errors/index.ts'
-import type { TurnErrorCode } from '@shared/turn-errors/codes.ts'
+import type { ConversationRole } from '@codetask/agent-runtime/roles'
+import type { CursorAcpMcpServer } from '../agent-mcp.ts'
+import type { AgentTurnChunk } from '@codetask/agent-runtime/types'
+import {
+  createTurnError,
+  type TurnErrorCode,
+  type TurnErrorDto
+} from '@codetask/contracts/turn-errors'
 import { classifyCursorAcpError } from './errors'
-import { abortReason, createProviderTurnScope } from '@server/agent-runtime/provider-turn'
+import { abortReason, createProviderTurnScope } from '@codetask/agent-runtime/provider-turn'
 import { createAsyncQueue } from './async-queue'
 import {
   applyCursorModel,
@@ -26,10 +29,10 @@ import {
   type ChildDiagnostics,
   type CursorAcpSessionHandle
 } from './acp-shared'
-import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '@server/agent-runtime/delta-emit'
+import { appendTextPiece, MAX_TURN_TEXT_CHARS } from '@codetask/agent-runtime/delta-emit'
 import { assertCursorAcpCompletion } from './turn-guards'
-import { recordAcpToolCallActivity } from '@server/agent-runtime/turn-scope'
-import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
+import { recordAcpToolCallActivity } from '@codetask/agent-runtime/turn-scope'
+import type { AgentCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 
 export interface CursorPromptInput {
   role: ConversationRole

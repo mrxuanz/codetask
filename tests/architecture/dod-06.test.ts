@@ -42,8 +42,8 @@ describe('architecture 06 DoD', () => {
     assert.equal(exists('packages/server-core/src/modules/realtime/dispatcher.ts'), true)
     assert.equal(exists('packages/server-core/src/modules/realtime/live-fanout.ts'), true)
     assert.equal(exists('packages/database/src/migrations/realtime-events.ts'), true)
-    assert.equal(exists('src/server/db/migrations/054_realtime_events.ts'), true)
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
+    assert.equal(exists('packages/database/src/migrations/realtime-events.ts'), true)
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
     assert.match(index, /migration054RealtimeEvents/)
   })
 

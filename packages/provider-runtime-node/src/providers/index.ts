@@ -37,7 +37,7 @@ export {
   processHostAuthSource,
   ProcessHostAuthSource,
   ProcessHostEnvironmentSource
-} from '@server/host-environment'
+} from '@codetask/agent-runtime/host-environment'
 export type {
   HostEnvironmentSnapshot,
   HostEnvironmentSource,
@@ -45,4 +45,4 @@ export type {
   ResolveHostEnvironmentOptions,
   HostAuthSource,
   HostAuthKeyPresence
-} from '@server/host-environment'
+} from '@codetask/agent-runtime/host-environment'

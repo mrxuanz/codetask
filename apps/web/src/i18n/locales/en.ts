@@ -1,4 +1,4 @@
-import { turnErrorsEn } from '@shared/turn-errors'
+import { turnErrorsEn } from '@codetask/contracts/turn-errors'
 
 export default {
   common: {
@@ -219,10 +219,18 @@ export default {
         resume: 'Resume',
         continue: 'Continue',
         restart: 'Clear progress and start over',
+        restartExecution: 'Restart',
+        replan: 'Replan',
+        confirmPlan: 'Confirm Plan',
+        editPlan: 'Edit Plan',
         cancel: 'Cancel',
-        delete: 'Delete'
+        delete: 'Delete',
+        pausing: 'Pausing…'
       },
       actionFailed: 'Task action failed',
+      deleteFailed: 'Failed to delete',
+      revisionConflict: 'Task state changed; confirm and retry',
+      uploadInvalidResponse: 'Invalid upload response',
       recovery: {
         retry: 'Continue retries from the failed checkpoint without clearing completed tasks.',
         remediate: 'Continue runs remediation tasks first, then returns to the failed checkpoint.',

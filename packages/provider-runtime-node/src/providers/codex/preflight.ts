@@ -1,5 +1,5 @@
-import { ProviderAuthError } from '@server/sandbox/provider-auth/errors'
-import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
+import { ProviderAuthError } from '../../provider-auth/errors'
+import type { ProviderRuntimeProfile } from '../../provider-auth/types'
 import type { ProviderInstallation } from '../../spec/installation'
 
 const CODEX_LABEL = 'Codex'

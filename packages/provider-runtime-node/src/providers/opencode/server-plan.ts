@@ -1,17 +1,17 @@
 import type { Config } from '@opencode-ai/sdk/v2'
-import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '@server/agent-runtime/env'
-import { buildOpencodeMcpServers } from '@server/agent-runtime/mcp'
+import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '../../agent-env'
+import { buildOpencodeMcpServers } from '../../agent-mcp'
 import {
   capabilityProfileIsReadOnly,
   resolveInputCapabilityProfile
-} from '@server/agent-runtime/capabilities'
-import { roleRequiresOuterSandbox } from '@server/agent-runtime/roles'
-import type { AgentTurnInput } from '@server/agent-runtime/types'
+} from '@codetask/agent-runtime/capabilities'
+import { roleRequiresOuterSandbox } from '@codetask/agent-runtime/roles'
+import type { AgentTurnInput } from '@codetask/agent-runtime/types'
 import {
   resolveOpencodePermissionConfig,
   resolveOpencodeToolsConfig
 } from '../../streamers/opencode-config'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 import { resolveProviderExecutable } from '../executable'
 
 /**

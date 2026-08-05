@@ -14,6 +14,16 @@ codetask 是面向软件交付的桌面端 AI 任务编排应用。你在对话�
 
 支持 **Codex**、**Claude Code**、**OpenCode**、**Cursor CLI** 作为规划与执行引擎；可跑 **Electron** 桌面，也可 **Server** 模式用浏览器访问。
 
+## 仓库布局
+
+仓库正处于 `src/` → `apps/` + `packages/` 迁移中期：
+
+- `apps/web` — Vue 渲染层
+- `apps/desktop` / `apps/service` — 宿主包占位（Electron 入口仍在 `src/main`）
+- `packages/*` — `@codetask/*` 共享库
+- `src/server` / `src/shared` / `src/main` — 组合根与宿主适配，逐步迁入 packages
+- `native/codeteam-*` — OS 沙箱 crate；`codeteam` 是上游 `codex-*` 的**历史重命名**（见 `NOTICE`），不是第二套产品名
+
 ## 要解决什么问题
 
 传统「一个大 Prompt 让 Agent 干到底」在长需求上容易：
@@ -70,11 +80,12 @@ Planner 规则（见 `src/server/planner/prompts.ts`）：
 
 ### 沙箱隔离（参考 Codex）
 
-Task Worker / Verifier 在 OS 级沙箱中运行，思路借鉴 [OpenAI Codex](https://github.com/openai/codex) 沙箱体系；native 层基于 `native/vendor/codex-rs` 与自研 `codeteam-*` crate 实现：
+Task Worker / Verifier 在 OS 级沙箱中运行，思路借鉴 [OpenAI Codex](https://github.com/openai/codex) 沙箱体系；native 层为自研 `codeteam-*` crate（fork 自 Codex `codex-rs`，基线 commit 见 `NOTICE`）：
 
 - **Planner / 对话**：不走外层 OS 沙箱，SDK/ACP 层只读
 - **Task Worker**：工作区可写，宿主文件系统只读，独立 `runtimeRoot`
 - **Fail closed**：沙箱 helper 或策略失败时立即终止，不回退到普通 `spawn()`
+- **网络不做限制（有意设计）**：沙箱边界只覆盖文件系统与进程隔离。Agent CLI 需要联网（模型 API、检索资料、安装依赖），因此沙箱内任务的对外网络出口有意保持放行。沙箱内可读的任何机密都应视为可能被外传。
 
 ## 工作流
 
@@ -106,7 +117,7 @@ Task Worker / Verifier 在 OS 级沙箱中运行，思路借鉴 [OpenAI Codex](h
 ## 设计参考与致谢
 
 - **GSD（Get Shit Done）** — 任务分解与计划结构：Milestone / Slice / Task 层级、明确完成标准、小步推进避免上下文腐烂
-- **[OpenAI Codex](https://github.com/openai/codex)** — 沙箱隔离与 OS helper 思路；native 层 vendor 于 `native/vendor/codex-rs`
+- **[OpenAI Codex](https://github.com/openai/codex)** — 沙箱隔离与 OS helper 思路；native 层为适配后的 `codeteam-*` forks（基线 commit 见根目录 `NOTICE`）
 - **[t3code](https://github.com/pingdotgg/t3code)** — 桌面端体验参考：项目 / 对话 / 任务分层、多 Provider 接入、流式状态联动
 
 ## 运行模式

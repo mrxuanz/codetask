@@ -5,6 +5,8 @@
  * Renderer must NOT compute actions from job state
  */
 
+import { i18n } from '@renderer/i18n'
+
 export interface JobAction {
   readonly id: string
   readonly label: string
@@ -12,6 +14,10 @@ export interface JobAction {
 }
 
 const ACTIVE_JOB_STATES = new Set(['running', 'pausing', 'cancelling'])
+
+function t(key: string): string {
+  return i18n.global.t(key)
+}
 
 export function getAvailableActions(job: {
   availableActions: readonly string[]
@@ -26,22 +32,23 @@ export function getAvailableActions(job: {
 function getActionLabel(action: string): string {
   switch (action) {
     case 'pause':
-      return 'Pause'
+      return t('workspace.tasks.actions.pause')
     case 'continue':
-      return 'Continue'
+      return t('workspace.tasks.actions.continue')
     case 'cancel':
-      return 'Cancel'
+      return t('workspace.tasks.actions.cancel')
     case 'restart':
+      return t('workspace.tasks.actions.restart')
     case 'restart_execution':
-      return 'Restart'
+      return t('workspace.tasks.actions.restartExecution')
     case 'replan':
-      return 'Replan'
+      return t('workspace.tasks.actions.replan')
     case 'confirm_plan':
-      return 'Confirm Plan'
+      return t('workspace.tasks.actions.confirmPlan')
     case 'edit_plan':
-      return 'Edit Plan'
+      return t('workspace.tasks.actions.editPlan')
     case 'delete':
-      return 'Delete'
+      return t('workspace.tasks.actions.delete')
     default:
       return action
   }
@@ -81,6 +88,6 @@ export function shouldShowDelete(job: {
 }
 
 export function getPauseButtonText(job: { state: string }): string | null {
-  if (job.state === 'pausing') return 'Pausing...'
+  if (job.state === 'pausing') return t('workspace.tasks.actions.pausing')
   return null
 }

@@ -9,8 +9,8 @@ import {
   validateSetupToken,
   validateSetupTokenWithGate
 } from '../../src/server/auth/setup-token'
-import { migration040DestructiveAuthCurrent } from '../../src/server/db/migrations/040_destructive_auth_current'
-import { migration041AuthSecretSqlite } from '../../src/server/db/migrations/041_auth_secret_sqlite'
+import { migration040DestructiveAuthCurrent } from '../../packages/database/src/migrations/v001_042/040_destructive_auth_current.ts'
+import { migration041AuthSecretSqlite } from '../../packages/database/src/migrations/v001_042/041_auth_secret_sqlite.ts'
 import { NodeSqliteAdapter } from '../helpers/node-sqlite-adapter'
 
 test('SQLite owns one stable auth secret for both Hono hosts', () => {
