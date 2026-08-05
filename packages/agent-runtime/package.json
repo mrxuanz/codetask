@@ -2,8 +2,29 @@
   "name": "@codetask/agent-runtime",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./roles": "./src/roles.ts",
+    "./types": "./src/types.ts",
+    "./capabilities": "./src/capabilities.ts",
+    "./delta-emit": "./src/delta-emit.ts",
+    "./reasoning-text": "./src/reasoning-text.ts",
+    "./errors": "./src/errors.ts",
+    "./provider-policy": "./src/provider-policy.ts",
+    "./provider-turn": "./src/provider-turn.ts",
+    "./progress-guard": "./src/progress-guard.ts",
+    "./turn-scope": "./src/turn-scope.ts",
+    "./turn-timeouts": "./src/turn-timeouts.ts",
+    "./workspace-binding": "./src/workspace-binding.ts",
+    "./host-environment": "./src/host-environment.ts",
+    "./shell-child-environment": "./src/shell-child-environment.ts",
+    "./debug/sandbox-turn": "./src/debug/sandbox-turn.ts",
+    "./mcp/tools": "./src/mcp/tools.ts",
+    "./mcp-constants": "./src/mcp-constants.ts"
+  },
+  "dependencies": {
+    "@codetask/contracts": "*"
   }
 }

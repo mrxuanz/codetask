@@ -1,3 +1,11 @@
+/**
+ * Design / planning adapter for the web UI.
+ *
+ * Bridges legacy "thread + draft + plan" call shapes onto Design + Execution APIs
+ * (`./design`, `./jobs-api`). Prefer `@codetask/contracts` types and `./jobs-api`
+ * for new Execution-only surfaces. Retire functions here as call sites move to
+ * design.ts / jobs-api.ts directly.
+ */
 import { authHeaders } from '@renderer/auth/token'
 import type {
   MessageAttachment,
@@ -9,12 +17,12 @@ import type {
 } from '@codetask/contracts'
 import { toPlanningSessionStatus } from '@codetask/contracts'
 import { designDraftToPayload, type TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
+import { i18n } from '@renderer/i18n'
 import { api, ApiError } from './client'
 import type { ApiSuccess } from './types'
 import {
   addDesignDraftReference,
   confirmDesignDraft,
-  confirmPlanningTreeNode,
   deleteDesignDraftReference,
   getDesignDraft,
   getPlanningSession,
@@ -117,13 +125,14 @@ export async function uploadConversationAttachment(
   }
   const body = (await res.json()) as { data?: { attachment?: MessageAttachment } }
   if (!body.data?.attachment) {
-    throw new ApiError('上传响应无效', res.status, body)
+    throw new ApiError(
+      String(i18n.global.t('workspace.tasks.uploadInvalidResponse')),
+      res.status,
+      body
+    )
   }
   return body.data.attachment
 }
-
-/** @deprecated Use uploadConversationAttachment */
-export const uploadThreadAttachment = uploadConversationAttachment
 
 export async function fetchLatestThreadJob(
   threadId: string
@@ -232,12 +241,11 @@ export function retryJobPlanning(
   return api<unknown>(`/api/planning-sessions/${encodeURIComponent(sessionId)}/retry`, {
     method: 'POST',
     body: '{}'
-  }).then(async () => {
+  }).then(async (retryRes) => {
     const current = await getPlanningSession(sessionId)
     return {
-      success: true as const,
-      data: { job: mapPlanningSessionToJob(current.data.session) },
-      requestId: 'client-local'
+      ...retryRes,
+      data: { job: mapPlanningSessionToJob(current.data.session) }
     }
   })
 }
@@ -254,7 +262,6 @@ export function deleteJob(
 }
 
 export function fetchTaskEvidenceDetail(
-  _threadId: string,
   jobId: string,
   taskId: string
 ): Promise<ApiSuccess<{ evidence: import('@codetask/contracts').TaskEvidenceDto }>> {
@@ -274,7 +281,6 @@ export function fetchTaskEvidenceDetail(
 }
 
 export function confirmDraftMessage(
-  _threadId: string,
   draftId: string
 ): Promise<ApiSuccess<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
   return getDesignDraft(draftId).then(async (res) => {
@@ -289,27 +295,6 @@ export function confirmDraftMessage(
     }
   })
 }
-export function confirmDraftSection(
-  _threadId: string,
-  draftId: string,
-  section: string
-): Promise<ApiSuccess<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
-  return getDesignDraft(draftId).then(async (res) => {
-    const draft = res.data
-    const body = await api<DesignDraftDto>(
-      `/api/drafts/${encodeURIComponent(draftId)}/sections/${encodeURIComponent(section)}/confirm`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ expectedRevision: draft.lockRevision })
-      }
-    )
-    return {
-      ...body,
-      data: { messageId: draftId, payload: designDraftToPayload(body.data) }
-    }
-  })
-}
-
 function mapDesignDraftToSummary(draft: DesignDraftDto): ThreadDraftSummaryDto {
   return {
     messageId: draft.id,
@@ -403,7 +388,6 @@ export async function fetchThreadPlans(
 }
 
 export async function confirmExecutionPlan(
-  _threadId: string,
   sessionId: string
 ): Promise<ApiSuccess<{ job: PlanningSessionViewDto }>> {
   const current = await getPlanningSession(sessionId)
@@ -422,33 +406,12 @@ export async function confirmExecutionPlan(
 }
 
 export async function launchDesignSession(
-  threadId: string,
   designSessionId: string
 ): Promise<ApiSuccess<{ job: PlanningSessionViewDto }>> {
-  return confirmExecutionPlan(threadId, designSessionId)
-}
-
-export async function freezeReferenceCorpus(
-  _threadId: string,
-  _designSessionId: string
-): Promise<ApiSuccess<{ manifest: import('@shared/job-references').JobReferenceManifestDto }>> {
-  // Design freezes reference manifest at planning-session creation; no-op success for UI.
-  return {
-    success: true,
-    data: {
-      manifest: {
-        revision: 1,
-        references: [],
-        contentHash: '',
-        frozenAt: new Date().toISOString()
-      } as unknown as import('@shared/job-references').JobReferenceManifestDto
-    },
-    requestId: 'client-local'
-  }
+  return confirmExecutionPlan(designSessionId)
 }
 
 export async function updateJobPlanNode(
-  _threadId: string,
   sessionId: string,
   patch: {
     nodeRef: string
@@ -483,22 +446,7 @@ export async function updateJobPlanNode(
   }
 }
 
-export async function confirmPlanNode(
-  _threadId: string,
-  sessionId: string,
-  nodeRef: string
-): Promise<ApiSuccess<{ job: PlanningSessionViewDto }>> {
-  const current = await getPlanningSession(sessionId)
-  await confirmPlanningTreeNode(sessionId, nodeRef, current.data.session.treeRevision)
-  const refreshed = await getPlanningSession(sessionId)
-  return {
-    ...refreshed,
-    data: { job: mapPlanningSessionToJob(refreshed.data.session) }
-  }
-}
-
 export function updateDraftContent(
-  _threadId: string,
   draftId: string,
   patch: {
     title?: string
@@ -528,7 +476,6 @@ export function updateDraftContent(
 }
 
 export async function updateDraftAbilityCores(
-  _threadId: string,
   messageId: string,
   selections: Array<{ abilityCode: string; providerCode: string }>
 ): Promise<ApiSuccess<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
@@ -543,7 +490,6 @@ export async function updateDraftAbilityCores(
 }
 
 export async function updateDraftExecutionConfig(
-  _threadId: string,
   messageId: string,
   config: {
     plannerCoreCode: string
@@ -567,29 +513,24 @@ function asDraftPayload(
       draftId,
       payload: designDraftToPayload(draft)
     },
-    requestId: 'client-local'
+    requestId: `design:${draftId}`
   }
 }
 
 export async function unlockDraftForEdit(
-  _threadId: string,
   draftMessageId: string
-): Promise<ApiSuccess<{ draft: TaskLaunchDraftPayload; thread: { id: string } }>> {
+): Promise<ApiSuccess<{ draft: TaskLaunchDraftPayload }>> {
   const current = await getDesignDraft(draftMessageId)
   const unlocked = await unlockDesignDraft(draftMessageId, current.data.lockRevision)
   return {
     ...unlocked,
     data: {
-      draft: designDraftToPayload(unlocked.data),
-      thread: { id: _threadId }
+      draft: designDraftToPayload(unlocked.data)
     }
   }
 }
 
-export async function unlockRequirementsContract(
-  _threadId: string,
-  draftMessageId: string
-): Promise<
+export async function unlockRequirementsContract(draftMessageId: string): Promise<
   ApiSuccess<{
     messageId: string
     payload: TaskLaunchDraftPayload
@@ -609,7 +550,6 @@ export async function unlockRequirementsContract(
 }
 
 export async function launchJobFromDraft(
-  _threadId: string,
   draftMessageId: string
 ): Promise<ApiSuccess<{ job: PlanningSessionViewDto; draft: TaskLaunchDraftPayload }>> {
   const draftRes = await getDesignDraft(draftMessageId)
@@ -636,7 +576,7 @@ export async function uploadDraftReferences(
   // Upload bytes via thread attachments, then attach metadata on the Design draft.
   const attachments: MessageAttachment[] = []
   for (const file of files) {
-    attachments.push(await uploadThreadAttachment(threadId, file))
+    attachments.push(await uploadConversationAttachment(threadId, file))
   }
   let draftRes = await getDesignDraft(messageId)
   let draft = draftRes.data
@@ -657,7 +597,6 @@ export async function uploadDraftReferences(
 }
 
 export async function deleteDraftReference(
-  _threadId: string,
   messageId: string,
   referenceId: string
 ): Promise<ApiSuccess<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
@@ -671,7 +610,6 @@ export async function deleteDraftReference(
 }
 
 export async function updateDraftReferenceDescription(
-  _threadId: string,
   messageId: string,
   referenceId: string,
   description: string
@@ -685,12 +623,10 @@ export async function updateDraftReferenceDescription(
 }
 
 export async function importDraftReferences(
-  threadId: string,
   messageId: string,
   attachmentIds: string[],
   descriptions: Record<string, string> = {}
 ): Promise<ApiSuccess<{ messageId: string; payload: TaskLaunchDraftPayload }>> {
-  void threadId
   let draftRes = await getDesignDraft(messageId)
   let draft = draftRes.data
   for (const attachmentId of attachmentIds) {
@@ -708,7 +644,6 @@ export async function importDraftReferences(
 }
 
 export async function addLocalCorpusDraftReference(
-  _threadId: string,
   messageId: string,
   input: {
     localPath: string

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { CursorAcpMcpServer } from '@server/agent-runtime/mcp'
+import type { CursorAcpMcpServer } from '../agent-mcp'
 import { withCursorHostStateLock } from './cursor-host-state'
 
 export function slugifyCursorProjectPath(path: string): string {

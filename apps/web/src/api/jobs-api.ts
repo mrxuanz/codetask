@@ -1,19 +1,13 @@
 /**
  * Execution jobs HTTP client — canonical `/api/jobs` surface.
  */
-import type {
-  JobCommandBody,
-  JobCommandResult,
-  JobDetail,
-  JobState,
-  JobSummary
-} from '@codetask/contracts'
+import type { JobCommandBody, JobCommandResult, JobDetail, JobSummary } from '@codetask/contracts'
 import { randomUUID } from '@renderer/lib/id'
 import { api } from './client'
 import type { ApiSuccess } from './types'
 
-/** UI job view: Execution JobDetail. Prefer `.state`; `.status` is a deprecated alias. */
-export type ExecutionJob = JobDetail & { /** @deprecated Use state */ status: JobState }
+/** UI job view: Execution JobDetail. Use `.state` (not a deprecated `.status` alias). */
+export type ExecutionJob = JobDetail
 
 export interface JobsApi {
   fetchJobs(
@@ -57,7 +51,7 @@ export function newIdempotencyKey(): string {
 }
 
 function mapDetail(detail: JobDetail): ExecutionJob {
-  return { ...detail, status: detail.state }
+  return detail
 }
 
 function mapSummary(summary: JobSummary): ExecutionJob {
@@ -65,7 +59,6 @@ function mapSummary(summary: JobSummary): ExecutionJob {
   const updatedAt = summary.startedAt ?? summary.queuedAt ?? createdAt
   return {
     ...summary,
-    status: summary.state,
     sourceDraftId: '',
     sourcePlanningSessionId: '',
     currentRunId: null,
@@ -146,14 +139,13 @@ export function createExecutionJobsApi(): JobsApi {
       return refetchExecutionJob(jobId)
     },
     delete: async (jobId, expectedRevision, idempotencyKey) => {
-      await api(`/api/jobs/${encodeURIComponent(jobId)}`, {
+      const res = await api<{ deleted?: boolean }>(`/api/jobs/${encodeURIComponent(jobId)}`, {
         method: 'DELETE',
         body: JSON.stringify(commandBody(expectedRevision, idempotencyKey))
       })
       return {
-        success: true as const,
-        data: { deleted: true },
-        requestId: 'client-local'
+        ...res,
+        data: { deleted: res.data.deleted ?? true }
       }
     }
   }

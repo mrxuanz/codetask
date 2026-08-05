@@ -79,7 +79,7 @@ function assertNoRuntimeCodexConfig(codexHome: string): void {
   const configPath = join(codexHome, 'config.toml')
   if (!existsSync(configPath)) return
   const raw = readFileSync(configPath, 'utf8')
-  if (/mcp_servers|codeteam-manager/i.test(raw)) {
+  if (/mcp_servers|codetask-manager/i.test(raw)) {
     throw new Error(`runtime config.toml must not contain MCP entries: ${configPath}`)
   }
 }
@@ -373,7 +373,7 @@ async function runStaticForRole(
           string,
           { required?: boolean; tools?: Record<string, unknown> }
         >
-      )['codeteam-manager']
+      )['codetask-manager']
     : undefined
   const mcpTools = Object.keys(systemMcp?.tools ?? {})
   const noProxyEntries = new Set(plan.env.NO_PROXY.split(','))
@@ -517,7 +517,7 @@ async function main(): Promise<void> {
             env,
             mcpUrl: fake.url,
             outerSandbox: liveRole !== 'conversation' && liveRole !== 'planner',
-            prompt: `Call codeteam-manager ${mcpTool} now with status "completed". Then reply: mcp-ok`
+            prompt: `Call codetask-manager ${mcpTool} now with status "completed". Then reply: mcp-ok`
           })
           const toolCalls = fake.calls.filter((c) => c.rpcMethod === 'tools/call')
           report.mcp = {

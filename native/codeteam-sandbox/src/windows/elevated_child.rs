@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use codeteam_sandbox_adapter::{ParsedTaskPolicy, legacy_policy_json, parse_task_policy_json};
+use codeteam_sandbox_adapter::{legacy_policy_json, parse_task_policy_json};
 use codeteam_windows_sandbox::{
     ElevatedSandboxCaptureRequest, StreamingCaptureControl, apply_electron_node_env,
     resolve_host_launcher, run_windows_sandbox_capture_streaming_elevated,
@@ -44,7 +44,6 @@ impl ElevatedChild {
     pub fn spawn(
         policy: &SandboxPolicy,
         policy_json: &str,
-        _parsed: &ParsedTaskPolicy,
         command: &str,
         args: &[String],
         env: &HashMap<String, String>,

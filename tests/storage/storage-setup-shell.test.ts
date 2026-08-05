@@ -47,10 +47,11 @@ test('setup shell initializes only db and assets after validation', async (t) =>
   assert.equal(existsSync(candidate), false)
   assert.equal((await app.request('/api/jobs')).status, 404)
 
+  // allowLowSpace: CI /tmp is often a small tmpfs below the 2GiB product floor.
   const validationResponse = await app.request('/api/system/storage/validate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: candidate })
+    body: JSON.stringify({ path: candidate, allowLowSpace: true })
   })
   assert.equal(validationResponse.status, 200)
   const validation = (await validationResponse.json()) as {
@@ -62,7 +63,8 @@ test('setup shell initializes only db and assets after validation', async (t) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       path: validation.data.canonicalPath,
-      validationNonce: validation.data.nonce
+      validationNonce: validation.data.nonce,
+      allowLowSpace: true
     })
   })
   assert.equal(initializeResponse.status, 200)
@@ -91,7 +93,7 @@ test('setup initialize persists dbPath source before activating storage', async 
   const validationResponse = await app.request('/api/system/storage/validate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: candidate })
+    body: JSON.stringify({ path: candidate, allowLowSpace: true })
   })
   const validation = (await validationResponse.json()) as {
     data: { canonicalPath: string; nonce: string }
@@ -101,7 +103,8 @@ test('setup initialize persists dbPath source before activating storage', async 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       path: validation.data.canonicalPath,
-      validationNonce: validation.data.nonce
+      validationNonce: validation.data.nonce,
+      allowLowSpace: true
     })
   })
   assert.equal(response.status, 200)
@@ -114,10 +117,26 @@ test('setup initialization rejects a forged validation nonce', async (t) => {
   const candidate = join(root, 'selected-data')
   const app = createSetupShell({ storage: selection(candidate), isDev: false })
 
+  // Validate first so initialize reaches the nonce check rather than failing on
+  // path/space policy before consume().
+  const validationResponse = await app.request('/api/system/storage/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: candidate, allowLowSpace: true })
+  })
+  assert.equal(validationResponse.status, 200)
+  const validation = (await validationResponse.json()) as {
+    data: { canonicalPath: string }
+  }
+
   const response = await app.request('/api/system/storage/initialize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: candidate, validationNonce: 'forged' })
+    body: JSON.stringify({
+      path: validation.data.canonicalPath,
+      validationNonce: 'forged',
+      allowLowSpace: true
+    })
   })
   assert.equal(response.status, 409)
   assert.equal(existsSync(candidate), false)

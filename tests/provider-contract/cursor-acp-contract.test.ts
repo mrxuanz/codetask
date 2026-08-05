@@ -86,7 +86,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
   const systemMcp = await handler({
     params: {
       options,
-      toolCall: { kind: 'other', title: 'codeteam-manager read_reference_attachment' }
+      toolCall: { kind: 'other', title: 'codetask-manager read_reference_attachment' }
     }
   })
   assert.deepEqual(systemMcp, {
@@ -95,9 +95,9 @@ test('permission handler denies shell/write for read-only profiles and permits r
 
   // Real Cursor ACP title: server and tool are hyphen-joined, then repeated after ":".
   for (const title of [
-    'codeteam-manager-read_reference_attachment: read_reference_attachment',
-    'codeteam-manager_read_reference_attachment',
-    'codeteam-manager read_reference_attachment'
+    'codetask-manager-read_reference_attachment: read_reference_attachment',
+    'codetask-manager_read_reference_attachment',
+    'codetask-manager read_reference_attachment'
   ] as const) {
     const conversationMcp = await handler({
       params: { options, toolCall: { kind: 'other', title } }
@@ -124,7 +124,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
       options,
       toolCall: {
         kind: 'other',
-        title: 'codeteam-manager-register_plan_outline: register_plan_outline'
+        title: 'codetask-manager-register_plan_outline: register_plan_outline'
       }
     }
   })
@@ -147,7 +147,7 @@ test('permission handler denies shell/write for read-only profiles and permits r
       options,
       toolCall: {
         kind: 'execute',
-        title: 'codeteam-manager-read_reference_attachment: read_reference_attachment'
+        title: 'codetask-manager-read_reference_attachment: read_reference_attachment'
       }
     }
   })
@@ -172,7 +172,7 @@ test('buildCursorTurnPlan: conversation/planner run directly with scoped MCP', (
     assert.deepEqual(plan.cliArgs.slice(-3), ['--workspace', '/workspace', 'acp'])
     assert.equal(plan.cliArgs.includes('--approve-mcps'), false)
     assert.equal(plan.mcpServers.length, 1)
-    assert.equal(plan.mcpServers[0]?.name, 'codeteam-manager')
+    assert.equal(plan.mcpServers[0]?.name, 'codetask-manager')
     assert.equal(plan.mcpServers[0]?.type, 'http')
   }
 })

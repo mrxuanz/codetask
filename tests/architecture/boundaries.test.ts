@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
+import { PACKAGES_IMPORT_SRC_BASELINE } from './packages-import-src-baseline.ts'
 
 const root = join(import.meta.dirname, '../..')
 
@@ -14,6 +15,21 @@ function walk(dir: string, files: string[] = []): string[] {
     else if (/\.(ts|tsx|mjs|js)$/.test(name)) files.push(full)
   }
   return files
+}
+
+const FORBIDDEN_FROM_PACKAGES =
+  /from\s+['"](@server\/[^'"]+|@shared\/[^'"]+|(?:\.\.\/)+src(?:\/[^'"]*)?)['"]|import\s*\(\s*['"](@server\/[^'"]+|@shared\/[^'"]+|(?:\.\.\/)+src(?:\/[^'"]*)?)['"]\s*\)|require\(\s*['"](@server\/[^'"]+|@shared\/[^'"]+|(?:\.\.\/)+src(?:\/[^'"]*)?)['"]\s*\)/
+
+function packagesImportSrcViolations(): string[] {
+  const packagesRoot = join(root, 'packages')
+  const out: string[] = []
+  for (const file of walk(packagesRoot)) {
+    const source = readFileSync(file, 'utf8')
+    if (FORBIDDEN_FROM_PACKAGES.test(source)) {
+      out.push(relative(root, file).split('\\').join('/'))
+    }
+  }
+  return out.sort()
 }
 
 describe('architecture boundaries (01+02)', () => {
@@ -139,8 +155,8 @@ describe('architecture boundaries (01+02)', () => {
     )
     assert.match(drop, /control_jobs/)
     assert.match(drop, /DROP TABLE IF EXISTS/)
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
-    assert.match(index, /migration047DropControlPlane/)
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
+    assert.match(index, /migration047DropControlPlaneTables/)
   })
 
   it('execution UI uses ExecutionJob type alias, not ThreadJob', () => {
@@ -150,10 +166,10 @@ describe('architecture boundaries (01+02)', () => {
   })
 
   it('conversation module and migrations 048-050 are registered (03)', () => {
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
-    assert.match(index, /migration048ConversationModule/)
-    assert.match(index, /migration049ConversationData/)
-    assert.match(index, /migration050ConversationCleanupTables/)
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
+    assert.match(index, /migration048ConversationModuleTables/)
+    assert.match(index, /migration049ConversationDataMigrate/)
+    assert.match(index, /migration050ConversationCleanup/)
     const convIndex = readFileSync(
       join(root, 'packages/server-core/src/modules/conversation/index.ts'),
       'utf8'
@@ -196,6 +212,39 @@ describe('architecture boundaries (01+02)', () => {
   it('conversation/draft and src/server/wizard are removed (03)', () => {
     assert.equal(pathExists('src/server/conversation/draft'), false)
     assert.equal(pathExists('src/server/wizard'), false)
+  })
+
+  it('packages/** must not import @server/@shared/src except explicit baseline', () => {
+    const actual = packagesImportSrcViolations()
+    const baseline = [...PACKAGES_IMPORT_SRC_BASELINE].sort()
+    const actualSet = new Set(actual)
+    const baselineSet = new Set(baseline)
+
+    const unexpected = actual.filter((f) => !baselineSet.has(f))
+    const stale = baseline.filter((f) => !actualSet.has(f))
+
+    assert.deepEqual(
+      unexpected,
+      [],
+      `new packages→src imports (remove or add only via deliberate baseline update):\n${unexpected.join('\n')}`
+    )
+    assert.deepEqual(
+      stale,
+      [],
+      `stale baseline entries (file no longer violates — remove from baseline):\n${stale.join('\n')}`
+    )
+  })
+
+  it('apps/web must not import @shared/* (use @codetask/contracts or packages)', () => {
+    const webRoot = join(root, 'apps/web/src')
+    const offenders: string[] = []
+    for (const file of walk(webRoot)) {
+      const source = readFileSync(file, 'utf8')
+      if (/from\s+['"]@shared\//.test(source) || /import\s*\(\s*['"]@shared\//.test(source)) {
+        offenders.push(relative(root, file).split('\\').join('/'))
+      }
+    }
+    assert.deepEqual(offenders, [], `web still imports @shared:\n${offenders.join('\n')}`)
   })
 })
 

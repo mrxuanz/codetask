@@ -13,14 +13,13 @@ import {
   fetchThreadDrafts,
   fetchThreadPlans,
   fetchJob,
-  freezeReferenceCorpus,
   launchDesignSession,
   mapExecutionJobToPlanView,
   retryJobPlanning
 } from '@renderer/api/jobs'
 import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 import { conversationTopic } from '@codetask/contracts'
-import { resolveDraftPlanReference } from '@shared/draft-plan-resolve'
+import { resolveDraftPlanReference } from '@codetask/contracts/draft-plan-resolve'
 import {
   DRAFT_WIZARD_STEP_COUNT,
   designDraftToPayload,
@@ -409,7 +408,7 @@ export function provideDraftPlanWorkspace(options: {
     error.value = null
     successMessage.value = null
     try {
-      await launchDesignSession(threadId, plan.id)
+      await launchDesignSession(plan.id)
       await loadWorkspace()
       successMessage.value = options.t('workspace.create.queuedSuccess')
       toast.success(options.t('workspace.create.queuedSuccess'))
@@ -456,7 +455,8 @@ export function provideDraftPlanWorkspace(options: {
     error.value = null
     successMessage.value = null
     try {
-      await freezeReferenceCorpus(threadId, plan.id)
+      // Design freezes the reference manifest when the planning session is created;
+      // there is no separate freeze API. Refresh workspace state for the UI action.
       await refreshPlan()
       successMessage.value = options.t('workspace.draftPanel.refreezeSuccess')
       toast.success(options.t('workspace.draftPanel.refreezeSuccess'))

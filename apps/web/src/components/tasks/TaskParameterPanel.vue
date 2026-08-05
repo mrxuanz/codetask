@@ -13,7 +13,6 @@ import { fetchTaskEvidenceDetail } from '@renderer/api/jobs'
 
 const props = defineProps<{
   task: UnifiedTaskNode | null
-  threadId?: string | null
   jobId?: string | null
   abilities?: Array<{ abilityCode: string; recommendedCoreCode?: string }>
   referenceManifest?: JobReferenceManifestDto | null
@@ -109,15 +108,15 @@ const displayEvidenceLines = computed(() => {
 })
 
 watch(
-  () => [props.task?.id, props.task?.evidenceArtifactId, props.threadId, props.jobId] as const,
+  () => [props.task?.id, props.task?.evidenceArtifactId, props.jobId] as const,
   async () => {
     evidenceDetail.value = null
     evidenceDetailError.value = null
     evidenceDetailExpanded.value = false
-    if (!needsEvidenceFetch.value || !props.threadId || !props.jobId || !props.task?.id) return
+    if (!needsEvidenceFetch.value || !props.jobId || !props.task?.id) return
     evidenceDetailLoading.value = true
     try {
-      const res = await fetchTaskEvidenceDetail(props.threadId, props.jobId, props.task.id)
+      const res = await fetchTaskEvidenceDetail(props.jobId, props.task.id)
       evidenceDetail.value = res.data.evidence
     } catch (error) {
       evidenceDetailError.value =

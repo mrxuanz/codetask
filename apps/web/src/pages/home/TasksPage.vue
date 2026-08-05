@@ -73,14 +73,14 @@ const asPlanView = (job: ExecutionJob): PlanningSessionViewDto => mapExecutionJo
 const listProgress = (job: ExecutionJob): JobProgressSnapshot =>
   getJobProgressSnapshot(asPlanView(job), t)
 const listStatusBadge = (job: ExecutionJob): { label: string; className: string } =>
-  resolveJobListStatusBadge(job.status, t, asPlanView(job))
+  resolveJobListStatusBadge(job.state, t, asPlanView(job))
 
 const selectedPlanView = computed(() => (selectedJob.value ? asPlanView(selectedJob.value) : null))
 
 const executionProgress = computed(() => getExecutionProgressSnapshot(selectedPlanView.value, t))
 const planProgress = computed(() => getPlanProgressSnapshot(selectedPlanView.value, t))
 const showExecutionProgress = computed(() => {
-  const status = selectedJob.value?.status
+  const status = selectedJob.value?.state
   return (
     status === 'running' ||
     status === 'succeeded' ||
@@ -262,9 +262,9 @@ onUnmounted(() => {
                 <div class="flex flex-wrap items-center gap-2">
                   <span
                     class="rounded-md px-2.5 py-1 text-xs font-medium"
-                    :class="jobStatusClass(selectedJob.status)"
+                    :class="jobStatusClass(selectedJob.state)"
                   >
-                    {{ jobStatusLabel(selectedJob.status, t, selectedPlanView) }}
+                    {{ jobStatusLabel(selectedJob.state, t, selectedPlanView) }}
                   </span>
                   <span
                     v-if="pauseButtonText"
@@ -350,7 +350,7 @@ onUnmounted(() => {
               </h2>
               <TaskProgressTree
                 :milestones="planTree"
-                :job-status="selectedJob.status"
+                :job-status="selectedJob.state"
                 :abilities="selectedPlanView?.abilities ?? []"
                 :selected-task-id="selectedTask?.id ?? null"
                 :active-task-id="activeTaskId"
@@ -376,7 +376,6 @@ onUnmounted(() => {
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
         <TaskParameterPanel
           :task="selectedTask"
-          :thread-id="selectedPlanView?.threadId"
           :job-id="selectedJob?.id"
           :abilities="selectedPlanView?.abilities"
         />

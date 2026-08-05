@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
-  CODETEAM_MANAGER_MCP_SERVER,
+  CODETASK_MANAGER_MCP_SERVER,
   MCP_HTTP_ACCEPT_HEADER_VALUE,
   toCanonicalProviderCode,
   type AgentRuntime,
@@ -304,7 +304,7 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
           systemPrompt,
           mcpServers: [
             {
-              name: CODETEAM_MANAGER_MCP_SERVER,
+              name: CODETASK_MANAGER_MCP_SERVER,
               url: mcpUrl,
               headers: { Accept: MCP_HTTP_ACCEPT_HEADER_VALUE }
             }

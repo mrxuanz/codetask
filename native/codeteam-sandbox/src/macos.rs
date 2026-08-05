@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use codeteam_sandbox_adapter::{
-    ParsedTaskPolicy, network_sandbox_policy, parse_task_policy_json, to_permission_profile,
+    network_sandbox_policy, parse_task_policy_json, to_permission_profile,
 };
 use codeteam_sandboxing::seatbelt::{
     CreateSeatbeltCommandArgsParams, MACOS_PATH_TO_SEATBELT_EXECUTABLE,
@@ -35,10 +35,7 @@ pub fn spawn(
     let permission_profile = to_permission_profile(&task_policy)?;
     let (file_system_sandbox_policy, _) = permission_profile.to_runtime_permissions();
     let network_policy = network_sandbox_policy(&task_policy);
-    let unix_socket_paths = match &task_policy {
-        ParsedTaskPolicy::V1(v1) => &v1.network.unix_sockets,
-        ParsedTaskPolicy::V2(v2) => &v2.network.allow_unix_sockets,
-    };
+    let unix_socket_paths = &task_policy.network.allow_unix_sockets;
     let unix_sockets: Vec<AbsolutePathBuf> = unix_socket_paths
         .iter()
         .map(|socket| AbsolutePathBuf::resolve_path_against_base(socket, policy.cwd()))

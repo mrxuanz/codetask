@@ -6,7 +6,12 @@
  */
 export { createProviderRegistry, DEFAULT_PROVIDER_REGISTRY } from './providers/composition.ts'
 export { ProviderRegistry } from './providers/registry.ts'
-export { getProviderRegistry, getProviderRuntimeManager } from './providers/access.ts'
+export {
+  getProviderRegistry,
+  getProviderRuntimeManager,
+  setProviderAccess,
+  clearProviderAccess
+} from './providers/access.ts'
 export { ProviderRuntimeManager } from './providers/lifecycle.ts'
 export { getAgentTurnProvider } from './streamers/index.ts'
 export type { ProviderDriver } from './providers/driver.ts'

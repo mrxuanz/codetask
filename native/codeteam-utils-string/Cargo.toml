@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "codeteam-utils-string"
 version.workspace = true
 edition.workspace = true

@@ -10,7 +10,6 @@ import Input from '@renderer/components/ui/Input.vue'
 
 const props = defineProps<{
   open: boolean
-  threadId: string
   /** Design draft id. */
   draftId?: string
 }>()
@@ -100,7 +99,7 @@ async function submitReference(): Promise<void> {
   submitting.value = true
   formError.value = null
   try {
-    await addLocalCorpusDraftReference(props.threadId, draftId, {
+    await addLocalCorpusDraftReference(draftId, {
       localPath: selectedPath.value,
       name: name.value.trim() || basename(selectedPath.value),
       description: desc,

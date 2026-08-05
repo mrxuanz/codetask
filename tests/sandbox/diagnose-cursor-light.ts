@@ -212,7 +212,7 @@ function buildMergedEnv(envPatch: Record<string, string>): Record<string, string
 
 function buildHttpMcp(url: string): McpServer {
   return {
-    name: 'codeteam-manager',
+    name: 'codetask-manager',
     type: 'http',
     url,
     headers: [{ name: 'Accept', value: MCP_ACCEPT }]
@@ -549,7 +549,7 @@ async function main(): Promise<void> {
                 env: buildMergedEnv(prepared.environment),
                 mcpUrl: fake.url,
                 prompt:
-                  'You must call codeteam-manager report_task_result now with status "completed". Then reply exactly: mcp-ok'
+                  'You must call codetask-manager report_task_result now with status "completed". Then reply exactly: mcp-ok'
               })
             )
             const toolCalls = fake.calls.filter((c) => c.rpcMethod === 'tools/call')

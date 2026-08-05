@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-const CODETEAM_MANAGER = 'codeteam-manager'
+const CODETASK_MANAGER = 'codetask-manager'
 
 function buildClaudeMcpServers(url, userMcpServers = {}) {
   const merged = { ...userMcpServers }
-  if (url) merged[CODETEAM_MANAGER] = { type: 'http', url }
+  if (url) merged[CODETASK_MANAGER] = { type: 'http', url }
   return merged
 }
 
 function listMergedMcpServerNames(systemMcpUrl, userMcpServers) {
   const names = Object.keys(userMcpServers)
-  if (systemMcpUrl) names.push(CODETEAM_MANAGER)
+  if (systemMcpUrl) names.push(CODETASK_MANAGER)
   return names
 }
 
@@ -22,14 +22,14 @@ test('role-scoped user MCP merges with system MCP', () => {
   const merged = buildClaudeMcpServers('http://127.0.0.1:1/mcp', userMcpServers)
   assert.equal(Object.keys(merged).length, 2)
   assert.equal(merged.docs.url, 'http://127.0.0.1:9/mcp')
-  assert.equal(merged[CODETEAM_MANAGER].url, 'http://127.0.0.1:1/mcp')
+  assert.equal(merged[CODETASK_MANAGER].url, 'http://127.0.0.1:1/mcp')
 })
 
 test('listMergedMcpServerNames includes user and system servers', () => {
   const names = listMergedMcpServerNames('http://127.0.0.1:1/mcp', {
     docs: { type: 'http', url: 'http://127.0.0.1:9/mcp' }
   })
-  assert.deepEqual(names, ['docs', CODETEAM_MANAGER])
+  assert.deepEqual(names, ['docs', CODETASK_MANAGER])
 })
 
 test('native codex fragment shape uses mcp_servers root key', () => {

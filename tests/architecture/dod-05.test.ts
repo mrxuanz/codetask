@@ -64,9 +64,9 @@ describe('architecture 05 DoD', () => {
   })
 
   it('migration 053 settings namespaces is registered', () => {
-    assert.equal(exists('src/server/db/migrations/053_settings_namespaces.ts'), true)
     assert.equal(exists('packages/database/src/migrations/settings-namespaces.ts'), true)
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
+    assert.equal(exists('packages/database/src/migrations/settings-namespaces.ts'), true)
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
     assert.match(index, /migration053SettingsNamespaces/)
   })
 

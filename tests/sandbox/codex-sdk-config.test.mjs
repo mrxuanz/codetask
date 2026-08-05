@@ -18,7 +18,7 @@ function buildCodexSdkConfig(input) {
   const config = {}
   if (input.mcpUrl) {
     config.mcp_servers = {
-      'codeteam-manager': { url: input.mcpUrl }
+      'codetask-manager': { url: input.mcpUrl }
     }
   }
   if (input.outerSandbox) {
@@ -59,7 +59,7 @@ test('buildCodexSdkConfig merges outer-sandbox CLI-safe overrides', () => {
   assert.equal(config.sandbox_mode, 'danger-full-access')
   assert.equal(config.approval_policy, 'never')
   assert.deepEqual(config.sandbox_workspace_write, { network_access: true })
-  assert.equal(config.mcp_servers['codeteam-manager'].url, 'http://127.0.0.1:1/mcp')
+  assert.equal(config.mcp_servers['codetask-manager'].url, 'http://127.0.0.1:1/mcp')
 })
 
 test('buildCodexSdkConfig returns overrides without mcp when outer sandbox only', () => {

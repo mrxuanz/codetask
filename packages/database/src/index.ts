@@ -21,3 +21,12 @@ export {
   BATCH_I_DEFERRED_LEGACY_TABLES
 } from './migrations/drop-backup-and-marker-tables.ts'
 export { migration065DropLegacyThreadTables } from './migrations/drop-legacy-thread-tables.ts'
+
+export { allMigrations, applyMigrations, runMigrations } from './migrations/all.ts'
+export {
+  assertMigrationsAlignWithManifest,
+  ensureMigrationsTable,
+  currentMigrationVersion
+} from './migrations/runner.ts'
+export type { Migration } from './migrations/all.ts'
+export * from './schema/host.ts'

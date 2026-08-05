@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { Migration } from '../../src/server/db/migrations/types'
-import { currentMigrationVersion, runMigrations } from '../../src/server/db/migrations/runner'
+import { currentMigrationVersion, runMigrations } from '@codetask/database'
 
 export function runMigrationsUpTo(
   db: Database.Database,

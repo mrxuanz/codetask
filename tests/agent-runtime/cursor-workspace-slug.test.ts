@@ -44,14 +44,14 @@ test('materializeCursorMcpApprovals writes under HOME/.cursor/projects', async (
   try {
     const result = await materializeCursorMcpApprovals({
       cwd: workspace,
-      servers: [{ name: 'codeteam-manager', type: 'http', url: 'http://127.0.0.1:9/mcp' }],
+      servers: [{ name: 'codetask-manager', type: 'http', url: 'http://127.0.0.1:9/mcp' }],
       env: { HOME: root }
     })
     assert.ok(result?.approvalsPath)
     assert.equal(existsSync(result!.approvalsPath), true)
     const parsed = JSON.parse(readFileSync(result!.approvalsPath, 'utf8')) as unknown
     assert.ok(Array.isArray(parsed))
-    assert.ok((parsed as string[]).some((id) => id.startsWith('codeteam-manager-')))
+    assert.ok((parsed as string[]).some((id) => id.startsWith('codetask-manager-')))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -65,7 +65,7 @@ test('materializeCursorMcpApprovals soft-fails on EPERM/EACCES instead of crashi
   try {
     const result = await materializeCursorMcpApprovals({
       cwd: join(root, 'workspace'),
-      servers: [{ name: 'codeteam-manager', type: 'http', url: 'http://127.0.0.1:9/mcp' }],
+      servers: [{ name: 'codetask-manager', type: 'http', url: 'http://127.0.0.1:9/mcp' }],
       env: { HOME: root }
     })
     assert.equal(result, null)

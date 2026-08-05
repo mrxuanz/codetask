@@ -1,33 +1,11 @@
-import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
 import type { SupportedCoreCode } from './cores'
 import { getAppConfig } from '../bootstrap'
+import {
+  readCursorCliDefaultModelId,
+  resolveCursorAcpModelId as resolveCursorAcpModelIdFromPackage
+} from '@codetask/provider-runtime-node/cursor-models'
 
-type CursorCliConfigFile = {
-  selectedModel?: {
-    modelId?: string
-    parameters?: Array<{ id: string; value: string }>
-  }
-  model?: {
-    modelId?: string
-  }
-}
-
-function readJsonFile<T>(path: string): T | null {
-  if (!existsSync(path)) return null
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as T
-  } catch {
-    return null
-  }
-}
-
-export function readCursorCliDefaultModelId(): string | null {
-  const config = readJsonFile<CursorCliConfigFile>(join(homedir(), '.cursor', 'cli-config.json'))
-  if (!config) return null
-  return config.selectedModel?.modelId ?? config.model?.modelId ?? null
-}
+export { readCursorCliDefaultModelId }
 
 export function resolveCoreModel(
   coreCode: SupportedCoreCode,
@@ -47,5 +25,6 @@ export function resolveCoreModel(
 }
 
 export function resolveCursorAcpModelId(model?: string): string | undefined {
-  return resolveCoreModel('cursor', model)
+  // Prefer host config via resolveCoreModel; package copy uses injected lookup.
+  return resolveCoreModel('cursor', model) ?? resolveCursorAcpModelIdFromPackage(model)
 }

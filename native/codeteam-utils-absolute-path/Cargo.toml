@@ -1,4 +1,4 @@
-﻿
+
 [package]
 name = "codeteam-utils-absolute-path"
 version.workspace = true

@@ -1,9 +1,6 @@
 import { posix, win32, type PlatformPath } from 'node:path'
 import type { SupportedCoreCode } from '../spec/codes'
-import type {
-  ProviderInstallation,
-  ProviderInstallationSource
-} from '../spec/installation'
+import type { ProviderInstallation, ProviderInstallationSource } from '../spec/installation'
 
 export type ProviderExecutableStrategy = 'sdk-bundled' | 'installation'
 

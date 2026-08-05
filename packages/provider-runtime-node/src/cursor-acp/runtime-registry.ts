@@ -5,7 +5,7 @@ import {
   touchConversationCursorBinding,
   upsertConversationCursorBinding
 } from './conversation-cursor-directory'
-import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
+import type { AgentCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 import {
   buildConversationProviderRuntimeScopeId,
   type ProviderConversationScopeKind

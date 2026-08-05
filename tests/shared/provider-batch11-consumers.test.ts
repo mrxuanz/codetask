@@ -56,7 +56,7 @@ test('MCP root keys come from shared descriptors; no duplicated Maps', () => {
   const settingsMcp = readSource(
     'packages/server-core/src/modules/settings/application/settings-application.ts'
   )
-  const runtimeMcp = readSource('src/server/agent-runtime/mcp.ts')
+  const runtimeMcp = readSource('packages/provider-runtime-node/src/agent-mcp.ts')
   assert.match(settingsMcp, /resolveMcpServersMap/)
   assert.match(runtimeMcp, /getProviderDescriptor\(coreCode\)\.mcpRootKey/)
   assert.doesNotMatch(runtimeMcp, /'claude':\s*'mcpServers'/)

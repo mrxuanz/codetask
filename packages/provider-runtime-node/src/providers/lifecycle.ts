@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { ProviderReusePolicy } from '../spec/capabilities'
-import type { AgentTurnChunk } from '@server/agent-runtime/types'
-import type { ConversationRole } from '@server/agent-runtime/roles'
-import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
+import type { AgentTurnChunk } from '@codetask/agent-runtime/types'
+import type { ConversationRole } from '@codetask/agent-runtime/roles'
+import type { AgentCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 import type { PreparedProviderTurn, ProviderDriver, ProviderTurnContext } from './driver'
 import type { ProviderRuntimeScope } from '../spec/capabilities'
 

@@ -1,5 +1,5 @@
-import type { SupportedCoreCode } from '@server/conversation/cores'
-import type { AgentTurnProvider } from '@server/agent-runtime/types'
+import type { SupportedCoreCode } from '../spec/codes'
+import type { AgentTurnProvider } from '@codetask/agent-runtime/types'
 import { getProviderRegistry } from '../providers/access'
 import { createTestOverrideDriver } from '../providers/delegating-driver'
 import type { ProviderRegistry } from '../providers/registry'

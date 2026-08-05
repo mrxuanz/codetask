@@ -13,10 +13,7 @@ import {
   listManifestMigrations
 } from '@codetask/database'
 import { allMigrations } from '../../src/server/db/migrations'
-import {
-  assertMigrationsAlignWithManifest,
-  runMigrations
-} from '../../src/server/db/migrations/runner'
+import { assertMigrationsAlignWithManifest, runMigrations } from '@codetask/database'
 
 const root = join(import.meta.dirname, '../..')
 
@@ -70,10 +67,10 @@ describe('architecture gates — Batch G', () => {
   })
 
   it('migration 062 host wrapper is registered', () => {
-    const host = join(root, 'src/server/db/migrations/062_assets_and_drop_dead_runtime.ts')
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
+    const host = join(root, 'packages/database/src/migrations/assets-and-drop-dead-runtime.ts')
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
     assert.equal(existsSync(host), true)
-    assert.match(index, /migration062AssetsAndDropDeadRuntimeTablesHost/)
+    assert.match(index, /migration062AssetsAndDropDeadRuntimeTables/)
   })
 
   it('migration 063 adds project FKs and is registered', () => {
@@ -89,10 +86,10 @@ describe('architecture gates — Batch G', () => {
         `${table} missing project_id FK`
       )
     }
-    const host = join(root, 'src/server/db/migrations/063_project_fk_and_asset_storage.ts')
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
+    const host = join(root, 'packages/database/src/migrations/project-fk-and-asset-storage.ts')
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
     assert.equal(existsSync(host), true)
-    assert.match(index, /migration063ProjectFkAndAssetStorageKeysHost/)
+    assert.match(index, /migration063ProjectFkAndAssetStorageKeys/)
     db.close()
   })
 

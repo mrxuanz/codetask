@@ -1,11 +1,11 @@
 import type { Composer } from 'vue-i18n'
-import type { TurnErrorCode, TurnErrorDto } from '@shared/turn-errors'
+import type { TurnErrorCode, TurnErrorDto } from '@codetask/contracts/turn-errors'
 import {
   coerceTurnErrorField,
   isTurnErrorCode,
   parseStoredTurnError,
   turnErrorI18nKey
-} from '@shared/turn-errors'
+} from '@codetask/contracts/turn-errors'
 
 function interpolate(template: string, params?: TurnErrorDto['params']): string {
   if (!params) return template

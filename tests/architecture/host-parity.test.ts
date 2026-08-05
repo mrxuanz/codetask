@@ -58,15 +58,15 @@ describe('host parity (01)', () => {
     assert.equal(body.data?.status, 'ok')
   })
 
-  it('desktop and service entries both reach startAppServer / createApp (no out/ dependency)', () => {
-    const desktop = readFileSync(join(root, 'apps/desktop/src/main.ts'), 'utf8')
+  it('desktop package is a thin host placeholder; real Electron entry remains src/main', () => {
+    const desktopPkg = readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')
     const service = readFileSync(join(root, 'apps/service/src/main.ts'), 'utf8')
     const mainIndex = readFileSync(join(root, 'src/main/index.ts'), 'utf8')
     const appMain = readFileSync(join(root, 'src/main/app-main.ts'), 'utf8')
     const desktopService = readFileSync(join(root, 'src/main/desktop-service.ts'), 'utf8')
     const server = readFileSync(join(root, 'src/main/server.ts'), 'utf8')
 
-    assert.match(desktop, /src\/main\/index/)
+    assert.match(desktopPkg, /@codetask\/desktop/)
     assert.match(mainIndex, /app-main/)
     // Batch D: Electron shell spawns Service; does not import startAppServer in-process.
     assert.match(appMain, /startDesktopService/)

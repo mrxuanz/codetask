@@ -249,7 +249,7 @@ async function handleUploadReferences(event: Event): Promise<void> {
 async function handleDeleteReference(reference: TaskLaunchDraftReference): Promise<void> {
   error.value = null
   try {
-    const res = await deleteDraftReference(props.threadId, props.draftId, reference.id)
+    const res = await deleteDraftReference(props.draftId, reference.id)
     emit('updated', coerceDraftPayload(res.data.payload))
   } catch (err) {
     toastError(err, t('workspace.draft.deleteFailed'))
@@ -277,7 +277,6 @@ async function submitImportReferences(): Promise<void> {
   error.value = null
   try {
     const res = await importDraftReferences(
-      props.threadId,
       props.draftId,
       selectedImportIds.value,
       importDescriptions.value
@@ -307,7 +306,7 @@ async function saveContractMarkdown(): Promise<void> {
   savingContract.value = true
   error.value = null
   try {
-    const res = await updateDraftContent(props.threadId, props.draftId, {
+    const res = await updateDraftContent(props.draftId, {
       requirementsContractMarkdown: markdown
     })
     emit('updated', coerceDraftPayload(res.data.payload))
@@ -332,11 +331,7 @@ async function handleAbilityChange(abilityCode: string, providerCode: string): P
     item.abilityCode === abilityCode ? { ...item, providerCode } : item
   )
   try {
-    const res = await updateDraftAbilityCores(
-      props.threadId,
-      props.draftId,
-      abilitySelections.value
-    )
+    const res = await updateDraftAbilityCores(props.draftId, abilitySelections.value)
     emit('updated', coerceDraftPayload(res.data.payload))
   } catch {
     // keep local selection even if persist fails
@@ -352,11 +347,7 @@ async function handleExecutionCoreChange(
   executionConfig.value = { ...executionConfig.value, [field]: providerCode }
   if (!Object.values(executionConfig.value).every(Boolean)) return
   try {
-    const res = await updateDraftExecutionConfig(
-      props.threadId,
-      props.draftId,
-      executionConfig.value
-    )
+    const res = await updateDraftExecutionConfig(props.draftId, executionConfig.value)
     emit('updated', coerceDraftPayload(res.data.payload))
   } catch (err) {
     executionConfig.value = previous
@@ -369,7 +360,7 @@ async function handleConfirmRequirements(): Promise<void> {
   confirmingRequirements.value = true
   error.value = null
   try {
-    const res = await confirmDraftMessage(props.threadId, props.draftId)
+    const res = await confirmDraftMessage(props.draftId)
     emit('updated', coerceDraftPayload(res.data.payload))
   } catch (err) {
     toastError(err, t('workspace.draft.confirmFailed'))
@@ -383,7 +374,7 @@ async function handleUnlockContract(): Promise<void> {
   unlockingContract.value = true
   error.value = null
   try {
-    const res = await unlockRequirementsContract(props.threadId, props.draftId)
+    const res = await unlockRequirementsContract(props.draftId)
     emit('updated', coerceDraftPayload(res.data.payload))
   } catch (err) {
     toastError(err, t('workspace.draft.unlockContractFailed'))
@@ -398,7 +389,6 @@ async function handleSaveReferenceDescription(reference: TaskLaunchDraftReferenc
   error.value = null
   try {
     const res = await updateDraftReferenceDescription(
-      props.threadId,
       props.draftId,
       reference.id,
       reference.description ?? ''
@@ -441,16 +431,11 @@ async function handleLaunch(): Promise<void> {
     error.value = t('workspace.draft.referenceDescriptionRequired')
     return
   }
-  console.log('[CODETASK_DEBUG:planner-sandbox] renderer: generate plan clicked', {
-    threadId: props.threadId,
-    messageId: props.draftId
-  })
   busy.value = true
   launchedLocally.value = true
   error.value = null
   try {
-    console.log('[CODETASK_DEBUG:planner-sandbox] renderer: calling launchJobFromDraft')
-    const res = await launchJobFromDraft(props.threadId, props.draftId)
+    const res = await launchJobFromDraft(props.draftId)
     launchedLocally.value = true
     linkedJobId.value = res.data.job.id
     if (res.data.draft) {
@@ -473,7 +458,7 @@ async function handleUnlockDraft(): Promise<void> {
   unlockingDraft.value = true
   error.value = null
   try {
-    const res = await unlockDraftForEdit(props.threadId, props.draftId)
+    const res = await unlockDraftForEdit(props.draftId)
     launchedLocally.value = false
     linkedJobId.value = null
     unlockDialogOpen.value = false
@@ -838,7 +823,6 @@ async function handleUnlockDraft(): Promise<void> {
 
     <LocalCorpusPickerDialog
       v-model:open="localCorpusDialogOpen"
-      :thread-id="threadId"
       :draft-id="draftId"
       @added="handleLocalCorpusAdded"
     />

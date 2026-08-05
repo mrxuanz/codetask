@@ -1,8 +1,12 @@
 import { RequestError } from '@agentclientprotocol/sdk'
 import type { StopReason } from '@agentclientprotocol/sdk'
 import { classifyCursorAcpErrorLite } from './classify-lite'
-import { createTurnError, normalizeTurnError, TURN_CANCELLED } from '@shared/turn-errors/index.ts'
-import type { TurnErrorDto } from '@shared/turn-errors/index.ts'
+import {
+  createTurnError,
+  normalizeTurnError,
+  TURN_CANCELLED
+} from '@codetask/contracts/turn-errors'
+import type { TurnErrorDto } from '@codetask/contracts/turn-errors'
 import { spawnCursorAgentSync } from './command'
 
 export interface CursorAcpErrorContext {

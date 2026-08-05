@@ -2,8 +2,8 @@ import type { ProviderSettings } from '../../spec/settings'
 import { DelegatingProviderDriver, type ProviderStreamFactory } from '../delegating-driver'
 import { CLAUDE_DESCRIPTOR } from './descriptor'
 import { runClaudeAuthPreflight } from './preflight'
-import { prepareClaudeRuntimeProfile } from '@server/sandbox/provider-auth/bridge'
-import { resolveClaudeInstallDirs } from '@server/sandbox/provider-auth/paths'
+import { prepareClaudeRuntimeProfile } from '../../provider-auth/bridge'
+import { resolveClaudeInstallDirs } from '../../provider-auth/paths'
 
 export {
   buildClaudeTurnOptions,

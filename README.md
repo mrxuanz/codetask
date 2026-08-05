@@ -14,6 +14,17 @@ codetask is a desktop AI task orchestration app for software delivery. You freez
 
 Supports **Codex**, **Claude Code**, **OpenCode**, and **Cursor CLI** as planners and workers. Run as a native **Electron** app or headless **server** mode in the browser.
 
+## Repository layout
+
+The tree is mid-migration toward a monorepo layout:
+
+- `apps/web` — Vue renderer
+- `apps/desktop` / `apps/service` — host package placeholders (Electron main still lives under `src/main`)
+- `packages/*` — shared `@codetask/*` libraries (`contracts`, `database`, `server-core`, …)
+- `src/server` / `src/shared` / `src/main` — composition root and host adapters still being moved into packages
+- `native/codeteam-*` — OS sandbox crates; the `codeteam` prefix is a **historical** rename from upstream `codex-*` (see `NOTICE`), not a second product name
+- Runtime MCP server id is `codetask-manager` (and `codetask-*-verifier`); native crate/package paths remain `codeteam-*`
+
 ## Problem It Solves
 
 The traditional approach — one large prompt and let the agent run to completion — often fails on long requirements:
@@ -68,11 +79,12 @@ Planner rules (see `src/server/planner/prompts.ts`):
 
 ### Sandbox Isolation (inspired by Codex)
 
-Task Worker / Verifier run in an OS-level sandbox, inspired by [OpenAI Codex](https://github.com/openai/codex); native layer uses `native/vendor/codex-rs` and custom `codeteam-*` crates:
+Task Worker / Verifier run in an OS-level sandbox, inspired by [OpenAI Codex](https://github.com/openai/codex); native layer uses adapted `codeteam-*` crates forked from Codex `codex-rs` (baseline commit recorded in `NOTICE`):
 
 - **Planner / chat** — no outer OS sandbox; SDK/ACP layer is read-only
 - **Task Worker** — workspace writable, host filesystem read-only, isolated `runtimeRoot`
 - **Fail closed** — sandbox helper or policy failure terminates immediately; no fallback to plain `spawn()`
+- **Network is not restricted (by design)** — the sandbox boundary covers filesystem and process isolation only. Agent CLIs are expected to reach the internet (model APIs, web research, package installs), so outbound network egress from sandboxed tasks is intentionally left open. Treat any secrets readable inside the sandbox as potentially exfiltrable.
 
 ## Workflow
 
@@ -104,19 +116,17 @@ Data is pushed via **SSE** job snapshots; embedded **Hono** HTTP server serves t
 ## Acknowledgements
 
 - **GSD (Get Shit Done)** — Milestone / Slice / Task hierarchy, clear done criteria, small steps to avoid context rot
-- **[OpenAI Codex](https://github.com/openai/codex)** — Sandbox isolation and OS helper patterns; native layer vendors `native/vendor/codex-rs`
+- **[OpenAI Codex](https://github.com/openai/codex)** — Sandbox isolation and OS helper patterns; the native layer forks `codex-rs` as the `native/codeteam-*` crates (see [NOTICE](NOTICE))
 - **[t3code](https://github.com/pingdotgg/t3code)** — Desktop UX reference: project / chat / task layering, multi-provider integration, streaming state
 
 ## Open Source Notice
 
-This repository includes vendored and adapted sandbox-related code derived from the OpenAI Codex project, primarily under `native/vendor/codex-rs` and the corresponding `native/codeteam-*` crates.
+This repository includes adapted sandbox-related code derived from the OpenAI Codex project, maintained as forks under the `native/codeteam-*` crates.
 
 - Upstream project: [openai/codex](https://github.com/openai/codex)
 - Upstream component used here: `codex-rs`
-- Upstream license for those components: Apache License 2.0
-- Local attribution details: [NOTICE](NOTICE)
-
-See `native/vendor/codex-rs/LICENSE` and `native/vendor/codex-rs/NOTICE` for the upstream license text and notice.
+- Upstream license for those components: Apache License 2.0 (same as this repository's [LICENSE](LICENSE))
+- Local attribution details and fork history: [NOTICE](NOTICE)
 
 Additional third-party code notices remain in the affected source files for MIT-licensed reused components such as the Windows PTY helpers and absolute-path utility.
 
@@ -159,7 +169,7 @@ Notes:
 
 ### Requirements
 
-- Node.js 24.x
+- Node.js 24.x (`engines`: `>=24 <25`)
 - Rust toolchain (for sandbox native components)
 - At least one Agent CLI installed and logged in: Codex, Claude Code, OpenCode, or Cursor CLI
 - Windows / macOS / Linux (sandbox capabilities vary by platform)
@@ -168,6 +178,13 @@ Notes:
 
 ```bash
 npm install
+```
+
+Optional Electron download mirrors (unset by default; see `CONTRIBUTING.md`):
+
+```bash
+export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
 ```
 
 ### Development

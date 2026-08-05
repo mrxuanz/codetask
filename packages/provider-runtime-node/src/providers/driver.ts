@@ -7,9 +7,13 @@ import type {
   ProviderRuntimeScope
 } from '../spec/capabilities'
 import type { ProviderSettings } from '../spec/settings'
-import type { AgentTurnChunk, AgentTurnInput, AgentTurnOptions } from '@server/agent-runtime/types'
-import type { ProviderRuntimeProfile } from '@server/sandbox/provider-auth/types'
-import type { HostEnvironmentSnapshot } from '@server/host-environment'
+import type {
+  AgentTurnChunk,
+  AgentTurnInput,
+  AgentTurnOptions
+} from '@codetask/agent-runtime/types'
+import type { ProviderRuntimeProfile } from '../provider-auth/types'
+import type { HostEnvironmentSnapshot } from '@codetask/agent-runtime/host-environment'
 
 export interface ProviderDiscoveryContext {
   readonly hostEnvironment?: HostEnvironmentSnapshot | undefined

@@ -25,11 +25,11 @@ describe('architecture gates — Batch F', () => {
 
   it('migration 061 canonical provider codes is registered', () => {
     const migration = join(root, 'packages/database/src/migrations/canonical-provider-codes.ts')
-    const host = join(root, 'src/server/db/migrations/061_canonical_provider_codes.ts')
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
+    const host = join(root, 'packages/database/src/migrations/canonical-provider-codes.ts')
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
     assert.equal(existsSync(migration), true)
     assert.equal(existsSync(host), true)
-    assert.match(index, /migration061CanonicalProviderCodesHost/)
+    assert.match(index, /migration061CanonicalProviderCodes/)
     assert.match(readFileSync(migration, 'utf8'), /version:\s*61/)
   })
 

@@ -6,7 +6,7 @@ import test from 'node:test'
 import Database from 'better-sqlite3'
 import { pathToFileURL } from 'node:url'
 import { allMigrations } from '../../src/server/db/migrations'
-import { runMigrations } from '../../src/server/db/migrations/runner'
+import { runMigrations } from '@codetask/database'
 
 test('db-integrity-audit reports FK=0 and orphan attachment dirs on fresh migrated data', async () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'db-audit-'))

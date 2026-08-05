@@ -157,7 +157,7 @@ export function sandboxPolicyForRole(role, workspaceRoot, scratchRoot, options =
       defaultAccess: 'none',
       allowedReadRoots,
       allowedWriteRoots,
-      protectedNames: ['.git', '.agents', '.codex', '.codeteam'],
+      protectedNames: ['.git', '.agents', '.codex', '.codeteam', '.codetask'],
       allowSystemRuntime: true
     },
     network: {

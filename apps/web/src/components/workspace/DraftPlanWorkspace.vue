@@ -5,7 +5,7 @@ import type { ConversationCore, ConversationMessage } from '@renderer/api/conver
 import DraftStepForm from '@renderer/components/create/DraftStepForm.vue'
 import { provideDraftPlanWorkspace } from '@renderer/composables/useDraftPlanWorkspace'
 import type { TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
-import { isDraftListEntryLaunched } from '@shared/job-lifecycle'
+import { isDraftListEntryLaunched } from '@codetask/contracts/job-lifecycle'
 
 const props = defineProps<{
   threadId: string

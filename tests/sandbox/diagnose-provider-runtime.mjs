@@ -445,7 +445,7 @@ async function runProviderMcpCase(native, prod, provider, workspace, scratchRoot
     provider,
     role: 'task-worker',
     cwd: workspace,
-    prompt: `Call codeteam-manager report_task_result now with status "completed". Then reply: mcp-ok`,
+    prompt: `Call codetask-manager report_task_result now with status "completed". Then reply: mcp-ok`,
     systemPrompt: 'Sandbox diagnostic agent. You must call MCP tools when asked.',
     mcpUrl,
     mcpToolNames: ['report_task_result']

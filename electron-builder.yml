@@ -1,4 +1,4 @@
-appId: com.electron.app
+appId: io.github.mrxuanz.codetask
 productName: codetask
 directories:
   buildResources: build
@@ -40,7 +40,7 @@ linux:
   target:
     - AppImage
     - deb
-  maintainer: electronjs.org
+  maintainer: mrxuanz <https://github.com/mrxuanz>
   category: Utility
 appImage:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}

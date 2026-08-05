@@ -12,7 +12,7 @@ import {
   SCHEMA_REGISTRY
 } from '@codetask/database'
 import { allMigrations } from '../../src/server/db/migrations'
-import { runMigrations } from '../../src/server/db/migrations/runner'
+import { runMigrations } from '@codetask/database'
 
 const root = join(import.meta.dirname, '../..')
 
@@ -37,14 +37,14 @@ describe('architecture gates — Batch I', () => {
     db.close()
   })
 
-  it('migration 064/065 host wrappers are registered', () => {
-    const host064 = join(root, 'src/server/db/migrations/064_drop_backup_and_marker_tables.ts')
-    const host065 = join(root, 'src/server/db/migrations/065_drop_legacy_thread_tables.ts')
-    const index = readFileSync(join(root, 'src/server/db/migrations/index.ts'), 'utf8')
-    assert.equal(existsSync(host064), true)
-    assert.equal(existsSync(host065), true)
-    assert.match(index, /migration064DropBackupAndMarkerTablesHost/)
-    assert.match(index, /migration065DropLegacyThreadTablesHost/)
+  it('migration 064/065 are registered in @codetask/database allMigrations', () => {
+    const mig064 = join(root, 'packages/database/src/migrations/drop-backup-and-marker-tables.ts')
+    const mig065 = join(root, 'packages/database/src/migrations/drop-legacy-thread-tables.ts')
+    const index = readFileSync(join(root, 'packages/database/src/migrations/all.ts'), 'utf8')
+    assert.equal(existsSync(mig064), true)
+    assert.equal(existsSync(mig065), true)
+    assert.match(index, /migration064DropBackupAndMarkerTables/)
+    assert.match(index, /migration065DropLegacyThreadTables/)
   })
 
   it('schema registry does not list threads as live tables', () => {
@@ -77,9 +77,35 @@ describe('architecture gates — Batch I', () => {
     assert.equal(existsSync(join(root, 'apps/web/src/main.ts')), true)
   })
 
-  it('provider concrete ownership is packages/provider-runtime-node', () => {
+  it('provider concrete ownership is packages/provider-runtime-node (import graph)', () => {
     assert.equal(existsSync(join(root, 'packages/provider-runtime-node/src/index.ts')), true)
-    const access = readFileSync(join(root, 'src/server/providers/access.ts'), 'utf8')
-    assert.match(access, /@codetask\/provider-runtime-node/)
+    assert.equal(
+      existsSync(join(root, 'packages/provider-runtime-node/src/providers/access.ts')),
+      true
+    )
+
+    const shim = readFileSync(join(root, 'src/server/providers/access.ts'), 'utf8')
+    assert.match(shim, /export \* from '@codetask\/provider-runtime-node\/providers\/access'/)
+
+    // Host-facing provider entry must re-export the package, not re-implement drivers.
+    const providersIndex = readFileSync(join(root, 'src/server/providers/index.ts'), 'utf8')
+    assert.match(providersIndex, /@codetask\/provider-runtime-node/)
+    assert.doesNotMatch(providersIndex, /\bclass\s+\w+Driver\b/)
+
+    // Concrete driver modules live under the package, not as large src implementations.
+    for (const rel of [
+      'packages/provider-runtime-node/src/providers/claude/driver.ts',
+      'packages/provider-runtime-node/src/providers/codex/driver.ts',
+      'packages/provider-runtime-node/src/providers/cursor/driver.ts',
+      'packages/provider-runtime-node/src/providers/opencode/driver.ts'
+    ]) {
+      assert.equal(existsSync(join(root, rel)), true, `${rel} must exist`)
+      const source = readFileSync(join(root, rel), 'utf8')
+      assert.doesNotMatch(
+        source,
+        /^export \* from /,
+        `${rel} should be the concrete implementation`
+      )
+    }
   })
 })

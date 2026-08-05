@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import test from 'node:test'
-import { migration039PromoteRestartInterruptedPaused } from '../../src/server/db/migrations/039_promote_restart_interrupted_paused'
+import { migration039PromoteRestartInterruptedPaused } from '../../packages/database/src/migrations/v001_042/039_promote_restart_interrupted_paused.ts'
 
 function createLegacyDb(): Database.Database {
   const db = new Database(':memory:')

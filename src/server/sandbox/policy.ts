@@ -3,7 +3,7 @@ import type { AgentRole, SandboxPolicy } from './types'
 import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
 
-const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam', '.git'] as const
+const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam', '.codetask', '.git'] as const
 
 function mergeUniqueRoots(existing: string[], extra: string[]): string[] {
   const seen = new Set(existing.map((path) => path.toLowerCase()))

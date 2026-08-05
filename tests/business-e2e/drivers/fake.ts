@@ -472,7 +472,7 @@ export class FakeDriver implements AgentDriver {
     const frag = (conv[core] ?? { [rootKey]: {} }) as Record<string, unknown>
     const servers = {
       ...((frag[rootKey] as Record<string, unknown>) ?? {}),
-      'codeteam-manager': serverEntry
+      'codetask-manager': serverEntry
     }
     conv[core] = { [rootKey]: servers }
     reservedRoles.conversation = conv

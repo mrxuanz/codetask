@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "codeteam-network-proxy"
 version.workspace = true
 edition.workspace = true
@@ -8,6 +8,3 @@ license.workspace = true
 name = "codeteam_network_proxy"
 path = "src/lib.rs"
 doctest = false
-
-[dependencies]
-serde = { workspace = true, features = ["derive"] }

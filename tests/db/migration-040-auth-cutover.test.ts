@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { migration040DestructiveAuthCurrent } from '../../src/server/db/migrations/040_destructive_auth_current'
+import { migration040DestructiveAuthCurrent } from '../../packages/database/src/migrations/v001_042/040_destructive_auth_current.ts'
 import { NodeSqliteAdapter } from '../helpers/node-sqlite-adapter'
 
 test('migration 040 destroys only legacy auth state and installs the current auth schema', () => {

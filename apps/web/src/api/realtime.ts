@@ -1,7 +1,7 @@
 import { api, ApiError } from '@renderer/api/client'
 import type { ApiSuccess } from '@renderer/api/types'
 import { throwIfNotSseResponse } from '@renderer/api/sse'
-import { parseSseBlock, readSseWithTimeout } from '@shared/sse'
+import { parseSseBlock, readSseWithTimeout } from '@codetask/contracts/sse'
 import {
   REALTIME_CONNECTION_ID_HEADER,
   RealtimeEnvelopeSchema,

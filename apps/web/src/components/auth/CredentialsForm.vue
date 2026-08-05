@@ -14,8 +14,8 @@ import PasswordInput from '@renderer/components/ui/PasswordInput.vue'
 import { translateApiError } from '@renderer/i18n/translateApiError'
 import { fetchCaptcha } from '@renderer/api/auth'
 import type { CaptchaChallenge } from '@renderer/api/types'
-import { validateSetupCredentials } from '@shared/auth/credentials-policy'
-import { turnErrorI18nKey } from '@shared/turn-errors'
+import { validateSetupCredentials } from '@codetask/contracts/auth/credentials-policy'
+import { turnErrorI18nKey } from '@codetask/contracts/turn-errors'
 
 const { t } = useI18n()
 

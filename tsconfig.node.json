@@ -32,6 +32,7 @@
       "@codetask/database": ["packages/database/src/index.ts"],
       "@codetask/database/*": ["packages/database/src/*"],
       "@codetask/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@codetask/agent-runtime/*": ["packages/agent-runtime/src/*"],
       "@codetask/provider-runtime-node": ["packages/provider-runtime-node/src/index.ts"],
       "@codetask/provider-runtime-node/*": ["packages/provider-runtime-node/src/*"],
       "@codetask/server-core": ["packages/server-core/src/index.ts"],

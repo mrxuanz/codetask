@@ -27,7 +27,7 @@ Pass `expectedRevision` from the prior `codetask_get_mcp_settings` response.
 1. `codetask_get_mcp_settings` — snapshot (`settings` + `revision`).
 2. `codetask_put_mcp_settings` — write `business-e2e-probe` under `settings.roles` for conversation / task / verification × active core.
 3. Get again — JSON must contain `business-e2e-probe` (round-trip).
-4. Attempt reserved name `codeteam-manager` — must fail.
+4. Attempt reserved name `codetask-manager` — must fail.
 5. Harness may self-call probe `ping_*` and expect:
    - `PROBE_OK_CONVERSATION`
    - `PROBE_OK_TASK`

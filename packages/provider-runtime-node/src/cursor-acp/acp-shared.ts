@@ -14,16 +14,16 @@ import {
   type SessionNotification,
   type Stream
 } from '@agentclientprotocol/sdk'
-import { resolveCursorAcpModelId } from '@server/conversation/models'
-import type { CursorAcpMcpServer } from '@server/agent-runtime/mcp'
+import { resolveCursorAcpModelId } from '../cursor-models'
+import type { CursorAcpMcpServer } from '../agent-mcp'
 import { autoAnswerCursorAskQuestion, type CursorAskQuestionRequest } from './extensions'
-import { sandboxTurnDebug } from '@server/debug/sandbox-turn'
+import { sandboxTurnDebug } from '@codetask/agent-runtime/debug/sandbox-turn'
 import { resolveCursorAgentBin } from './config'
 import { spawnCursorAgent, spawnCursorAgentInvocation } from './command'
 import { createCursorPermissionHandler } from './permissions'
-import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
+import type { AgentCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 import { classifyCursorAcpError } from './errors'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 
 export const CURSOR_ACP_RPC_TIMEOUT_MS = 60_000
 export const CURSOR_ACP_AUTH_TIMEOUT_MS = 120_000

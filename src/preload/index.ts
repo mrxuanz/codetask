@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 
 export interface ServerInfo {
   host: string
@@ -14,15 +13,5 @@ const api = {
   getServerInfo: (): Promise<ServerInfo | null> => ipcRenderer.invoke('get-server-info')
 }
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  window.electron = electronAPI
-
-  window.api = api
-}
+// contextIsolation is always enabled in src/main; expose only the used bridge.
+contextBridge.exposeInMainWorld('api', api)

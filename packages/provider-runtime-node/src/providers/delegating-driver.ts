@@ -8,7 +8,7 @@ import type {
   AgentTurnInput,
   AgentTurnOptions,
   AgentTurnProvider
-} from '@server/agent-runtime/types'
+} from '@codetask/agent-runtime/types'
 import type {
   PreparedProviderTurn,
   ProviderDiscoveryContext,
@@ -20,14 +20,17 @@ import type {
   SandboxPolicyContext
 } from './driver'
 import { providerInstallationResolver, type ProviderInstallationResolver } from './installation'
-import { processHostEnvironmentSource, type HostEnvironmentSource } from '@server/host-environment'
+import {
+  processHostEnvironmentSource,
+  type HostEnvironmentSource
+} from '@codetask/agent-runtime/host-environment'
 import { resolveProviderReusePolicy } from './lifecycle'
-import type { HostEnvironmentSnapshot } from '@server/host-environment'
+import type { HostEnvironmentSnapshot } from '@codetask/agent-runtime/host-environment'
 import {
   providerRuntimeReadRoots,
   providerRuntimeWriteRoots,
   type ProviderRuntimeProfile
-} from '@server/sandbox/provider-auth/types'
+} from '../provider-auth/types'
 import {
   resolveExecutableEnvironmentAffinity,
   resolveProviderExecutableStrategy

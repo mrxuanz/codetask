@@ -8,6 +8,7 @@
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import type { ExecutionJob } from '@renderer/api/jobs'
 import { newIdempotencyKey, resolveJobsApi, type JobsApi } from '@renderer/api/jobs-api'
@@ -22,7 +23,7 @@ import {
 import { toast, toastError } from '@renderer/lib/toast'
 import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 import type { RealtimeEnvelope } from '@codetask/contracts'
-import { jobNeedsRealtimeWatch } from '@shared/job-realtime'
+import { jobNeedsRealtimeWatch } from '@codetask/contracts/job-realtime'
 
 export interface UseControlPlaneJobsStoreOptions {
   selectedJobId: Ref<string | null>
@@ -77,6 +78,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 } {
   const { selectedJobId } = options
   const router = useRouter()
+  const { t } = useI18n()
   const realtime = useRealtimeGateway()
   const v3Store = new JobsStore()
   const jobsApi: JobsApi = resolveJobsApi()
@@ -223,7 +225,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       }
     } catch (err) {
       if (!silent) {
-        error.value = err instanceof Error ? err.message : 'Failed to load jobs'
+        error.value = err instanceof Error ? err.message : t('workspace.tasks.loadFailed')
       }
     } finally {
       if (!silent) loadingList.value = false
@@ -242,7 +244,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     } catch (err) {
       if (token !== loadDetailToken) return
       if (!silent) {
-        error.value = err instanceof Error ? err.message : 'Failed to load job detail'
+        error.value = err instanceof Error ? err.message : t('workspace.tasks.detailFailed')
         detail.value = null
       }
     } finally {
@@ -363,10 +365,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     } catch (err) {
       if (isRevisionConflict(err)) {
         await loadDetail(job.id)
-        toast.warning('任务状态已变化，请确认后重试')
+        toast.warning(t('workspace.tasks.revisionConflict'))
         return
       }
-      toastError(err, 'Action failed')
+      toastError(err, t('workspace.tasks.actionFailed'))
     } finally {
       runningAction.value = null
     }
@@ -410,7 +412,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       await router.replace({ name: 'tasks' })
       await loadJobs({ silent: true })
     } catch (err) {
-      toastError(err, 'Failed to delete')
+      toastError(err, t('workspace.tasks.deleteFailed'))
     } finally {
       runningAction.value = null
     }

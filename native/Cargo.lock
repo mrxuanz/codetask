@@ -229,9 +229,6 @@ dependencies = [
 [[package]]
 name = "codeteam-network-proxy"
 version = "0.1.0"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "codeteam-otel"

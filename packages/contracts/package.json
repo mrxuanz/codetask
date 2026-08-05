@@ -2,6 +2,7 @@
   "name": "@codetask/contracts",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -10,7 +11,22 @@
     "./conversation": "./src/conversation.ts",
     "./api": "./src/api.ts",
     "./events": "./src/events.ts",
-    "./settings": "./src/settings.ts"
+    "./settings": "./src/settings.ts",
+    "./sse": "./src/legacy/sse.ts",
+    "./job-realtime": "./src/legacy/job-realtime.ts",
+    "./job-lifecycle": "./src/legacy/job-lifecycle.ts",
+    "./job-display": "./src/legacy/job-display.ts",
+    "./draft-plan-resolve": "./src/legacy/draft-plan-resolve.ts",
+    "./draft-references": "./src/legacy/draft-references.ts",
+    "./message-thinking": "./src/legacy/message-thinking.ts",
+    "./workspace-access": "./src/legacy/workspace-access.ts",
+    "./plan-generation-progress": "./src/legacy/plan-generation-progress.ts",
+    "./plan-tree": "./src/legacy/plan-tree.ts",
+    "./auth/credentials-policy": "./src/legacy/auth/credentials-policy.ts",
+    "./turn-errors": "./src/legacy/turn-errors/index.ts",
+    "./turn-errors/*": "./src/legacy/turn-errors/*.ts",
+    "./planning-status": "./src/legacy/planning-status.ts",
+    "./job-references": "./src/legacy/job-references.ts"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.52"

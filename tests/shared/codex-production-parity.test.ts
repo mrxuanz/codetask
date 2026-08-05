@@ -37,10 +37,10 @@ function planSnapshot(plan: ReturnType<typeof buildCodexTurnPlan>): Record<strin
     mcpToolNames: plan.mcpToolNames ? [...plan.mcpToolNames].sort() : null,
     sdkSandboxMode: plan.sdkConfig?.sandbox_mode ?? null,
     hasSystemMcp: Boolean(
-      plan.sdkConfig?.mcp_servers && 'codeteam-manager' in plan.sdkConfig.mcp_servers
+      plan.sdkConfig?.mcp_servers && 'codetask-manager' in plan.sdkConfig.mcp_servers
     ),
     systemMcpRequired: Boolean(
-      (plan.sdkConfig?.mcp_servers?.['codeteam-manager'] as { required?: boolean } | undefined)
+      (plan.sdkConfig?.mcp_servers?.['codetask-manager'] as { required?: boolean } | undefined)
         ?.required
     )
   }

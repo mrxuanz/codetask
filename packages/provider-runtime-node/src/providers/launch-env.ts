@@ -15,7 +15,7 @@ import type {
   ResolvedExecutable
 } from './types'
 import { resolveProviderExecutable } from './executable'
-import { processHostEnvironmentSource } from '@server/host-environment'
+import { processHostEnvironmentSource } from '@codetask/agent-runtime/host-environment'
 
 export { CODETASK_TRANSIENT_ENV_KEYS, applyProviderOverlay, stripCodeTaskTransientEnv }
 

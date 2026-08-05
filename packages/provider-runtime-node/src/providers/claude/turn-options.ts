@@ -1,21 +1,21 @@
-import type { AgentCapabilityProfile } from '@server/agent-runtime/capabilities'
+import type { AgentCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 import {
   CLI_READ_ONLY_BUILTINS,
   capabilityProfileIsReadOnly,
   resolveInputCapabilityProfile
-} from '@server/agent-runtime/capabilities'
-import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '@server/agent-runtime/env'
-import { buildClaudeMcpServers } from '@server/agent-runtime/mcp'
-import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '@server/agent-runtime/roles'
-import type { AgentTurnInput } from '@server/agent-runtime/types'
+} from '@codetask/agent-runtime/capabilities'
+import { buildProviderChildEnv, buildSandboxPreparedProviderEnv } from '../../agent-env'
+import { buildClaudeMcpServers } from '../../agent-mcp'
+import { CLI_FULL_ACCESS_BUILTINS, roleRequiresOuterSandbox } from '@codetask/agent-runtime/roles'
+import type { AgentTurnInput } from '@codetask/agent-runtime/types'
 import type { CommandInvocation } from '../../spec/installation'
-import { createTurnError } from '@shared/turn-errors/index.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 import { resolveProviderExecutable } from '../executable'
 import {
   resolveProviderExecutableStrategy,
   type ProviderExecutableStrategy
 } from '../runtime-executable'
-import { resolveClaudeSettingsAuthEnv } from '@server/sandbox/provider-auth/paths'
+import { resolveClaudeSettingsAuthEnv } from '../../provider-auth/paths'
 import type {
   PermissionMode as ClaudePermissionMode,
   SandboxSettings as ClaudeSandboxSettings
