@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PublicApiClient } from '../api/client'
 import * as ops from '../api/operations'
-import { resolveProfile } from '../config/profiles'
+import { resolveProfile, type Profile } from '../config/profiles'
 import {
   draftExecutionConfigFromRoles,
   executionProfileCoresMatch,
@@ -15,6 +15,7 @@ import {
   formatCaseList,
   labelForCaseId,
   labelForPart,
+  partitionProviderScopedCases,
   resolveSelection,
   scopeLabelForCaseId,
   slugForCaseId
@@ -230,7 +231,43 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
       })
     }
 
+    const { sharedOnce, perProvider } = partitionProviderScopedCases(caseIds)
+    const firstActiveSlot =
+      providerQueue.find((slot) => !slot.skipReason) ?? providerQueue[0] ?? null
+
+    type RunSlot = {
+      alias: string
+      profile: Profile
+      caseIds: string[]
+      skipReason?: string
+    }
+    const runSlots: RunSlot[] = []
+    if (sharedOnce.length > 0 && firstActiveSlot) {
+      runSlots.push({
+        alias: 'shared',
+        profile: firstActiveSlot.profile,
+        caseIds: sharedOnce
+      })
+    }
     for (const slot of providerQueue) {
+      if (slot.skipReason) {
+        runSlots.push({
+          alias: slot.alias,
+          profile: slot.profile,
+          caseIds: [],
+          skipReason: slot.skipReason
+        })
+        continue
+      }
+      if (perProvider.length === 0) continue
+      runSlots.push({
+        alias: slot.alias,
+        profile: slot.profile,
+        caseIds: perProvider
+      })
+    }
+
+    for (const slot of runSlots) {
       const profile = slot.profile
       if (slot.skipReason) {
         progress('supervisor', 'case.skipped', {
@@ -247,11 +284,11 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
 
       progress('supervisor', 'provider.slot', {
         provider: slot.alias,
-        core: slot.core,
+        core: slot.alias === 'shared' ? 'shared' : profile.roleProviders.conversation,
         profile: profile.name
       })
 
-      for (const id of caseIds) {
+      for (const id of slot.caseIds) {
         const scope = `${scopeLabelForCaseId(id)} [${slot.alias}]`
         const slug = slugForCaseId(id)
         const manifest = MANIFESTS[id]

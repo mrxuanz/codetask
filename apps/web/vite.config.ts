@@ -27,8 +27,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@renderer': resolve(import.meta.dirname, 'src'),
-      '@shared': resolve(root, 'src/shared'),
-      '@codetask/contracts': resolve(root, 'packages/contracts/src/index.ts')
+      '@shared': resolve(root, 'src/shared')
     }
   },
   server: {

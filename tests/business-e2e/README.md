@@ -17,6 +17,9 @@ Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + S
 
 Image chat cases upload the fixture as neutral `attachment.png`, never leak `Dream`/`1000`/`Cats` in prompts/titles, and match the contiguous phrase `Dream of 1000 Cats` (NFKC, case/whitespace insensitive). create_task-era draft→job e2e case IDs were removed in architecture 03; deeper Design/Execution coverage lives in unit tests.
 
+`--suite all` runs the full remaining catalog: bootstrap + foundation + conversation + draft-job (confirm only) + settings-mcp.
+Supervisor/bootstrap cases (`driver: supervisor`, including Setup login) run **once** per server (`shared`); conversation/draft/settings cases still multiply by `--providers`.
+
 **Two MCP surfaces:** Test MCP = outer driver. Settings Probe (`business-e2e-probe`) = user MCP registered via `PUT /api/settings/mcp`. Do not confuse them.
 
 ```bash

@@ -69,8 +69,7 @@ export default defineConfig({
     resolve: {
       alias: {
         '@renderer': resolve('apps/web/src'),
-        '@shared': resolve('src/shared'),
-        '@codetask/contracts': resolve('packages/contracts/src/index.ts')
+        '@shared': resolve('src/shared')
       }
     },
     plugins: [vue(), tailwindcss(), standaloneRendererAssetBasePlugin()]
