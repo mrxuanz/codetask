@@ -6,7 +6,7 @@ import test from 'node:test'
 import { inflateSync } from 'node:zlib'
 import type { PublicApiClient } from './api/client.ts'
 import { waitJobTerminal, waitTurnTerminal } from './api/operations.ts'
-import { resolveSelection } from './cases/selection.ts'
+import { partitionProviderScopedCases, resolveSelection } from './cases/selection.ts'
 import { createTemporaryRunRoot, removeTemporaryRunRoot } from './supervisor/run-layout.ts'
 
 test('E2E run roots are ephemeral and outside the repository', () => {
@@ -143,6 +143,28 @@ test('image attachment case aliases resolve into phase 1/2 defaults', () => {
     'CHAT-IMG-001'
   ])
   assert.deepEqual(resolveSelection({ part: 'draft-job' }).caseIds, ['DESIGN-DRAFT-001'])
+})
+
+test('--suite all includes foundation plus every part default case', () => {
+  const ids = resolveSelection({ suite: 'all' }).caseIds
+  assert.ok(ids.includes('FOUNDATION-FAKE-001'))
+  assert.ok(ids.includes('G0-001'))
+  assert.ok(ids.includes('G3-001'))
+  assert.ok(ids.includes('DESIGN-DRAFT-001'))
+  assert.ok(ids.includes('SETTINGS-MCP-001'))
+  assert.equal(ids.length, 16)
+})
+
+test('supervisor cases run once; agent cases stay per-provider', () => {
+  const { sharedOnce, perProvider } = partitionProviderScopedCases([
+    'G1-003',
+    'G0-002',
+    'G3-001',
+    'DESIGN-DRAFT-001',
+    'SETTINGS-MCP-001'
+  ])
+  assert.deepEqual(sharedOnce, ['G1-003', 'G0-002'])
+  assert.deepEqual(perProvider, ['G3-001', 'DESIGN-DRAFT-001', 'SETTINGS-MCP-001'])
 })
 
 test('image attachment matcher requires contiguous phrase, not scattered tokens', async () => {

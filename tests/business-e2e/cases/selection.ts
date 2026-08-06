@@ -10,6 +10,20 @@ import { MANIFESTS } from './catalog'
 
 export type AcceptancePart = 'bootstrap' | 'conversation' | 'draft-job' | 'settings-mcp'
 
+/** Supervisor/infra cases share one server auth — run once, not per --providers slot. */
+export function partitionProviderScopedCases(caseIds: readonly string[]): {
+  sharedOnce: string[]
+  perProvider: string[]
+} {
+  const sharedOnce: string[] = []
+  const perProvider: string[] = []
+  for (const id of caseIds) {
+    if (MANIFESTS[id]?.driver === 'supervisor') sharedOnce.push(id)
+    else perProvider.push(id)
+  }
+  return { sharedOnce, perProvider }
+}
+
 /** Friendly slug → internal catalog caseId */
 export const CASE_ALIASES: Record<string, string> = {
   // bootstrap / smoke building blocks
@@ -149,7 +163,16 @@ export const SUITE_ALIASES: Record<string, { parts?: AcceptancePart[]; caseIds?:
   phases: { parts: ['conversation', 'draft-job', 'settings-mcp'] },
   'settings-mcp': { parts: ['settings-mcp'] },
   mcp: { parts: ['settings-mcp'] },
-  all: { parts: ['bootstrap', 'conversation', 'draft-job', 'settings-mcp'] }
+  // Every catalog case (including foundation). Job execution e2e was removed in architecture 03.
+  all: {
+    caseIds: [
+      ...PART_DEFAULT_CASES.bootstrap,
+      'FOUNDATION-FAKE-001',
+      ...PART_DEFAULT_CASES.conversation,
+      ...PART_DEFAULT_CASES['draft-job'],
+      ...PART_DEFAULT_CASES['settings-mcp']
+    ]
+  }
 }
 
 const LEGACY_GATE_HINT: Record<string, string> = {
@@ -332,6 +355,7 @@ export function formatCaseList(): string {
     '',
     'Suites (--suite):',
     '  smoke | conversation | draft-job | both | phases | all',
+    '  all = bootstrap + foundation + conversation + draft-job + settings-mcp',
     '',
     'Providers (--providers):',
     '  opencode | cursor | claude | codex | all',

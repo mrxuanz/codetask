@@ -377,6 +377,26 @@ export function resolveCaseIds(options: { gate?: string; caseId?: string }): str
   if (options.gate === 'phases') {
     return ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001', 'DESIGN-DRAFT-001', 'SETTINGS-MCP-001']
   }
+  if (options.gate === 'all') {
+    return [
+      'G0-001',
+      'G0-002',
+      'G0-003',
+      'G0-004',
+      'G0-005',
+      'G1-003',
+      'G1-007',
+      'G1-008',
+      'G0-006',
+      'G2-001',
+      'FOUNDATION-FAKE-001',
+      'G3-001',
+      'CHAT-HTML-001',
+      'CHAT-IMG-001',
+      'DESIGN-DRAFT-001',
+      'SETTINGS-MCP-001'
+    ]
+  }
   if (options.gate === 'fixed-opencode-full') {
     return [...SMOKE_CASES, 'FOUNDATION-FAKE-001', 'DESIGN-DRAFT-001']
   }
