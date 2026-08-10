@@ -1,0 +1,23 @@
+{
+  "name": "@codetask/provider-spec",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./codes": "./src/index.ts",
+    "./capabilities": "./src/index.ts",
+    "./descriptor": "./src/index.ts",
+    "./descriptors": "./src/index.ts",
+    "./descriptors/codex": "./src/index.ts",
+    "./descriptors/claude": "./src/index.ts",
+    "./descriptors/opencode": "./src/index.ts",
+    "./descriptors/cursor": "./src/index.ts",
+    "./installation": "./src/index.ts",
+    "./settings": "./src/index.ts"
+  }
+}

@@ -423,7 +423,7 @@ test('Claude turn options parity snapshots stay stable for settings/MCP/permissi
           capabilityProfile: 'planner-read'
         })
       },
-      { outerSandbox: false }
+      { outerSandbox: true }
     )
     const task = buildClaudeTurnOptions(
       {
@@ -443,7 +443,8 @@ test('Claude turn options parity snapshots stay stable for settings/MCP/permissi
     assert.equal(conversation.model, 'claude-test')
     assert.ok(conversation.allowedTools.some((tool) => tool.startsWith('mcp__')))
 
-    assert.deepEqual([...planner.settingSources], ['user', 'project', 'local'])
+    assert.deepEqual([...planner.settingSources], ['user'])
+    assert.equal(planner.outerSandbox, true)
     assert.equal(planner.readOnly, true)
     assert.ok(planner.disallowedTools.includes('Bash'))
     assert.ok(planner.disallowedTools.includes('Edit'))

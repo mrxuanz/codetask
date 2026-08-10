@@ -79,6 +79,7 @@ export function createSandboxPolicy(input: {
   providerWriteRoots?: string[]
   attachmentReadRoots?: string[]
   workspaceAccess?: WorkspaceAccessMode
+  networkMode?: SandboxPolicy['network']['mode']
 }): SandboxPolicy {
   const workspaceRoot = canonicalizePath(input.workspaceRoot)
   const scratchRoot = canonicalizePath(input.scratchRoot)
@@ -122,7 +123,7 @@ export function createSandboxPolicy(input: {
       allowSystemRuntime: true
     },
     network: {
-      mode: 'full',
+      mode: input.networkMode ?? 'full',
       allowLoopback: true,
       allowUnixSockets: []
     },

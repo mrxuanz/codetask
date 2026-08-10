@@ -51,4 +51,4 @@ Do **not** count Test MCP traffic as “user MCP used by role”.
 - mcp_probe_self_ok
 
 ## See also
-[`docs/business-testing/04-脚本使用与三语言架构.md`](../../../../docs/business-testing/04-脚本使用与三语言架构.md) §3.
+[`docs/testing/business-e2e.md`](../../../../docs/testing/business-e2e.md).

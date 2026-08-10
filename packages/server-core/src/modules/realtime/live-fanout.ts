@@ -16,16 +16,13 @@ export type RealtimeConnectionState = {
 const MAX_QUEUE_EVENTS = 256
 const MAX_QUEUE_BYTES = 512 * 1024
 
-const PROGRESS_TYPES = new Set([
-  'planning.progress',
-  'job.queue.changed',
-  'assistant.thinking.delta',
-  'assistant.text.delta'
-])
+const PROGRESS_TYPES = new Set(['planning.progress', 'job.queue.changed'])
 
 const NEVER_DROP_TYPES = new Set([
   'realtime.resync-required',
   'auth.session.expired',
+  'assistant.thinking.delta',
+  'assistant.text.delta',
   'message.committed',
   'turn.completed',
   'turn.failed',

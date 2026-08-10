@@ -18,8 +18,31 @@ function originForbidden(message: string, requestId: string): Response {
   )
 }
 
+function parseAuthority(hostHeader: string): { authority: string; hostname: string } | null {
+  const trimmed = hostHeader.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = new URL(`http://${trimmed}`)
+    return { authority: parsed.host.toLowerCase(), hostname: parsed.hostname.toLowerCase() }
+  } catch {
+    return null
+  }
+}
+
+function parseOrigin(originHeader: string): { authority: string; hostname: string } | null {
+  const trimmed = originHeader.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    return { authority: parsed.host.toLowerCase(), hostname: parsed.hostname.toLowerCase() }
+  } catch {
+    return null
+  }
+}
+
 function isLoopbackHost(host: string): boolean {
-  const normalized = host.split(':')[0]?.toLowerCase() ?? ''
+  const normalized = host.toLowerCase()
   return (
     normalized === '127.0.0.1' ||
     normalized === '::1' ||
@@ -35,10 +58,10 @@ function isLoopbackHost(host: string): boolean {
 export function requestGuard(security: SecurityContext): MiddlewareHandler {
   return async (c, next) => {
     const hostHeader = c.req.header('Host') ?? ''
-    const host = hostHeader.split(':')[0]?.toLowerCase() ?? ''
+    const host = parseAuthority(hostHeader)
 
     if (security.mode === 'desktop') {
-      if (host && !isLoopbackHost(host)) {
+      if (host && !isLoopbackHost(host.hostname)) {
         return originForbidden(
           'External host not allowed in desktop mode',
           c.get('requestId') ?? 'unknown'
@@ -48,17 +71,14 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
 
     if (WRITE_METHODS.has(c.req.method)) {
       const originHeader = c.req.header('Origin') ?? ''
-      const origin = originHeader.split('/').slice(0, 3).join('/')
+      const origin = parseOrigin(originHeader)
 
+      if (originHeader && !origin) {
+        return originForbidden('Invalid Origin header', c.get('requestId') ?? 'unknown')
+      }
       if (origin) {
-        const originHost =
-          origin
-            .replace(/^https?:\/\//, '')
-            .split(':')[0]
-            ?.toLowerCase() ?? ''
-
         if (security.mode === 'desktop') {
-          if (!isLoopbackHost(originHost)) {
+          if (!isLoopbackHost(origin.hostname)) {
             return originForbidden(
               'Cross-origin write requests not allowed',
               c.get('requestId') ?? 'unknown'
@@ -66,14 +86,12 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
           }
         }
 
-        if (security.mode === 'server') {
-          const sameOriginAsHost = Boolean(host && originHost === host)
-          if (!sameOriginAsHost) {
-            return originForbidden(
-              'Cross-origin write requests not allowed',
-              c.get('requestId') ?? 'unknown'
-            )
-          }
+        const sameOriginAsHost = Boolean(host && origin.authority === host.authority)
+        if (!sameOriginAsHost) {
+          return originForbidden(
+            'Cross-origin write requests not allowed',
+            c.get('requestId') ?? 'unknown'
+          )
         }
       }
     }

@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3'
 import { newId, nowMs } from '../shared.ts'
-import type { ExecutionOutboxEvent } from './job-events.ts'
 
 export type ExecutionOutboxListener = (
   jobId: string,
@@ -28,20 +27,25 @@ export class ExecutionOutbox {
   drainOnce(limit = 50): number {
     const rows = this.db
       .prepare(
-        `SELECT * FROM execution_outbox WHERE dispatched_at IS NULL
+        `SELECT id, job_id, event_type, payload_json FROM execution_outbox
+         WHERE dispatched_at IS NULL
          ORDER BY created_at ASC LIMIT ?`
       )
-      .all(limit) as Array<Record<string, unknown>>
+      .all(limit) as Array<{
+      id: string
+      job_id: string
+      event_type: string
+      payload_json: string
+    }>
 
     let dispatched = 0
     const now = nowMs()
     for (const row of rows) {
-      const event = row as ExecutionOutboxEvent
       try {
-        this.onEvent?.(event.jobId, event.eventType, JSON.parse(event.payloadJson), event.id)
+        this.onEvent?.(row.job_id, row.event_type, JSON.parse(row.payload_json), row.id)
         this.db
           .prepare(`UPDATE execution_outbox SET dispatched_at = ? WHERE id = ?`)
-          .run(now, event.id)
+          .run(now, row.id)
         dispatched += 1
       } catch (error) {
         this.db
@@ -50,7 +54,7 @@ export class ExecutionOutbox {
           )
           .run(
             JSON.stringify({ message: error instanceof Error ? error.message : String(error) }),
-            event.id
+            row.id
           )
       }
     }

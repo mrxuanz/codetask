@@ -54,9 +54,16 @@ export class WorkRepository {
   }
 
   listDependencies(jobId: string, generation: number): WorkDependencyRecord[] {
-    return this.db
+    const rows = this.db
       .prepare(`SELECT * FROM job_work_dependencies WHERE job_id = ? AND generation = ?`)
-      .all(jobId, generation) as WorkDependencyRecord[]
+      .all(jobId, generation) as Array<Record<string, unknown>>
+    return rows.map((row) => ({
+      jobId: row.job_id as string,
+      generation: row.generation as number,
+      fromWorkId: row.from_work_id as string,
+      dependsOnWorkId: row.depends_on_work_id as string,
+      reason: row.reason as WorkDependencyRecord['reason']
+    }))
   }
 
   casWorkState(input: {

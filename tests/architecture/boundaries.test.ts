@@ -246,6 +246,30 @@ describe('architecture boundaries (01+02)', () => {
     }
     assert.deepEqual(offenders, [], `web still imports @shared:\n${offenders.join('\n')}`)
   })
+
+  it('apps/web uses browser-safe provider-spec, never provider-runtime-node', () => {
+    const offenders: string[] = []
+    for (const file of walk(join(root, 'apps/web'))) {
+      const source = readFileSync(file, 'utf8')
+      if (source.includes('@codetask/provider-runtime-node')) {
+        offenders.push(relative(root, file).split('\\').join('/'))
+      }
+    }
+    assert.deepEqual(offenders, [], `web imports Node Provider runtime:\n${offenders.join('\n')}`)
+  })
+
+  it('production apps and packages do not import test helpers', () => {
+    const offenders: string[] = []
+    for (const base of ['apps', 'packages', 'src']) {
+      for (const file of walk(join(root, base))) {
+        const source = readFileSync(file, 'utf8')
+        if (/['"][^'"]*tests\//.test(source)) {
+          offenders.push(relative(root, file).split('\\').join('/'))
+        }
+      }
+    }
+    assert.deepEqual(offenders, [], `production source imports tests/**:\n${offenders.join('\n')}`)
+  })
 })
 
 function pathExists(rel: string): boolean {

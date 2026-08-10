@@ -1,6 +1,6 @@
 /**
  * Architecture 06 DoD checklist — HTTP + single-window Fetch SSE cutover.
- * @see docs/架构收口/06-前后端交互与实时通信.md §26
+ * @see ARCHITECTURE.md#runtime-flow
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'

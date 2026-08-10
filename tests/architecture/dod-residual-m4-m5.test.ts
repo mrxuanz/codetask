@@ -1,6 +1,6 @@
 /**
  * Architecture residual DoD — M4 drop thread_jobs graph + M5 façade.
- * @see docs/架构收口/残差进度.md
+ * @see ARCHITECTURE.md#package-maturity
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'

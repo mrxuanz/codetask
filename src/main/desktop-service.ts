@@ -5,6 +5,7 @@ import { app } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { spawnSupervisedService, type SupervisedService } from '@codetask/service-bootstrap'
 import { resolveDataDirSelection } from './data-dir'
+import { resolvePackagedServiceEntry } from './service-entry'
 
 export type DesktopServiceHandle = {
   url: string
@@ -94,7 +95,7 @@ function resolveHostNodeBinary(): string {
 function resolveServiceLaunch(): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
   if (is.dev) {
     const root = resolveRepoRootFromMain()
-    const tsconfigImport = join(root, 'tests', 'tsx-tsconfig.mjs')
+    const tsconfigImport = join(root, 'scripts', 'tooling', 'tsx-tsconfig.mjs')
     const entry = join(root, 'apps', 'service', 'src', 'main.ts')
     const env: NodeJS.ProcessEnv = { ...process.env }
     delete env.ELECTRON_RUN_AS_NODE
@@ -107,12 +108,7 @@ function resolveServiceLaunch(): { command: string; args: string[]; env: NodeJS.
     }
   }
 
-  const standalone = join(__dirname, 'standalone.js')
-  if (!existsSync(standalone)) {
-    throw new Error(
-      `Service entry not found at ${standalone}. Build the desktop/standalone bundle first.`
-    )
-  }
+  const standalone = resolvePackagedServiceEntry(__dirname)
   // Packaged desktop: no host Node required; run the bundled service as Electron-as-Node.
   return {
     command: process.execPath,
@@ -125,13 +121,31 @@ function resolveServiceLaunch(): { command: string; args: string[]; env: NodeJS.
  * Spawn the Hono Node Service as a supervised child and wait for ready handshake.
  * Desktop shell does not import server-core / database.
  */
-export async function startDesktopService(): Promise<DesktopServiceHandle> {
-  const storage = resolveDataDirSelection()
+export async function startDesktopService(
+  options: { smokeTest?: boolean } = {}
+): Promise<DesktopServiceHandle> {
+  const storage = options.smokeTest
+    ? resolveDataDirSelection({
+        // Package smoke must be repeatable and must never write test accounts or
+        // databases into the application bundle beside the executable.
+        defaultDataDir: join(app.getPath('userData'), 'package-smoke-data')
+      })
+    : resolveDataDirSelection()
   const launch = resolveServiceLaunch()
-  const args = [...launch.args, '--port', '0', '--host', '127.0.0.1', '--data-dir', storage.dataDir]
+  const args = [
+    ...launch.args,
+    '--desktop',
+    '--port',
+    '0',
+    '--host',
+    '127.0.0.1',
+    '--data-dir',
+    storage.dataDir
+  ]
   if (is.dev) {
     args.push('--renderer-dev-url', 'http://127.0.0.1:5173')
   }
+  if (options.smokeTest) args.push('--smoke-test')
 
   const supervised: SupervisedService = await spawnSupervisedService({
     command: launch.command,

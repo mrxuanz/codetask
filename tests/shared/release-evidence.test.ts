@@ -28,11 +28,13 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     const smokeLog = join(root, 'package-smoke.log')
     const seaSmokeLog = join(root, 'server-sea-smoke.log')
     const buildLog = join(root, 'build.log')
+    const nativeTestLog = join(root, 'native-test.log')
     writeFileSync(lockfile, '{"lockfileVersion":3}\n')
     writeFileSync(testLog, 'all release tests passed\n')
     writeFileSync(smokeLog, '{"ok":true,"health":{"health":"ok"}}\n')
     writeFileSync(seaSmokeLog, '{"ok":true,"mode":"sea","health":{"health":"ok"}}\n')
     writeFileSync(buildLog, 'build passed\n')
+    writeFileSync(nativeTestLog, '[run-and-record] exitCode=0 signal=none\n')
     for (const platform of platforms) {
       const extension = platform.startsWith('linux-')
         ? 'AppImage'
@@ -43,10 +45,12 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
         join(root, `codetask-0.1.0-${platform}.${extension}`),
         `${platform} application artifact`
       )
-      writeFileSync(
-        join(root, `codetask-server-0.1.0-${platform}.tar.gz`),
-        `${platform} sea service artifact`
-      )
+      if (platform.startsWith('linux-')) {
+        writeFileSync(
+          join(root, `codetask-server-0.1.0-${platform}.tar.gz`),
+          `${platform} sea service artifact`
+        )
+      }
     }
 
     const testOutput = join(root, 'release-evidence', 'test', 'test-gate.manifest.json')
@@ -68,6 +72,15 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     for (const platform of platforms) {
       const outputDir = join(root, 'release-evidence', platform)
       mkdirSync(outputDir, { recursive: true })
+      const signatureLog = join(outputDir, 'signature-verification.log')
+      writeFileSync(
+        signatureLog,
+        `${JSON.stringify({
+          ok: true,
+          platform,
+          signing: platform.startsWith('linux-') ? 'not-required' : 'verified'
+        })}\n`
+      )
       const result = run([
         'create-build',
         '--commit',
@@ -87,7 +100,11 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
         '--log',
         smokeLog,
         '--log',
-        seaSmokeLog
+        seaSmokeLog,
+        '--log',
+        nativeTestLog,
+        '--log',
+        signatureLog
       ])
       assert.equal(result.status, 0, result.stderr)
     }

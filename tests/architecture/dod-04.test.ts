@@ -1,6 +1,6 @@
 /**
  * Architecture 04 DoD checklist — Auth module cutover.
- * @see docs/架构收口/04-登录与统一鉴权.md §20
+ * @see ARCHITECTURE.md#runtime-flow
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'

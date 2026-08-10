@@ -5,7 +5,14 @@ on:
     branches: [main, master]
     paths:
       - '.github/workflows/sandbox.yml'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
       - 'native/**'
+      - 'packages/agent-runtime/**'
+      - 'packages/provider-runtime-node/**'
+      - 'packages/provider-spec/**'
+      - 'packages/server-core/src/modules/design/planning/**'
+      - 'packages/server-core/src/modules/execution/**'
       - 'src/server/sandbox/**'
       - 'src/sandbox/**'
       - 'tests/sandbox/**'
@@ -13,10 +20,24 @@ on:
     branches: [main, master]
     paths:
       - '.github/workflows/sandbox.yml'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/release.yml'
       - 'native/**'
+      - 'packages/agent-runtime/**'
+      - 'packages/provider-runtime-node/**'
+      - 'packages/provider-spec/**'
+      - 'packages/server-core/src/modules/design/planning/**'
+      - 'packages/server-core/src/modules/execution/**'
       - 'src/server/sandbox/**'
       - 'src/sandbox/**'
       - 'tests/sandbox/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust-tests:

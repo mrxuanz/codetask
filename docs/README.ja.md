@@ -209,4 +209,4 @@ npm run release:test-gate     # リリースと同じ JavaScript/TypeScript ゲ�
 
 ## アーキテクチャドキュメント
 
-- [ADR: ホスト認可・Provider 解決・Control Plane（中国語）](./adr/0001-host-auth-and-control-plane.md)
+- [アーキテクチャ、パッケージ所有権、依存境界](../ARCHITECTURE.md)

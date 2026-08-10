@@ -12,6 +12,8 @@ import {
   taskMcpFromJobSettings
 } from '../../job/application/job-settings-snapshot.ts'
 import type { RuntimeHandleRegistry } from '../../pool/infrastructure/runtime-handle-registry.ts'
+import type { ReferenceManifest } from '@codetask/contracts'
+import { buildAssignedReferenceContext } from './reference-context.ts'
 
 /** Post-complete grace waiting for HTTP MCP report_task_result (legacy parity). */
 export const TASK_EVIDENCE_GRACE_MS = 3 * 60 * 1000
@@ -102,6 +104,22 @@ export function createExecuteWorkService(deps: {
 
       const jobSettings = readJobExecutionSettings(deps.db, input.jobId)
       const userMcpServers = taskMcpFromJobSettings(jobSettings)
+      const referenceRow = deps.db
+        .prepare(`SELECT reference_manifest_json FROM job_snapshots WHERE job_id = ?`)
+        .get(input.jobId) as { reference_manifest_json: string } | undefined
+      const referenceIds = (
+        deps.db
+          .prepare(
+            `SELECT reference_id FROM job_work_references
+             WHERE job_id = ? AND generation = ? AND work_id = ? ORDER BY reference_id`
+          )
+          .all(input.jobId, work.generation, input.workId) as Array<{ reference_id: string }>
+      ).map((row) => row.reference_id)
+      let referenceContext = { readRoots: [] as string[], promptAppendix: '' }
+      if (referenceRow && referenceIds.length > 0) {
+        const manifest = JSON.parse(referenceRow.reference_manifest_json) as ReferenceManifest
+        referenceContext = buildAssignedReferenceContext(manifest, referenceIds)
+      }
 
       const leaseRow = deps.db
         .prepare(
@@ -154,8 +172,11 @@ export function createExecuteWorkService(deps: {
         provider: work.providerCode,
         workspaceRoot: input.workspaceRoot,
         capabilityProfile: 'task-sandbox',
-        prompt: work.description,
+        prompt: referenceContext.promptAppendix
+          ? `${work.description}\n\n${referenceContext.promptAppendix}`
+          : work.description,
         systemPrompt: work.contextMarkdown,
+        readRoots: referenceContext.readRoots,
         userMcpServers,
         ...(mcpUrl
           ? {
@@ -183,7 +204,7 @@ export function createExecuteWorkService(deps: {
           : {})
       }
 
-      deps.handles?.setTurnId(input.runId, attemptId)
+      deps.handles?.addTurnId(input.runId, attemptId)
 
       const failAttempt = (message: string, nextWorkState: 'failed' | 'pending'): void => {
         deps.db
@@ -275,9 +296,12 @@ export function createExecuteWorkService(deps: {
         } finally {
           if (graceTimer !== undefined) clearTimeout(graceTimer)
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        failAttempt(message, signal?.aborted ? 'pending' : 'failed')
       } finally {
         unregisterTaskMcpSession(sessionId)
-        deps.handles?.setTurnId(input.runId, null)
+        deps.handles?.removeTurnId(input.runId, attemptId)
         if (!evidenceSettled) {
           evidenceSettled = true
           evidenceReject(new Error('Evidence wait cancelled by executor'))

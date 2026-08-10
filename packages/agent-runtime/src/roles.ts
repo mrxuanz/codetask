@@ -6,6 +6,7 @@ export type ConversationRole =
   | 'slice-verifier'
 
 export const OUTER_SANDBOX_ROLES: ConversationRole[] = [
+  'planner',
   'task-worker',
   'milestone-verifier',
   'slice-verifier'

@@ -135,3 +135,42 @@ test('replay gap signals resync when cursor is behind retention', async () => {
     rmSync(dataDir, { recursive: true, force: true })
   }
 })
+
+test('live queue byte accounting is released after delivery', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'codetask-rt-bytes-'))
+  try {
+    await resetAppContextForTests()
+    const ctx = bootstrapRuntime({ dataDir })
+    const db = (ctx.db as AppDatabase & { $client?: Database.Database }).$client!
+    const log = new RealtimeEventLog(db)
+    const fanout = new LiveFanout()
+    const stream = openRealtimeStream({
+      fanout,
+      log,
+      actorId: 'actor-1',
+      sessionId: 's1',
+      connectionId: 'c-bytes',
+      lastEventId: null,
+      initialTopics: ['job:j1']
+    })
+    const conn = fanout.get(stream.key)
+    assert.ok(conn)
+
+    fanout.publish('actor-1', {
+      eventId: null,
+      ephemeral: true,
+      topic: 'job:j1',
+      type: 'assistant.text.delta',
+      entityId: 'j1',
+      occurredAt: Date.now(),
+      payload: { content: 'hello' }
+    })
+    assert.ok(conn.queuedBytes > 0)
+    await stream.stream.next()
+    assert.equal(conn.queuedBytes, 0)
+    stream.close()
+  } finally {
+    await resetAppContextForTests()
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})

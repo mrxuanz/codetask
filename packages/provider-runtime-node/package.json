@@ -4,6 +4,9 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./spec": "./src/spec/index.ts",
@@ -21,6 +24,12 @@
     "./toolchain-path": "./src/toolchain-path.ts"
   },
   "dependencies": {
-    "@codetask/agent-runtime": "*"
+    "@agentclientprotocol/sdk": "^1.3.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.221",
+    "@codetask/agent-runtime": "*",
+    "@codetask/contracts": "*",
+    "@codetask/provider-spec": "*",
+    "@openai/codex-sdk": "^0.146.0",
+    "@opencode-ai/sdk": "^1.18.13"
   }
 }

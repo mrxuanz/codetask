@@ -56,6 +56,7 @@ export type ConversationRuntimeStateDto = {
     updatedAt?: string
   } | null
   conversationId?: string | null
+  activeTurnId?: string | null
   runtimeStatus?: string | null
   lastError?: { code: string; message: string } | null
   lastUsedAt?: string | null

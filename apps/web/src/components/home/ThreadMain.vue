@@ -23,12 +23,15 @@ const messages = computed(() => chatCtx.messages.value)
 const cores = computed(() => chatCtx.cores.value)
 const activeProviderCode = computed(() => chatCtx.activeProviderCode.value)
 const loading = computed(() => chatCtx.loading.value)
+const hasOlderMessages = computed(() => chatCtx.hasOlderMessages.value)
+const loadingOlderMessages = computed(() => chatCtx.loadingOlderMessages.value)
 const providerSwitching = computed(() => chatCtx.providerSwitching.value)
 const sending = computed(() => chatCtx.sending.value)
 const streamingMessageId = computed(() => chatCtx.streamingMessageId.value)
 const awaitingAssistantReply = computed(() => chatCtx.awaitingAssistantReply.value)
 const error = computed(() => chatCtx.error.value)
 const runtimeStatus = computed(() => chatCtx.runtimeStatus.value)
+const activeTurnId = computed(() => chatCtx.activeTurnId.value)
 const activeWorkspaceAccess = computed(() => chatCtx.activeWorkspaceAccess.value)
 const workspaceAccess = ref<ProjectWorkspaceAccess>({ mode: 'read_write', blocker: null })
 let workspaceAccessTimer: ReturnType<typeof setInterval> | null = null
@@ -144,7 +147,11 @@ async function handleCoreChange(code: string): Promise<void> {
   if (updated) workspace.syncThread(updated)
 }
 
-async function handleSend(payload: { message: string; files: File[] }): Promise<void> {
+async function handleSend(payload: {
+  message: string
+  files: File[]
+  onAccepted?: () => void
+}): Promise<void> {
   const updated = await chat.sendMessage(payload)
   if (updated) workspace.syncThread(updated)
 }
@@ -233,8 +240,11 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
       <ChatMessages
         :messages="messages"
         :loading="loading"
+        :has-older="hasOlderMessages"
+        :loading-older="loadingOlderMessages"
         :streaming-message-id="streamingMessageId"
         :pending-reply="awaitingAssistantReply && !streamingMessageId"
+        @load-older="chat.loadOlderMessages"
       />
       <ChatComposer
         :cores="composerProviders"
@@ -242,8 +252,10 @@ async function handleSend(payload: { message: string; files: File[] }): Promise<
         :require-read-only-core="workspaceReadOnly"
         :disabled="loading || providerSwitching || providerUnavailable"
         :sending="busy"
+        :can-stop="Boolean(activeTurnId)"
         @core-change="handleCoreChange"
         @send="handleSend"
+        @stop="chat.cancelActiveTurn"
       />
     </div>
   </div>

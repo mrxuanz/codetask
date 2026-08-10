@@ -1,6 +1,6 @@
 export type CoordinatorDecision =
   | { kind: 'settle-control' }
-  | { kind: 'dispatch-work'; workId: string }
+  | { kind: 'dispatch-work'; workIds: string[] }
   | { kind: 'verify-slice'; sliceId: string }
   | { kind: 'verify-milestone'; milestoneId: string }
   | { kind: 'complete-job' }
@@ -63,7 +63,12 @@ export function decideNextStep(input: {
   })
 
   if (ready.workIds.length > 0) {
-    return { kind: 'dispatch-work', workId: ready.workIds[0]! }
+    const byId = new Map(workItems.map((item) => [item.id, item]))
+    const parallelWorkIds = ready.workIds.filter((workId) => byId.get(workId)?.canRunInParallel)
+    return {
+      kind: 'dispatch-work',
+      workIds: parallelWorkIds.length > 1 ? parallelWorkIds : [ready.workIds[0]!]
+    }
   }
 
   const slices = [

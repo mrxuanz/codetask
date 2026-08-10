@@ -45,18 +45,17 @@ test('resolveProviderRunPolicy ignores CODETASK_OUTER_SANDBOX env', () => {
 
 test('resolveProviderOuterSandbox matrix', () => {
   assert.equal(resolveProviderOuterSandbox('conversation', undefined), false)
-  assert.equal(resolveProviderOuterSandbox('planner', undefined), false)
+  assert.equal(resolveProviderOuterSandbox('planner', undefined), true)
   assert.equal(resolveProviderOuterSandbox('task-worker', undefined), true)
   assert.equal(resolveProviderOuterSandbox('slice-verifier', undefined), true)
   assert.equal(resolveProviderOuterSandbox('milestone-verifier', undefined), true)
 })
 
 test('resolveProviderOuterSandbox rejects disable for file roles', () => {
-  for (const role of ['task-worker', 'slice-verifier', 'milestone-verifier'] as const) {
+  for (const role of ['planner', 'task-worker', 'slice-verifier', 'milestone-verifier'] as const) {
     assert.throws(() => resolveProviderOuterSandbox(role, false), /cannot disable outer sandbox/)
   }
   assert.equal(resolveProviderOuterSandbox('conversation', false), false)
-  assert.equal(resolveProviderOuterSandbox('planner', false), false)
 })
 
 test('resolveRoleMcpToolNames per role', () => {

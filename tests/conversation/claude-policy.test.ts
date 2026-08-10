@@ -70,8 +70,9 @@ test('Claude direct write uses only the native workspace boundary', () => {
         prompt: 'plan',
         capabilityProfile: 'planner-read'
       },
-      { outerSandbox: false }
+      { outerSandbox: true }
     )
+    assert.equal(readOnly.outerSandbox, true)
     assert.equal(readOnly.sandbox.enabled, false)
     assert.equal(readOnly.permissionMode, 'bypassPermissions')
     assert.equal(readOnly.allowDangerouslySkipPermissions, true)

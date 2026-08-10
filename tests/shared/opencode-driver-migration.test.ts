@@ -371,7 +371,7 @@ test('OpenCode server plan parity snapshots stay stable for question deny / MCP 
           capabilityProfile: 'planner-read'
         })
       },
-      { outerSandbox: false }
+      { outerSandbox: true }
     )
     const task = buildOpenCodeServerPlan(
       {
@@ -396,6 +396,7 @@ test('OpenCode server plan parity snapshots stay stable for question deny / MCP 
       [...planner.buildServeArgs(9)],
       ['serve', '--hostname=127.0.0.1', '--port=9', '--pure']
     )
+    assert.equal(planner.outerSandbox, true)
     assert.equal(planner.config.permission?.question, 'deny')
     assert.deepEqual(planner.config.plugin, [])
 

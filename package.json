@@ -3,6 +3,7 @@
   "version": "0.1.0-beta",
   "private": true,
   "description": "Local-first AI task orchestration with pluggable agent CLIs and OS sandboxing",
+  "author": "mrxuanz",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

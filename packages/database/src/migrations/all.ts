@@ -65,6 +65,7 @@ import { migration062AssetsAndDropDeadRuntimeTables } from './assets-and-drop-de
 import { migration063ProjectFkAndAssetStorageKeys } from './project-fk-and-asset-storage.ts'
 import { migration064DropBackupAndMarkerTables } from './drop-backup-and-marker-tables.ts'
 import { migration065DropLegacyThreadTables } from './drop-legacy-thread-tables.ts'
+import { migration066PlanningCapacityIndex } from './planning-capacity-index.ts'
 
 export type { Migration } from './v001_042/types.ts'
 export { runMigrations } from './runner.ts'
@@ -131,7 +132,8 @@ export const allMigrations: Migration[] = [
   migration062AssetsAndDropDeadRuntimeTables,
   migration063ProjectFkAndAssetStorageKeys,
   migration064DropBackupAndMarkerTables,
-  migration065DropLegacyThreadTables
+  migration065DropLegacyThreadTables,
+  migration066PlanningCapacityIndex
 ]
 
 export function applyMigrations(db: Database.Database): void {

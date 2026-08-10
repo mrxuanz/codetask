@@ -1,0 +1,5 @@
+extends: ./electron-builder.yml
+mac:
+  forceCodeSigning: true
+win:
+  forceCodeSigning: true

@@ -1,7 +1,9 @@
-import { onMounted, ref, type InjectionKey, type Ref } from 'vue'
+import { onMounted, onScopeDispose, ref, type InjectionKey, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   createConversationTurn,
+  cancelConversationTurn,
+  fetchConversationTurn,
   fetchConversationProviderOptions,
   fetchThreadConversationState,
   fetchConversationMessages,
@@ -28,6 +30,7 @@ import {
 import { setPreferredProviderCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import type { WorkspaceAccessMode } from '@codetask/contracts/workspace-access'
+import { ApiError } from '@renderer/api/client'
 
 export interface HomeChatContext {
   cores: Ref<ConversationCore[]>
@@ -35,14 +38,18 @@ export interface HomeChatContext {
   activeThreadId: Ref<string | null>
   activeProviderCode: Ref<string | null>
   runtimeStatus: Ref<string>
+  activeTurnId: Ref<string | null>
   streamingMessageId: Ref<string | null>
   awaitingAssistantReply: Ref<boolean>
   loading: Ref<boolean>
+  hasOlderMessages: Ref<boolean>
+  loadingOlderMessages: Ref<boolean>
   providerSwitching: Ref<boolean>
   sending: Ref<boolean>
   error: Ref<string | null>
   activeWorkspaceAccess: Ref<WorkspaceAccessMode | null>
   loadCores: () => Promise<void>
+  loadOlderMessages: () => Promise<void>
   openThread: (thread: ConversationListItemDto) => Promise<void>
   setProviderCode: (
     threadId: string,
@@ -51,11 +58,16 @@ export interface HomeChatContext {
   sendMessage: (input: {
     message: string
     files?: File[]
+    onAccepted?: () => void
   }) => Promise<ConversationListItemDto | null>
+  cancelActiveTurn: () => Promise<void>
   clear: () => void
 }
 
 export const HomeChatKey: InjectionKey<HomeChatContext> = Symbol('homeChat')
+
+const HISTORY_PAGE_SIZE = 100
+const HISTORY_PAGE_REQUEST_SIZE = HISTORY_PAGE_SIZE + 1
 
 function isAbortError(err: unknown): boolean {
   return (
@@ -131,9 +143,12 @@ export function useHomeChat(
   const activeThreadId = ref<string | null>(null)
   const activeProviderCode = ref<string | null>(null)
   const runtimeStatus = ref('idle')
+  const activeTurnId = ref<string | null>(null)
   const streamingMessageId = ref<string | null>(null)
   const awaitingAssistantReply = ref(false)
   const loading = ref(false)
+  const hasOlderMessages = ref(false)
+  const loadingOlderMessages = ref(false)
   const providerSwitching = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
@@ -142,6 +157,11 @@ export function useHomeChat(
   let turnUnsub: (() => void) | null = null
   let settleActiveTurn: ((err?: unknown) => void) | null = null
   let streamGeneration = 0
+
+  function replaceWithLatestHistory(history: ConversationMessage[]): void {
+    hasOlderMessages.value = history.length > HISTORY_PAGE_SIZE
+    messages.value = hasOlderMessages.value ? history.slice(-HISTORY_PAGE_SIZE) : history
+  }
 
   /** Detach UI from an in-flight turn. Does NOT cancel the server turn. */
   function detachActiveTurn(reason?: unknown): void {
@@ -162,9 +182,12 @@ export function useHomeChat(
     openToken += 1
     detachActiveTurn()
     messages.value = []
+    hasOlderMessages.value = false
+    loadingOlderMessages.value = false
     activeThreadId.value = null
     activeProviderCode.value = null
     runtimeStatus.value = 'idle'
+    activeTurnId.value = null
     activeWorkspaceAccess.value = null
     streamingMessageId.value = null
     awaitingAssistantReply.value = false
@@ -198,6 +221,111 @@ export function useHomeChat(
     }
   }
 
+  function monitorRestoredTurn(
+    threadId: string,
+    turnId: string,
+    providerCode: string,
+    token: number
+  ): void {
+    let pollInFlight = false
+    let activeStreamingId: string | null = null
+    let activeThinking = ''
+    const releases: Array<() => void> = []
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+
+    const isCurrent = (): boolean => token === openToken && isViewingThread(threadId)
+    const cleanup = (): void => {
+      for (const release of releases) release()
+      if (pollTimer) clearInterval(pollTimer)
+      if (turnUnsub === cleanup) turnUnsub = null
+    }
+
+    const settleFromSnapshot = (turn: ConversationTurnDto): void => {
+      activeWorkspaceAccess.value =
+        !isTerminalTurnStatus(turn.state) &&
+        (turn.workspaceAccess === 'exclusive-write' || turn.workspaceAccess === 'live-read')
+          ? turn.workspaceAccess
+          : null
+      if (!isTerminalTurnStatus(turn.state) || !isCurrent()) return
+
+      cleanup()
+      activeTurnId.value = null
+      sending.value = false
+      awaitingAssistantReply.value = false
+      void Promise.all([
+        fetchConversationMessages(threadId, HISTORY_PAGE_REQUEST_SIZE),
+        fetchThreadConversationState(threadId)
+      ])
+        .then(([historyRes, stateRes]) => {
+          if (!isCurrent()) return
+          replaceWithLatestHistory(historyRes.data ?? [])
+          streamingMessageId.value = null
+          applyStatus(stateRes.data)
+          if (turn.state === 'failed') {
+            runtimeStatus.value = 'error'
+            error.value = displayError(turn.lastError)
+          }
+        })
+        .catch((syncError) => {
+          if (!isCurrent()) return
+          runtimeStatus.value = turn.state === 'failed' ? 'error' : 'idle'
+          error.value = syncError instanceof Error ? syncError.message : null
+        })
+    }
+
+    const onEnvelope = (envelope: import('@codetask/contracts').RealtimeEnvelope): void => {
+      if (!isCurrent()) return
+      const data = realtimePayload(envelope)
+      if (envelope.type.startsWith('turn.')) {
+        const turn = readTurnPayload(data.turn)
+        if (turn?.id === turnId) settleFromSnapshot(turn)
+        return
+      }
+      if (envelope.type === 'assistant.thinking.delta') {
+        activeThinking += String(data.content ?? '')
+      } else if (envelope.type !== 'assistant.text.delta') {
+        return
+      }
+      if (!activeStreamingId) {
+        activeStreamingId = `stream-${turnId}`
+        streamingMessageId.value = activeStreamingId
+      }
+      const current =
+        messages.value.find((message) => message.id === activeStreamingId)?.content ?? ''
+      const content =
+        envelope.type === 'assistant.text.delta' ? current + String(data.content ?? '') : current
+      messages.value = upsertStreamingAssistantMessage(
+        messages.value,
+        activeStreamingId,
+        content,
+        providerCode,
+        activeThinking
+      )
+    }
+
+    const pollTurn = async (): Promise<void> => {
+      if (!isCurrent() || pollInFlight) return
+      pollInFlight = true
+      try {
+        const snapshot = await fetchConversationTurn(threadId, turnId)
+        settleFromSnapshot(snapshot.data)
+      } catch {
+        // Retry transient failures; authentication failures redirect through the API client.
+      } finally {
+        pollInFlight = false
+      }
+    }
+
+    releases.push(hub.watchTopic(conversationTurnTopic(turnId), onEnvelope))
+    releases.push(hub.onResync(() => void pollTurn()))
+    pollTimer = setInterval(() => void pollTurn(), 2_000)
+    turnUnsub = cleanup
+    sending.value = true
+    awaitingAssistantReply.value = true
+    void hub.flushSubscriptionsNow()
+    void pollTurn()
+  }
+
   async function openThread(thread: ConversationListItemDto): Promise<void> {
     const sameThread = activeThreadId.value === thread.id
     const token = ++openToken
@@ -207,6 +335,7 @@ export function useHomeChat(
       awaitingAssistantReply.value = false
       sending.value = false
       messages.value = []
+      hasOlderMessages.value = false
       activeWorkspaceAccess.value = null
       loading.value = true
     }
@@ -219,12 +348,21 @@ export function useHomeChat(
     try {
       const [stateRes, historyRes] = await Promise.all([
         fetchThreadConversationState(thread.id),
-        fetchConversationMessages(thread.id, 100)
+        fetchConversationMessages(thread.id, HISTORY_PAGE_REQUEST_SIZE)
       ])
       if (token !== openToken || activeThreadId.value !== thread.id) return
-      messages.value = historyRes.data ?? []
+      replaceWithLatestHistory(historyRes.data ?? [])
       applyStatus(stateRes.data)
+      activeTurnId.value = stateRes.data.activeTurnId ?? null
       activeProviderCode.value = stateRes.data.provider?.code ?? thread.providerCode
+      if (activeTurnId.value) {
+        monitorRestoredTurn(
+          thread.id,
+          activeTurnId.value,
+          activeProviderCode.value ?? thread.providerCode,
+          token
+        )
+      }
     } catch (err) {
       if (token !== openToken || activeThreadId.value !== thread.id) return
       error.value = err instanceof Error ? err.message : t('workspace.loadThreadFailed')
@@ -241,6 +379,35 @@ export function useHomeChat(
       cores.value = res.data.cores ?? []
     } catch {
       cores.value = []
+    }
+  }
+
+  async function loadOlderMessages(): Promise<void> {
+    const threadId = activeThreadId.value
+    const oldest = messages.value[0]
+    if (!threadId || !oldest || !hasOlderMessages.value || loadingOlderMessages.value) return
+
+    loadingOlderMessages.value = true
+    try {
+      const response = await fetchConversationMessages(threadId, HISTORY_PAGE_REQUEST_SIZE, {
+        createdAt: oldest.createdAt,
+        id: oldest.id
+      })
+      if (!isViewingThread(threadId)) return
+      const page = response.data ?? []
+      hasOlderMessages.value = page.length > HISTORY_PAGE_SIZE
+      const older = hasOlderMessages.value ? page.slice(-HISTORY_PAGE_SIZE) : page
+      const existingIds = new Set(messages.value.map((message) => message.id))
+      messages.value = [
+        ...older.filter((message) => !existingIds.has(message.id)),
+        ...messages.value
+      ]
+    } catch (err) {
+      if (isViewingThread(threadId)) {
+        error.value = err instanceof Error ? err.message : t('workspace.loadOlderMessagesFailed')
+      }
+    } finally {
+      if (isViewingThread(threadId)) loadingOlderMessages.value = false
     }
   }
 
@@ -271,6 +438,7 @@ export function useHomeChat(
   async function sendMessage(input: {
     message: string
     files?: File[]
+    onAccepted?: () => void
   }): Promise<ConversationListItemDto | null> {
     const threadId = activeThreadId.value
     if (!threadId) return null
@@ -291,6 +459,7 @@ export function useHomeChat(
     let activeStreamingId: string | null = null
     let optimisticUserId: string | null = null
     let activeThinking = ''
+    const idempotencyKey = crypto.randomUUID()
 
     if (outbound) {
       optimisticUserId = `optimistic-user-${Date.now()}`
@@ -318,16 +487,38 @@ export function useHomeChat(
         attachmentIds.push(attachment.id)
       }
 
-      const accepted = await createConversationTurn(threadId, outbound, {
-        attachmentIds
-      })
+      let accepted: Awaited<ReturnType<typeof createConversationTurn>> | null = null
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          accepted = await createConversationTurn(threadId, outbound, {
+            attachmentIds,
+            idempotencyKey
+          })
+          break
+        } catch (enqueueError) {
+          const retryable =
+            !(enqueueError instanceof ApiError) ||
+            enqueueError.retryable ||
+            enqueueError.httpStatus >= 500
+          if (!retryable || attempt === 1) throw enqueueError
+        }
+      }
+      if (!accepted) throw new Error('Conversation turn was not accepted')
+      input.onAccepted?.()
       const turnId = accepted.data.turnId
+      activeTurnId.value = turnId
 
       await new Promise<void>((resolve, reject) => {
         let settled = false
+        let pollInFlight = false
+        const releases: Array<() => void> = []
+        let pollTimer: ReturnType<typeof setInterval> | null = null
+        let timeoutTimer: ReturnType<typeof setTimeout> | null = null
         const finish = (err?: unknown): void => {
           if (settled) return
           settled = true
+          if (pollTimer) clearInterval(pollTimer)
+          if (timeoutTimer) clearTimeout(timeoutTimer)
           settleActiveTurn = null
           turnUnsub?.()
           turnUnsub = null
@@ -336,7 +527,6 @@ export function useHomeChat(
         }
         settleActiveTurn = finish
 
-        const releases: Array<() => void> = []
         const onEnvelope = (envelope: import('@codetask/contracts').RealtimeEnvelope): void => {
           if (generation !== streamGeneration) return
 
@@ -358,14 +548,15 @@ export function useHomeChat(
                 ? snapshotAccess
                 : null
             if (isTerminalTurnStatus(status)) {
+              activeTurnId.value = null
               const terminalTurn = turn
               void Promise.all([
-                fetchConversationMessages(threadId, 100),
+                fetchConversationMessages(threadId, HISTORY_PAGE_REQUEST_SIZE),
                 fetchThreadConversationState(threadId)
               ])
                 .then(([historyRes, stateRes]) => {
                   if (generation !== streamGeneration || !isViewingThread(threadId)) return
-                  messages.value = historyRes.data ?? []
+                  replaceWithLatestHistory(historyRes.data ?? [])
                   activeStreamingId = null
                   streamingMessageId.value = null
                   awaitingAssistantReply.value = false
@@ -475,11 +666,41 @@ export function useHomeChat(
 
         releases.push(hub.watchTopic(conversationTurnTopic(turnId), onEnvelope))
         releases.push(hub.watchTopic(conversationTopic(threadId), onEnvelope))
+        const pollTurn = async (): Promise<void> => {
+          if (settled || pollInFlight) return
+          pollInFlight = true
+          try {
+            const snapshot = await fetchConversationTurn(threadId, turnId)
+            onEnvelope({
+              eventId: null,
+              ephemeral: true,
+              topic: conversationTurnTopic(turnId),
+              type: 'turn.changed',
+              entityId: turnId,
+              occurredAt: Date.now(),
+              payload: { turn: snapshot.data }
+            })
+          } catch {
+            // The shared API client handles authentication expiry. Other transient
+            // polling failures are retried while the SSE connection may still recover.
+          } finally {
+            pollInFlight = false
+          }
+        }
+        releases.push(hub.onResync(() => void pollTurn()))
+        pollTimer = setInterval(() => void pollTurn(), 2_000)
+        timeoutTimer = setTimeout(
+          () => finish(new Error('Conversation turn did not reach a terminal state in time')),
+          30 * 60_000
+        )
         turnUnsub = () => {
           for (const release of releases) release()
+          if (pollTimer) clearInterval(pollTimer)
+          if (timeoutTimer) clearTimeout(timeoutTimer)
         }
 
         void hub.flushSubscriptionsNow()
+        void pollTurn()
       })
 
       return resultThread
@@ -501,9 +722,37 @@ export function useHomeChat(
     }
   }
 
+  async function cancelActiveTurn(): Promise<void> {
+    const threadId = activeThreadId.value
+    const turnId = activeTurnId.value
+    if (!threadId || !turnId) return
+    try {
+      await cancelConversationTurn(threadId, turnId)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : t('workspace.cancelTurnFailed')
+    }
+  }
+
   onMounted(() => {
     void loadCores()
   })
+
+  const resyncRelease = hub.onResync(() => {
+    const threadId = activeThreadId.value
+    if (!threadId) return
+    void Promise.all([
+      fetchConversationMessages(threadId, HISTORY_PAGE_REQUEST_SIZE),
+      fetchThreadConversationState(threadId)
+    ])
+      .then(([historyRes, stateRes]) => {
+        if (activeThreadId.value !== threadId) return
+        replaceWithLatestHistory(historyRes.data ?? [])
+        applyStatus(stateRes.data)
+        activeTurnId.value = stateRes.data.activeTurnId ?? null
+      })
+      .catch(() => undefined)
+  })
+  onScopeDispose(resyncRelease)
 
   return {
     cores,
@@ -511,17 +760,22 @@ export function useHomeChat(
     activeThreadId,
     activeProviderCode,
     runtimeStatus,
+    activeTurnId,
     streamingMessageId,
     awaitingAssistantReply,
     loading,
+    hasOlderMessages,
+    loadingOlderMessages,
     providerSwitching,
     sending,
     error,
     activeWorkspaceAccess,
     loadCores,
+    loadOlderMessages,
     openThread,
     setProviderCode,
     sendMessage,
+    cancelActiveTurn,
     clear
   }
 }

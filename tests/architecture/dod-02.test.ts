@@ -1,6 +1,6 @@
 /**
  * Architecture 02 DoD — Execution cutover residuals.
- * @see docs/架构收口/02-Job与Work校验执行调度.md
+ * @see ARCHITECTURE.md#data-and-concurrency
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'

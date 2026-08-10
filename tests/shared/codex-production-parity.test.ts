@@ -95,7 +95,7 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
           capabilityProfile: 'planner-read',
           mcpUrl: 'http://127.0.0.1:9/mcp'
         },
-        { outerSandbox: false }
+        { outerSandbox: true }
       )
     )
     const task = planSnapshot(
@@ -121,13 +121,13 @@ test('Codex turn plan parity snapshots stay stable for model/MCP/permissions', (
       systemMcpRequired: true
     })
     assert.deepEqual(planner, {
-      outerSandbox: false,
-      sandboxMode: 'read-only',
+      outerSandbox: true,
+      sandboxMode: 'danger-full-access',
       networkAccessEnabled: false,
       approvalPolicy: 'never',
       model: 'gpt-test-model',
       mcpToolNames: null,
-      sdkSandboxMode: null,
+      sdkSandboxMode: 'danger-full-access',
       hasSystemMcp: true,
       systemMcpRequired: true
     })

@@ -119,6 +119,7 @@ function listArtifacts(distDir, platform) {
       (entry) =>
         entry.isFile() &&
         entry.name.includes(platformToken) &&
+        (platform.startsWith('linux-') || !entry.name.startsWith('codetask-server-')) &&
         ARTIFACT_EXTENSIONS.some((extension) => entry.name.endsWith(extension))
     )
     .map((entry) => {
@@ -170,6 +171,7 @@ function createBuild(argv) {
   const artifacts = listArtifacts(distDir, platform)
   if (artifacts.length === 0) throw new Error('release_evidence.artifact_missing')
   if (
+    platform.startsWith('linux-') &&
     !artifacts.some(
       (artifact) =>
         artifact.name.startsWith('codetask-server-') && artifact.name.endsWith('.tar.gz')
@@ -180,6 +182,20 @@ function createBuild(argv) {
   const seaSmokeLog = logPaths.find((path) => basename(path) === 'server-sea-smoke.log')
   if (!seaSmokeLog || !readFileSync(seaSmokeLog, 'utf8').includes('"mode":"sea"')) {
     throw new Error('release_evidence.server_sea_smoke_proof_missing')
+  }
+  const nativeTestLog = logPaths.find((path) => basename(path) === 'native-test.log')
+  if (
+    !nativeTestLog ||
+    !readFileSync(nativeTestLog, 'utf8').includes('[run-and-record] exitCode=0')
+  ) {
+    throw new Error('release_evidence.native_test_proof_missing')
+  }
+  const signatureLog = logPaths.find((path) => basename(path) === 'signature-verification.log')
+  const expectedSigning = platform.startsWith('linux-')
+    ? '"signing":"not-required"'
+    : '"signing":"verified"'
+  if (!signatureLog || !readFileSync(signatureLog, 'utf8').includes(expectedSigning)) {
+    throw new Error('release_evidence.signature_proof_missing')
   }
   const logs = copyAndDescribeLogs(logPaths, evidenceRoot, dirname(output))
   const testManifestPath = join(evidenceRoot, 'release-evidence', 'test', 'test-gate.manifest.json')
@@ -277,6 +293,27 @@ function verify(argv) {
       const smokeLog = manifest.logs.find((log) => basename(log.path).includes('smoke'))
       if (!smokeLog || !readFileSync(resolve(root, smokeLog.path), 'utf8').includes('"ok":true')) {
         throw new Error(`release_evidence.smoke_proof_invalid:${path}`)
+      }
+      const nativeTestLog = manifest.logs.find((log) => basename(log.path) === 'native-test.log')
+      if (
+        !nativeTestLog ||
+        !readFileSync(resolve(root, nativeTestLog.path), 'utf8').includes(
+          '[run-and-record] exitCode=0'
+        )
+      ) {
+        throw new Error(`release_evidence.native_test_proof_invalid:${path}`)
+      }
+      const signatureLog = manifest.logs.find(
+        (log) => basename(log.path) === 'signature-verification.log'
+      )
+      const expectedSigning = manifest.platform.startsWith('linux-')
+        ? '"signing":"not-required"'
+        : '"signing":"verified"'
+      if (
+        !signatureLog ||
+        !readFileSync(resolve(root, signatureLog.path), 'utf8').includes(expectedSigning)
+      ) {
+        throw new Error(`release_evidence.signature_proof_invalid:${path}`)
       }
     }
     for (const artifact of manifest.artifacts ?? []) {

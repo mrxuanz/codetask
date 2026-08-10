@@ -30,10 +30,10 @@ test('resolves runtime capability profiles (chat / planner / sandbox)', () => {
   assert.equal(resolveAgentCapabilityProfile({ role: 'milestone-verifier' }), 'verifier-sandbox')
 })
 
-test('only task and verifier profiles require the outer sandbox', () => {
+test('planner, task, and verifier profiles require the outer sandbox', () => {
   assert.equal(capabilityProfileRequiresOuterSandbox('chat-write'), false)
   assert.equal(capabilityProfileRequiresOuterSandbox('chat-read'), false)
-  assert.equal(capabilityProfileRequiresOuterSandbox('planner-read'), false)
+  assert.equal(capabilityProfileRequiresOuterSandbox('planner-read'), true)
   assert.equal(capabilityProfileRequiresOuterSandbox('task-sandbox'), true)
   assert.equal(capabilityProfileRequiresOuterSandbox('verifier-sandbox'), true)
 })

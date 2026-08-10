@@ -162,9 +162,14 @@ export class ConversationApplication {
     })
   }
 
-  listMessages(actor: Actor, conversationId: string, limit = 100): ConversationMessageDto[] {
+  listMessages(
+    actor: Actor,
+    conversationId: string,
+    limit = 100,
+    before?: { createdAt: string; id: string }
+  ): ConversationMessageDto[] {
     this.requireOwned(actor, conversationId)
-    return this.ports.messages.list(conversationId, limit).map(toMessageDto)
+    return this.ports.messages.list(conversationId, limit, before).map(toMessageDto)
   }
 
   getTurn(actor: Actor, conversationId: string, turnId: string): ConversationTurnDto {
@@ -178,6 +183,12 @@ export class ConversationApplication {
         ? this.ports.turns.countQueuedAhead(conversationId, turn.createdAt, turn.id) + 1
         : null
     return toTurnDto(turn, queuePosition)
+  }
+
+  getActiveTurn(actor: Actor, conversationId: string): ConversationTurnDto | null {
+    this.requireOwned(actor, conversationId)
+    const turn = this.ports.turns.getActiveForConversation(conversationId)
+    return turn ? toTurnDto(turn, null) : null
   }
 
   enqueueTurn(
@@ -348,14 +359,22 @@ export class ConversationApplication {
   }
 
   reconcileOnStartup(): void {
-    const queued = this.ports.turns.listQueued()
-    for (const turn of queued) {
-      // keep queued
-      void turn
-    }
-    // Mark interrupted active turns failed
-    for (const actorTurns of [this.ports.turns.listQueued()]) {
-      void actorTurns
+    for (const turn of this.ports.turns.listActive()) {
+      const failed: TurnRecord = {
+        ...turn,
+        state: 'failed',
+        completedAt: nowIso(),
+        lastErrorJson: JSON.stringify({
+          code: 'runtime.interrupted',
+          message: 'The application restarted before this turn completed'
+        }),
+        stateRevision: turn.stateRevision + 1
+      }
+      this.ports.turns.update(failed)
+      this.publishTurn(failed, null)
+      this.ports.realtime.publish(conversationTurnTopic(turn.id), 'turn.failed', {
+        turn: toTurnDto(failed)
+      })
     }
   }
 

@@ -4,6 +4,14 @@ import { LiveFanout, type RealtimeConnectionState } from './live-fanout.ts'
 
 const HEARTBEAT_MS = 25_000
 
+function envelopeBytes(envelope: RealtimeEnvelope): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(envelope), 'utf8')
+  } catch {
+    return 1024
+  }
+}
+
 export type RealtimeStreamHandle = {
   connectionId: string
   setSubscriptions: (topics: RealtimeTopic[]) => void
@@ -62,6 +70,7 @@ export function openRealtimeStream(input: {
     }
     for (const event of result.events) {
       conn.queue.push(event)
+      conn.queuedBytes += envelopeBytes(event)
     }
   }
 
@@ -89,6 +98,7 @@ export function openRealtimeStream(input: {
       while (!conn.closed) {
         while (conn.queue.length > 0) {
           const item = conn.queue.shift()!
+          conn.queuedBytes = Math.max(0, conn.queuedBytes - envelopeBytes(item))
           if (!item.ephemeral && typeof item.eventId === 'number') {
             conn.lastDeliveredEventId = Math.max(conn.lastDeliveredEventId, item.eventId)
           }

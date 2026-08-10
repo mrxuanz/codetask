@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ConversationMessage } from '@renderer/api/conversation'
 import ChatMarkdown from '@renderer/components/home/ChatMarkdown.vue'
@@ -11,8 +11,14 @@ import { cn } from '@renderer/lib/utils'
 const props = defineProps<{
   messages: ConversationMessage[]
   loading?: boolean
+  hasOlder?: boolean
+  loadingOlder?: boolean
   streamingMessageId?: string | null
   pendingReply?: boolean
+}>()
+
+const emit = defineEmits<{
+  loadOlder: []
 }>()
 
 const { t } = useI18n()
@@ -23,6 +29,30 @@ const visibleMessages = computed(() => props.messages)
 
 const streamingMessageIdRef = toRef(props, 'streamingMessageId')
 const pendingReplyRef = toRef(props, 'pendingReply')
+let previousScrollHeight: number | null = null
+let previousScrollTop: number | null = null
+
+function requestOlderMessages(): void {
+  const root = scrollRoot.value
+  if (!root || props.loadingOlder) return
+  previousScrollHeight = root.scrollHeight
+  previousScrollTop = root.scrollTop
+  emit('loadOlder')
+}
+
+watch(
+  () => props.loadingOlder,
+  async (loading, wasLoading) => {
+    if (loading || !wasLoading || previousScrollHeight == null || previousScrollTop == null) return
+    await nextTick()
+    const root = scrollRoot.value
+    if (root) {
+      root.scrollTop = previousScrollTop + (root.scrollHeight - previousScrollHeight)
+    }
+    previousScrollHeight = null
+    previousScrollTop = null
+  }
+)
 
 watch(
   () => [
@@ -58,6 +88,16 @@ onMounted(() => {
     </div>
 
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-4">
+      <button
+        v-if="hasOlder"
+        type="button"
+        class="mx-auto rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+        :disabled="loadingOlder"
+        @click="requestOlderMessages"
+      >
+        {{ loadingOlder ? t('workspace.loadingOlderMessages') : t('workspace.loadOlderMessages') }}
+      </button>
+
       <template v-for="message in visibleMessages" :key="message.id">
         <div :class="cn('flex w-full', message.role === 'user' ? 'justify-end' : 'justify-start')">
           <div

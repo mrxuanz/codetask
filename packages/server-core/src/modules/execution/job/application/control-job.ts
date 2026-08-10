@@ -190,6 +190,14 @@ export class ControlJobService {
           updatedAt: now
         }
       })
+      if (nextState === 'cancelled') {
+        this.db
+          .prepare(
+            `UPDATE execution_queue_entries SET status = 'removed', removed_at = ?
+             WHERE job_id = ? AND generation = ? AND status = 'queued'`
+          )
+          .run(now, jobId, job.executionGeneration)
+      }
       if (nextState === 'cancelling') {
         this.abortActiveRun?.(jobId, 'job-cancel')
       }

@@ -6,12 +6,24 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 const REQUIRED_RELEASE_FILES = [
+  '.node-version',
   '.github/workflows/build.yml',
+  'electron-builder.release.yml',
+  'electron-builder.yml',
   'package-lock.json',
+  'package.json',
+  'rust-toolchain.toml',
+  'scripts/check-release-signing.mjs',
+  'scripts/normalize-release-artifacts.mjs',
   'scripts/package-server-sea.mjs',
+  'scripts/package-smoke.mjs',
   'scripts/release-evidence.mjs',
-  'scripts/run-and-record.mjs'
+  'scripts/run-and-record.mjs',
+  'scripts/verify-release-signing.mjs'
 ]
+
+const SEMVER_PATTERN =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u
 
 function readArg(argv, name, fallback) {
   const index = argv.indexOf(name)
@@ -41,9 +53,6 @@ export function resolveReleaseSource({ event, eventSha, tag, repo = resolve('.')
   if (!['push', 'workflow_dispatch'].includes(event)) {
     fail('unsupported_event', event)
   }
-  if (!/^v[0-9A-Za-z][0-9A-Za-z.+_-]*$/u.test(tag)) {
-    fail('invalid_tag', `Expected a release tag beginning with "v", received "${tag}".`)
-  }
   if (!/^[a-f0-9]{40}$/u.test(eventSha)) {
     fail('invalid_event_sha', eventSha)
   }
@@ -64,6 +73,28 @@ export function resolveReleaseSource({ event, eventSha, tag, repo = resolve('.')
     fail('pushed_tag_missing', `${tag} is not available in the checkout.`)
   }
 
+  const packageJsonResult = git(repo, ['show', `${sourceSha}:package.json`], true)
+  if (packageJsonResult.status !== 0) {
+    fail('package_json_missing', `Commit ${sourceSha} does not contain package.json.`)
+  }
+  let packageVersion
+  try {
+    packageVersion = JSON.parse(packageJsonResult.stdout).version
+  } catch {
+    fail('package_json_invalid', `Commit ${sourceSha} contains invalid package.json.`)
+  }
+  if (typeof packageVersion !== 'string' || !SEMVER_PATTERN.test(packageVersion)) {
+    fail(
+      'package_version_invalid',
+      `package.json version is not strict SemVer: "${packageVersion}".`
+    )
+  }
+  if (tag !== `v${packageVersion}`) {
+    fail(
+      'version_mismatch',
+      `Release tag ${tag} must exactly match package.json version ${packageVersion}.`
+    )
+  }
   for (const file of REQUIRED_RELEASE_FILES) {
     const exists = git(repo, ['cat-file', '-e', `${sourceSha}:${file}`], true).status === 0
     if (!exists) {
@@ -74,7 +105,7 @@ export function resolveReleaseSource({ event, eventSha, tag, repo = resolve('.')
     }
   }
 
-  return { tag, version: tag.slice(1), sha: sourceSha, tagExists }
+  return { tag, version: packageVersion, sha: sourceSha, tagExists }
 }
 
 export function main(argv = process.argv.slice(2)) {

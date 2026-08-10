@@ -342,6 +342,27 @@ describe('execution module integration', () => {
     db.close()
   })
 
+  it('rejects an unknown Provider instead of silently using OpenCode', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+    const execution = composeExecutionModule({ db })
+    const submission = minimalSubmission({
+      submissionId: 'sub_unknown_provider',
+      idempotencyKey: 'idem_unknown_provider'
+    })
+    submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!.coreCode = 'mystery-provider'
+
+    await assert.rejects(
+      () => execution.submitJob.accept(submission),
+      (error: unknown) =>
+        error instanceof ExecutionValidationError && /Unsupported Provider/.test(error.message)
+    )
+    execution.drain()
+    db.close()
+  })
+
   it('pause while running moves to pausing then paused after tick', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
@@ -371,16 +392,24 @@ describe('execution module integration', () => {
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
     const execution = composeExecutionModule({ db })
+    execution.drain()
     const actor = { userId: 'alice', sessionId: 'sess-1' }
     const accepted = await execution.submitJob.accept(minimalSubmission())
     const job = execution.jobs.query.get(actor, accepted.jobId)
+    assert.equal(job.state, 'queued')
     execution.jobs.control.cancel(actor, accepted.jobId, {
       idempotencyKey: 'cancel-1',
       expectedRevision: job.stateRevision
     })
     const cancelled = execution.jobs.query.get(actor, accepted.jobId)
-    assert.equal(cancelled.state, 'cancelling')
-    await settleExecution(execution, { jobId: accepted.jobId })
+    assert.equal(cancelled.state, 'cancelled')
+    const queue = db
+      .prepare(
+        `SELECT status, removed_at AS removedAt FROM execution_queue_entries WHERE job_id = ?`
+      )
+      .get(accepted.jobId) as { status: string; removedAt: number | null }
+    assert.equal(queue.status, 'removed')
+    assert.ok(queue.removedAt)
     db.close()
   })
 
@@ -981,6 +1010,133 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     assert.deepEqual(bundles.map((row) => row.scopeType).sort(), ['milestone', 'slice'])
     assert.ok(bundles.every((row) => JSON.parse(row.evidenceBundleJson).schemaVersion === 1))
 
+    execution.drain()
+    db.close()
+  })
+
+  it('passes assigned reference files to the task prompt and read-only roots', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    const runtime = new ScriptedAgentRuntime(async (input) => successfulRuntimeEvents(input.role))
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const submission = minimalSubmission({
+      submissionId: 'sub_references',
+      idempotencyKey: 'idem_references'
+    })
+    submission.referenceManifest.references = [
+      {
+        id: 'ref-api-contract',
+        source: 'local_corpus',
+        name: 'API contract',
+        kind: 'file',
+        mimeType: 'text/markdown',
+        description: 'Required API behavior',
+        localPath: '/tmp/codetask-references/api/contract.md',
+        resolvedPath: '/tmp/codetask-references/api/contract.md',
+        sortOrder: 0
+      }
+    ]
+    submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!.referenceIds = ['ref-api-contract']
+
+    const accepted = await execution.submitJob.accept(submission)
+    await settleExecution(execution, { jobId: accepted.jobId })
+
+    const taskTurn = runtime.turns.find((turn) => turn.role === 'task-worker')
+    assert.ok(taskTurn)
+    assert.deepEqual(taskTurn.readRoots, ['/tmp/codetask-references/api'])
+    assert.match(taskTurn.prompt, /API contract/)
+    assert.match(taskTurn.prompt, /\/tmp\/codetask-references\/api\/contract\.md/)
+
+    execution.drain()
+    db.close()
+  })
+
+  it('fails the active attempt when a provider iterator throws', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    const runtime = new ScriptedAgentRuntime((input) => {
+      if (input.role !== 'task-worker') return successfulRuntimeEvents(input.role)
+      return (async function* () {
+        yield await Promise.reject(new Error('provider stream exploded'))
+      })()
+    })
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const accepted = await execution.submitJob.accept(
+      minimalSubmission({
+        submissionId: 'sub_provider_throw',
+        idempotencyKey: 'idem_provider_throw'
+      })
+    )
+    await settleExecution(execution, { jobId: accepted.jobId })
+
+    const work = db
+      .prepare(`SELECT state FROM job_work_items WHERE job_id = ? AND kind = 'task'`)
+      .get(accepted.jobId) as { state: string }
+    assert.equal(work.state, 'failed')
+    const attempt = db
+      .prepare(`SELECT status, error_json AS errorJson FROM work_attempts WHERE job_id = ?`)
+      .get(accepted.jobId) as { status: string; errorJson: string }
+    assert.equal(attempt.status, 'interrupted')
+    assert.match(attempt.errorJson, /provider stream exploded/)
+
+    execution.drain()
+    db.close()
+  })
+
+  it('executes independent canRunInParallel work concurrently', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    let activeTaskTurns = 0
+    let maxActiveTaskTurns = 0
+    let releaseBoth!: () => void
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseBoth = resolve
+    })
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'task-worker') {
+        activeTaskTurns += 1
+        maxActiveTaskTurns = Math.max(maxActiveTaskTurns, activeTaskTurns)
+        if (activeTaskTurns === 2) releaseBoth()
+        await bothStarted
+        activeTaskTurns -= 1
+      }
+      return successfulRuntimeEvents(input.role)
+    })
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const submission = minimalSubmission({
+      submissionId: 'sub_parallel_work',
+      idempotencyKey: 'idem_parallel_work'
+    })
+    const first = submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!
+    first.canRunInParallel = true
+    submission.executionTree.milestones[0]!.slices[0]!.tasks.push({
+      ...first,
+      id: 'task-2',
+      title: 'Parallel task 2',
+      dependsOnTaskIds: []
+    })
+
+    const accepted = await execution.submitJob.accept(submission)
+    await waitUntil(
+      () => runtime.turns.filter((turn) => turn.role === 'task-worker').length === 2,
+      'both parallel task turns should start before either completes'
+    )
+    await settleExecution(execution, { jobId: accepted.jobId })
+
+    assert.equal(maxActiveTaskTurns, 2)
+    assert.equal(
+      execution.jobs.query.get({ userId: 'alice', sessionId: 'parallel' }, accepted.jobId).state,
+      'succeeded'
+    )
     execution.drain()
     db.close()
   })

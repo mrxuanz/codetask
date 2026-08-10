@@ -520,7 +520,7 @@ async function runSliceVerifierAgent(input: {
     verdictWait.cancel('Slice verifier aborted by Job control')
   }
   signal?.addEventListener('abort', abortVerdictWait, { once: true })
-  deps.handles?.setTurnId(runId, turnId)
+  deps.handles?.addTurnId(runId, turnId)
 
   try {
     for await (const event of deps.agentRuntime.runTurn({
@@ -592,7 +592,7 @@ async function runSliceVerifierAgent(input: {
     }
   } finally {
     signal?.removeEventListener('abort', abortVerdictWait)
-    deps.handles?.setTurnId(runId, null)
+    deps.handles?.removeTurnId(runId, turnId)
   }
 }
 
@@ -783,7 +783,7 @@ async function runMilestoneVerifierAgent(input: {
     verdictWait.cancel('Milestone verifier aborted by Job control')
   }
   signal?.addEventListener('abort', abortVerdictWait, { once: true })
-  deps.handles?.setTurnId(runId, turnId)
+  deps.handles?.addTurnId(runId, turnId)
 
   try {
     for await (const event of deps.agentRuntime.runTurn({
@@ -855,7 +855,7 @@ async function runMilestoneVerifierAgent(input: {
     }
   } finally {
     signal?.removeEventListener('abort', abortVerdictWait)
-    deps.handles?.setTurnId(runId, null)
+    deps.handles?.removeTurnId(runId, turnId)
   }
 }
 

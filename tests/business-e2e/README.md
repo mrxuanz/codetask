@@ -2,10 +2,8 @@
 
 Node Supervisor + Test MCP + (phase-3) Settings Probe + Fake/OpenCode Driver + Skills + Node Oracle.
 
-- Capability parts: [`docs/业务测试.md` §0.1](../../docs/业务测试.md#01-两段式业务验收约定)
-- Run phases + providers: [`docs/业务测试.md` §0.2](../../docs/业务测试.md#02-三阶段跑测与-providers-cli)
-- Operator guide (architecture, phase-3 evidence, i18n):
-  [`docs/business-testing/04-脚本使用与三语言架构.md`](../../docs/business-testing/04-脚本使用与三语言架构.md)
+- Acceptance layers, run phases, Providers, and operator guide:
+  [`docs/testing/business-e2e.md`](../../docs/testing/business-e2e.md)
 
 ## Phases
 

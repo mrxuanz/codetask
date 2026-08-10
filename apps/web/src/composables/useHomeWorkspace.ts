@@ -267,6 +267,9 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
   }
 
   let threadHubRelease: (() => void) | null = null
+  const resyncRelease = hub.onResync(() => {
+    void loadWorkspace()
+  })
 
   watch(
     activeThreadId,
@@ -286,6 +289,7 @@ export function provideHomeWorkspace(hub: RealtimeGateway): HomeWorkspaceContext
   onScopeDispose(() => {
     threadHubRelease?.()
     threadHubRelease = null
+    resyncRelease()
   })
 
   const ctx: HomeWorkspaceContext = {

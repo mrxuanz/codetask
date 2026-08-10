@@ -1,13 +1,16 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteComponent } from 'vue-router'
 import BootstrapGate from '@renderer/components/BootstrapGate.vue'
 import BootstrapRedirect from '@renderer/pages/BootstrapRedirect.vue'
-import HomeLayout from '@renderer/layouts/HomeLayout.vue'
-import ChatPage from '@renderer/pages/home/ChatPage.vue'
-import CreateTaskPage from '@renderer/pages/home/CreateTaskPage.vue'
-import SettingsPage from '@renderer/pages/home/SettingsPage.vue'
-import TasksPage from '@renderer/pages/home/TasksPage.vue'
-import LoginPage from '@renderer/pages/LoginPage.vue'
-import SetupPage from '@renderer/pages/SetupPage.vue'
+
+type RouteModule = Promise<{ default: RouteComponent }>
+
+const HomeLayout = (): RouteModule => import('@renderer/layouts/HomeLayout.vue')
+const ChatPage = (): RouteModule => import('@renderer/pages/home/ChatPage.vue')
+const CreateTaskPage = (): RouteModule => import('@renderer/pages/home/CreateTaskPage.vue')
+const SettingsPage = (): RouteModule => import('@renderer/pages/home/SettingsPage.vue')
+const TasksPage = (): RouteModule => import('@renderer/pages/home/TasksPage.vue')
+const LoginPage = (): RouteModule => import('@renderer/pages/LoginPage.vue')
+const SetupPage = (): RouteModule => import('@renderer/pages/SetupPage.vue')
 
 const router = createRouter({
   history: createWebHistory(),

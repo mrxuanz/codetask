@@ -22,6 +22,7 @@ import {
   unregisterPlannerMcpSession,
   type PlannerMcpSession
 } from '../mcp/index.ts'
+import { buildAssignedReferenceContext } from '../../../execution/work/application/reference-context.ts'
 
 function buildSnapshotOutlineTree(input: {
   sessionId: string
@@ -162,6 +163,8 @@ function resolveUserMcpServers(plannerSettingsSnapshotJson?: string): Record<str
  * Success path commits only via finalize_plan → registeredPlanToExecutionTree → commitExecutionTree.
  */
 export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
+  private readonly activeRuns = new Map<string, { controller: AbortController; turnId: string }>()
+
   constructor(
     private readonly planningPort: () => PlanningApplicationPort,
     private readonly agentRuntime: AgentRuntime,
@@ -172,6 +175,13 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
       signal?: AbortSignal
     } = {}
   ) {}
+
+  async cancel(runId: string, reason: string): Promise<void> {
+    const active = this.activeRuns.get(runId)
+    if (!active) return
+    if (!active.controller.signal.aborted) active.controller.abort(new Error(reason))
+    await this.agentRuntime.abort(active.turnId, reason).catch(() => undefined)
+  }
 
   async run(input: {
     sessionId: string
@@ -191,6 +201,13 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
       draft: input.draftSnapshot,
       workspacePath: input.draftSnapshot.workspaceRoot
     })
+    const referenceContext = buildAssignedReferenceContext(
+      input.referenceManifest,
+      input.referenceManifest.references.map((reference) => reference.id)
+    )
+    const plannerPrompt = referenceContext.promptAppendix
+      ? `${userPrompt}\n\n${referenceContext.promptAppendix}`
+      : userPrompt
     const defaultCoreCode =
       input.draftSnapshot.abilities[0]?.recommendedCoreCode ??
       input.executionProfile.plannerCoreCode
@@ -209,6 +226,8 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
 
       const mcpSessionId = `plan-mcp-${randomUUID()}`
       const abortController = new AbortController()
+      const turnId = `${input.runId}:attempt:${attempt}`
+      this.activeRuns.set(input.runId, { controller: abortController, turnId })
       if (this.options.signal) {
         if (this.options.signal.aborted) {
           throw this.options.signal.reason instanceof Error
@@ -300,7 +319,7 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
           role: 'planner',
           provider,
           capabilityProfile: 'planner-read',
-          prompt: userPrompt,
+          prompt: plannerPrompt,
           systemPrompt,
           mcpServers: [
             {
@@ -311,8 +330,9 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
           ],
           userMcpServers,
           scopeId,
-          turnId: `${input.runId}:attempt:${attempt}`,
+          turnId,
           workspaceRoot: input.draftSnapshot.workspaceRoot || undefined,
+          readRoots: referenceContext.readRoots,
           signal: abortController.signal
         })) {
           if (event.type === 'failed') {
@@ -332,6 +352,8 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
         }
       } finally {
         unregisterPlannerMcpSession(mcpSessionId)
+        const active = this.activeRuns.get(input.runId)
+        if (active?.controller === abortController) this.activeRuns.delete(input.runId)
       }
 
       if (plannerSession.finalizerPromise) {

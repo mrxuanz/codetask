@@ -144,7 +144,19 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
 
   routes.get('/conversations/:conversationId/messages', (c) => {
     try {
-      return ok(c, app.listMessages(c.get('actor'), c.req.param('conversationId')))
+      const rawLimit = c.req.query('limit')
+      const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : 100
+      const limit = Number.isInteger(parsedLimit) ? Math.min(500, Math.max(1, parsedLimit)) : 100
+      const beforeCreatedAt = c.req.query('beforeCreatedAt')
+      const beforeId = c.req.query('beforeId')
+      if (Boolean(beforeCreatedAt) !== Boolean(beforeId)) {
+        throw new ConversationValidationError(
+          'beforeCreatedAt and beforeId must be provided together'
+        )
+      }
+      const before =
+        beforeCreatedAt && beforeId ? { createdAt: beforeCreatedAt, id: beforeId } : undefined
+      return ok(c, app.listMessages(c.get('actor'), c.req.param('conversationId'), limit, before))
     } catch (error) {
       return fail(c, error)
     }
@@ -175,6 +187,14 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
         providerCode: body.providerCode
       })
       return ok(c, accepted, 202)
+    } catch (error) {
+      return fail(c, error)
+    }
+  })
+
+  routes.get('/conversations/:conversationId/active-turn', (c) => {
+    try {
+      return ok(c, app.getActiveTurn(c.get('actor'), c.req.param('conversationId')))
     } catch (error) {
       return fail(c, error)
     }

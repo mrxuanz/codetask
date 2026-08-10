@@ -70,6 +70,9 @@ tests/business/.runtime/
 /claude.html
 /gemini.html
 
+# Local development notes (do not publish)
+docs/问题.md
+
 # Electron / tooling
 .codegraph/
 .cursor/

@@ -2,7 +2,16 @@
 import { computed, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronRight, Folder, ListTodo, MessageSquare, Plus, Settings, X } from 'lucide-vue-next'
+import {
+  ChevronRight,
+  Folder,
+  ListTodo,
+  LogOut,
+  MessageSquare,
+  Plus,
+  Settings,
+  X
+} from 'lucide-vue-next'
 import ThreadSidebarItem from '@renderer/components/home/ThreadSidebarItem.vue'
 import Button from '@renderer/components/ui/Button.vue'
 import Tooltip from '@renderer/components/ui/Tooltip.vue'
@@ -12,6 +21,7 @@ import RenameDialog from '@renderer/components/ui/RenameDialog.vue'
 import { threadsForProject, useHomeWorkspace } from '@renderer/composables/useHomeWorkspace'
 import { toastError } from '@renderer/lib/toast'
 import { cn } from '@renderer/lib/utils'
+import { logout } from '@renderer/api/auth'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -167,6 +177,18 @@ async function handleRenameConfirm(title: string): Promise<void> {
     renameTarget.value = null
   } catch (err) {
     toastError(err, String(err))
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleLogout(): Promise<void> {
+  actionLoading.value = true
+  try {
+    await logout()
+    window.location.replace('/login')
+  } catch (err) {
+    toastError(err, t('workspace.logoutFailed'))
   } finally {
     actionLoading.value = false
   }
@@ -363,6 +385,19 @@ const confirmDeleteMessage = computed(() => {
           </div>
         </li>
       </ul>
+    </div>
+
+    <div class="shrink-0 border-t border-border p-2">
+      <Button
+        type="button"
+        variant="ghost"
+        class="w-full justify-start gap-2"
+        :disabled="actionLoading"
+        @click="handleLogout"
+      >
+        <LogOut class="size-4" aria-hidden="true" />
+        {{ t('workspace.logout') }}
+      </Button>
     </div>
 
     <ContextMenu

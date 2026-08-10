@@ -79,7 +79,11 @@ export type MessageRepository = {
   insert(row: MessageRecord): void
   insertAttachments(rows: MessageAttachmentRecord[]): void
   listAttachments(conversationId: string, messageIds: string[]): MessageAttachmentRecord[]
-  list(conversationId: string, limit: number): MessageRecord[]
+  list(
+    conversationId: string,
+    limit: number,
+    before?: { createdAt: string; id: string }
+  ): MessageRecord[]
   deleteForConversation(conversationId: string): void
 }
 
@@ -90,6 +94,8 @@ export type TurnRepository = {
   update(row: TurnRecord): void
   countActiveForActor(actorId: string): number
   hasActiveForConversation(conversationId: string): boolean
+  getActiveForConversation(conversationId: string): TurnRecord | null
+  listActive(): TurnRecord[]
   listQueued(actorId?: string): TurnRecord[]
   countQueuedAhead(conversationId: string, createdAt: string, turnId: string): number
   deleteForConversation(conversationId: string): void

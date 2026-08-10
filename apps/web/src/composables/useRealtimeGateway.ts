@@ -8,6 +8,7 @@ import {
 } from '@codetask/contracts'
 import { connectRealtimeStream, putRealtimeSubscriptions } from '@renderer/api/realtime'
 import { ApiError } from '@renderer/api/client'
+import { handleUnauthorizedApiError } from '@renderer/auth/sessionRedirect'
 import { RealtimeReducer } from '@renderer/realtime/reducer'
 
 export type RealtimeListener = (envelope: RealtimeEnvelope) => void
@@ -98,6 +99,7 @@ export function provideRealtimeGateway(): RealtimeGateway {
     if (envelope.type === 'auth.session.expired') {
       stopped = true
       abort?.abort()
+      handleUnauthorizedApiError()
       return
     }
 
@@ -169,6 +171,7 @@ export function provideRealtimeGateway(): RealtimeGateway {
         if (controller.signal.aborted) return
         if (error instanceof ApiError && error.httpStatus === 401) {
           stopped = true
+          handleUnauthorizedApiError()
           return
         }
         console.warn('[realtime] stream ended', error)

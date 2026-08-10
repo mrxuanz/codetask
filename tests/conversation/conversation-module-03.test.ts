@@ -114,6 +114,95 @@ describe('conversation module (03)', () => {
     assert.match(source, /Draft\/Plan fields are not accepted/)
     assert.doesNotMatch(source, /generateDraft:\s*true/)
   })
+
+  it('paginates message history with a stable timestamp and id cursor', () => {
+    const db = new Database(':memory:')
+    migration048ConversationModuleTables.up(db)
+    const runtime = createAgentRuntime({
+      async *streamTurn() {
+        yield { type: 'completed', reply: '', runtimeSessionId: null }
+      }
+    })
+    const module = composeConversationModule({
+      db,
+      agentRuntime: runtime,
+      async resolveWorkspaceRoot({ projectId }) {
+        return { projectId, workspaceRoot: '/tmp/ws', canonicalWorkspaceRoot: '/tmp/ws' }
+      },
+      leases: { tryAcquireExclusive: () => null, release: () => {} },
+      realtime: { publish: () => {} }
+    })
+    const actor = { userId: 'alice', sessionId: 's1' }
+    const conversation = module.app.create(actor, 'proj-1', { title: 'History' })
+    const insert = db.prepare(
+      `INSERT INTO conversation_messages (
+        id, conversation_id, turn_id, role, kind, content, provider_code, model,
+        thinking_text, thinking_duration_ms, created_at
+      ) VALUES (?, ?, NULL, 'user', 'text', ?, 'codex', NULL, NULL, NULL, ?)`
+    )
+    for (let index = 1; index <= 5; index += 1) {
+      insert.run(
+        `msg-${index}`,
+        conversation.id,
+        `message-${index}`,
+        `2026-01-01T00:00:0${index}.000Z`
+      )
+    }
+
+    const latest = module.app.listMessages(actor, conversation.id, 2)
+    assert.deepEqual(
+      latest.map((message) => message.content),
+      ['message-4', 'message-5']
+    )
+    const older = module.app.listMessages(actor, conversation.id, 2, {
+      createdAt: latest[0]!.createdAt,
+      id: latest[0]!.id
+    })
+    assert.deepEqual(
+      older.map((message) => message.content),
+      ['message-2', 'message-3']
+    )
+  })
+
+  it('marks interrupted active turns failed during startup reconciliation', () => {
+    const db = new Database(':memory:')
+    migration048ConversationModuleTables.up(db)
+    const events: string[] = []
+    const runtime = createAgentRuntime({
+      async *streamTurn() {
+        yield { type: 'completed', reply: '', runtimeSessionId: null }
+      }
+    })
+    const module = composeConversationModule({
+      db,
+      agentRuntime: runtime,
+      async resolveWorkspaceRoot({ projectId }) {
+        return { projectId, workspaceRoot: '/tmp/ws', canonicalWorkspaceRoot: '/tmp/ws' }
+      },
+      leases: { tryAcquireExclusive: () => null, release: () => {} },
+      realtime: { publish: (_topic, event) => events.push(event) }
+    })
+    const actor = { userId: 'alice', sessionId: 's1' }
+    const conversation = module.app.create(actor, 'proj-1', { title: 'Restart' })
+    const now = new Date().toISOString()
+    db.prepare(
+      `INSERT INTO conversation_turns (
+        id, conversation_id, actor_id, state, input_text, provider_code, workspace_access,
+        settings_snapshot_json, settings_hash, idempotency_key, request_hash, state_revision,
+        user_message_id, assistant_message_id, last_error_json, created_at, admitted_at,
+        started_at, completed_at
+      ) VALUES (?, ?, ?, 'running', 'hello', 'codex', 'live-read', '{}', 'hash', 'idem',
+        'request-hash', 2, NULL, NULL, NULL, ?, ?, ?, NULL)`
+    ).run('turn-interrupted', conversation.id, actor.userId, now, now, now)
+
+    module.startup()
+
+    const turn = module.app.getTurn(actor, conversation.id, 'turn-interrupted')
+    assert.equal(turn.state, 'failed')
+    assert.equal(turn.lastError?.code, 'runtime.interrupted')
+    assert.ok(turn.completedAt)
+    assert.ok(events.includes('turn.failed'))
+  })
 })
 
 describe('agent-runtime shared port (03)', () => {

@@ -7,6 +7,7 @@ export interface SandboxRuntimeFeatures {
   readonly outerSandboxEnabled: boolean
   readonly supervisorEnabled: boolean
   readonly singleFileAllowlist: boolean
+  readonly networkMode: 'none' | 'restricted' | 'full'
   readonly home: string | null
 }
 
@@ -26,6 +27,7 @@ export const DEFAULT_RUNTIME_FEATURES: RuntimeFeatures = Object.freeze({
     outerSandboxEnabled: true,
     supervisorEnabled: true,
     singleFileAllowlist: false,
+    networkMode: 'full',
     home: null
   }),
   debug: Object.freeze({

@@ -20,11 +20,13 @@ const props = defineProps<{
   requireReadOnlyCore?: boolean
   disabled?: boolean
   sending?: boolean
+  canStop?: boolean
 }>()
 
 const emit = defineEmits<{
   coreChange: [code: string]
-  send: [payload: { message: string; files: File[] }]
+  send: [payload: { message: string; files: File[]; onAccepted: () => void }]
+  stop: []
 }>()
 
 const { t } = useI18n()
@@ -78,15 +80,18 @@ function submit(): void {
   if (props.disabled || props.sending) return
   const text = value.value.trim()
   if (!text && pending.value.length === 0) return
+  const submitted = [...pending.value]
   emit('send', {
     message: text,
-    files: pending.value.map((item) => item.file)
+    files: submitted.map((item) => item.file),
+    onAccepted: () => {
+      value.value = ''
+      for (const item of submitted) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+      }
+      pending.value = []
+    }
   })
-  value.value = ''
-  for (const item of pending.value) {
-    if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
-  }
-  pending.value = []
 }
 
 function onComposerKeydown(event: KeyboardEvent): void {
@@ -207,12 +212,19 @@ function onComposerKeydown(event: KeyboardEvent): void {
           <Button
             type="button"
             size="sm"
-            :disabled="disabled || sending || (!value.trim() && pending.length === 0)"
+            :disabled="
+              disabled ||
+              (sending && !canStop) ||
+              (!canStop && !value.trim() && pending.length === 0)
+            "
             :class="cn('size-9 rounded-full px-0')"
-            :aria-label="t('workspace.composer.send')"
-            @click="submit()"
+            :aria-label="canStop ? t('workspace.composer.stop') : t('workspace.composer.send')"
+            @click="canStop ? emit('stop') : submit()"
           >
-            <svg viewBox="0 0 24 24" class="size-4" aria-hidden fill="none">
+            <svg v-if="canStop" viewBox="0 0 24 24" class="size-4" aria-hidden fill="currentColor">
+              <rect x="7" y="7" width="10" height="10" rx="1" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" class="size-4" aria-hidden fill="none">
               <path
                 d="M12 5v14M5 12l7-7 7 7"
                 stroke="currentColor"

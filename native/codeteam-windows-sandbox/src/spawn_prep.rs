@@ -1,4 +1,4 @@
-﻿use crate::acl::add_allow_ace;
+use crate::acl::add_allow_ace;
 use crate::acl::add_deny_write_ace;
 use crate::acl::allow_null_device;
 use crate::allow::AllowDenyPaths;
@@ -29,6 +29,7 @@ use crate::token::get_current_token_for_restriction;
 use crate::token::get_logon_sid_bytes;
 use crate::workspace_acl::is_command_cwd_root;
 use crate::workspace_acl::protect_workspace_agents_dir;
+use crate::workspace_acl::protect_workspace_codetask_dir;
 use crate::workspace_acl::protect_workspace_codeteam_dir;
 use crate::workspace_acl::protect_workspace_dot_codex_dir;
 use crate::workspace_acl::protect_workspace_git_dir;
@@ -352,6 +353,7 @@ pub(crate) fn apply_legacy_session_acl_rules(
                 let _ = protect_workspace_codeteam_dir(current_dir, workspace_sid.sid.as_ptr());
                 let _ = protect_workspace_agents_dir(current_dir, workspace_sid.sid.as_ptr());
                 let _ = protect_workspace_dot_codex_dir(current_dir, workspace_sid.sid.as_ptr());
+                let _ = protect_workspace_codetask_dir(current_dir, workspace_sid.sid.as_ptr());
             }
         }
     }

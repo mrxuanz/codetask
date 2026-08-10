@@ -17,6 +17,7 @@ import {
   mapExecutionJobToPlanView,
   retryJobPlanning
 } from '@renderer/api/jobs'
+import { getDesignDraft } from '@renderer/api/design'
 import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 import { conversationTopic } from '@codetask/contracts'
 import { resolveDraftPlanReference } from '@codetask/contracts/draft-plan-resolve'
@@ -289,7 +290,6 @@ export function provideDraftPlanWorkspace(options: {
           selectedDraftPayload.value.draftId !== selectedDraftId.value
         ) {
           try {
-            const { getDesignDraft } = await import('@renderer/api/design')
             const res = await getDesignDraft(selectedDraftId.value)
             if (token !== loadToken || options.threadId.value !== threadId) return
             selectedDraftPayload.value = designDraftToPayload(res.data)
@@ -348,7 +348,6 @@ export function provideDraftPlanWorkspace(options: {
     successMessage.value = null
 
     try {
-      const { getDesignDraft } = await import('@renderer/api/design')
       const res = await getDesignDraft(messageId)
       selectedDraftPayload.value = designDraftToPayload(res.data)
     } catch {

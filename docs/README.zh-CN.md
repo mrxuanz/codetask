@@ -209,4 +209,4 @@ npm run release:test-gate     # 与发布流水线一致的 JS/TS 门禁
 
 ## 架构文档
 
-- [ADR：宿主机授权、Provider 解析与 Control Plane](./adr/0001-host-auth-and-control-plane.md)
+- [架构、包归属与依赖边界](../ARCHITECTURE.md)

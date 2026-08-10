@@ -17,6 +17,7 @@ import {
   updateDraftReferenceDescription,
   uploadDraftReferences
 } from '@renderer/api/jobs'
+import { getDesignDraft } from '@renderer/api/design'
 import AttachmentPickerButton from '@renderer/components/home/AttachmentPickerButton.vue'
 import LocalCorpusPickerDialog from '@renderer/components/create/LocalCorpusPickerDialog.vue'
 import Button from '@renderer/components/ui/Button.vue'
@@ -199,7 +200,6 @@ async function syncLinkedJob(): Promise<void> {
 
 async function handleLocalCorpusAdded(): Promise<void> {
   try {
-    const { getDesignDraft } = await import('@renderer/api/design')
     const res = await getDesignDraft(props.draftId)
     emit('updated', designDraftToPayload(res.data))
   } catch {

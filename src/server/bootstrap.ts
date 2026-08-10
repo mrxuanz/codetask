@@ -56,6 +56,8 @@ export type AppMode = 'desktop' | 'server'
 export interface BootstrapOptions {
   dataDir: string
   mode?: AppMode
+  /** Packaged end-to-end smoke mode; uses an in-process deterministic conversation Provider. */
+  smokeTest?: boolean
   config?: AppConfigOverrides
   shellChildEnvironment?: Record<string, string>
   /** Optional recovery master key file (--master-key-file). */
@@ -170,6 +172,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       providerRuntimeManager: new ProviderRuntimeManager(),
       bootId,
       applicationRuntime: null,
+      smokeTest: options.smokeTest === true,
       ...(options.storage ? { storage: options.storage } : {})
     }
     setProviderAccess({

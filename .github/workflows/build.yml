@@ -40,12 +40,29 @@ on:
         required: false
         default: ''
         type: string
+    secrets:
+      MAC_CSC_LINK:
+        required: false
+      MAC_CSC_KEY_PASSWORD:
+        required: false
+      WIN_CSC_LINK:
+        required: false
+      WIN_CSC_KEY_PASSWORD:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_APP_SPECIFIC_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
 
 jobs:
   build:
     name: package
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -63,7 +80,7 @@ jobs:
 
       - run: npm ci
 
-      - if: ${{ runner.os != 'Linux' }}
+      - if: ${{ inputs.include-release-evidence || runner.os != 'Linux' }}
         name: Test platform-native modules
         # Release packaging must prove target-specific Seatbelt, PTY, and
         # Windows sandbox code, not only that the helper binaries compile.
@@ -75,13 +92,37 @@ jobs:
       - name: Build app
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/build-app.log -- npm run build
 
+      - if: ${{ inputs.include-release-evidence && runner.os != 'Linux' }}
+        name: Require release signing credentials
+        run: node scripts/check-release-signing.mjs --platform ${{ inputs.artifact-name }}
+        env:
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+
       - name: Package ${{ inputs.builder-args }}
         # --publish never: packaging only; Release workflow publishes via softprops/action-gh-release
-        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --publish never
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --config ${{ inputs.include-release-evidence && 'electron-builder.release.yml' || 'electron-builder.yml' }} --publish never
+        env:
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          CODETASK_REDACT_ENV_NAMES: CSC_LINK,CSC_KEY_PASSWORD,APPLE_ID,APPLE_APP_SPECIFIC_PASSWORD,APPLE_TEAM_ID
 
       - if: ${{ inputs.smoke-unpacked }}
         name: Package unpacked app for smoke test
-        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-unpacked.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --dir --publish never
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-unpacked.log -- node scripts/electron-mirror-env.mjs electron-builder ${{ inputs.builder-args }} --config ${{ inputs.include-release-evidence && 'electron-builder.release.yml' || 'electron-builder.yml' }} --dir --publish never
+        env:
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          CODETASK_REDACT_ENV_NAMES: CSC_LINK,CSC_KEY_PASSWORD,APPLE_ID,APPLE_APP_SPECIFIC_PASSWORD,APPLE_TEAM_ID
 
       - if: ${{ inputs.smoke-unpacked && runner.os == 'Linux' }}
         name: Smoke unpacked app (Linux)
@@ -103,6 +144,10 @@ jobs:
           --dist dist
           --platform ${{ inputs.artifact-name }}
           --version ${{ inputs.release-version }}
+
+      - if: ${{ inputs.include-release-evidence }}
+        name: Verify release signing policy
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/signature-verification.log -- node scripts/verify-release-signing.mjs --dist dist --platform ${{ inputs.artifact-name }}
 
       - name: Smoke standalone Node service without a display
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/standalone-smoke.log -- npm run smoke:standalone:ci
@@ -132,17 +177,19 @@ jobs:
           --lockfile package-lock.json
           --evidence-root dist
           --out dist/release-evidence/${{ inputs.artifact-name }}/build.manifest.json
+          --log release-evidence/${{ inputs.artifact-name }}/native-test.log
           --log release-evidence/${{ inputs.artifact-name }}/build-sandbox.log
           --log release-evidence/${{ inputs.artifact-name }}/build-app.log
           --log release-evidence/${{ inputs.artifact-name }}/package.log
           --log release-evidence/${{ inputs.artifact-name }}/normalize-artifacts.log
           --log release-evidence/${{ inputs.artifact-name }}/package-unpacked.log
           --log release-evidence/${{ inputs.artifact-name }}/package-smoke.log
+          --log release-evidence/${{ inputs.artifact-name }}/signature-verification.log
           --log release-evidence/${{ inputs.artifact-name }}/standalone-smoke.log
           --log release-evidence/${{ inputs.artifact-name }}/server-sea-package.log
           --log release-evidence/${{ inputs.artifact-name }}/server-sea-smoke.log
 
-      - if: ${{ inputs.upload-artifact }}
+      - if: ${{ inputs.upload-artifact && runner.os == 'Linux' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.artifact-name }}
@@ -154,5 +201,18 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.tar.gz
+            dist/release-evidence/**
+          if-no-files-found: error
+
+      - if: ${{ inputs.upload-artifact && runner.os != 'Linux' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          # macOS/Windows SEA binaries are smoke-tested but are not public until
+          # their standalone signing/notarization pipeline is implemented.
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
             dist/release-evidence/**
           if-no-files-found: error

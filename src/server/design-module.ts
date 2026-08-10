@@ -58,6 +58,7 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
   let runtime = agentRuntimeByDb.get(rawDb)
   if (runtime) return runtime
 
+  const smokeReply = 'Packaged conversation smoke reply'
   runtime = createAgentRuntime({
     async *streamTurn(input, options) {
       const conversationMatch = /^conversation:([^:]+)(?::provider:|$)/.exec(input.scopeId)
@@ -72,7 +73,16 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
       }
 
       try {
-        yield* hostAgentTurnStreamer(input, options)
+        if (ctx.smokeTest) {
+          yield { type: 'delta' as const, content: smokeReply }
+          yield {
+            type: 'completed' as const,
+            reply: smokeReply,
+            runtimeSessionId: 'packaged-smoke-session'
+          }
+        } else {
+          yield* hostAgentTurnStreamer(input, options)
+        }
       } finally {
         if (conversationId) {
           ctx.runtimeRegistry.removeInflightConversation(conversationId)
@@ -83,6 +93,17 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
       }
     },
     async listProviders(): Promise<ProviderSummary[]> {
+      if (ctx.smokeTest) {
+        return [
+          {
+            code: 'codex',
+            label: 'Codex (packaged smoke)',
+            description: 'Deterministic packaged smoke Provider',
+            available: true,
+            supportedProfiles: ['chat-read', 'chat-write']
+          }
+        ]
+      }
       const cores = await listChatCores()
       return cores.map((core) => {
         const code = toCanonicalProviderCode(core.code) ?? 'codex'

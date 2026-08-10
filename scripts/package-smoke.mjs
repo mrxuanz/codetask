@@ -87,7 +87,11 @@ export function runPackageSmoke(argv = process.argv) {
         CODETASK_SANDBOX_READY_MAX_ATTEMPTS: '1'
       }
     })
-    if (result.error) throw result.error
+    if (result.error) {
+      throw new Error(
+        `package_smoke.spawn_failed:${result.error.message}:stdout=${result.stdout}:stderr=${result.stderr}`
+      )
+    }
     const marker = result.stdout.split(/\r?\n/u).find((line) => line.startsWith(READY_MARKER))
     if (result.status !== 0 || !marker) {
       throw new Error(

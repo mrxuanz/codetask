@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -51,4 +51,21 @@ test('package smoke resolves exact Windows and macOS application names', () => {
     rmSync(windowsRoot, { recursive: true, force: true })
     rmSync(macRoot, { recursive: true, force: true })
   }
+})
+
+test('packaged application smoke covers setup, login, and an assistant reply', () => {
+  const appMain = readFileSync(new URL('../../src/main/app-main.ts', import.meta.url), 'utf8')
+  const sidecar = readFileSync(
+    new URL('../../src/main/desktop-service.ts', import.meta.url),
+    'utf8'
+  )
+  assert.match(appMain, /\/api\/auth\/setup/)
+  assert.match(appMain, /\/api\/auth\/login/)
+  assert.match(appMain, /\/api\/projects/)
+  assert.match(appMain, /\/turns/)
+  assert.match(appMain, /conversation: 'reply-ok'/)
+  assert.match(appMain, /turnStatus = current\.state/)
+  assert.match(sidecar, /options\.smokeTest.*--smoke-test/)
+  assert.match(sidecar, /package-smoke-data/)
+  assert.match(appMain, /await gracefulShutdownFromApp\(\)\.catch/)
 })

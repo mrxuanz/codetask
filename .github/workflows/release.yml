@@ -10,6 +10,13 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -38,7 +45,7 @@ jobs:
   test-gate:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -47,9 +54,24 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: native
       - run: npm ci
       - name: Run and record Legacy release test gate
         run: node scripts/run-and-record.mjs --out release-evidence/test/test-gate.log -- npm run release:test-gate
+      - name: Run and record Linux native tests
+        run: node scripts/run-and-record.mjs --out release-evidence/test/linux-native-test.log -- cargo test --manifest-path native/Cargo.toml --release --no-fail-fast -- --test-threads=1
+      - name: Build Linux sandbox attack target
+        run: node scripts/run-and-record.mjs --out release-evidence/test/linux-sandbox-build.log -- npm run build:sandbox:debug
+      - name: Run and record Linux sandbox attack matrix
+        run: node scripts/run-and-record.mjs --out release-evidence/test/linux-sandbox-test.log -- npm run test:sandbox:all
       - name: Create test evidence manifest
         run: >-
           node scripts/release-evidence.mjs create-test
@@ -58,6 +80,9 @@ jobs:
           --evidence-root dist
           --out dist/release-evidence/test/test-gate.manifest.json
           --log release-evidence/test/test-gate.log
+          --log release-evidence/test/linux-native-test.log
+          --log release-evidence/test/linux-sandbox-build.log
+          --log release-evidence/test/linux-sandbox-test.log
       - name: Upload release test evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -100,6 +125,14 @@ jobs:
       release-version: ${{ needs.prepare.outputs.version }}
       upload-artifact: true
       artifact-name: ${{ matrix.name }}
+    secrets:
+      MAC_CSC_LINK: ${{ startsWith(matrix.name, 'macos-') && secrets.MAC_CSC_LINK || '' }}
+      MAC_CSC_KEY_PASSWORD: ${{ startsWith(matrix.name, 'macos-') && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+      WIN_CSC_LINK: ${{ startsWith(matrix.name, 'windows-') && secrets.WIN_CSC_LINK || '' }}
+      WIN_CSC_KEY_PASSWORD: ${{ startsWith(matrix.name, 'windows-') && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+      APPLE_ID: ${{ startsWith(matrix.name, 'macos-') && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(matrix.name, 'macos-') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ startsWith(matrix.name, 'macos-') && secrets.APPLE_TEAM_ID || '' }}
 
   publish:
     needs: [prepare, test-gate, build]

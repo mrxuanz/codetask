@@ -24,7 +24,7 @@ import {
 } from '@codetask/contracts/job-display'
 import { formatDateTimeValue, formatUnixTimestamp } from '@renderer/lib/formatDateTime'
 import { resolvePlanningPercent } from '@codetask/contracts/plan-generation-progress'
-import { getProviderDescriptors } from '@codetask/provider-runtime-node/spec/descriptors'
+import { getProviderDescriptors } from '@codetask/provider-spec/descriptors'
 
 export { resolveJobLifecycleBucket, type JobLifecycleBucket }
 

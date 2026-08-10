@@ -1,6 +1,6 @@
 /**
  * Architecture 03 DoD checklist — isolation and structural contracts.
- * @see docs/架构收口/03-普通对话与共享AgentRuntime.md §22.6 / §23
+ * @see ARCHITECTURE.md#runtime-flow
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'

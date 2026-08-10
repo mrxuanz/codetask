@@ -104,7 +104,8 @@ export const MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = Object.free
   migrationEntry(62, 'assets_and_drop_dead_runtime_tables'),
   migrationEntry(63, 'project_fk_and_asset_storage_keys'),
   migrationEntry(64, 'drop_backup_and_marker_tables'),
-  migrationEntry(65, 'drop_legacy_thread_tables')
+  migrationEntry(65, 'drop_legacy_thread_tables'),
+  migrationEntry(66, 'planning_capacity_index')
 ])
 
 export function listManifestMigrations(): Array<{

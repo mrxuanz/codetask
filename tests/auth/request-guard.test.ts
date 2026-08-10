@@ -29,4 +29,27 @@ test('server writes use the request Host as their origin boundary', async () => 
     }
   })
   assert.equal(rejected.status, 403)
+
+  const wrongPort = await app('server').request('http://service.example:8080/write', {
+    method: 'POST',
+    headers: {
+      Host: 'service.example:8080',
+      Origin: 'http://service.example:9090'
+    }
+  })
+  assert.equal(wrongPort.status, 403)
+})
+
+test('desktop writes require the same loopback host and port', async () => {
+  const accepted = await app('desktop').request('http://127.0.0.1:43127/write', {
+    method: 'POST',
+    headers: { Host: '127.0.0.1:43127', Origin: 'http://127.0.0.1:43127' }
+  })
+  assert.equal(accepted.status, 200)
+
+  const rejected = await app('desktop').request('http://127.0.0.1:43127/write', {
+    method: 'POST',
+    headers: { Host: '127.0.0.1:43127', Origin: 'http://127.0.0.1:5173' }
+  })
+  assert.equal(rejected.status, 403)
 })

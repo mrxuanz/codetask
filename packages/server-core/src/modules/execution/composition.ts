@@ -37,7 +37,7 @@ import {
   createJobRoutes,
   type ExecutionHttpEnv
 } from './job/http/job-routes.ts'
-import { LEASE_TTL_MS, nowMs } from './shared.ts'
+import { LEASE_TTL_MS, newId, nowMs } from './shared.ts'
 
 export type ExecutionModule = {
   submitJob: JobSubmissionPort
@@ -66,7 +66,7 @@ export function composeExecutionModule(deps: {
   /** Test override; production refreshes at one third of the lease TTL. */
   heartbeatIntervalMs?: number
 }): ExecutionModule {
-  const leaseOwner = deps.leaseOwner ?? 'execution-host'
+  const leaseOwner = deps.leaseOwner ?? newId('execution-host')
   const agentRuntime = deps.agentRuntime ?? new FakeAgentRuntime()
 
   const jobs = new JobRepository(deps.db)
@@ -112,6 +112,7 @@ export function composeExecutionModule(deps: {
   let ticking = false
   let rerunRequested = false
   let activeRun: { runId: string; jobId: string } | null = null
+  let outboxTimer: ReturnType<typeof setInterval> | null = null
   const heartbeatIntervalMs =
     deps.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(LEASE_TTL_MS / 3))
 
@@ -119,8 +120,8 @@ export function composeExecutionModule(deps: {
     if (!activeRun) return
     const handle = handles.get(activeRun.runId)
     handles.abort(activeRun.runId, reason)
-    if (handle?.turnId) {
-      void agentRuntime.abort(handle.turnId, reason)
+    for (const turnId of handle?.turnIds ?? []) {
+      void agentRuntime.abort(turnId, reason)
     }
   }
 
@@ -152,8 +153,8 @@ export function composeExecutionModule(deps: {
 
     if (job.state === 'pausing' || job.state === 'cancelling') {
       const handle = handles.get(runId)
-      if (handle?.turnId) {
-        // Turn still active — abort and wait for execute-work to clear turnId.
+      if (handle && handle.turnIds.size > 0) {
+        // Turns still active — abort and wait for executors to remove every turn id.
         abortActiveTurn(job.state === 'pausing' ? 'pause' : 'cancel')
         return false
       }
@@ -195,12 +196,16 @@ export function composeExecutionModule(deps: {
     switch (decision.kind) {
       case 'dispatch-work':
         await awaitWithRunHeartbeat(runId, () =>
-          dispatchWork.dispatch({
-            jobId,
-            workId: decision.workId,
-            runId,
-            workspaceRoot: job.workspaceRoot
-          })
+          Promise.all(
+            decision.workIds.map((workId) =>
+              dispatchWork.dispatch({
+                jobId,
+                workId,
+                runId,
+                workspaceRoot: job.workspaceRoot
+              })
+            )
+          ).then(() => undefined)
         )
         return true
       case 'verify-slice':
@@ -302,7 +307,9 @@ export function composeExecutionModule(deps: {
   }
 
   const wake = createWakeScheduler(() => {
-    void tick()
+    void tick().catch((error) => {
+      console.error('[execution] scheduler tick failed:', error)
+    })
   })
   registerWakeScheduler(wake)
 
@@ -332,9 +339,19 @@ export function composeExecutionModule(deps: {
     scheduler: { wake, tick },
     startup: () => {
       startupReconcile.run()
+      outbox.drainOnce()
+      if (!outboxTimer) {
+        outboxTimer = setInterval(() => outbox.drainOnce(), 500)
+        outboxTimer.unref?.()
+      }
       wake()
     },
     drain: () => {
+      if (outboxTimer) {
+        clearInterval(outboxTimer)
+        outboxTimer = null
+      }
+      outbox.drainOnce()
       drainPool.drain()
       handles.dropAll()
     },

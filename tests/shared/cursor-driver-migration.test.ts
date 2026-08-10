@@ -426,7 +426,7 @@ test('Cursor turn plan parity snapshots stay stable for permissions/MCP/endpoint
           capabilityProfile: 'planner-read'
         })
       },
-      { outerSandbox: false }
+      { outerSandbox: true }
     )
     const task = buildCursorTurnPlan(
       {
@@ -443,8 +443,9 @@ test('Cursor turn plan parity snapshots stay stable for permissions/MCP/endpoint
     assert.ok(conversation.cliArgs.includes('--approve-mcps'))
     assert.equal(conversation.mcpServers[0]?.name, 'codetask-manager')
 
-    assert.deepEqual(planner.cliArgs.slice(0, 2), ['--mode', 'ask'])
-    assert.equal(planner.cliArgs.includes('--approve-mcps'), false)
+    assert.equal(planner.outerSandbox, true)
+    assert.deepEqual(planner.cliArgs.slice(0, 4), ['--trust', '--force', '--sandbox', 'disabled'])
+    assert.equal(planner.cliArgs.includes('--approve-mcps'), true)
 
     assert.equal(task.outerSandbox, true)
     assert.ok(task.cliArgs.includes('--sandbox'))

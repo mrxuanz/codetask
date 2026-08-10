@@ -31,9 +31,10 @@ function baseInput(role: AgentTurnInput['role']): AgentTurnInput {
   }
 }
 
-test('resolveCodexOuterSandbox: only execution roles require outer sandbox', () => {
+test('resolveCodexOuterSandbox: planner and execution roles require outer sandbox', () => {
   assert.equal(resolveCodexOuterSandbox('conversation', undefined), false)
-  assert.equal(resolveCodexOuterSandbox('planner', undefined), false)
+  assert.equal(resolveCodexOuterSandbox('planner', undefined), true)
+  assert.throws(() => resolveCodexOuterSandbox('planner', false), /cannot disable outer sandbox/)
   assert.equal(resolveCodexOuterSandbox('task-worker', true), true)
   assert.equal(resolveCodexOuterSandbox('slice-verifier', undefined), true)
   assert.equal(resolveCodexOuterSandbox('milestone-verifier', undefined), true)
@@ -79,10 +80,11 @@ test('buildCodexTurnPlan unifies conversation vs planner vs sandboxed task', () 
       capabilityProfile: 'planner-read',
       mcpUrl: 'http://127.0.0.1:9/mcp'
     },
-    { outerSandbox: false }
+    { outerSandbox: true }
   )
-  assert.equal(planner.outerSandbox, false)
-  assert.equal(planner.threadOptions.sandboxMode, 'read-only')
+  assert.equal(planner.outerSandbox, true)
+  assert.equal(planner.threadOptions.sandboxMode, 'danger-full-access')
+  assert.equal(planner.sdkConfig?.sandbox_mode, 'danger-full-access')
   assert.equal(planner.threadOptions.networkAccessEnabled, false)
   assert.equal(planner.mcpToolNames, undefined)
 

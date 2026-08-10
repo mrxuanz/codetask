@@ -1,8 +1,8 @@
-/** @deprecated Import from `@codetask/provider-runtime-node/spec/capabilities` — host shim. */
+/** @deprecated Import from `@codetask/provider-spec/capabilities` — host shim. */
 export {
   PROVIDER_CAPABILITY_PROFILES,
   buildConversationProviderRuntimeScopeId
-} from '@codetask/provider-runtime-node/spec/capabilities'
+} from '@codetask/provider-spec/capabilities'
 export type {
   ProviderAuthMode,
   ProviderCapabilities,
@@ -11,4 +11,4 @@ export type {
   ProviderProtocol,
   ProviderReusePolicy,
   ProviderRuntimeScope
-} from '@codetask/provider-runtime-node/spec/capabilities'
+} from '@codetask/provider-spec/capabilities'

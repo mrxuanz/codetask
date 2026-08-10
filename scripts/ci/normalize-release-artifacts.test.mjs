@@ -49,3 +49,21 @@ test('Windows installer, portable executable and archive keep their suffixes', (
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('artifact normalization rejects a release version different from package.json', () => {
+  const root = mkdtempSync(join(tmpdir(), 'release-artifacts-version-'))
+  try {
+    writeFileSync(join(root, 'codetask-0.1.0-beta-linux-x86_64.AppImage'), 'app')
+    assert.throws(
+      () =>
+        normalizeReleaseArtifacts({
+          distDir: root,
+          platform: 'linux-amd64',
+          version: '9.9.9'
+        }),
+      /release_artifacts\.version_mismatch:9\.9\.9:0\.1\.0-beta/u
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

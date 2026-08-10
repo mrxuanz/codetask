@@ -110,8 +110,12 @@ export function getConversation(conversationId: string): Promise<ApiSuccess<Conv
 export async function fetchThreadConversationState(
   conversationId: string
 ): Promise<ApiSuccess<ConversationRuntimeStateDto>> {
-  const res = await getConversation(conversationId)
+  const [res, activeTurnRes] = await Promise.all([
+    getConversation(conversationId),
+    fetchActiveConversationTurn(conversationId)
+  ])
   const conversation = res.data
+  const activeTurn = activeTurnRes.data
   const providerCode = conversation.providerCode
   return {
     ...res,
@@ -123,8 +127,9 @@ export async function fetchThreadConversationState(
         providerCode
       },
       conversationId: conversation.id,
-      runtimeStatus: 'idle',
-      lastError: null,
+      activeTurnId: activeTurn?.id ?? null,
+      runtimeStatus: activeTurn ? 'running' : 'idle',
+      lastError: activeTurn?.lastError ?? null,
       lastUsedAt: conversation.lastUsedAt ?? null,
       provider: {
         code: providerCode,
@@ -134,6 +139,14 @@ export async function fetchThreadConversationState(
       }
     }
   }
+}
+
+export function fetchActiveConversationTurn(
+  conversationId: string
+): Promise<ApiSuccess<ConversationTurnDto | null>> {
+  return api<ConversationTurnDto | null>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/active-turn`
+  )
 }
 
 export function renameConversation(
@@ -166,10 +179,16 @@ export function deleteConversation(
 
 export async function fetchConversationMessages(
   conversationId: string,
-  limit = 50
+  limit = 50,
+  before?: Pick<UiConversationMessage, 'createdAt' | 'id'>
 ): Promise<ApiSuccess<UiConversationMessage[]>> {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (before) {
+    query.set('beforeCreatedAt', before.createdAt)
+    query.set('beforeId', before.id)
+  }
   const res = await api<ContractConversationMessageDto[]>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages?${query.toString()}`
   )
   return {
     ...res,

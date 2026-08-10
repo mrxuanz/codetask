@@ -131,6 +131,7 @@ async function createReadyApp(
   const ctx = bootstrapRuntime({
     dataDir,
     mode: cli.mode,
+    smokeTest: cli.smokeTest,
     shellChildEnvironment: platform.shellChildEnvironment,
     masterKeyFile: cli.masterKeyFile,
     storage: {

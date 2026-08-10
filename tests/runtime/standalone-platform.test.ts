@@ -17,3 +17,12 @@ test('shared server composition and standalone adapters do not import Electron',
     assert.doesNotMatch(text, /@electron-toolkit/u, source.pathname)
   }
 })
+
+test('standalone entry forwards the CLI data directory to its platform adapter', () => {
+  const source = readFileSync(
+    new URL('../../src/standalone/standalone-main.ts', import.meta.url),
+    'utf8'
+  )
+  assert.match(source, /createNodeServerPlatform\(\{ dataDir: cli\.dataDir \}\)/)
+  assert.match(source, /cli\.smokeTest && cli\.mode === 'server'/)
+})

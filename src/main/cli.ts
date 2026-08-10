@@ -68,10 +68,16 @@ export function parseCliArgs(argv: string[] = process.argv): CliOptions {
   }
 }
 
-/** Parse the dedicated Node entry point, which is always a server even without `--serve`. */
+/**
+ * Parse the dedicated Node entry point. It defaults to server mode; the
+ * supervised Electron sidecar opts into desktop account bootstrap semantics.
+ */
 export function parseServerCliArgs(argv: string[] = process.argv): CliOptions {
   const normalized = argv.includes('--serve') ? argv : [...argv, '--serve']
   const parsed = parseCliArgs(normalized)
+  if (argv.includes('--desktop')) {
+    return { ...parsed, mode: 'desktop' }
+  }
   // Dedicated server entry defaults remain 8080 when --port omitted.
   if (!readArgValue(normalized, '--port') && parsed.port === DEFAULT_SERVER_PORT) {
     return parsed

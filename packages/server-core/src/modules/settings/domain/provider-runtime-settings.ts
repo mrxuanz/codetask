@@ -139,7 +139,15 @@ export function validateProviderRuntimeSettings(
         `Missing provider settings for ${code}`
       )
     }
-    if (options?.isProviderAvailable && setting.enabled && !options.isProviderAvailable(code)) {
+    // The catalog describes the currently running registry. A newly configured
+    // explicit executable only takes effect after restart, so current discovery
+    // cannot be used to reject the very setting that makes the provider available.
+    if (
+      options?.isProviderAvailable &&
+      setting.enabled &&
+      setting.executable.mode === 'auto' &&
+      !options.isProviderAvailable(code)
+    ) {
       throw SettingsError.badRequest(
         'settings.provider_unavailable',
         `Provider unavailable: ${code}`

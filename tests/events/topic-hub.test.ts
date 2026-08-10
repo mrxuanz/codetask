@@ -38,7 +38,7 @@ test('parseSseBlock reads id field', () => {
   assert.equal(parsed?.event, 'domain')
 })
 
-test('LiveFanout coalesces progress events and broadcasts settings:self', () => {
+test('LiveFanout preserves append-only deltas and broadcasts settings:self', () => {
   const fanout = new LiveFanout()
   const conn = {
     actorId: 'a1',
@@ -72,8 +72,11 @@ test('LiveFanout coalesces progress events and broadcasts settings:self', () => 
     occurredAt: 2,
     payload: { content: 'b' }
   })
-  assert.equal(conn.queue.length, 1)
-  assert.deepEqual(conn.queue[0]?.payload, { content: 'b' })
+  assert.equal(conn.queue.length, 2)
+  assert.deepEqual(
+    conn.queue.map((item) => item.payload),
+    [{ content: 'a' }, { content: 'b' }]
+  )
 
   fanout.publish('other-actor', {
     eventId: 1,

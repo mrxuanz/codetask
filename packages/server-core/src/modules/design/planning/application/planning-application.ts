@@ -30,6 +30,7 @@ import {
 
 export interface PlanningCapacityPort {
   acquire(input: { planningSessionId: string; pool: string }): Promise<{ leaseId: string } | null>
+  heartbeat(leaseId: string): Promise<void>
   release(leaseId: string): Promise<void>
 }
 
@@ -66,6 +67,11 @@ export interface PlanningRepository {
     sessionId: string
     tree: ExecutionTreeSnapshot
     contentHash: string
+    sessionUpdate?: {
+      session: PlanningSessionRecord
+      expectedTreeRevision: number
+    }
+    runUpdate?: PlanningRunRecord
   }): Promise<void>
   getTree(sessionId: string): Promise<ExecutionTreeSnapshot | null>
   insertHandoff(input: {
@@ -98,6 +104,7 @@ export interface PlannerRunnerPort {
     executionProfile: { plannerCoreCode: string }
     plannerSettingsSnapshotJson?: string
   }): Promise<void>
+  cancel?(runId: string, reason: string): Promise<void>
 }
 
 export type PlanningSettingsPort = {
@@ -144,6 +151,8 @@ function firstTaskCoreCode(tree: ExecutionTreeSnapshot): string {
 }
 
 export class PlanningApplication {
+  private readonly activeLeases = new Map<string, string>()
+
   constructor(
     private readonly repo: PlanningRepository,
     private readonly capacity: PlanningCapacityPort,
@@ -228,7 +237,7 @@ export class PlanningApplication {
     }
     await this.repo.insertSession(session)
     this.events.publish(session.id, 'planning.changed', { status: session.status })
-    void this.startPlanning(actor, session.id)
+    this.schedulePlanning(actor, session.id)
     return session
   }
 
@@ -246,6 +255,11 @@ export class PlanningApplication {
     if (!lease) {
       throw new DesignValidationError('Planning capacity unavailable')
     }
+    this.activeLeases.set(session.id, lease.leaseId)
+    const heartbeatTimer = setInterval(() => {
+      void this.capacity.heartbeat(lease.leaseId).catch(() => undefined)
+    }, 10_000)
+    heartbeatTimer.unref?.()
 
     const runId = newId('prun')
     const fencingToken = newId('fence')
@@ -279,7 +293,11 @@ export class PlanningApplication {
       : null
     if (!manifest) {
       await this.failSession(session.id, 'Missing reference manifest')
-      await this.capacity.release(lease.leaseId)
+      clearInterval(heartbeatTimer)
+      if (this.activeLeases.get(session.id) === lease.leaseId) {
+        this.activeLeases.delete(session.id)
+        await this.capacity.release(lease.leaseId)
+      }
       return
     }
 
@@ -296,7 +314,11 @@ export class PlanningApplication {
     } catch (error) {
       await this.failSession(session.id, error instanceof Error ? error.message : String(error))
     } finally {
-      await this.capacity.release(lease.leaseId)
+      clearInterval(heartbeatTimer)
+      if (this.activeLeases.get(session.id) === lease.leaseId) {
+        this.activeLeases.delete(session.id)
+        await this.capacity.release(lease.leaseId)
+      }
     }
   }
 
@@ -310,7 +332,7 @@ export class PlanningApplication {
       lastErrorJson: null
     }
     const saved = await this.repo.updateSession(next)
-    void this.startPlanning(actor, sessionId)
+    this.schedulePlanning(actor, sessionId)
     return saved
   }
 
@@ -319,9 +341,27 @@ export class PlanningApplication {
     if (session.status === 'published') {
       throw new DesignValidationError('Published session cannot be cancelled')
     }
+    if (session.activeRunId) {
+      await this.planner.cancel?.(session.activeRunId, 'planning.cancelled')
+      const run = await this.repo.getRun(session.activeRunId)
+      if (run?.status === 'running') {
+        await this.repo.updateRun({
+          ...run,
+          status: 'cancelled',
+          finishedAt: nowMs(),
+          errorJson: JSON.stringify({ message: 'Cancelled by user' })
+        })
+      }
+    }
+    const leaseId = this.activeLeases.get(sessionId)
+    if (leaseId) {
+      this.activeLeases.delete(sessionId)
+      await this.capacity.release(leaseId)
+    }
     const next = {
       ...session,
       status: 'cancelled' as const,
+      activeRunId: null,
       updatedAt: nowMs()
     }
     const saved = await this.repo.updateSession(next)
@@ -339,7 +379,7 @@ export class PlanningApplication {
       updatedAt: nowMs()
     }
     const saved = await this.repo.updateSession(next)
-    void this.startPlanning(actor, sessionId)
+    this.schedulePlanning(actor, sessionId)
     return saved
   }
 
@@ -387,29 +427,28 @@ export class PlanningApplication {
 
     assertTransition(session.status, 'plan_editing')
 
-    const contentHash = stableHash(JSON.stringify(input.tree))
     const revision = session.treeRevision + 1
     const tree = { ...input.tree, revision, planningSessionId: session.id }
-    await this.repo.saveTree({
-      planId: tree.treeId,
-      sessionId: session.id,
-      tree,
-      contentHash
-    })
     const now = nowMs()
-    await this.repo.updateRun({
-      ...run,
-      status: 'succeeded',
-      finishedAt: now,
-      errorJson: null
-    })
-    const next = {
+    const nextSession = {
       ...session,
       status: 'plan_editing' as const,
       treeRevision: revision,
       updatedAt: now
     }
-    await this.repo.updateSession(next)
+    await this.repo.saveTree({
+      planId: tree.treeId,
+      sessionId: session.id,
+      tree,
+      contentHash: stableHash(JSON.stringify(tree)),
+      sessionUpdate: { session: nextSession, expectedTreeRevision: session.treeRevision },
+      runUpdate: {
+        ...run,
+        status: 'succeeded',
+        finishedAt: now,
+        errorJson: null
+      }
+    })
     this.events.publish(session.id, 'planning.tree.changed', {
       treeRevision: revision
     })
@@ -485,21 +524,19 @@ export class PlanningApplication {
       revision,
       milestones
     }
+    const nextSession = {
+      ...session,
+      status: 'plan_editing' as const,
+      treeRevision: revision,
+      updatedAt: nowMs()
+    }
     await this.repo.saveTree({
       planId: nextTree.treeId,
       sessionId,
       tree: nextTree,
-      contentHash: stableHash(JSON.stringify(nextTree))
+      contentHash: stableHash(JSON.stringify(nextTree)),
+      sessionUpdate: { session: nextSession, expectedTreeRevision: body.expectedRevision }
     })
-    await this.repo.updateSession(
-      {
-        ...session,
-        status: 'plan_editing',
-        treeRevision: revision,
-        updatedAt: nowMs()
-      },
-      body.expectedRevision
-    )
     this.events.publish(sessionId, 'planning.tree.changed', { treeRevision: revision })
     return nextTree
   }
@@ -547,21 +584,19 @@ export class PlanningApplication {
     const revision = session.treeRevision + 1
     const nextTree: ExecutionTreeSnapshot = { ...tree, revision, milestones }
     const ready = allNodesConfirmed(nextTree)
+    const nextSession = {
+      ...session,
+      status: ready ? ('ready_to_publish' as const) : ('plan_editing' as const),
+      treeRevision: revision,
+      updatedAt: nowMs()
+    }
     await this.repo.saveTree({
       planId: nextTree.treeId,
       sessionId,
       tree: nextTree,
-      contentHash: stableHash(JSON.stringify(nextTree))
+      contentHash: stableHash(JSON.stringify(nextTree)),
+      sessionUpdate: { session: nextSession, expectedTreeRevision: expectedRevision }
     })
-    await this.repo.updateSession(
-      {
-        ...session,
-        status: ready ? 'ready_to_publish' : 'plan_editing',
-        treeRevision: revision,
-        updatedAt: nowMs()
-      },
-      expectedRevision
-    )
     this.events.publish(sessionId, 'planning.tree.changed', {
       treeRevision: revision,
       readyToPublish: ready
@@ -575,13 +610,25 @@ export class PlanningApplication {
     expectedRevision: number,
     idempotencyKey: string
   ): Promise<{ session: PlanningSessionRecord; jobId: string }> {
+    const session = await this.requireOwned(actor, sessionId)
     const existing = await this.repo.findHandoffByIdempotency(idempotencyKey)
-    if (existing?.jobId) {
-      const session = await this.requireOwned(actor, sessionId)
-      return { session, jobId: existing.jobId }
+    if (existing) {
+      let prior: JobSubmission
+      try {
+        prior = JSON.parse(existing.payloadJson) as JobSubmission
+      } catch {
+        throw new DesignConflictError('Idempotency key refers to an invalid handoff')
+      }
+      if (
+        prior.actorId !== actor.userId ||
+        prior.source.planningSessionId !== sessionId ||
+        existing.submissionId !== prior.submissionId
+      ) {
+        throw new DesignConflictError('Idempotency key is already used by another publish')
+      }
+      if (existing.jobId) return { session, jobId: existing.jobId }
     }
 
-    const session = await this.requireOwned(actor, sessionId)
     if (session.status !== 'ready_to_publish') {
       throw new DesignValidationError('Session is not ready to publish')
     }
@@ -673,7 +720,7 @@ export class PlanningApplication {
 
   private async failSession(sessionId: string, message: string): Promise<void> {
     const session = await this.repo.getSession(sessionId)
-    if (!session) return
+    if (!session || session.status === 'cancelled' || session.status === 'published') return
     await this.repo.updateSession({
       ...session,
       status: 'failed',
@@ -681,6 +728,12 @@ export class PlanningApplication {
       updatedAt: nowMs()
     })
     this.events.publish(sessionId, 'planning.failed', { message })
+  }
+
+  private schedulePlanning(actor: Actor, sessionId: string): void {
+    void this.startPlanning(actor, sessionId).catch((error) =>
+      this.failSession(sessionId, error instanceof Error ? error.message : String(error))
+    )
   }
 
   private async requireOwned(actor: Actor, sessionId: string): Promise<PlanningSessionRecord> {

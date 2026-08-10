@@ -5,8 +5,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --import ../../tests/tsx-tsconfig.mjs src/main.ts",
-    "start": "tsx --import ../../tests/tsx-tsconfig.mjs src/main.ts"
+    "dev": "tsx watch --import ../../scripts/tooling/tsx-tsconfig.mjs src/main.ts",
+    "start": "tsx --import ../../scripts/tooling/tsx-tsconfig.mjs src/main.ts"
   },
   "dependencies": {
     "@codetask/server-core": "*",

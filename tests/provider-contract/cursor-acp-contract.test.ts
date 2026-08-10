@@ -156,21 +156,26 @@ test('permission handler denies shell/write for read-only profiles and permits r
   })
 })
 
-test('buildCursorTurnPlan: conversation/planner run directly with scoped MCP', () => {
-  for (const [role, capabilityProfile] of [
-    ['conversation', 'chat-read'],
-    ['planner', 'planner-read']
+test('buildCursorTurnPlan: conversation is direct and planner uses outer sandbox', () => {
+  for (const [role, capabilityProfile, outerSandbox] of [
+    ['conversation', 'chat-read', false],
+    ['planner', 'planner-read', true]
   ] as const) {
     const plan = buildCursorTurnPlan(
       { ...baseInput(role), capabilityProfile, mcpUrl: 'http://127.0.0.1:9/mcp' },
-      { outerSandbox: false }
+      { outerSandbox }
     )
-    assert.equal(plan.outerSandbox, false)
+    assert.equal(plan.outerSandbox, outerSandbox)
     assert.equal(plan.capabilityProfile, capabilityProfile)
-    assert.equal(plan.cliArgs.includes('--sandbox'), false)
-    assert.deepEqual(plan.cliArgs.slice(0, 2), ['--mode', 'ask'])
+    if (outerSandbox) {
+      assert.deepEqual(plan.cliArgs.slice(0, 4), ['--trust', '--force', '--sandbox', 'disabled'])
+      assert.equal(plan.cliArgs.includes('--approve-mcps'), true)
+    } else {
+      assert.equal(plan.cliArgs.includes('--sandbox'), false)
+      assert.deepEqual(plan.cliArgs.slice(0, 2), ['--mode', 'ask'])
+      assert.equal(plan.cliArgs.includes('--approve-mcps'), false)
+    }
     assert.deepEqual(plan.cliArgs.slice(-3), ['--workspace', '/workspace', 'acp'])
-    assert.equal(plan.cliArgs.includes('--approve-mcps'), false)
     assert.equal(plan.mcpServers.length, 1)
     assert.equal(plan.mcpServers[0]?.name, 'codetask-manager')
     assert.equal(plan.mcpServers[0]?.type, 'http')

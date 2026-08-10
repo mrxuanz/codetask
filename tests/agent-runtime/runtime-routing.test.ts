@@ -4,10 +4,15 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { OUTER_SANDBOX_ROLES, roleRequiresOuterSandbox } from '../../src/server/agent-runtime/roles'
 
-test('only worker and verifier roles require the outer sandbox', () => {
-  assert.deepEqual(OUTER_SANDBOX_ROLES, ['task-worker', 'milestone-verifier', 'slice-verifier'])
+test('planner, worker, and verifier roles require the outer sandbox', () => {
+  assert.deepEqual(OUTER_SANDBOX_ROLES, [
+    'planner',
+    'task-worker',
+    'milestone-verifier',
+    'slice-verifier'
+  ])
   assert.equal(roleRequiresOuterSandbox('conversation'), false)
-  assert.equal(roleRequiresOuterSandbox('planner'), false)
+  assert.equal(roleRequiresOuterSandbox('planner'), true)
 })
 
 test('agent runner loads sandbox orchestration only inside the sandbox branch', () => {

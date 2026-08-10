@@ -58,3 +58,18 @@ test('server CLI accepts ephemeral port 0', () => {
   assert.equal(parsed.port, 0)
   assert.equal(parsed.mode, 'server')
 })
+
+test('supervised desktop service keeps bootstrap arguments but uses desktop mode', () => {
+  const parsed = parseServerCliArgs([
+    'codetask-service',
+    '--desktop',
+    '--port',
+    '0',
+    '--data-dir',
+    '/tmp/codetask-desktop'
+  ])
+  assert.equal(parsed.mode, 'desktop')
+  assert.equal(parsed.host, '127.0.0.1')
+  assert.equal(parsed.port, 0)
+  assert.equal(parsed.dataDir, '/tmp/codetask-desktop')
+})

@@ -44,6 +44,9 @@ export function normalizeReleaseArtifacts({ distDir, platform, version }) {
     throw new Error(`release_artifacts.invalid_version:${version}`)
   }
   const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+  if (version !== packageJson.version) {
+    throw new Error(`release_artifacts.version_mismatch:${version}:${packageJson.version}`)
+  }
   const os = platform.split('-')[0]
   const targetPrefix = `codetask-${version}-${platform}`
   const sourcePrefixes = sourceArchTokens(platform).map(

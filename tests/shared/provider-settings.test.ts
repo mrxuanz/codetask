@@ -15,6 +15,7 @@ test('Provider settings persist with CAS and apply only after restart', async (t
   })
   const ctx = bootstrapRuntime({ dataDir })
   const app = getOrComposeSettings(ctx).app
+  const testExecutable = process.execPath
 
   const initial = app.getProviders({ providers: ctx.config.providers })
   assert.equal(initial.revision, 0)
@@ -27,11 +28,17 @@ test('Provider settings persist with CAS and apply only after restart', async (t
       providers: {
         codex: {
           enabled: true,
-          executable: { mode: 'auto' },
+          executable: { mode: 'path', path: testExecutable },
           model: 'gpt-test',
           approveMcps: false
         },
-        cursor: { enabled: true, executable: { mode: 'auto' }, approveMcps: false }
+        cursor: {
+          enabled: true,
+          executable: { mode: 'path', path: testExecutable },
+          approveMcps: false
+        },
+        claude: { enabled: false, executable: { mode: 'auto' }, approveMcps: false },
+        opencode: { enabled: false, executable: { mode: 'auto' }, approveMcps: false }
       }
     },
     { providers: ctx.config.providers }
@@ -53,10 +60,13 @@ test('Provider settings persist with CAS and apply only after restart', async (t
           providers: {
             codex: {
               enabled: true,
-              executable: { mode: 'auto' },
+              executable: { mode: 'path', path: testExecutable },
               approveMcps: false,
               model: 'stale'
-            }
+            },
+            cursor: { enabled: false, executable: { mode: 'auto' }, approveMcps: false },
+            claude: { enabled: false, executable: { mode: 'auto' }, approveMcps: false },
+            opencode: { enabled: false, executable: { mode: 'auto' }, approveMcps: false }
           }
         },
         { providers: ctx.config.providers }

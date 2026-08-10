@@ -1,7 +1,7 @@
 export type RuntimeHandle = {
   runId: string
   abortController: AbortController
-  turnId: string | null
+  turnIds: Set<string>
 }
 
 export class RuntimeHandleRegistry {
@@ -11,7 +11,7 @@ export class RuntimeHandleRegistry {
     const handle: RuntimeHandle = {
       runId,
       abortController: new AbortController(),
-      turnId: null
+      turnIds: new Set()
     }
     this.handles.set(runId, handle)
     return handle
@@ -33,9 +33,14 @@ export class RuntimeHandleRegistry {
     return { signal: handle.abortController.signal, controller: handle.abortController }
   }
 
-  setTurnId(runId: string, turnId: string | null): void {
+  addTurnId(runId: string, turnId: string): void {
     const handle = this.handles.get(runId)
-    if (handle) handle.turnId = turnId
+    handle?.turnIds.add(turnId)
+  }
+
+  removeTurnId(runId: string, turnId: string): void {
+    const handle = this.handles.get(runId)
+    handle?.turnIds.delete(turnId)
   }
 
   abort(runId: string, reason?: string): void {

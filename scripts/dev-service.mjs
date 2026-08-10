@@ -37,7 +37,7 @@ writeFileSync(
 
 const service = run(process.execPath, [
   '--import',
-  path.join(root, 'tests/tsx-tsconfig.mjs'),
+  path.join(root, 'scripts/tooling/tsx-tsconfig.mjs'),
   require.resolve('tsx/cli'),
   'watch',
   path.join(root, 'apps/service/src/main.ts'),

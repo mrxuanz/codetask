@@ -22,7 +22,7 @@ export function capabilityProfileIsReadOnly(profile: AgentCapabilityProfile): bo
 }
 
 export function capabilityProfileRequiresOuterSandbox(profile: AgentCapabilityProfile): boolean {
-  return profile === 'task-sandbox' || profile === 'verifier-sandbox'
+  return profile === 'planner-read' || profile === 'task-sandbox' || profile === 'verifier-sandbox'
 }
 
 export function resolveAgentCapabilityProfile(input: {

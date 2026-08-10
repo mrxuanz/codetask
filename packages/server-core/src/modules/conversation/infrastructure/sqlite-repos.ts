@@ -202,14 +202,19 @@ export function createSqliteMessageRepository(db: Database.Database): MessageRep
         createdAt: String(row.created_at)
       }))
     },
-    list(conversationId, limit) {
+    list(conversationId, limit, before) {
+      const beforeClause = before ? `AND (created_at < ? OR (created_at = ? AND id < ?))` : ''
+      const parameters = before
+        ? [conversationId, before.createdAt, before.createdAt, before.id, limit]
+        : [conversationId, limit]
       const messages = (
         db
           .prepare(
             `SELECT * FROM conversation_messages WHERE conversation_id = ?
-             ORDER BY created_at DESC LIMIT ?`
+             ${beforeClause}
+             ORDER BY created_at DESC, id DESC LIMIT ?`
           )
-          .all(conversationId, limit) as Record<string, unknown>[]
+          .all(...parameters) as Record<string, unknown>[]
       )
         .reverse()
         .map(mapMessage)
@@ -335,6 +340,26 @@ export function createSqliteTurnRepository(db: Database.Database): TurnRepositor
         )
         .get(conversationId) as { id: string } | undefined
       return Boolean(row)
+    },
+    getActiveForConversation(conversationId) {
+      const row = db
+        .prepare(
+          `SELECT * FROM conversation_turns
+           WHERE conversation_id = ? AND state IN ('queued', ${activeList})
+           ORDER BY created_at DESC, id DESC LIMIT 1`
+        )
+        .get(conversationId) as Record<string, unknown> | undefined
+      return row ? mapTurn(row) : null
+    },
+    listActive() {
+      return (
+        db
+          .prepare(
+            `SELECT * FROM conversation_turns WHERE state IN (${activeList})
+             ORDER BY created_at ASC, id ASC`
+          )
+          .all() as Record<string, unknown>[]
+      ).map(mapTurn)
     },
     listQueued(actorId) {
       if (actorId) {

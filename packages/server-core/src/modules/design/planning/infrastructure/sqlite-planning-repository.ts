@@ -35,6 +35,60 @@ type SessionRow = {
 export class SqlitePlanningRepository implements PlanningRepository {
   constructor(private readonly db: Database.Database) {}
 
+  private updateRunRow(run: PlanningRunRecord): void {
+    const result = this.db
+      .prepare(`UPDATE planning_runs SET status = ?, finished_at = ?, error_json = ? WHERE id = ?`)
+      .run(run.status, run.finishedAt, run.errorJson, run.id)
+    if (result.changes !== 1) throw new DesignConflictError('Planning run no longer exists')
+  }
+
+  private updateSessionRow(session: PlanningSessionRecord, expectedTreeRevision?: number): void {
+    const result = this.db
+      .prepare(
+        `UPDATE planning_sessions SET
+          draft_snapshot_json = ?, reference_snapshot_id = ?, execution_profile_json = ?,
+          planner_settings_snapshot_json = ?, planner_settings_hash = ?,
+          status = ?, active_run_id = ?, tree_revision = ?, published_job_id = ?,
+          last_error_json = ?, updated_at = ?, published_at = ?
+        WHERE id = ? ${expectedTreeRevision === undefined ? '' : 'AND tree_revision = ?'}`
+      )
+      .run(
+        ...(expectedTreeRevision === undefined
+          ? [
+              session.draftSnapshotJson,
+              session.referenceSnapshotId,
+              JSON.stringify(session.executionProfile),
+              session.plannerSettingsSnapshotJson,
+              session.plannerSettingsHash,
+              session.status,
+              session.activeRunId,
+              session.treeRevision,
+              session.publishedJobId,
+              session.lastErrorJson,
+              session.updatedAt,
+              session.publishedAt,
+              session.id
+            ]
+          : [
+              session.draftSnapshotJson,
+              session.referenceSnapshotId,
+              JSON.stringify(session.executionProfile),
+              session.plannerSettingsSnapshotJson,
+              session.plannerSettingsHash,
+              session.status,
+              session.activeRunId,
+              session.treeRevision,
+              session.publishedJobId,
+              session.lastErrorJson,
+              session.updatedAt,
+              session.publishedAt,
+              session.id,
+              expectedTreeRevision
+            ])
+      )
+    if (result.changes !== 1) throw new DesignConflictError()
+  }
+
   async getSession(sessionId: string): Promise<PlanningSessionRecord | null> {
     const row = this.db.prepare(`SELECT * FROM planning_sessions WHERE id = ?`).get(sessionId) as
       | SessionRow
@@ -84,50 +138,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
     session: PlanningSessionRecord,
     expectedTreeRevision?: number
   ): Promise<PlanningSessionRecord> {
-    const result = this.db
-      .prepare(
-        `UPDATE planning_sessions SET
-          draft_snapshot_json = ?, reference_snapshot_id = ?, execution_profile_json = ?,
-          planner_settings_snapshot_json = ?, planner_settings_hash = ?,
-          status = ?, active_run_id = ?, tree_revision = ?, published_job_id = ?,
-          last_error_json = ?, updated_at = ?, published_at = ?
-        WHERE id = ? ${expectedTreeRevision === undefined ? '' : 'AND tree_revision = ?'}`
-      )
-      .run(
-        ...(expectedTreeRevision === undefined
-          ? [
-              session.draftSnapshotJson,
-              session.referenceSnapshotId,
-              JSON.stringify(session.executionProfile),
-              session.plannerSettingsSnapshotJson,
-              session.plannerSettingsHash,
-              session.status,
-              session.activeRunId,
-              session.treeRevision,
-              session.publishedJobId,
-              session.lastErrorJson,
-              session.updatedAt,
-              session.publishedAt,
-              session.id
-            ]
-          : [
-              session.draftSnapshotJson,
-              session.referenceSnapshotId,
-              JSON.stringify(session.executionProfile),
-              session.plannerSettingsSnapshotJson,
-              session.plannerSettingsHash,
-              session.status,
-              session.activeRunId,
-              session.treeRevision,
-              session.publishedJobId,
-              session.lastErrorJson,
-              session.updatedAt,
-              session.publishedAt,
-              session.id,
-              expectedTreeRevision
-            ])
-      )
-    if (result.changes !== 1) throw new DesignConflictError()
+    this.updateSessionRow(session, expectedTreeRevision)
     return (await this.getSession(session.id))!
   }
 
@@ -154,9 +165,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
   }
 
   async updateRun(run: PlanningRunRecord): Promise<void> {
-    this.db
-      .prepare(`UPDATE planning_runs SET status = ?, finished_at = ?, error_json = ? WHERE id = ?`)
-      .run(run.status, run.finishedAt, run.errorJson, run.id)
+    this.updateRunRow(run)
   }
 
   async getRun(runId: string): Promise<PlanningRunRecord | null> {
@@ -231,6 +240,11 @@ export class SqlitePlanningRepository implements PlanningRepository {
     sessionId: string
     tree: ExecutionTreeSnapshot
     contentHash: string
+    sessionUpdate?: {
+      session: PlanningSessionRecord
+      expectedTreeRevision: number
+    }
+    runUpdate?: PlanningRunRecord
   }): Promise<void> {
     const planRowId = `${input.sessionId}:${input.tree.revision}`
     const tx = this.db.transaction(() => {
@@ -343,6 +357,11 @@ export class SqlitePlanningRepository implements PlanningRepository {
           input.contentHash,
           Date.now()
         )
+
+      if (input.sessionUpdate) {
+        this.updateSessionRow(input.sessionUpdate.session, input.sessionUpdate.expectedTreeRevision)
+      }
+      if (input.runUpdate) this.updateRunRow(input.runUpdate)
     })
     tx()
   }

@@ -28,14 +28,17 @@ async function runSmokeTest(server: ServerInfo): Promise<void> {
 async function main(): Promise<void> {
   await initializeProcessHostEnvironment()
   const cli = parseServerCliArgs()
-  const platform = createNodeServerPlatform()
+  const platform = createNodeServerPlatform({ dataDir: cli.dataDir })
   if (!platform.isDev && !platform.staticDir) {
     throw new Error('Renderer assets not found. Run the standalone entry from a complete build.')
   }
 
   const server = await startAppServer(cli, platform)
   console.log(`[server] standalone Node service ready: ${server.url}`)
-  if (cli.smokeTest) {
+  // A supervised desktop smoke is orchestrated by the Electron parent and must
+  // keep this sidecar alive for setup/login/conversation checks. The headless
+  // standalone smoke remains a health-only process that exits by itself.
+  if (cli.smokeTest && cli.mode === 'server') {
     await runSmokeTest(server)
     await shutdown()
   }

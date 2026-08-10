@@ -52,7 +52,7 @@ pub fn compute_allow_paths(
                 let canonical = canonicalize(&candidate).unwrap_or(candidate);
                 add_allow(canonical.clone());
 
-                for protected_subdir in [".git", ".codeteam", ".agents"] {
+                for protected_subdir in [".git", ".codeteam", ".agents", ".codex", ".codetask"] {
                     let protected_entry = canonical.join(protected_subdir);
                     if protected_entry.exists() {
                         add_deny(protected_entry);
@@ -216,13 +216,17 @@ mod tests {
     }
 
     #[test]
-    fn denies_codex_and_agents_inside_writable_root() {
+    fn denies_all_protected_metadata_inside_writable_root() {
         let tmp = TempDir::new().expect("tempdir");
         let command_cwd = tmp.path().join("workspace");
         let codex_dir = command_cwd.join(".codeteam");
         let agents_dir = command_cwd.join(".agents");
+        let dot_codex_dir = command_cwd.join(".codex");
+        let codetask_dir = command_cwd.join(".codetask");
         let _ = fs::create_dir_all(&codex_dir);
         let _ = fs::create_dir_all(&agents_dir);
+        let _ = fs::create_dir_all(&dot_codex_dir);
+        let _ = fs::create_dir_all(&codetask_dir);
 
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
@@ -238,6 +242,8 @@ mod tests {
         let expected_deny: HashSet<PathBuf> = [
             dunce::canonicalize(&codex_dir).unwrap(),
             dunce::canonicalize(&agents_dir).unwrap(),
+            dunce::canonicalize(&dot_codex_dir).unwrap(),
+            dunce::canonicalize(&codetask_dir).unwrap(),
         ]
         .into_iter()
         .collect();

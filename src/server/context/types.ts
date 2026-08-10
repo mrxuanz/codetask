@@ -29,6 +29,8 @@ export interface AppContext {
   providerRuntimeManager: ProviderRuntimeManager
   security: SecurityContext
   bootId: string
+  /** True only for the packaged application smoke flow. */
+  smokeTest: boolean
   applicationRuntime: ApplicationRuntime | null
   /** Optional recovery master key file path from CLI. */
   masterKeyFile?: string

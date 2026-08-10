@@ -7,11 +7,19 @@ import test from 'node:test'
 
 const script = resolve('scripts/resolve-release-source.mjs')
 const requiredFiles = [
+  '.node-version',
   '.github/workflows/build.yml',
+  'electron-builder.release.yml',
+  'electron-builder.yml',
   'package-lock.json',
+  'rust-toolchain.toml',
+  'scripts/check-release-signing.mjs',
+  'scripts/normalize-release-artifacts.mjs',
   'scripts/package-server-sea.mjs',
+  'scripts/package-smoke.mjs',
   'scripts/release-evidence.mjs',
-  'scripts/run-and-record.mjs'
+  'scripts/run-and-record.mjs',
+  'scripts/verify-release-signing.mjs'
 ]
 
 function git(repo, ...args) {
@@ -47,7 +55,8 @@ test('manual releases reject an old tag and accept a new tag at the selected com
     git(repo, 'config', 'user.name', 'CI Test')
     git(repo, 'config', 'user.email', 'ci@example.invalid')
     writeFileSync(join(repo, 'old.txt'), 'old\n')
-    git(repo, 'add', 'old.txt')
+    writeFileSync(join(repo, 'package.json'), '{"version":"0.1.0"}\n')
+    git(repo, 'add', 'old.txt', 'package.json')
     git(repo, '-c', 'commit.gpgSign=false', 'commit', '-m', 'old release')
     git(repo, 'tag', 'v0.1.0')
 
@@ -55,6 +64,7 @@ test('manual releases reject an old tag and accept a new tag at the selected com
       mkdirSync(join(repo, file, '..'), { recursive: true })
       writeFileSync(join(repo, file), `${file}\n`)
     }
+    writeFileSync(join(repo, 'package.json'), '{"version":"0.2.0-beta.1"}\n')
     git(repo, 'add', '.')
     git(repo, '-c', 'commit.gpgSign=false', 'commit', '-m', 'release tooling')
     const currentSha = git(repo, 'rev-parse', 'HEAD')
@@ -72,6 +82,14 @@ test('manual releases reject an old tag and accept a new tag at the selected com
     git(repo, 'tag', 'v0.2.0-beta.1')
     const existingTag = run(repo, currentSha, 'v0.2.0-beta.1', join(repo, 'existing-output'))
     assert.equal(existingTag.status, 0, existingTag.stderr)
+
+    const wrongVersion = run(repo, currentSha, 'v9.9.9', join(repo, 'wrong-version-output'))
+    assert.notEqual(wrongVersion.status, 0)
+    assert.match(wrongVersion.stderr, /release_source\.version_mismatch/u)
+
+    const invalidVersion = run(repo, currentSha, 'v1_2', join(repo, 'invalid-version-output'))
+    assert.notEqual(invalidVersion.status, 0)
+    assert.match(invalidVersion.stderr, /release_source\.version_mismatch/u)
   } finally {
     rmSync(repo, { recursive: true, force: true })
   }

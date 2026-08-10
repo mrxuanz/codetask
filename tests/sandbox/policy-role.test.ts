@@ -55,6 +55,23 @@ test('native policy version exists only at the wire boundary', (t) => {
   assert.equal(wire.version, 2)
 })
 
+test('sandbox network mode can be restricted by runtime configuration', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'codetask-policy-network-'))
+  const workspaceRoot = join(root, 'workspace')
+  const scratchRoot = join(root, 'scratch')
+  mkdirSync(workspaceRoot)
+  mkdirSync(scratchRoot)
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  const policy = createSandboxPolicy({
+    role: 'planner',
+    workspaceRoot,
+    scratchRoot,
+    networkMode: 'none'
+  })
+  assert.equal(policy.network.mode, 'none')
+})
+
 test('sandbox policy rejects relative workspace roots instead of resolving process cwd', () => {
   assert.throws(
     () =>

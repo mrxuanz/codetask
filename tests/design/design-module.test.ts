@@ -95,6 +95,26 @@ describe('design module (01)', () => {
       }
     }
 
+    db.prepare(
+      `INSERT INTO job_handoffs (
+        submission_id, planning_session_id, idempotency_key, payload_json, status, created_at
+      ) VALUES (?, ?, ?, ?, 'pending', ?)`
+    ).run(
+      'sub-foreign-collision',
+      session.id,
+      'idem-foreign-collision',
+      JSON.stringify({
+        submissionId: 'sub-foreign-collision',
+        actorId: 'mallory',
+        source: { planningSessionId: 'another-session' }
+      }),
+      Date.now()
+    )
+    await assert.rejects(
+      () => design.planning.publish(actor, session.id, revision, 'idem-foreign-collision'),
+      /Idempotency key is already used/
+    )
+
     const first = await design.planning.publish(
       actor,
       session.id,
@@ -225,6 +245,103 @@ describe('design module (01)', () => {
     db.close()
   })
 
+  it('cancel aborts the active planner run and releases its capacity lease', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    const execution = composeExecutionModule({ db })
+    const { SqliteDraftRepository } =
+      await import('../../packages/server-core/src/modules/design/draft/infrastructure/sqlite-draft-repository.ts')
+    const { SqlitePlanningRepository } =
+      await import('../../packages/server-core/src/modules/design/planning/infrastructure/sqlite-planning-repository.ts')
+    const { SqlitePlanningCapacity } =
+      await import('../../packages/server-core/src/modules/design/planning/infrastructure/planning-capacity.ts')
+    const { JobSubmissionOutbox } =
+      await import('../../packages/server-core/src/modules/design/handoff/job-submission-outbox.ts')
+    const { DraftApplication } =
+      await import('../../packages/server-core/src/modules/design/draft/application/draft-application.ts')
+    const { PlanningApplication } =
+      await import('../../packages/server-core/src/modules/design/planning/application/planning-application.ts')
+
+    const draftRepo = new SqliteDraftRepository(db)
+    const planningRepo = new SqlitePlanningRepository(db)
+    const capacity = new SqlitePlanningCapacity(db)
+    const outbox = new JobSubmissionOutbox(db, execution.submitJob)
+    const drafts = new DraftApplication(draftRepo, {
+      resolveWorkspaceRoot: async () => '/tmp/cancel-planner'
+    })
+    let finishRun!: () => void
+    const running = new Promise<void>((resolve) => {
+      finishRun = resolve
+    })
+    let cancelledRunId: string | null = null
+    const planning = new PlanningApplication(
+      planningRepo,
+      capacity,
+      outbox.asPort(),
+      { publish: () => undefined },
+      {
+        async run() {
+          await running
+        },
+        async cancel(runId) {
+          cancelledRunId = runId
+          finishRun()
+        }
+      }
+    )
+
+    const actor = { userId: 'dora', sessionId: 'cancel-test' }
+    let draft = await drafts.create(actor, {
+      projectId: 'p',
+      title: 'Cancel planning',
+      requirementsMarkdown: 'req'
+    })
+    draft = await drafts.patchAbilities(actor, draft.id, draft.lockRevision, [
+      {
+        abilityCode: 'general',
+        label: 'General',
+        description: 'General implementation',
+        reason: 'default',
+        recommendedCoreCode: 'opencode'
+      }
+    ])
+    draft = await drafts.patchExecutionProfile(actor, draft.id, draft.lockRevision, {
+      plannerCoreCode: 'opencode',
+      sliceVerifierCoreCode: 'opencode',
+      milestoneVerifierCoreCode: 'opencode'
+    })
+    draft = await drafts.confirm(actor, draft.id, draft.lockRevision)
+    const session = await planning.createSession({
+      actor,
+      draftSnapshot: await drafts.captureConfirmedSnapshot(actor, draft.id),
+      references: []
+    })
+
+    await waitForPlanningState(planning, actor, session.id, 'planning')
+    const before = await planning.get(actor, session.id)
+    const cancelled = await planning.cancel(actor, session.id)
+    assert.equal(cancelled.status, 'cancelled')
+    assert.equal(cancelled.activeRunId, null)
+    assert.equal(cancelledRunId, before.session.activeRunId)
+    const run = db
+      .prepare(`SELECT status FROM planning_runs WHERE id = ?`)
+      .get(before.session.activeRunId) as { status: string }
+    assert.equal(run.status, 'cancelled')
+    const lease = db
+      .prepare(
+        `SELECT released_at AS releasedAt FROM planning_capacity_leases WHERE planning_session_id = ?`
+      )
+      .get(session.id) as { releasedAt: number | null }
+    assert.ok(lease.releasedAt)
+
+    outbox.stop()
+    await new Promise((resolve) => setImmediate(resolve))
+    db.close()
+  })
+
   it('tree patch with stale revision conflicts', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
@@ -280,7 +397,51 @@ describe('design module (01)', () => {
         }),
       /conflict|Conflict/i
     )
+
+    const expectedRevision = tree!.revision
+    const edits = await Promise.allSettled([
+      design.planning.patchNode(actor, session.id, nodeId, {
+        expectedRevision,
+        title: 'winner-a'
+      }),
+      design.planning.patchNode(actor, session.id, nodeId, {
+        expectedRevision,
+        title: 'winner-b'
+      })
+    ])
+    const fulfilled = edits.filter(
+      (result): result is PromiseFulfilledResult<NonNullable<typeof tree>> =>
+        result.status === 'fulfilled'
+    )
+    const rejected = edits.filter((result) => result.status === 'rejected')
+    assert.equal(fulfilled.length, 1)
+    assert.equal(rejected.length, 1)
+    const persisted = await design.planning.get(actor, session.id)
+    assert.equal(persisted.session.treeRevision, expectedRevision + 1)
+    assert.equal(
+      persisted.tree?.milestones.find((milestone) => milestone.id === nodeId)?.title,
+      fulfilled[0]!.value.milestones.find((milestone) => milestone.id === nodeId)?.title
+    )
     design.outbox.stop()
     db.close()
   })
 })
+
+async function waitForPlanningState(
+  planning: {
+    get(
+      actor: { userId: string; sessionId: string },
+      sessionId: string
+    ): Promise<{ session: { status: string } }>
+  },
+  actor: { userId: string; sessionId: string },
+  sessionId: string,
+  status: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const current = await planning.get(actor, sessionId)
+    if (current.session.status === status) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.fail(`planning session did not reach ${status}`)
+}

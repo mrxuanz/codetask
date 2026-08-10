@@ -22,7 +22,10 @@ const VALID_PROVIDERS = new Set<ProviderCode>(['opencode', 'cursor', 'codex', 'c
 
 export function normalizeProvider(coreCode: string): ProviderCode {
   const lower = coreCode.toLowerCase() as ProviderCode
-  return VALID_PROVIDERS.has(lower) ? lower : 'opencode'
+  if (!VALID_PROVIDERS.has(lower)) {
+    throw new ExecutionValidationError(`Unsupported Provider: ${coreCode}`)
+  }
+  return lower
 }
 
 function allNodesConfirmed(tree: ExecutionTreeSnapshot): boolean {

@@ -1,6 +1,6 @@
 /**
  * Architecture 05 DoD checklist — Settings module cutover.
- * @see docs/架构收口/05-设置模块与配置生效.md §21
+ * @see ARCHITECTURE.md#ownership-map
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'

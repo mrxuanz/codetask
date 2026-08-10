@@ -25,6 +25,8 @@ The tree is mid-migration toward a monorepo layout:
 - `native/codeteam-*` — OS sandbox crates; the `codeteam` prefix is a **historical** rename from upstream `codex-*` (see `NOTICE`), not a second product name
 - Runtime MCP server id is `codetask-manager` (and `codetask-*-verifier`); native crate/package paths remain `codeteam-*`
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for package ownership, runtime flow, and enforced dependency boundaries.
+
 ## Problem It Solves
 
 The traditional approach — one large prompt and let the agent run to completion — often fails on long requirements:
@@ -81,10 +83,11 @@ Planner rules (see `src/server/planner/prompts.ts`):
 
 Task Worker / Verifier run in an OS-level sandbox, inspired by [OpenAI Codex](https://github.com/openai/codex); native layer uses adapted `codeteam-*` crates forked from Codex `codex-rs` (baseline commit recorded in `NOTICE`):
 
-- **Planner / chat** — no outer OS sandbox; SDK/ACP layer is read-only
+- **Planner** — outer OS sandbox with a read-only workspace; chat remains governed by the SDK/ACP access mode
 - **Task Worker** — workspace writable, host filesystem read-only, isolated `runtimeRoot`
 - **Fail closed** — sandbox helper or policy failure terminates immediately; no fallback to plain `spawn()`
-- **Network is not restricted (by design)** — the sandbox boundary covers filesystem and process isolation only. Agent CLIs are expected to reach the internet (model APIs, web research, package installs), so outbound network egress from sandboxed tasks is intentionally left open. Treat any secrets readable inside the sandbox as potentially exfiltrable.
+- **Network defaults to full access** — Agent CLIs normally need model APIs, research, and package registries. Deployments can set `AppConfigOverrides.sandbox.networkMode` to `none` or `restricted`; treat secrets readable in a network-enabled sandbox as potentially exfiltrable.
+- **Provider identity is read-only for untrusted turns** — planner, task, and verifier sandboxes may read the selected Provider identity/config needed for authentication, but only ordinary conversation turns receive Provider-declared host write grants.
 
 ## Workflow
 
@@ -161,7 +164,7 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 Notes:
 
 - In **server** mode, Electron skips GPU init (helpful on WSL / CI / headless hosts).
-- When bound to `0.0.0.0`, other devices on the LAN can reach the UI at `http://<your-ip>:<port>`.
+- Plain HTTP is suitable only for loopback development. For LAN or internet access, bind the Service behind an HTTPS reverse proxy; otherwise passwords and session cookies cross the network unencrypted.
 - Job execution, planner, and sandbox behavior are identical in both modes — only the shell differs.
 - The dedicated Node entry is always server mode, so `--serve` is optional for `start:server`.
 

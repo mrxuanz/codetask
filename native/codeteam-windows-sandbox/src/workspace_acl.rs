@@ -32,6 +32,12 @@ pub unsafe fn protect_workspace_dot_codex_dir(cwd: &Path, psid: *mut c_void) -> 
     protect_workspace_subdir(cwd, psid, ".codex")
 }
 
+/// # Safety
+/// Caller must ensure `psid` is a valid SID pointer.
+pub unsafe fn protect_workspace_codetask_dir(cwd: &Path, psid: *mut c_void) -> Result<bool> {
+    protect_workspace_subdir(cwd, psid, ".codetask")
+}
+
 unsafe fn protect_workspace_subdir(cwd: &Path, psid: *mut c_void, subdir: &str) -> Result<bool> {
     let path = cwd.join(subdir);
     if path.is_dir() {

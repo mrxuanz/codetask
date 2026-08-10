@@ -28,6 +28,7 @@ import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
 import type { ProviderInstallation } from '../../shared/providers/installation'
 import type { ProviderSettings } from '../../shared/providers/settings'
 import { processHostEnvironmentSource } from '../host-environment'
+import { getRuntimeFeatures } from '../config/runtime-features'
 export { isOuterSandboxEnabled } from './outer-sandbox-flag'
 
 export interface RunSandboxedTurnInput {
@@ -262,11 +263,14 @@ export async function* streamSandboxedConversationTurnLocal(
       workspaceRoot: input.workspaceRoot,
       scratchRoot,
       providerReadRoots,
-      ...(contribution.writeRoots.length > 0
+      // Provider host identity/config is visible for authentication but remains
+      // read-only inside untrusted planner/task/verifier turns.
+      ...(input.role === 'conversation' && contribution.writeRoots.length > 0
         ? { providerWriteRoots: [...contribution.writeRoots] }
         : {}),
       ...(input.readRoots ? { attachmentReadRoots: input.readRoots } : {}),
-      ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {})
+      ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {}),
+      networkMode: getRuntimeFeatures().sandbox.networkMode
     })
 
     sandboxTurnDebug(

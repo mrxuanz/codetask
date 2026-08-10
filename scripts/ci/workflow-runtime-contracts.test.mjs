@@ -40,6 +40,11 @@ test('release builds package and smoke an ncc + SEA service artifact', () => {
   assert.match(buildWorkflow, /npm run package:server:sea/)
   assert.match(buildWorkflow, /server-sea-smoke\.log/)
   assert.match(buildWorkflow, /dist\/\*\.tar\.gz/)
+  assert.match(buildWorkflow, /runner\.os == 'Linux'[\s\S]*?dist\/\*\.tar\.gz/u)
+  assert.match(
+    buildWorkflow,
+    /runner\.os != 'Linux'[\s\S]*?macOS\/Windows SEA binaries are smoke-tested/u
+  )
 })
 
 test('CI package-smoke passes a real platform label for SEA packaging', () => {
@@ -51,7 +56,7 @@ test('CI package-smoke passes a real platform label for SEA packaging', () => {
 })
 
 test('CI and release use Node 24 LTS from one version file', () => {
-  assert.equal(nodeVersion, '24')
+  assert.equal(nodeVersion, '24.18.0')
   for (const workflow of [buildWorkflow, ciWorkflow, sandboxWorkflow, releaseWorkflow]) {
     assert.match(workflow, /node-version-file: \.node-version/u)
     assert.doesNotMatch(workflow, /node-version:\s*['"]?22/u)
@@ -91,9 +96,37 @@ test('Rust workspace tests are serialized on every platform-specific CI path', (
   assert.ok(buildWorkflow.includes(serialRustTest))
   assert.match(ciWorkflow, /rust-macos:[\s\S]*?runs-on: macos-15/u)
   assert.match(ciWorkflow, /rust-windows:[\s\S]*?runs-on: windows-2025/u)
-  assert.match(buildWorkflow, /runner\.os != 'Linux'[\s\S]*?Test platform-native modules/u)
+  assert.match(
+    buildWorkflow,
+    /inputs\.include-release-evidence \|\| runner\.os != 'Linux'[\s\S]*?Test platform-native modules/u
+  )
   assert.match(
     sandboxWorkflow,
     /cargo test --manifest-path native\/Cargo\.toml --release --no-fail-fast -- --test-threads=1/
   )
+})
+
+test('release signing secrets are step-scoped and signed artifacts are verified', () => {
+  assert.doesNotMatch(buildWorkflow, /timeout-minutes: 45\s+env:/u)
+  assert.match(buildWorkflow, /electron-builder\.release\.yml/u)
+  assert.match(buildWorkflow, /scripts\/check-release-signing\.mjs/u)
+  assert.match(buildWorkflow, /scripts\/verify-release-signing\.mjs/u)
+  assert.match(buildWorkflow, /signature-verification\.log/u)
+  assert.doesNotMatch(releaseWorkflow, /secrets: inherit/u)
+  assert.match(releaseWorkflow, /startsWith\(matrix\.name, 'macos-'\)/u)
+  assert.match(releaseWorkflow, /startsWith\(matrix\.name, 'windows-'\)/u)
+})
+
+test('release gates Linux native and sandbox attack tests', () => {
+  assert.match(releaseWorkflow, /Run and record Linux native tests/u)
+  assert.match(releaseWorkflow, /Run and record Linux sandbox attack matrix/u)
+  assert.match(releaseWorkflow, /npm run test:sandbox:all/u)
+  assert.match(releaseWorkflow, /linux-sandbox-test\.log/u)
+})
+
+test('workflows use least-privilege tokens and concurrency groups', () => {
+  for (const workflow of [ciWorkflow, sandboxWorkflow, releaseWorkflow]) {
+    assert.match(workflow, /permissions:\s+contents: read/u)
+    assert.match(workflow, /concurrency:/u)
+  }
 })
