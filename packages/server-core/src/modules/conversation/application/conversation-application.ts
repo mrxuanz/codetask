@@ -12,9 +12,12 @@ import type {
   ProviderCode,
   ProviderSummary
 } from '@codetask/contracts'
-import { conversationTopic, conversationTurnTopic } from '@codetask/contracts'
 import {
-  ACTIVE_TURN_STATES,
+  conversationTopic,
+  conversationTurnTopic,
+  MAX_CONVERSATION_TITLE_CHARS
+} from '@codetask/contracts'
+import {
   toConversationDto,
   toMessageDto,
   toTurnDto,
@@ -35,9 +38,63 @@ import {
 
 const DEFAULT_TITLE = 'New thread'
 const MAX_HISTORY_MESSAGES = 30
+const MAX_HISTORY_CHARS = 32_000
+const MAX_ASSISTANT_REPLY_CHARS = 512 * 1024
+const MAX_ASSISTANT_THINKING_CHARS = 128 * 1024
+const MAX_CONVERSATION_TURN_MS = 30 * 60 * 1000
+const MAX_QUEUED_TURNS_PER_ACTOR = 100
+const MAX_QUEUED_PAYLOAD_BYTES_PER_ACTOR = 16 * 1024 * 1024
+const QUEUE_SCAN_LIMIT = 128
+const MAX_REALTIME_ERROR_CHARS = 2_048
+const OUTPUT_TRUNCATED_NOTICE = '\n\n[Output truncated: conversation response limit reached.]'
+
+function truncateOutput(value: string, limit: number): string {
+  if (value.length <= limit) return value
+  const keep = Math.max(0, limit - OUTPUT_TRUNCATED_NOTICE.length)
+  return `${value.slice(0, keep)}${OUTPUT_TRUNCATED_NOTICE}`
+}
+
+function buildBoundedHistory(
+  messages: Array<{ role: string; content: string; providerCode: string | null }>
+): string {
+  const lines = messages
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .map((message) => {
+      const provider = message.providerCode ? ` (${message.providerCode})` : ''
+      return `${message.role}${provider}: ${message.content.trim()}`
+    })
+    .filter((line) => !line.endsWith(': '))
+  let history = lines.join('\n\n')
+  if (history.length > MAX_HISTORY_CHARS) {
+    history = `…(earlier messages truncated)\n\n${history.slice(-MAX_HISTORY_CHARS)}`
+  }
+  return history
+}
+
+function toRealtimeTurnDto(
+  turn: TurnRecord,
+  queuePosition: number | null = null
+): ConversationTurnDto {
+  const dto = toTurnDto(turn, queuePosition)
+  const error = dto.lastError
+    ? {
+        code: dto.lastError.code.slice(0, 128),
+        message: dto.lastError.message.slice(0, MAX_REALTIME_ERROR_CHARS),
+        ...(dto.lastError.detail
+          ? { detail: dto.lastError.detail.slice(0, MAX_REALTIME_ERROR_CHARS) }
+          : {})
+      }
+    : null
+  // Turn input is available from the REST snapshot and user message. Repeating a
+  // 512 KiB prompt in every durable state event would exceed the event-log cap.
+  return { ...dto, inputText: '', lastError: error }
+}
 
 export class ConversationApplication {
   private readonly abortControllers = new Map<string, AbortController>()
+  private readonly activeTurnPromises = new Map<string, Promise<void>>()
+  private readonly deletingConversationIds = new Set<string>()
+  private readonly pendingAdvanceActors = new Set<string | null>()
   private advancing = false
 
   constructor(private readonly ports: ConversationModulePorts) {}
@@ -72,12 +129,16 @@ export class ConversationApplication {
     input: { title?: string; providerCode?: ProviderCode }
   ): ConversationDto {
     const now = nowIso()
+    const title = input.title?.trim() ?? ''
+    if (title.length > MAX_CONVERSATION_TITLE_CHARS) {
+      throw new ConversationValidationError('Conversation title is too long')
+    }
     const row: ConversationRecord = {
       id: newId('conv'),
       actorId: actor.userId,
       projectId,
-      title: input.title?.trim() || DEFAULT_TITLE,
-      titleSource: input.title?.trim() ? 'manual' : 'auto',
+      title: title || DEFAULT_TITLE,
+      titleSource: title ? 'manual' : 'auto',
       providerCode: input.providerCode ?? this.ports.defaultProviderCode,
       state: 'active',
       stateRevision: 0,
@@ -87,7 +148,7 @@ export class ConversationApplication {
     }
     this.ports.conversations.insert(row)
     const dto = toConversationDto(row)
-    this.ports.realtime.publish(conversationTopic(row.id), 'conversation.changed', {
+    this.publishRealtime(conversationTopic(row.id), 'conversation.changed', {
       conversation: dto
     })
     return dto
@@ -96,6 +157,9 @@ export class ConversationApplication {
   rename(actor: Actor, conversationId: string, title: string): ConversationDto {
     const trimmed = title.trim()
     if (!trimmed) throw new ConversationValidationError('Title cannot be empty')
+    if (trimmed.length > MAX_CONVERSATION_TITLE_CHARS) {
+      throw new ConversationValidationError('Conversation title is too long')
+    }
     const row = this.requireOwned(actor, conversationId)
     const next = {
       ...row,
@@ -106,7 +170,7 @@ export class ConversationApplication {
     }
     this.ports.conversations.update(next)
     const dto = toConversationDto(next)
-    this.ports.realtime.publish(conversationTopic(row.id), 'conversation.changed', {
+    this.publishRealtime(conversationTopic(row.id), 'conversation.changed', {
       conversation: dto
     })
     return dto
@@ -131,7 +195,7 @@ export class ConversationApplication {
     }
     this.ports.conversations.update(next)
     const dto = toConversationDto(next)
-    this.ports.realtime.publish(conversationTopic(row.id), 'conversation.changed', {
+    this.publishRealtime(conversationTopic(row.id), 'conversation.changed', {
       conversation: dto
     })
     return dto
@@ -139,27 +203,35 @@ export class ConversationApplication {
 
   async delete(actor: Actor, conversationId: string): Promise<void> {
     const row = this.requireOwned(actor, conversationId)
-    const active = this.ports.turns.listQueued(actor.userId).concat(
-      ...ACTIVE_TURN_STATES.flatMap((state) => {
-        const turn = this.ports.turns.get(conversationId)
-        return turn && turn.state === state ? [turn] : []
+    this.deletingConversationIds.add(conversationId)
+    try {
+      const activeTurns = this.ports.turns.listActiveForConversation(conversationId)
+      for (const turn of activeTurns) {
+        this.abortControllers.get(turn.id)?.abort('conversation.deleted')
+      }
+      await Promise.allSettled(
+        activeTurns.map((turn) => this.ports.agentRuntime.abort(turn.id, 'conversation.deleted'))
+      )
+      await this.ports.agentRuntime.closeScope(
+        buildConversationScopeId(row.id, row.providerCode as RuntimeProviderCode)
+      )
+      await Promise.allSettled(
+        activeTurns
+          .map((turn) => this.activeTurnPromises.get(turn.id))
+          .filter((promise): promise is Promise<void> => promise !== undefined)
+      )
+
+      this.ports.turns.deleteForConversation(conversationId)
+      this.ports.messages.deleteForConversation(conversationId)
+      this.ports.conversations.delete(conversationId)
+      this.ports.attachments?.releaseConversation?.(conversationId)
+      this.publishRealtime(conversationTopic(conversationId), 'conversation.deleted', {
+        conversationId
       })
-    )
-    void active
-    // Cancel in-flight via abort map
-    for (const [turnId, controller] of this.abortControllers) {
-      const turn = this.ports.turns.get(turnId)
-      if (turn?.conversationId === conversationId) controller.abort('conversation.deleted')
+    } finally {
+      this.deletingConversationIds.delete(conversationId)
+      void this.advanceQueue(actor.userId)
     }
-    await this.ports.agentRuntime.closeScope(
-      buildConversationScopeId(row.id, row.providerCode as RuntimeProviderCode)
-    )
-    this.ports.turns.deleteForConversation(conversationId)
-    this.ports.messages.deleteForConversation(conversationId)
-    this.ports.conversations.delete(conversationId)
-    this.ports.realtime.publish(conversationTopic(conversationId), 'conversation.deleted', {
-      conversationId
-    })
   }
 
   listMessages(
@@ -261,6 +333,18 @@ export class ConversationApplication {
       settingsHash = captured.contentHash
     }
 
+    const queued = this.ports.turns.queuedStats(actor.userId)
+    const incomingBytes =
+      Buffer.byteLength(message, 'utf8') + Buffer.byteLength(settingsSnapshotJson, 'utf8')
+    if (
+      queued.count >= MAX_QUEUED_TURNS_PER_ACTOR ||
+      queued.payloadBytes + incomingBytes > MAX_QUEUED_PAYLOAD_BYTES_PER_ACTOR
+    ) {
+      throw new ConversationConflictError(
+        'Conversation queue is full; wait for an earlier turn to finish or cancel it'
+      )
+    }
+
     const turn: TurnRecord = {
       id: newId('turn'),
       conversationId,
@@ -313,8 +397,8 @@ export class ConversationApplication {
       this.ports.turns.update(next)
       this.publishTurn(next, null)
       void this.advanceQueue(actor.userId)
-      this.ports.realtime.publish(conversationTurnTopic(turnId), 'turn.cancelled', {
-        turn: toTurnDto(next)
+      this.publishRealtime(conversationTurnTopic(turnId), 'turn.cancelled', {
+        turn: toRealtimeTurnDto(next)
       })
       return toTurnDto(next)
     }
@@ -327,31 +411,53 @@ export class ConversationApplication {
   }
 
   async advanceQueue(actorId?: string): Promise<void> {
+    this.pendingAdvanceActors.add(actorId ?? null)
     if (this.advancing) return
     this.advancing = true
     try {
-      const queued = this.ports.turns.listQueued(actorId)
-      for (const row of queued) {
-        if (this.ports.turns.hasActiveForConversation(row.conversationId)) continue
-        if (
-          this.ports.turns.countActiveForActor(row.actorId) >= this.ports.maxConcurrentTurnsPerUser
-        ) {
-          continue
+      while (this.pendingAdvanceActors.size > 0) {
+        const pendingActor = this.pendingAdvanceActors.values().next().value as string | null
+        this.pendingAdvanceActors.delete(pendingActor)
+        const queued = this.ports.turns.listAdmittableQueued(
+          pendingActor ?? undefined,
+          QUEUE_SCAN_LIMIT,
+          this.ports.maxConcurrentTurnsPerUser
+        )
+        let admittedCount = 0
+        for (const row of queued) {
+          if (this.deletingConversationIds.has(row.conversationId)) continue
+          if (this.ports.turns.hasActiveForConversation(row.conversationId)) continue
+          if (
+            this.ports.turns.countActiveForActor(row.actorId) >=
+            this.ports.maxConcurrentTurnsPerUser
+          ) {
+            continue
+          }
+          const admittedAt = nowIso()
+          const admitted: TurnRecord = {
+            ...row,
+            state: 'admitted',
+            admittedAt,
+            startedAt: admittedAt,
+            stateRevision: row.stateRevision + 1
+          }
+          const current = this.ports.turns.get(row.id)
+          if (!current || current.state !== 'queued') continue
+          this.ports.turns.update(admitted)
+          admittedCount += 1
+          this.publishTurn(admitted, null)
+          const run = this.runAdmittedTurn(admitted.id).catch((error) => {
+            console.error('[conversation] admitted turn crashed outside its error boundary', {
+              turnId: admitted.id,
+              error
+            })
+          })
+          this.activeTurnPromises.set(admitted.id, run)
+          void run.then(() => this.activeTurnPromises.delete(admitted.id))
         }
-        const admittedAt = nowIso()
-        const admitted: TurnRecord = {
-          ...row,
-          state: 'admitted',
-          admittedAt,
-          startedAt: admittedAt,
-          stateRevision: row.stateRevision + 1
+        if (pendingActor === null && queued.length === QUEUE_SCAN_LIMIT && admittedCount > 0) {
+          this.pendingAdvanceActors.add(null)
         }
-        // Optimistic CAS via revision check
-        const current = this.ports.turns.get(row.id)
-        if (!current || current.state !== 'queued') continue
-        this.ports.turns.update(admitted)
-        this.publishTurn(admitted, null)
-        void this.runAdmittedTurn(admitted.id)
       }
     } finally {
       this.advancing = false
@@ -372,8 +478,8 @@ export class ConversationApplication {
       }
       this.ports.turns.update(failed)
       this.publishTurn(failed, null)
-      this.ports.realtime.publish(conversationTurnTopic(turn.id), 'turn.failed', {
-        turn: toTurnDto(failed)
+      this.publishRealtime(conversationTurnTopic(turn.id), 'turn.failed', {
+        turn: toRealtimeTurnDto(failed)
       })
     }
   }
@@ -399,6 +505,13 @@ export class ConversationApplication {
 
     const controller = new AbortController()
     this.abortControllers.set(turnId, controller)
+    let timedOut = false
+    const turnTimeout = setTimeout(() => {
+      timedOut = true
+      controller.abort('conversation.turn_timeout')
+      void this.ports.agentRuntime.abort(turnId, 'conversation.turn_timeout')
+    }, MAX_CONVERSATION_TURN_MS)
+    turnTimeout.unref?.()
     let leaseId: string | null = null
     let releaseSystemMcp: (() => void) | null = null
 
@@ -466,31 +579,33 @@ export class ConversationApplication {
         throw new ConversationValidationError('One or more attachments were not found')
       }
 
-      this.ports.messages.insert({
-        id: userMessageId,
-        conversationId: conversation.id,
-        turnId,
-        role: 'user',
-        kind: 'text',
-        content: turn.inputText,
-        providerCode: turn.providerCode,
-        model: null,
-        thinkingText: null,
-        thinkingDurationMs: null,
-        createdAt: userCreatedAt,
-        attachments: resolvedAttachments.attachments
+      this.ports.transaction(() => {
+        this.ports.messages.insert({
+          id: userMessageId,
+          conversationId: conversation.id,
+          turnId,
+          role: 'user',
+          kind: 'text',
+          content: turn.inputText,
+          providerCode: turn.providerCode,
+          model: null,
+          thinkingText: null,
+          thinkingDurationMs: null,
+          createdAt: userCreatedAt,
+          attachments: resolvedAttachments.attachments
+        })
+        if (resolvedAttachments.attachments.length > 0) {
+          this.ports.messages.insertAttachments(
+            resolvedAttachments.attachments.map((att) => ({
+              ...att,
+              messageId: userMessageId,
+              conversationId: conversation.id,
+              createdAt: userCreatedAt
+            }))
+          )
+        }
       })
-      if (resolvedAttachments.attachments.length > 0) {
-        this.ports.messages.insertAttachments(
-          resolvedAttachments.attachments.map((att) => ({
-            ...att,
-            messageId: userMessageId,
-            conversationId: conversation.id,
-            createdAt: userCreatedAt
-          }))
-        )
-      }
-      this.ports.realtime.publish(conversationTopic(conversation.id), 'message.committed', {
+      this.publishRealtime(conversationTopic(conversation.id), 'message.committed', {
         message: toMessageDto({
           id: userMessageId,
           conversationId: conversation.id,
@@ -521,28 +636,30 @@ export class ConversationApplication {
           stateRevision: conversation.stateRevision + 1
         }
         this.ports.conversations.update(updatedConv)
-        this.ports.realtime.publish(conversationTopic(conversation.id), 'conversation.changed', {
+        this.publishRealtime(conversationTopic(conversation.id), 'conversation.changed', {
           conversation: toConversationDto(updatedConv)
         })
       }
-
-      const history = this.ports.messages.list(conversation.id, MAX_HISTORY_MESSAGES)
-      const policy = contextPolicyFor('conversation', capabilityProfile)
-      const historyBlock = policy.requiresHistorySeed
-        ? history
-            .filter((m) => m.id !== userMessageId)
-            .map((m) => `${m.role}: ${m.content}`)
-            .join('\n')
-        : ''
-      const basePrompt = historyBlock ? `${historyBlock}\nuser: ${turn.inputText}` : turn.inputText
-      const prompt = resolvedAttachments.promptAppendix
-        ? `${basePrompt}\n\n${resolvedAttachments.promptAppendix}`
-        : basePrompt
 
       const scopeId = buildConversationScopeId(
         conversation.id,
         turn.providerCode as RuntimeProviderCode
       )
+      const history = this.ports.messages
+        .list(conversation.id, MAX_HISTORY_MESSAGES)
+        .filter((message) => message.id !== userMessageId)
+      const policy = contextPolicyFor('conversation', capabilityProfile)
+      const scope = policy.sessionReusable
+        ? await this.ports.agentRuntime.inspectScope(scopeId)
+        : null
+      const canResumeProviderSession = Boolean(scope?.binding?.providerSessionId)
+      const historyBlock =
+        policy.requiresHistorySeed || !canResumeProviderSession ? buildBoundedHistory(history) : ''
+      const basePrompt = historyBlock ? `${historyBlock}\nuser: ${turn.inputText}` : turn.inputText
+      const prompt = resolvedAttachments.promptAppendix
+        ? `${basePrompt}\n\n${resolvedAttachments.promptAppendix}`
+        : basePrompt
+
       let reply = ''
       let thinking = ''
       let thinkingStarted = 0
@@ -600,27 +717,47 @@ export class ConversationApplication {
           }
           this.ports.turns.update(cancelled)
           this.publishTurn(cancelled, null)
-          this.ports.realtime.publish(conversationTurnTopic(turnId), 'turn.cancelled', {
-            turn: toTurnDto(cancelled)
+          this.publishRealtime(conversationTurnTopic(turnId), 'turn.cancelled', {
+            turn: toRealtimeTurnDto(cancelled)
           })
           return
         }
         if (event.type === 'text_delta') {
+          if (reply.length + event.text.length > MAX_ASSISTANT_REPLY_CHARS) {
+            reply = truncateOutput(`${reply}${event.text}`, MAX_ASSISTANT_REPLY_CHARS)
+            await this.ports.agentRuntime.abort(turnId, 'conversation.output_limit')
+            break
+          }
           reply += event.text
-          this.ports.realtime.publish(conversationTurnTopic(turnId), 'assistant.text.delta', {
+          this.publishRealtime(conversationTurnTopic(turnId), 'assistant.text.delta', {
             content: event.text
           })
         } else if (event.type === 'thinking_delta') {
           if (!thinkingStarted) thinkingStarted = Date.now()
+          if (thinking.length + event.text.length > MAX_ASSISTANT_THINKING_CHARS) {
+            thinking = truncateOutput(`${thinking}${event.text}`, MAX_ASSISTANT_THINKING_CHARS)
+            await this.ports.agentRuntime.abort(turnId, 'conversation.thinking_limit')
+            break
+          }
           thinking += event.text
-          this.ports.realtime.publish(conversationTurnTopic(turnId), 'assistant.thinking.delta', {
+          this.publishRealtime(conversationTurnTopic(turnId), 'assistant.thinking.delta', {
             content: event.text
           })
         } else if (event.type === 'completed') {
-          reply = event.reply ?? reply
+          reply = truncateOutput(event.reply ?? reply, MAX_ASSISTANT_REPLY_CHARS)
         } else if (event.type === 'failed') {
           throw new Error(event.message)
         }
+      }
+
+      const beforeCommit = this.ports.turns.get(turnId)
+      if (beforeCommit?.state === 'cancelling' || controller.signal.aborted) {
+        if (timedOut) {
+          this.failTurn(beforeCommit ?? running, 'Conversation turn timed out')
+        } else {
+          this.finishCancelled(beforeCommit ?? running, userMessageId)
+        }
+        return
       }
 
       const committing: TurnRecord = {
@@ -629,24 +766,8 @@ export class ConversationApplication {
         userMessageId,
         stateRevision: running.stateRevision + 1
       }
-      this.ports.turns.update(committing)
-
       const assistantId = newId('msg')
       const assistantCreatedAt = nowIso()
-      this.ports.messages.insert({
-        id: assistantId,
-        conversationId: conversation.id,
-        turnId,
-        role: 'assistant',
-        kind: 'text',
-        content: reply,
-        providerCode: turn.providerCode,
-        model: null,
-        thinkingText: thinking || null,
-        thinkingDurationMs: thinkingStarted ? Date.now() - thinkingStarted : null,
-        createdAt: assistantCreatedAt
-      })
-
       const completed: TurnRecord = {
         ...committing,
         state: 'completed',
@@ -654,16 +775,33 @@ export class ConversationApplication {
         completedAt: nowIso(),
         stateRevision: committing.stateRevision + 1
       }
-      this.ports.turns.update(completed)
+      this.ports.transaction(() => {
+        this.ports.turns.update(committing)
+        this.ports.messages.insert({
+          id: assistantId,
+          conversationId: conversation.id,
+          turnId,
+          role: 'assistant',
+          kind: 'text',
+          content: reply,
+          providerCode: turn.providerCode,
+          model: null,
+          thinkingText: thinking || null,
+          thinkingDurationMs: thinkingStarted ? Date.now() - thinkingStarted : null,
+          createdAt: assistantCreatedAt
+        })
+        this.ports.turns.update(completed)
+        const currentConversation = this.ports.conversations.get(conversation.id)
+        if (!currentConversation) throw new Error('Conversation disappeared while committing')
+        const touchedAt = nowIso()
+        this.ports.conversations.update({
+          ...currentConversation,
+          lastUsedAt: touchedAt,
+          updatedAt: touchedAt
+        })
+      })
 
-      const touched = {
-        ...this.ports.conversations.get(conversation.id)!,
-        lastUsedAt: nowIso(),
-        updatedAt: nowIso()
-      }
-      this.ports.conversations.update(touched)
-
-      this.ports.realtime.publish(conversationTopic(conversation.id), 'message.committed', {
+      this.publishRealtime(conversationTopic(conversation.id), 'message.committed', {
         message: toMessageDto({
           id: assistantId,
           conversationId: conversation.id,
@@ -679,27 +817,20 @@ export class ConversationApplication {
         })
       })
       this.publishTurn(completed, null)
-      this.ports.realtime.publish(conversationTurnTopic(turnId), 'turn.completed', {
-        turn: toTurnDto(completed)
+      this.publishRealtime(conversationTurnTopic(turnId), 'turn.completed', {
+        turn: toRealtimeTurnDto(completed)
       })
     } catch (error) {
       const latest = this.ports.turns.get(turnId)
-      if (latest?.state === 'cancelling' || controller.signal.aborted) {
-        const cancelled = {
-          ...(latest ?? running),
-          state: 'cancelled' as const,
-          completedAt: nowIso(),
-          stateRevision: (latest ?? running).stateRevision + 1
-        }
-        this.ports.turns.update(cancelled)
-        this.publishTurn(cancelled, null)
-        this.ports.realtime.publish(conversationTurnTopic(turnId), 'turn.cancelled', {
-          turn: toTurnDto(cancelled)
-        })
+      if (timedOut) {
+        this.failTurn(latest ?? running, 'Conversation turn timed out')
+      } else if (latest?.state === 'cancelling' || controller.signal.aborted) {
+        this.finishCancelled(latest ?? running)
       } else {
         this.failTurn(latest ?? running, error instanceof Error ? error.message : String(error))
       }
     } finally {
+      clearTimeout(turnTimeout)
       releaseSystemMcp?.()
       if (leaseId) this.ports.leases.release(leaseId)
       if (this.abortControllers.get(turnId) === controller) this.abortControllers.delete(turnId)
@@ -717,14 +848,40 @@ export class ConversationApplication {
     }
     this.ports.turns.update(failed)
     this.publishTurn(failed, null)
-    this.ports.realtime.publish(conversationTurnTopic(turn.id), 'turn.failed', {
-      turn: toTurnDto(failed)
+    this.publishRealtime(conversationTurnTopic(turn.id), 'turn.failed', {
+      turn: toRealtimeTurnDto(failed)
+    })
+  }
+
+  private finishCancelled(turn: TurnRecord, userMessageId?: string): void {
+    const cancelled: TurnRecord = {
+      ...turn,
+      state: 'cancelled',
+      completedAt: nowIso(),
+      stateRevision: turn.stateRevision + 1,
+      ...(userMessageId ? { userMessageId } : {})
+    }
+    this.ports.turns.update(cancelled)
+    this.publishTurn(cancelled, null)
+    this.publishRealtime(conversationTurnTopic(turn.id), 'turn.cancelled', {
+      turn: toRealtimeTurnDto(cancelled)
     })
   }
 
   private publishTurn(turn: TurnRecord, queuePosition: number | null): void {
-    const dto = toTurnDto(turn, queuePosition)
-    this.ports.realtime.publish(conversationTurnTopic(turn.id), 'turn.changed', { turn: dto })
+    this.publishRealtime(conversationTurnTopic(turn.id), 'turn.changed', {
+      turn: toRealtimeTurnDto(turn, queuePosition)
+    })
+  }
+
+  private publishRealtime(topic: string, event: string, payload: Record<string, unknown>): void {
+    try {
+      this.ports.realtime.publish(topic, event, payload)
+    } catch (error) {
+      // Realtime delivery is secondary to the durable command state. A transient
+      // event-log/fanout failure must never strand an accepted turn.
+      console.error('[conversation] realtime publish failed', { topic, event, error })
+    }
   }
 
   private requireOwned(actor: Actor, conversationId: string): ConversationRecord {

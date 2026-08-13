@@ -19,6 +19,7 @@ Drive image + local-corpus directory references through Design Draft → Plannin
 11. Report: `draftId`, `attachmentId`, `directoryReferenceId`, planning/job identifiers, `localCorpusPath`.
 
 ## Forbidden
+
 - Retired `create_task` turns / wizard APIs
 - Leaking fixture answer text into prompts
 - Exceeding 4 clarification chat turns

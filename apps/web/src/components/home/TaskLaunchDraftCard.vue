@@ -6,7 +6,6 @@ import type { ConversationCore, ConversationMessage } from '@renderer/api/conver
 import {
   confirmDraftMessage,
   deleteDraftReference,
-  fetchLatestThreadJob,
   importDraftReferences,
   launchJobFromDraft,
   unlockDraftForEdit,
@@ -18,6 +17,7 @@ import {
   uploadDraftReferences
 } from '@renderer/api/jobs'
 import { getDesignDraft } from '@renderer/api/design'
+import { loadLatestConversationPlan } from '@renderer/api/design-workspace'
 import AttachmentPickerButton from '@renderer/components/home/AttachmentPickerButton.vue'
 import LocalCorpusPickerDialog from '@renderer/components/create/LocalCorpusPickerDialog.vue'
 import Button from '@renderer/components/ui/Button.vue'
@@ -186,7 +186,7 @@ async function syncLinkedJob(): Promise<void> {
       linkedJobId.value = null
       return
     }
-    const res = await fetchLatestThreadJob(props.threadId)
+    const res = await loadLatestConversationPlan(props.threadId)
     const job = res.data.job
     if (job?.draftMessageId === props.draftId && job.status !== 'cancelled') {
       linkedJobId.value = job.id

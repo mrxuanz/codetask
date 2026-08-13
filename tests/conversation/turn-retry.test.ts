@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors/turn-error'
 import {
   isInfraTurnError,
   isRetryableSandboxError,
   isRetryableTurnError,
   normalizeTurnError
-} from '../../src/shared/turn-errors.ts'
+} from '@codetask/contracts/turn-errors'
 import { turnRetryDelayMs } from '../../src/server/agent-runtime/retry'
 import { SandboxError } from '../../src/server/sandbox/types'
 

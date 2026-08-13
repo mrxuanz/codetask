@@ -1,55 +1,55 @@
 import type { ExecutionTreeSnapshot } from '@codetask/contracts'
 import { newId } from '../../shared.ts'
 import { buildTreeFromOutline } from './planning.ts'
+import type { PlannerRegisteredPlan } from '../mcp/types.ts'
 
 /** Legacy planner MCP outline + contexts → Design ExecutionTreeSnapshot (stable UUID node ids). */
 export function registeredPlanToExecutionTree(input: {
   planningSessionId: string
-  plan: {
-    milestones: Array<{
-      title?: string | undefined
-      description?: string | undefined
-      successCriteria?: string | undefined
-      slices: Array<{
-        title?: string | undefined
-        description?: string | undefined
-        successCriteria: string
-        tasks: Array<{
-          title?: string | undefined
-          description?: string | undefined
-          taskKind: string
-          abilityCode?: string | undefined
-          referenceIds?: string[] | undefined
-          dependsOnTaskRefs?: string[] | undefined
-          successCriteria?: string | undefined
-          canRunInParallel?: boolean | undefined
-        }>
-      }>
-    }>
-  }
+  plan: PlannerRegisteredPlan
   contexts: Map<string, { taskTitle: string; content: string }>
   defaultCoreCode: string
 }): ExecutionTreeSnapshot {
-  const coordToId = new Map<string, string>()
+  const milestoneIds = input.plan.milestones.map(() => newId('ms'))
+  const sliceCoordToId = new Map<string, string>()
+  const taskCoordToId = new Map<string, string>()
+
+  input.plan.milestones.forEach((milestone, mIdx) => {
+    milestone.slices.forEach((slice, sIdx) => {
+      sliceCoordToId.set(`m${mIdx + 1}-s${sIdx + 1}`, newId('sl'))
+      slice.tasks.forEach((_task, tIdx) => {
+        taskCoordToId.set(`m${mIdx + 1}-s${sIdx + 1}-t${tIdx + 1}`, newId('tk'))
+      })
+    })
+  })
+
+  const requireId = (ids: Map<string, string>, ref: string): string => {
+    const id = ids.get(ref.trim().toLowerCase())
+    if (!id) throw new Error(`Planner dependency was not normalized: ${ref}`)
+    return id
+  }
 
   const milestones = input.plan.milestones.map((milestone, mIdx) => {
-    const milestoneId = newId('ms')
+    const milestoneId = milestoneIds[mIdx]!
     return {
       id: milestoneId,
       title: milestone.title?.trim() || `Milestone ${mIdx + 1}`,
       description: milestone.description?.trim() || '',
       successCriteria: milestone.successCriteria?.trim() || 'Milestone complete',
       slices: milestone.slices.map((slice, sIdx) => {
-        const sliceId = newId('sl')
+        const sliceCoord = `m${mIdx + 1}-s${sIdx + 1}`
+        const sliceId = requireId(sliceCoordToId, sliceCoord)
         return {
           id: sliceId,
           title: slice.title?.trim() || `Slice ${sIdx + 1}`,
           description: slice.description?.trim() || '',
           successCriteria: slice.successCriteria,
+          dependsOnSliceIds: (slice.dependsOnSliceRefs ?? []).map((ref) =>
+            requireId(sliceCoordToId, ref)
+          ),
           tasks: slice.tasks.map((task, tIdx) => {
             const coord = `m${mIdx + 1}-s${sIdx + 1}-t${tIdx + 1}`
-            const taskId = newId('tk')
-            coordToId.set(coord, taskId)
+            const taskId = requireId(taskCoordToId, coord)
             const context = input.contexts.get(coord)
             const taskSuccess = task.successCriteria?.trim()
             return {
@@ -62,9 +62,11 @@ export function registeredPlanToExecutionTree(input: {
               contextMarkdown: context?.content ?? '',
               successCriteria: taskSuccess || slice.successCriteria,
               referenceIds: task.referenceIds ?? [],
-              dependsOnTaskIds: (task.dependsOnTaskRefs ?? [])
-                .map((ref) => coordToId.get(ref))
-                .filter((id): id is string => Boolean(id)),
+              referenceReason: task.referenceReason?.trim() ?? '',
+              requiredInputs: task.requiredInputs ?? [],
+              dependsOnTaskIds: (task.dependsOnTaskRefs ?? []).map((ref) =>
+                requireId(taskCoordToId, ref)
+              ),
               canRunInParallel: Boolean(task.canRunInParallel)
             }
           })
@@ -72,24 +74,6 @@ export function registeredPlanToExecutionTree(input: {
       })
     }
   })
-
-  // Second pass: dependsOn may reference later-declared coords in same outline.
-  for (let mIdx = 0; mIdx < input.plan.milestones.length; mIdx += 1) {
-    const milestone = input.plan.milestones[mIdx]!
-    for (let sIdx = 0; sIdx < milestone.slices.length; sIdx += 1) {
-      const slice = milestone.slices[sIdx]!
-      for (let tIdx = 0; tIdx < slice.tasks.length; tIdx += 1) {
-        const task = slice.tasks[tIdx]!
-        const coord = `m${mIdx + 1}-s${sIdx + 1}-t${tIdx + 1}`
-        const taskId = coordToId.get(coord)
-        if (!taskId) continue
-        const outTask = milestones[mIdx]!.slices[sIdx]!.tasks[tIdx]!
-        outTask.dependsOnTaskIds = (task.dependsOnTaskRefs ?? [])
-          .map((ref) => coordToId.get(ref))
-          .filter((id): id is string => Boolean(id))
-      }
-    }
-  }
 
   return buildTreeFromOutline({
     planningSessionId: input.planningSessionId,

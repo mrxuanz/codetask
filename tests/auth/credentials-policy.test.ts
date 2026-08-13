@@ -4,7 +4,7 @@ import {
   validateSetupCredentials,
   validateSetupPassword,
   validateSetupUsername
-} from '../../src/shared/auth/credentials-policy'
+} from '@codetask/contracts/auth'
 import { assertSetupCredentialsAllowed } from '../../src/server/auth/credentials-policy'
 import { AppError } from '../../src/server/error'
 

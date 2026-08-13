@@ -26,7 +26,7 @@ import {
 import {
   mergeProvidersConfigOverrides,
   parseProvidersConfigOverrides
-} from '../shared/providers/settings'
+} from '@codetask/provider-spec/settings'
 import { createProviderRegistry } from './providers/composition'
 import { ProviderRuntimeManager } from './providers/lifecycle'
 import { clearProviderAccess, setProviderAccess } from './providers/access'
@@ -156,6 +156,7 @@ export function bootstrapRuntime(options: BootstrapOptions): AppContext {
       config,
       dataDir: options.dataDir,
       db,
+      logger: bootstrapLogger,
       settings,
       masterKeyFile: options.masterKeyFile,
       security: {

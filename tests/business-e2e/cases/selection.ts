@@ -1,14 +1,13 @@
 /**
  * Human-facing suite selection for business e2e.
- * Prefer --part / --case <slug> / npm scripts — not G0/G6-style ids in day-to-day use.
- * Legacy --gate G* and --case G* remain as deprecated aliases.
+ * Prefer --part / --case <business-slug> / npm scripts.
  * Labels: see i18n/messages.ts (--lang zh|en|ja).
  */
 
 import { tCase, tPart, tStep } from '../i18n'
-import { MANIFESTS } from './catalog'
+import { MANIFESTS, type CaseGate } from './catalog'
 
-export type AcceptancePart = 'bootstrap' | 'conversation' | 'draft-job' | 'settings-mcp'
+export type AcceptancePart = CaseGate
 
 /** Supervisor/infra cases share one server auth — run once, not per --providers slot. */
 export function partitionProviderScopedCases(caseIds: readonly string[]): {
@@ -24,60 +23,25 @@ export function partitionProviderScopedCases(caseIds: readonly string[]): {
   return { sharedOnce, perProvider }
 }
 
-/** Friendly slug → internal catalog caseId */
+/** Short compatibility aliases → canonical business case id. */
 export const CASE_ALIASES: Record<string, string> = {
-  // bootstrap / smoke building blocks
-  'build-artifact': 'G0-001',
-  'server-health': 'G0-002',
-  'isolated-dirs': 'G0-003',
-  'isolated-port': 'G0-004',
-  'single-server': 'G0-005',
-  'worker-crash': 'G0-006',
-  setup: 'G1-003',
-  'auth-bearer': 'G1-007',
-  'token-redaction': 'G1-008',
-  'project-thread': 'G2-001',
-
-  // Part A — normal conversation / phase-1 attachment entry
-  'chat-basic': 'G3-001',
-  'chat-create-html': 'CHAT-HTML-001',
-  // legacy aliases first so preferred slugs win CASE_SLUG_BY_ID reverse map
-  'chat-image-ocr': 'CHAT-IMG-001',
-  'chat-image-attachment': 'CHAT-IMG-001',
-
-  // Part B — Design draft smoke (architecture 03)
-  foundation: 'FOUNDATION-FAKE-001',
-  // Friendly aliases → Design smoke (create_task-era cases deleted)
-  'draft-fuzzy': 'DESIGN-DRAFT-001',
-  'draft-staged': 'DESIGN-DRAFT-001',
-  'draft-fields': 'DESIGN-DRAFT-001',
-  'draft-confirm': 'DESIGN-DRAFT-001',
-  'draft-multiturn': 'DESIGN-DRAFT-001',
-  'draft-reference-path-job': 'DESIGN-DRAFT-001',
-  'draft-chat-image-attachment': 'DESIGN-DRAFT-001',
-  'draft-image-ocr': 'DESIGN-DRAFT-001',
-  'notes-search': 'DESIGN-DRAFT-001',
-  'notes-search-oracle-trap': 'DESIGN-DRAFT-001',
-  'job-chat-readonly': 'DESIGN-DRAFT-001',
-  'fixed-opencode-chain': 'DESIGN-DRAFT-001',
-  'full-chain': 'DESIGN-DRAFT-001',
-  // preferred slug last so CASE_SLUG_BY_ID wins
-  'design-draft': 'DESIGN-DRAFT-001',
-
-  // Phase 3 — settings user MCP (conversation / task / verification)
-  'settings-mcp-probe': 'SETTINGS-MCP-001'
+  setup: 'setup-login',
+  'project-thread': 'project-conversation',
+  foundation: 'foundation-probe',
+  'design-draft': 'design-draft-confirm',
+  'draft-confirm': 'design-draft-confirm'
 }
 
-/** Internal id → preferred slug (for CLI / machine logs) */
+/** Canonical ids are already readable slugs; keep this map for report callers. */
 export const CASE_SLUG_BY_ID: Record<string, string> = Object.fromEntries(
-  Object.entries(CASE_ALIASES).map(([slug, id]) => [id, slug])
+  Object.keys(MANIFESTS).map((id) => [id, id])
 )
 
 export function slugForCaseId(caseId: string): string {
   return CASE_SLUG_BY_ID[caseId] ?? caseId
 }
 
-/** Stdout label: localized case name (never print bare G6-001 as scope). */
+/** Stdout label: localized business case name. */
 export function labelForCaseId(caseId: string): string {
   const label = tCase(caseId)
   return label !== caseId ? label : slugForCaseId(caseId)
@@ -92,22 +56,10 @@ export function labelForStep(step: string): string {
 }
 
 export function partForCaseId(caseId: string): AcceptancePart | null {
-  if (caseId.startsWith('G3') || caseId.startsWith('CHAT')) return 'conversation'
-  if (caseId.startsWith('SETTINGS-MCP') || caseId.startsWith('SETTINGS')) return 'settings-mcp'
-  if (
-    caseId.startsWith('DESIGN') ||
-    caseId.startsWith('FOUNDATION') ||
-    caseId.startsWith('DRAFT')
-  ) {
-    return 'draft-job'
-  }
-  if (caseId.startsWith('G0') || caseId.startsWith('G1') || caseId.startsWith('G2')) {
-    return 'bootstrap'
-  }
-  return null
+  return MANIFESTS[caseId]?.gate ?? null
 }
 
-/** e.g. 段B·草案执行树任务 / 笔记搜索·完整闭环 */
+/** e.g. 段B·设计草案确认 / 设计草案·对话澄清后确认 */
 export function scopeLabelForCaseId(caseId: string): string {
   const part = partForCaseId(caseId)
   const caseLabel = labelForCaseId(caseId)
@@ -118,73 +70,48 @@ export function scopeLabelForCaseId(caseId: string): string {
 export const PART_DEFAULT_CASES: Record<AcceptancePart, string[]> = {
   // Infrastructure smoke used before A/B depth
   bootstrap: [
-    'G0-001',
-    'G0-002',
-    'G0-003',
-    'G0-004',
-    'G0-005',
-    'G1-003',
-    'G1-007',
-    'G1-008',
-    'G0-006',
-    'G2-001'
+    'build-artifact',
+    'server-health',
+    'isolated-dirs',
+    'isolated-port',
+    'single-server',
+    'setup-login',
+    'auth-bearer',
+    'token-redaction',
+    'worker-crash',
+    'project-conversation'
   ],
   // Part A / phase 1: ordinary chat (+ attachment when Asset Store lands)
-  conversation: ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001'],
+  conversation: ['chat-basic', 'chat-create-html', 'chat-image-attachment'],
   // Part B: Design draft smoke
-  'draft-job': ['DESIGN-DRAFT-001'],
+  design: ['design-draft-confirm'],
   // Phase 3: settings user MCP probe
-  'settings-mcp': ['SETTINGS-MCP-001']
+  'settings-mcp': ['settings-mcp-probe']
 }
 
 export const SUITE_ALIASES: Record<string, { parts?: AcceptancePart[]; caseIds?: string[] }> = {
   smoke: {
-    caseIds: [
-      'G0-001',
-      'G0-002',
-      'G0-003',
-      'G0-004',
-      'G0-005',
-      'G1-003',
-      'G1-007',
-      'G1-008',
-      'G0-006',
-      'G2-001',
-      'G3-001'
-    ]
+    caseIds: [...PART_DEFAULT_CASES.bootstrap, 'chat-basic']
   },
   conversation: { parts: ['conversation'] },
   chat: { parts: ['conversation'] },
-  'draft-job': { parts: ['draft-job'] },
-  draft: { parts: ['draft-job'] },
-  job: { parts: ['draft-job'] },
-  both: { parts: ['conversation', 'draft-job'] },
-  'a-b': { parts: ['conversation', 'draft-job'] },
-  phases: { parts: ['conversation', 'draft-job', 'settings-mcp'] },
+  design: { parts: ['design'] },
+  draft: { parts: ['design'] },
+  both: { parts: ['conversation', 'design'] },
+  'a-b': { parts: ['conversation', 'design'] },
+  phases: { parts: ['conversation', 'design', 'settings-mcp'] },
   'settings-mcp': { parts: ['settings-mcp'] },
   mcp: { parts: ['settings-mcp'] },
   // Every catalog case (including foundation). Job execution e2e was removed in architecture 03.
   all: {
     caseIds: [
       ...PART_DEFAULT_CASES.bootstrap,
-      'FOUNDATION-FAKE-001',
+      'foundation-probe',
       ...PART_DEFAULT_CASES.conversation,
-      ...PART_DEFAULT_CASES['draft-job'],
+      ...PART_DEFAULT_CASES.design,
       ...PART_DEFAULT_CASES['settings-mcp']
     ]
   }
-}
-
-const LEGACY_GATE_HINT: Record<string, string> = {
-  G0: 'bootstrap (prefer --part bootstrap)',
-  G1: 'bootstrap (prefer --part bootstrap)',
-  G2: 'bootstrap (prefer --part bootstrap)',
-  G3: 'conversation (prefer --part conversation)',
-  G4: 'draft-job (prefer --part draft-job or --case design-draft)',
-  G5: 'draft-job (prefer --part draft-job or --case design-draft)',
-  G6: 'draft-job (prefer --part draft-job or --case design-draft)',
-  G7: 'draft-job (prefer --part draft-job or --case design-draft)',
-  G8: 'draft-job (prefer --part draft-job or --case design-draft)'
 }
 
 export function resolveInternalCaseId(raw: string): string {
@@ -206,8 +133,8 @@ export function parseParts(raw: string | undefined): AcceptancePart[] {
       out.push('conversation')
       continue
     }
-    if (piece === 'b' || piece === 'draft-job' || piece === 'draft' || piece === 'job') {
-      out.push('draft-job')
+    if (piece === 'b' || piece === 'design' || piece === 'draft') {
+      out.push('design')
       continue
     }
     if (piece === 'bootstrap' || piece === 'infra') {
@@ -225,7 +152,7 @@ export function parseParts(raw: string | undefined): AcceptancePart[] {
       continue
     }
     throw new Error(
-      `unknown_part:${piece}:use conversation|draft-job|settings-mcp|bootstrap (or a,b,c)`
+      `unknown_part:${piece}:use conversation|design|settings-mcp|bootstrap (or a,b,c)`
     )
   }
   return [...new Set(out)]
@@ -258,11 +185,6 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
     if (!MANIFESTS[resolved]) {
       throw new Error(`unknown_case:${input.caseId}:use --list for valid case slugs`)
     }
-    if (/^G\d/i.test(input.caseId) && CASE_SLUG_BY_ID[resolved]) {
-      warnings.push(`deprecated_case_id:${input.caseId}:prefer --case ${CASE_SLUG_BY_ID[resolved]}`)
-    } else if (/^G\d/i.test(input.caseId)) {
-      warnings.push(`deprecated_case_id:${input.caseId}:prefer friendly --case slugs (see --list)`)
-    }
     return {
       caseIds: [resolved],
       part: parts.length ? parts : null,
@@ -274,9 +196,7 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
   if (suiteKey) {
     const suite = SUITE_ALIASES[suiteKey]
     if (!suite) {
-      throw new Error(
-        `unknown_suite:${suiteKey}:use smoke|conversation|draft-job|both|all (not G4/G6)`
-      )
+      throw new Error(`unknown_suite:${suiteKey}:use smoke|conversation|design|both|all`)
     }
     if (suite.caseIds) {
       return { caseIds: [...suite.caseIds], part: null, suite: suiteKey, warnings }
@@ -301,9 +221,8 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
     const gateAlias: Record<string, string> = {
       conversation: 'conversation',
       chat: 'conversation',
-      'draft-job': 'draft-job',
-      draft: 'draft-job',
-      job: 'draft-job',
+      design: 'design',
+      draft: 'design',
       'settings-mcp': 'settings-mcp',
       mcp: 'settings-mcp',
       phases: 'phases',
@@ -315,10 +234,8 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
     if (mapped && SUITE_ALIASES[mapped]) {
       return resolveSelection({ suite: mapped })
     }
-    if (LEGACY_GATE_HINT[gate]) {
-      warnings.push(`deprecated_gate:${gate}:${LEGACY_GATE_HINT[gate]}`)
-    } else if (/^G\d/i.test(gate)) {
-      warnings.push(`deprecated_gate:${gate}:prefer --part conversation|draft-job or --suite smoke`)
+    if (/^G\d/i.test(gate)) {
+      throw new Error(`legacy_gate_removed:${gate}:use --part or --suite with business names`)
     }
     return { caseIds: [], part: null, suite: null, warnings, legacyGate: gate }
   }
@@ -333,13 +250,7 @@ export function resolveSelection(input: SelectionInput): SelectionResult {
 }
 
 export function formatCaseList(): string {
-  const seenIds = new Set<string>()
-  const preferredEntries: Array<[string, string]> = []
-  for (const id of Object.values(CASE_ALIASES)) {
-    if (seenIds.has(id)) continue
-    seenIds.add(id)
-    preferredEntries.push([slugForCaseId(id), id])
-  }
+  const preferredEntries = Object.keys(MANIFESTS).map((id) => [slugForCaseId(id), id] as const)
   const lines = [
     'Cases (--case <slug>; labels follow --lang zh|en|ja):',
     ...preferredEntries.map(([slug, id]) => {
@@ -349,16 +260,20 @@ export function formatCaseList(): string {
     '',
     'Parts / phases (--part):',
     `  conversation   ${labelForPart('conversation')}  (phase 1)`,
-    `  draft-job      ${labelForPart('draft-job')}  (phase 2)`,
+    `  design         ${labelForPart('design')}  (phase 2)`,
     `  settings-mcp   ${labelForPart('settings-mcp')}  (phase 3)`,
     `  bootstrap      ${labelForPart('bootstrap')}`,
     '',
     'Suites (--suite):',
-    '  smoke | conversation | draft-job | both | phases | all',
-    '  all = bootstrap + foundation + conversation + draft-job + settings-mcp',
+    '  smoke | conversation | design | both | phases | all',
+    '  all = bootstrap + foundation + conversation + design + settings-mcp',
     '',
     'Providers (--providers):',
     '  opencode | cursor | claude | codex | all',
+    '',
+    'Outer operator (--operator; --driver is an alias):',
+    '  manifest | fake | opencode(local-server) | codex(SDK) | claude(SDK) | cursor(ACP)',
+    '  operator = who operates CodeTask; providers = the SDK/ACP core inside CodeTask',
     '',
     'Language: --lang zh|en|ja  (or BUSINESS_E2E_LANG)'
   ]

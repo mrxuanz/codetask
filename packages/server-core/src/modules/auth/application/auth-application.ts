@@ -1,4 +1,8 @@
 import { randomBytes, timingSafeEqual } from 'crypto'
+import {
+  PASSWORD_MAX_LENGTH,
+  USERNAME_MAX_LENGTH
+} from '@codetask/contracts/auth/credentials-policy'
 import type { AuthUserRecord } from '../domain/account.ts'
 import type { AuthPrincipal } from '../domain/actor.ts'
 import { AuthError } from '../domain/auth-errors.ts'
@@ -130,14 +134,13 @@ export class AuthApplication {
 
   async setup(username: string, password: string): Promise<SessionIssue> {
     const trimmedUsername = username.trim()
-    const trimmedPassword = password.trim()
-    if (!trimmedUsername || !trimmedPassword) {
+    if (!trimmedUsername || !password) {
       throw AuthError.badRequest(
         'auth.username_password_required',
         'Username and password are required'
       )
     }
-    this.credentials.assertAllowed(trimmedUsername, trimmedPassword)
+    this.credentials.assertAllowed(trimmedUsername, password)
     if (this.store.getUser()) {
       throw AuthError.conflict('auth.already_initialized', 'Account already initialized')
     }
@@ -148,7 +151,7 @@ export class AuthApplication {
       user = this.store.createUser({
         username: trimmedUsername,
         normalizedUsername: normalizeUsername(trimmedUsername),
-        passwordHash: await this.passwords.hash(trimmedPassword),
+        passwordHash: await this.passwords.hash(password),
         nowMs
       })
     } catch (error) {
@@ -220,6 +223,15 @@ export class AuthApplication {
   }
 
   async login(options: LoginOptions): Promise<SessionIssue> {
+    if (
+      options.username.length > USERNAME_MAX_LENGTH ||
+      options.password.length > PASSWORD_MAX_LENGTH ||
+      options.clientIp.length > 256 ||
+      (options.captchaId?.length ?? 0) > 64 ||
+      (options.captchaAnswer?.length ?? 0) > 16
+    ) {
+      throw AuthError.badRequest('auth.invalid_payload', 'Invalid authentication request body')
+    }
     const normalizedUsername = normalizeUsername(options.username)
     if (!normalizedUsername || !options.password) {
       throw AuthError.badRequest(
@@ -231,6 +243,18 @@ export class AuthApplication {
     const nowMs = this.nowMs()
     const subjectDigest = this.digester.digest('username', normalizedUsername)
     const scopeDigest = this.digester.digest('ip', options.clientIp)
+    const ipThrottle = this.loginThrottle(`login-ip:${scopeDigest}`, nowMs)
+    ipThrottle.requestCount += 1
+    ipThrottle.updatedAtMs = nowMs
+    this.store.putThrottle(ipThrottle)
+    if (ipThrottle.requestCount > LoginPolicy.loginIpRequestLimit) {
+      throw AuthError.rateLimited('auth.rate_limited', 'Too many requests', {
+        retryAfterSec: Math.ceil(
+          (ipThrottle.windowStartedAtMs + LoginPolicy.throttleWindowMs - nowMs) / 1000
+        )
+      })
+    }
+
     const throttleKey = `login:${scopeDigest}:${subjectDigest}`
     const throttle = this.loginThrottle(throttleKey, nowMs)
     throttle.requestCount += 1
@@ -288,7 +312,11 @@ export class AuthApplication {
       )
     }
 
-    this.store.deleteThrottle(throttleKey)
+    throttle.failureCount = 0
+    throttle.captchaRequired = false
+    throttle.lockedUntilMs = null
+    throttle.updatedAtMs = nowMs
+    this.store.putThrottle(throttle)
     this.store.deleteChallengeForScope(captchaScope)
     const result = this.issueSession(user)
     this.store.audit({
@@ -350,7 +378,7 @@ export class AuthApplication {
     }
     this.credentials.assertAllowed(user.username, newPassword)
     const nowMs = this.nowMs()
-    this.store.updatePassword(user.id, await this.passwords.hash(newPassword.trim()), nowMs)
+    this.store.updatePassword(user.id, await this.passwords.hash(newPassword), nowMs)
     this.store.revokeUserSessions(user.id, nowMs, 'password_changed')
     const updated = this.store.getUser()
     if (!updated) {
@@ -424,10 +452,6 @@ export class AuthApplication {
     const valid = safeEqual(actual, challenge.answerDigest)
     this.store.recordChallengeAttempt(id, valid ? nowMs : undefined)
     return valid
-  }
-
-  verifyCaptchaForClient(id: string, answer: string, clientIp: string): boolean {
-    return this.verifyCaptcha(id, answer, `login:${this.digester.digest('ip', clientIp)}`)
   }
 
   cleanup(): void {

@@ -1,13 +1,6 @@
 {
   "titleText": "Orders",
-  "numbers": [
-    1
-  ],
-  "columns": [
-    "id",
-    "amount"
-  ],
-  "colorLabels": [
-    "green"
-  ]
+  "numbers": [1],
+  "columns": ["id", "amount"],
+  "colorLabels": ["green"]
 }

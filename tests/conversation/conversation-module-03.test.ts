@@ -3,12 +3,14 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
+import { Hono } from 'hono'
 import {
   buildConversationScopeId,
   createAgentRuntime,
   toCanonicalProviderCode
 } from '@codetask/agent-runtime'
 import { composeConversationModule } from '@codetask/server-core'
+import type { ConversationHttpEnv } from '../../packages/server-core/src/modules/conversation/http/conversation-routes.ts'
 import { migration048ConversationModuleTables } from '../../packages/database/src/migrations/conversation.ts'
 
 const root = join(import.meta.dirname, '../..')
@@ -106,6 +108,76 @@ describe('conversation module (03)', () => {
     assert.ok(seenLease?.ownerId)
   })
 
+  it('resumes same-provider history and seeds bounded DB history after provider switch', async () => {
+    const db = new Database(':memory:')
+    migration048ConversationModuleTables.up(db)
+    const turns: Array<{
+      provider: string
+      prompt: string
+      runtimeSessionId: string | null | undefined
+    }> = []
+    const runtime = createAgentRuntime({
+      async *streamTurn(input) {
+        turns.push({
+          provider: input.provider,
+          prompt: input.prompt,
+          runtimeSessionId: input.runtimeSessionId
+        })
+        const reply = `reply-${turns.length}`
+        yield {
+          type: 'completed',
+          reply,
+          runtimeSessionId: `${input.provider}-session`
+        }
+      }
+    })
+    const module = composeConversationModule({
+      db,
+      agentRuntime: runtime,
+      async resolveWorkspaceRoot({ projectId }) {
+        return { projectId, workspaceRoot: '/tmp/ws', canonicalWorkspaceRoot: '/tmp/ws' }
+      },
+      leases: { tryAcquireExclusive: () => null, release: () => {} },
+      realtime: { publish: () => {} },
+      maxConcurrentTurnsPerUser: 1
+    })
+    const actor = { userId: 'alice', sessionId: 'switch-history' }
+    const conversation = module.app.create(actor, 'proj-1', {
+      title: 'Provider switch',
+      providerCode: 'codex'
+    })
+    const runTurn = async (message: string, idempotencyKey: string): Promise<void> => {
+      const accepted = module.app.enqueueTurn(actor, conversation.id, {
+        message,
+        attachmentIds: [],
+        idempotencyKey
+      })
+      await module.advanceQueue(actor.userId)
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const state = module.app.getTurn(actor, conversation.id, accepted.turnId).state
+        if (state === 'completed') return
+        if (state === 'failed' || state === 'cancelled') assert.fail(`turn ended as ${state}`)
+        await new Promise((resolve) => setTimeout(resolve, 2))
+      }
+      assert.fail('turn did not complete')
+    }
+
+    await runTurn('first question', 'switch-history-1')
+    await runTurn('second question', 'switch-history-2')
+    await module.app.switchProvider(actor, conversation.id, 'opencode')
+    await runTurn('third question', 'switch-history-3')
+
+    assert.equal(turns[0]?.prompt, 'first question')
+    assert.equal(turns[0]?.runtimeSessionId, null)
+    assert.equal(turns[1]?.prompt, 'second question')
+    assert.equal(turns[1]?.runtimeSessionId, 'codex-session')
+    assert.equal(turns[2]?.runtimeSessionId, null)
+    assert.match(turns[2]?.prompt ?? '', /user \(codex\): first question/)
+    assert.match(turns[2]?.prompt ?? '', /assistant \(codex\): reply-1/)
+    assert.match(turns[2]?.prompt ?? '', /user: third question$/)
+    db.close()
+  })
+
   it('rejects draft/plan fields on turn body via route validation helper', () => {
     const source = readFileSync(
       join(root, 'packages/server-core/src/modules/conversation/http/conversation-routes.ts'),
@@ -113,6 +185,62 @@ describe('conversation module (03)', () => {
     )
     assert.match(source, /Draft\/Plan fields are not accepted/)
     assert.doesNotMatch(source, /generateDraft:\s*true/)
+  })
+
+  it('rejects malformed and structurally invalid HTTP request bodies', async () => {
+    const db = new Database(':memory:')
+    migration048ConversationModuleTables.up(db)
+    const runtime = createAgentRuntime({
+      async *streamTurn() {
+        yield { type: 'completed', reply: '', runtimeSessionId: null }
+      }
+    })
+    const module = composeConversationModule({
+      db,
+      agentRuntime: runtime,
+      async resolveWorkspaceRoot({ projectId }) {
+        return { projectId, workspaceRoot: '/tmp/ws', canonicalWorkspaceRoot: '/tmp/ws' }
+      },
+      leases: { tryAcquireExclusive: () => null, release: () => {} },
+      realtime: { publish: () => {} }
+    })
+    const http = new Hono<ConversationHttpEnv>()
+    http.use('*', async (c, next) => {
+      c.set('actor', { userId: 'alice', sessionId: 's1' })
+      c.set('requestId', 'request-validation-test')
+      await next()
+    })
+    http.route('/', module.routes)
+
+    const malformed = await http.request('/projects/proj-1/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{'
+    })
+    assert.equal(malformed.status, 400)
+    assert.equal((await malformed.json()).requestId, 'request-validation-test')
+
+    const wrongType = await http.request('/projects/proj-1/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 42 })
+    })
+    assert.equal(wrongType.status, 400)
+
+    const unexpectedField = await http.request('/projects/proj-1/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generateDraft: true })
+    })
+    assert.equal(unexpectedField.status, 400)
+
+    const oversizedTitle = await http.request('/projects/proj-1/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'x'.repeat(257) })
+    })
+    assert.equal(oversizedTitle.status, 400)
+    db.close()
   })
 
   it('paginates message history with a stable timestamp and id cursor', () => {
@@ -202,6 +330,114 @@ describe('conversation module (03)', () => {
     assert.equal(turn.lastError?.code, 'runtime.interrupted')
     assert.ok(turn.completedAt)
     assert.ok(events.includes('turn.failed'))
+  })
+
+  it('keeps durable turn events small and bounds each actor queue', () => {
+    const db = new Database(':memory:')
+    migration048ConversationModuleTables.up(db)
+    const eventBytes: number[] = []
+    const runtime = createAgentRuntime({
+      async *streamTurn() {
+        yield { type: 'completed', reply: '', runtimeSessionId: null }
+      }
+    })
+    const module = composeConversationModule({
+      db,
+      agentRuntime: runtime,
+      async resolveWorkspaceRoot({ projectId }) {
+        return { projectId, workspaceRoot: '/tmp/ws', canonicalWorkspaceRoot: '/tmp/ws' }
+      },
+      leases: { tryAcquireExclusive: () => null, release: () => {} },
+      realtime: {
+        publish(_topic, event, payload) {
+          const bytes = Buffer.byteLength(JSON.stringify(payload), 'utf8')
+          if (event.startsWith('turn.')) eventBytes.push(bytes)
+          if (bytes > 32 * 1024) throw new Error('realtime.payload_too_large')
+        }
+      },
+      maxConcurrentTurnsPerUser: 0
+    })
+    const actor = { userId: 'queue-owner', sessionId: 's1' }
+    const conversation = module.app.create(actor, 'proj-1', { title: 'Bounded queue' })
+    const largeInput = 'x'.repeat(128 * 1024)
+
+    const accepted = module.app.enqueueTurn(actor, conversation.id, {
+      message: largeInput,
+      attachmentIds: [],
+      idempotencyKey: 'bounded-0'
+    })
+    assert.equal(accepted.status, 'queued')
+    assert.equal(module.app.getTurn(actor, conversation.id, accepted.turnId).inputText, largeInput)
+    assert.ok(eventBytes.every((bytes) => bytes < 32 * 1024))
+
+    for (let index = 1; index < 100; index += 1) {
+      module.app.enqueueTurn(actor, conversation.id, {
+        message: `queued-${index}`,
+        attachmentIds: [],
+        idempotencyKey: `bounded-${index}`
+      })
+    }
+    assert.throws(
+      () =>
+        module.app.enqueueTurn(actor, conversation.id, {
+          message: 'one too many',
+          attachmentIds: [],
+          idempotencyKey: 'bounded-overflow'
+        }),
+      /queue is full/i
+    )
+    db.close()
+  })
+
+  it('waits for an active provider turn before deleting a conversation', async () => {
+    const db = new Database(':memory:')
+    migration048ConversationModuleTables.up(db)
+    let providerStopped = false
+    let scopeClosed = false
+    const runtime = createAgentRuntime({
+      async *streamTurn(_input, options) {
+        await new Promise<void>((resolve) => {
+          if (options.signal?.aborted) resolve()
+          else options.signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        providerStopped = true
+        yield { type: 'completed', reply: '', runtimeSessionId: null }
+      },
+      async closeScopeImpl() {
+        scopeClosed = true
+      }
+    })
+    const module = composeConversationModule({
+      db,
+      agentRuntime: runtime,
+      async resolveWorkspaceRoot({ projectId }) {
+        return { projectId, workspaceRoot: '/tmp/ws', canonicalWorkspaceRoot: '/tmp/ws' }
+      },
+      leases: { tryAcquireExclusive: () => null, release: () => {} },
+      realtime: { publish: () => {} }
+    })
+    const actor = { userId: 'alice', sessionId: 's1' }
+    const conversation = module.app.create(actor, 'proj-1', { title: 'Delete safely' })
+    const accepted = module.app.enqueueTurn(actor, conversation.id, {
+      message: 'wait',
+      attachmentIds: [],
+      idempotencyKey: 'delete-active-turn'
+    })
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const state = module.app.getTurn(actor, conversation.id, accepted.turnId).state
+      if (state === 'running') break
+      await new Promise((resolve) => setTimeout(resolve, 2))
+    }
+
+    await module.app.delete(actor, conversation.id)
+    assert.equal(providerStopped, true)
+    assert.equal(scopeClosed, true)
+    const remaining = db
+      .prepare(`SELECT COUNT(*) AS count FROM conversation_turns WHERE conversation_id = ?`)
+      .get(conversation.id) as { count: number }
+    assert.equal(remaining.count, 0)
+    assert.throws(() => module.app.get(actor, conversation.id), /Conversation not found/)
   })
 })
 

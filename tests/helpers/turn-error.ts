@@ -1,5 +1,5 @@
-import type { TurnErrorDto } from '../../src/shared/turn-errors'
-import { coerceTurnErrorField } from '../../src/shared/turn-errors/storage.ts'
+import type { TurnErrorDto } from '@codetask/contracts/turn-errors'
+import { coerceTurnErrorField } from '@codetask/contracts/turn-errors/storage'
 
 export function readTurnErrorCode(value: unknown): string | null {
   if (!value) return null

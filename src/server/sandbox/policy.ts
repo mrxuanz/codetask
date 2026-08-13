@@ -1,6 +1,6 @@
 import { resolve } from 'path'
 import type { AgentRole, SandboxPolicy } from './types'
-import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
+import type { WorkspaceAccessMode } from '@codetask/contracts/workspace-access'
 import { compileSandboxPolicy, canonicalizePath } from './paths'
 
 const PROTECTED_NAMES = ['.agents', '.codex', '.codeteam', '.codetask', '.git'] as const

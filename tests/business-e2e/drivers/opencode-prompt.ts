@@ -6,7 +6,7 @@ import {
   processHostEnvironmentSource
 } from '../../../src/server/host-environment'
 import { DefaultProviderInstallationResolver } from '../../../src/server/providers/installation'
-import type { CommandInvocation } from '../../../src/shared/providers/installation'
+import type { CommandInvocation } from '@codetask/provider-spec/installation'
 import type { OpencodeBudgets } from '../config/timeouts'
 import { TIMEOUTS } from '../config/timeouts'
 import { extractPromptFailure, isMeaningfulSdkError, serializePromptError } from './opencode-errors'
@@ -66,9 +66,10 @@ export async function runIsolatedOpencodePrompt(input: {
       cwd: input.workspaceRoot,
       env,
       windowsHide: true,
-      // The case worker is already a dedicated process group. Keeping OpenCode
-      // inside it lets supervisor cleanup terminate the complete case tree.
-      detached: false
+      // Give the CLI wrapper and any native child it launches their own process
+      // group so cleanup can terminate the complete OpenCode tree without
+      // killing the case worker itself.
+      detached: process.platform !== 'win32'
     }
   ) as ChildProcessWithoutNullStreams
 
@@ -130,7 +131,7 @@ export async function runIsolatedOpencodePrompt(input: {
 
     return { promptResult, url, sessionId, events }
   } finally {
-    longFetch.close()
+    await longFetch.close()
     await stopTree(proc)
   }
 }
@@ -247,7 +248,7 @@ export async function waitForCapabilityReport(
 
 function createBusinessOpencodeFetch(promptMs: number): {
   fetch: typeof globalThis.fetch
-  close(): void
+  close(): Promise<void>
 } {
   const { Agent } = nodeRequire('undici') as {
     Agent: new (options?: {
@@ -271,9 +272,9 @@ function createBusinessOpencodeFetch(promptMs: number): {
     } as RequestInit)) as typeof globalThis.fetch
   return {
     fetch: fetchWithAgent,
-    close() {
+    async close() {
       try {
-        void agent.close()
+        await agent.close()
       } catch {
         /* ignore */
       }
@@ -354,18 +355,58 @@ function pickPort(): Promise<number> {
 }
 
 async function stopTree(proc: ChildProcessWithoutNullStreams): Promise<void> {
-  if (proc.exitCode !== null || proc.signalCode !== null) return
-  if (process.platform === 'win32' && proc.pid) {
+  if (process.platform === 'win32') {
+    if (proc.exitCode !== null || proc.signalCode !== null || !proc.pid) return
     spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], {
       windowsHide: true,
       stdio: 'ignore'
     })
     return
   }
-  proc.kill('SIGTERM')
-  if (await waitForExit(proc, 2_000)) return
-  proc.kill('SIGKILL')
-  await waitForExit(proc, 1_000)
+  const pid = proc.pid
+  if (!pid) return
+  if (!processGroupIsAlive(pid)) return
+  signalProcessGroup(proc, pid, 'SIGTERM')
+  if (await waitForProcessGroupExit(pid, 2_000)) {
+    await waitForExit(proc, 250)
+    return
+  }
+  signalProcessGroup(proc, pid, 'SIGKILL')
+  await Promise.all([waitForProcessGroupExit(pid, 1_000), waitForExit(proc, 1_000)])
+}
+
+function signalProcessGroup(
+  proc: ChildProcessWithoutNullStreams,
+  pid: number,
+  signal: NodeJS.Signals
+): void {
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    try {
+      proc.kill(signal)
+    } catch {
+      /* process already exited */
+    }
+  }
+}
+
+function processGroupIsAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!processGroupIsAlive(pid)) return true
+    await sleep(25)
+  }
+  return !processGroupIsAlive(pid)
 }
 
 function waitForExit(proc: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {

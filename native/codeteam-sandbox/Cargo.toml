@@ -3,6 +3,7 @@ name = "codeteam-sandbox"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 description = "Node native addon (.node) — OS sandbox for Codeteam"
 build = "build.rs"
 
@@ -16,22 +17,22 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-codeteam-sandbox-adapter = { path = "../codeteam-sandbox-adapter" }
+codeteam-sandbox-adapter = { path = "../codeteam-sandbox-adapter", version = "0.1.0" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy" }
-codeteam-sandboxing = { path = "../codeteam-sandboxing" }
+codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy", version = "0.1.0" }
+codeteam-sandboxing = { path = "../codeteam-sandboxing", version = "0.1.0" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy" }
-codeteam-sandboxing = { path = "../codeteam-sandboxing" }
+codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy", version = "0.1.0" }
+codeteam-sandboxing = { path = "../codeteam-sandboxing", version = "0.1.0" }
 codeteam-utils-absolute-path = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 base64 = "0.22"
-codeteam-windows-sandbox = { path = "../codeteam-windows-sandbox" }
-codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy" }
+codeteam-windows-sandbox = { path = "../codeteam-windows-sandbox", version = "0.1.0" }
+codeteam-sandbox-policy = { path = "../codeteam-sandbox-policy", version = "0.1.0" }
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Security",

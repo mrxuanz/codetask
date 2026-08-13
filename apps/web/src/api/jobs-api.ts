@@ -1,13 +1,19 @@
 /**
  * Execution jobs HTTP client — canonical `/api/jobs` surface.
  */
-import type { JobCommandBody, JobCommandResult, JobDetail, JobSummary } from '@codetask/contracts'
+import type {
+  JobCommandBody,
+  JobCommandResult,
+  JobDetail,
+  JobListResult,
+  JobTreeDto
+} from '@codetask/contracts'
 import { randomUUID } from '@renderer/lib/id'
 import { api } from './client'
 import type { ApiSuccess } from './types'
 
 /** UI job view: Execution JobDetail. Use `.state` (not a deprecated `.status` alias). */
-export type ExecutionJob = JobDetail
+export type ExecutionJob = JobDetail & { tree?: JobTreeDto }
 
 export interface JobsApi {
   fetchJobs(
@@ -15,7 +21,7 @@ export interface JobsApi {
     page?: number,
     limit?: number,
     q?: string
-  ): Promise<ApiSuccess<{ jobs: ExecutionJob[]; total: number }>>
+  ): Promise<ApiSuccess<{ jobs: ExecutionJob[]; total: number; page: number; limit: number }>>
   fetchJob(jobId: string): Promise<ApiSuccess<{ job: ExecutionJob }>>
   pause(
     jobId: string,
@@ -31,7 +37,6 @@ export interface JobsApi {
   cancel(
     jobId: string,
     expectedRevision: number,
-    reasonCode?: string,
     idempotencyKey?: string
   ): Promise<ApiSuccess<{ job: ExecutionJob }>>
   restartExecution(
@@ -43,30 +48,11 @@ export interface JobsApi {
     jobId: string,
     expectedRevision: number,
     idempotencyKey?: string
-  ): Promise<ApiSuccess<{ deleted: boolean }>>
+  ): Promise<ApiSuccess<JobCommandResult>>
 }
 
 export function newIdempotencyKey(): string {
   return randomUUID()
-}
-
-function mapDetail(detail: JobDetail): ExecutionJob {
-  return detail
-}
-
-function mapSummary(summary: JobSummary): ExecutionJob {
-  const createdAt = summary.queuedAt ?? new Date().toISOString()
-  const updatedAt = summary.startedAt ?? summary.queuedAt ?? createdAt
-  return {
-    ...summary,
-    sourceDraftId: '',
-    sourcePlanningSessionId: '',
-    currentRunId: null,
-    suspensionKind: null,
-    queuePosition: null,
-    createdAt,
-    updatedAt
-  }
 }
 
 function commandBody(
@@ -85,10 +71,14 @@ function commandBody(
 }
 
 async function refetchExecutionJob(jobId: string): Promise<ApiSuccess<{ job: ExecutionJob }>> {
-  const res = await api<JobDetail>(`/api/jobs/${encodeURIComponent(jobId)}`)
+  const encodedJobId = encodeURIComponent(jobId)
+  const [res, treeRes] = await Promise.all([
+    api<JobDetail>(`/api/jobs/${encodedJobId}`),
+    api<JobTreeDto>(`/api/jobs/${encodedJobId}/tree`)
+  ])
   return {
     ...res,
-    data: { job: mapDetail(res.data) }
+    data: { job: { ...res.data, tree: treeRes.data } }
   }
 }
 
@@ -101,11 +91,15 @@ export function createExecutionJobsApi(): JobsApi {
         limit: String(limit)
       })
       if (q.trim()) params.set('q', q.trim())
-      const res = await api<JobSummary[]>(`/api/jobs?${params.toString()}`)
-      const jobs = res.data.map(mapSummary)
+      const res = await api<JobListResult>(`/api/jobs?${params.toString()}`)
       return {
         ...res,
-        data: { jobs, total: jobs.length }
+        data: {
+          jobs: res.data.jobs,
+          total: res.data.total,
+          page: res.data.page,
+          limit: res.data.limit
+        }
       }
     },
     fetchJob: refetchExecutionJob,
@@ -123,8 +117,7 @@ export function createExecutionJobsApi(): JobsApi {
       })
       return refetchExecutionJob(jobId)
     },
-    cancel: async (jobId, expectedRevision, _reasonCode, idempotencyKey) => {
-      void _reasonCode
+    cancel: async (jobId, expectedRevision, idempotencyKey) => {
       await api<JobCommandResult>(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
         body: JSON.stringify(commandBody(expectedRevision, idempotencyKey))
@@ -139,14 +132,10 @@ export function createExecutionJobsApi(): JobsApi {
       return refetchExecutionJob(jobId)
     },
     delete: async (jobId, expectedRevision, idempotencyKey) => {
-      const res = await api<{ deleted?: boolean }>(`/api/jobs/${encodeURIComponent(jobId)}`, {
+      return api<JobCommandResult>(`/api/jobs/${encodeURIComponent(jobId)}`, {
         method: 'DELETE',
         body: JSON.stringify(commandBody(expectedRevision, idempotencyKey))
       })
-      return {
-        ...res,
-        data: { deleted: res.data.deleted ?? true }
-      }
     }
   }
 }

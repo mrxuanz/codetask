@@ -24,6 +24,7 @@ import { createCursorPermissionHandler } from './permissions'
 import type { AgentCapabilityProfile } from '@codetask/agent-runtime/capabilities'
 import { classifyCursorAcpError } from './errors'
 import { createTurnError } from '@codetask/contracts/turn-errors'
+import { scrubLogString } from '@codetask/contracts/log-redaction'
 
 export const CURSOR_ACP_RPC_TIMEOUT_MS = 60_000
 export const CURSOR_ACP_AUTH_TIMEOUT_MS = 120_000
@@ -74,7 +75,7 @@ export function createChildDiagnostics(child: ChildProcess): ChildDiagnostics {
   const exitListeners: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = []
 
   child.stderr?.on('data', (chunk: Buffer) => {
-    const text = chunk.toString('utf8').trim()
+    const text = scrubLogString(chunk.toString('utf8').trim())
     if (!text) return
     stderrTail = `${stderrTail}\n${text}`.slice(-2000)
     debugCursor('stderr', { text: text.slice(0, 400) })

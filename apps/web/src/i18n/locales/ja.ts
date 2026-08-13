@@ -10,6 +10,8 @@ export default {
     admin: '管理者',
     operationFailed: '操作に失敗しました',
     cancel: 'キャンセル',
+    back: '戻る',
+    save: '保存',
     preview: 'プレビュー',
     delete: '削除',
     loading: '読み込み中',
@@ -118,6 +120,8 @@ export default {
     addProject: 'ローカルフォルダを追加',
     addProjectHint: 'ローカルフォルダを追加…',
     loading: '読み込み中…',
+    loadFailed: 'ワークスペースの読み込みに失敗しました',
+    retryLoad: '再試行',
     noThreads: 'スレッドがありません',
     expand: '展開',
     collapse: '折りたたむ',
@@ -149,6 +153,18 @@ export default {
     workspaceReadOnly: '別の操作がこのディレクトリを使用中です。この会話は読み取り専用です。',
     relativeHours: '{n} 時間前',
     relativeMinutes: '{n} 分前',
+    sidebar: {
+      rename: '名前を変更',
+      removeProject: 'ワークスペースから削除',
+      deleteThread: '会話を削除',
+      confirmRemoveProjectTitle: 'プロジェクトを削除',
+      confirmRemoveProjectMessage:
+        '「{name}」をワークスペースから削除しますか？ローカルフォルダは削除されません。',
+      confirmDeleteThreadTitle: '会話を削除',
+      confirmDeleteThreadMessage: '会話「{name}」を削除しますか？この操作は取り消せません。',
+      renameThreadTitle: '会話の名前を変更',
+      renamePlaceholder: '会話名'
+    },
     composer: {
       placeholder: 'フォローアップの変更を入力…',
       attachment: '添付',
@@ -176,14 +192,30 @@ export default {
       title: 'タスク一覧',
       total: '現在 {count} 件の大タスク',
       empty: 'このフィルターにタスクはありません',
+      searchPlaceholder: 'タスクを検索…',
+      searchEmpty: '一致するタスクはありません',
+      lifecycle: {
+        inProgress: '進行中',
+        completed: '完了',
+        failed: '失敗',
+        cancelled: 'キャンセル'
+      },
       selectHint: '左のタスクを選ぶと実行ツリーとパラメータを表示します',
       backToList: 'タスク一覧に戻る',
       loadFailed: 'タスク一覧の読み込みに失敗しました',
       detailFailed: 'タスク詳細の読み込みに失敗しました',
+      deleteConfirmTitle: 'タスクを削除しますか？',
+      deleteConfirmMessage:
+        '「{title}」とその実行履歴をすべて削除します。この操作は元に戻せません。',
       executionTree: '実行ツリー',
       taskParameters: 'タスクパラメータ',
       runHistory: '実行履歴',
       cliLabel: 'CLI: {summary}',
+      pagination: {
+        previous: '前へ',
+        next: '次へ',
+        page: '{page} / {total}'
+      },
       filters: {
         all: 'すべて',
         pending: 'キュー中',
@@ -379,6 +411,7 @@ export default {
     draftPanel: {
       title: 'ドラフトと実行ツリー',
       empty: 'ドラフトがありません。左のチャットで要件を説明すると自動生成されます',
+      chatNotice: 'ドラフト',
       untitled: '無題のドラフト',
       statusEditing: '編集中',
       statusConfirmed: '確認済み',
@@ -394,6 +427,11 @@ export default {
         'DesignSession（ds-*）から Launch してください。旧 job 確認は無効です',
       confirmDraft: 'ドラフトを確認して実行ツリーを生成',
       confirmedHint: 'ドラフトを確認しました。下で実行ツリーを確認してください',
+      unlockDraft: 'ドラフトのロックを解除',
+      unlockDraftTitle: 'ドラフトのロックを解除して実行ツリーをクリア',
+      unlockDraftMessage:
+        'ロックを解除すると現在の実行ツリーがクリアされ、ドラフトを再編集できます。再度確認して計画を生成する必要があります。この操作は取り消せません。',
+      unlockDraftConfirm: 'ロック解除',
       referenceManifestStaleHint:
         '参考資料が前回の凍結以降に変更されています。起動前に再凍結してください。',
       refreezeCorpus: '参考資料を再凍結',
@@ -422,6 +460,11 @@ export default {
       backToDraftList: '草案リストに戻る',
       draftListEmpty: '未完了の草案はありません',
       draftIncompleteEmpty: '進行中の草案はありません',
+      draftSearchPlaceholder: 'タイトル、プロジェクトを検索…',
+      draftSearchEmpty: '一致する草案はありません',
+      draftFilterAll: 'すべて',
+      draftFilterIncomplete: '進行中',
+      draftFilterComplete: '完了',
       confirmDeleteDraftTitle: '草案を削除',
       confirmDeleteDraftMessage:
         '草案「{name}」と生成済みファイルデータを削除しますか？この操作は取り消せません。',
@@ -430,10 +473,17 @@ export default {
       deleteDraftFailed: '草案の削除に失敗しました',
       draftStatusLaunched: '完了',
       draftStatusInProgress: '進行中',
+      draftStatusCollecting: '要件を収集中',
       draftStatusPlanningFailed: '計画失敗',
       planningFailedTitle: '実行ツリーの生成が中断されました',
       retryPlanning: '計画生成を再試行',
       retryingPlanning: '再試行中…',
+      completedTitle: 'タスクを送信しました',
+      completedHint: 'ドラフトと実行ツリーはロックされました。タスク一覧で進捗を確認できます。',
+      completedDraftTag: 'ドラフト',
+      completedPlanTag: '実行ツリー',
+      completedDraftMissing: 'ドラフトの内容が見つかりません',
+      viewTask: 'タスクを表示',
       step0Hint:
         '左のチャットでタスクの要件・範囲・制約を説明してください。情報が十分に集まると MCP で草案が生成され、ステップ 2 に進みます。',
       prevStep: '前へ',
@@ -444,7 +494,10 @@ export default {
         collect: '要件収集',
         draft: '草案確認',
         executionTree: '実行ツリー'
-      }
+      },
+      rollbackToCollect: '要件収集に戻る',
+      rollbackToDraft: 'ドラフト確認に戻る',
+      rollbackReason: 'UI からフェーズの巻き戻しがリクエストされました'
     },
     draft: {
       badge: 'タスク起動ドラフト',
@@ -477,6 +530,20 @@ export default {
       references: '参考資料',
       referencesHint:
         '画像と非テキストファイルには計画参考説明が必須です。Planner が関連タスクに割り当て、実行時の参照に使います。',
+      localCorpusAdd: 'ローカル資料を追加',
+      localCorpusDialogTitle: 'ローカル資料ディレクトリを選択',
+      localCorpusDialogHint:
+        'サーバーからアクセスできるディレクトリを選び、資料の利用方法を説明してください。',
+      localCorpusSelectDirectory: 'このディレクトリを選択',
+      localCorpusPathLabel: 'ディレクトリパス',
+      localCorpusNameLabel: '表示名',
+      localCorpusNamePlaceholder: '例：認証サービスのドキュメント',
+      localCorpusDescriptionPlaceholder:
+        'この資料の用途（エラーコード、ミドルウェア、ルーティングパターンなど）を説明…',
+      localCorpusDescriptionRequired: 'ローカル資料の説明を入力してください',
+      localCorpusAddFailed: 'ローカル資料の追加に失敗しました',
+      localCorpusAdding: '追加中…',
+      localCorpusBadge: 'ローカル資料',
       referenceDescriptionLabel: '計画参考説明',
       referenceDescriptionPlaceholder:
         'どのページ/機能か、レイアウト・文言・インタラクションの要点…',
@@ -504,7 +571,8 @@ export default {
       deleteFailed: '削除に失敗しました',
       importFailed: 'インポートに失敗しました',
       confirmFailed: '確認に失敗しました',
-      launchFailed: '開始に失敗しました'
+      launchFailed: '開始に失敗しました',
+      unlockFailed: 'ドラフトのロック解除に失敗しました'
     },
     settings: {
       title: '設定',

@@ -10,6 +10,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./ready": "./src/ready.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./shutdown": "./src/shutdown.ts",
+    "./storage-selection": "./src/storage/storage-selection.ts",
+    "./initialization-config": "./src/storage/initialization-config.ts"
   }
 }

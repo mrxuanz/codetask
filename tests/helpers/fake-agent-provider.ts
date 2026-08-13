@@ -48,9 +48,19 @@ export class FakeScriptRegistry {
   }
 
   private defaultTaskWorkerScript: FakeTurnScript | null = null
+  private defaultSliceVerifierScript: FakeTurnScript | null = null
+  private defaultMilestoneVerifierScript: FakeTurnScript | null = null
 
   setDefaultTaskWorkerScript(script: FakeTurnScript): void {
     this.defaultTaskWorkerScript = script
+  }
+
+  setDefaultSliceVerifierScript(script: FakeTurnScript): void {
+    this.defaultSliceVerifierScript = script
+  }
+
+  setDefaultMilestoneVerifierScript(script: FakeTurnScript): void {
+    this.defaultMilestoneVerifierScript = script
   }
 
   resolve(input: AgentTurnInput): FakeTurnScript {
@@ -59,6 +69,12 @@ export class FakeScriptRegistry {
     if (!entry) {
       if (key.startsWith('task-worker:') && this.defaultTaskWorkerScript) {
         return this.defaultTaskWorkerScript
+      }
+      if (key.startsWith('slice-verifier:') && this.defaultSliceVerifierScript) {
+        return this.defaultSliceVerifierScript
+      }
+      if (key.startsWith('milestone-verifier:') && this.defaultMilestoneVerifierScript) {
+        return this.defaultMilestoneVerifierScript
       }
       return { reply: `fake:${key}`, mcpCalls: [] }
     }
@@ -86,6 +102,8 @@ export class FakeScriptRegistry {
     this.counters.clear()
     this.argResolver = null
     this.defaultTaskWorkerScript = null
+    this.defaultSliceVerifierScript = null
+    this.defaultMilestoneVerifierScript = null
   }
 
   resolveKey(input: AgentTurnInput): string {

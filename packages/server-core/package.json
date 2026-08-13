@@ -21,6 +21,7 @@
     "@codetask/agent-runtime": "*",
     "@codetask/contracts": "*",
     "@codetask/database": "*",
+    "@codetask/provider-spec": "*",
     "@hono/node-server": "^2.1.0",
     "@sinclair/typebox": "^0.34.52",
     "better-sqlite3": "^12.11.1",

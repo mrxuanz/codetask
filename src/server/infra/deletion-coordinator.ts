@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { rm } from 'fs/promises'
 import { and, eq, inArray } from 'drizzle-orm'
-import { parseJobReferenceManifest } from '../../shared/job-references.ts'
+import { parseJobReferenceManifest } from '@codetask/contracts/job-references'
 import { getAppContext } from '../bootstrap'
 import { getDb } from '../db'
 import { deletionRequests, projects } from '../db/schema'
@@ -19,7 +19,7 @@ import {
 } from '../retention/purge'
 import { releaseWorkspaceLeaseForOwner } from './workspace-lease-store.js'
 import { throwIfCurrentRequestAborted } from '../context/request-abort'
-import { assertFrozenAttachmentId, FrozenIdError } from '../../shared/frozen-ids'
+import { assertFrozenAttachmentId, FrozenIdError } from '@codetask/server-core/modules/conversation'
 
 export type DeletionEntityKind = 'thread_job' | 'thread' | 'project'
 
@@ -335,7 +335,7 @@ async function stopJobRuntimeByFrozenIdentity(
 ): Promise<void> {
   const { cancelJobSandboxTurns, releaseJobCursorResources } =
     await import('../sandbox/orchestrator')
-  const { JOB_CANCELLED } = await import('../../shared/turn-errors.ts')
+  const { JOB_CANCELLED } = await import('@codetask/contracts/turn-errors')
   const executionRuntime = getAppContext().executionRuntime
 
   if (executionRuntime.isLoopActive(jobId) || executionRuntime.get(jobId)) {
@@ -478,6 +478,7 @@ async function ensureProjectExecutionJobsDeleted(
       workspaceLeaseOwnerId: jobId
     }).catch(() => {})
     releaseWorkspaceLeaseForOwner('job-run', jobId)
+    releaseOwnerAssetReferences(client, 'job', jobId)
     client.prepare(`DELETE FROM jobs WHERE id = ? AND actor_id = ?`).run(jobId, actorId)
   }
 }
@@ -591,6 +592,9 @@ async function ensureProjectOwnedAggregatesDeleted(input: {
   for (const conversationId of conversationIds) {
     releaseOwnerAssetReferences(client, 'conversation', conversationId)
   }
+  for (const draftId of draftIds) {
+    releaseOwnerAssetReferences(client, 'draft', draftId)
+  }
 
   if (planningSessionIds.length > 0 && tableExists(client, 'job_handoffs')) {
     const placeholders = planningSessionIds.map(() => '?').join(',')
@@ -633,6 +637,7 @@ async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise
   const db = getDb()
   if (request.entityKind === 'thread_job') {
     const client = sqliteClient()
+    if (client) releaseOwnerAssetReferences(client, 'job', request.entityId)
     client
       ?.prepare(`DELETE FROM jobs WHERE id = ? AND actor_id = ?`)
       .run(request.entityId, request.actorId)
@@ -640,6 +645,8 @@ async function deleteEntityDatabaseRows(request: LoadedDeletionRequest): Promise
   }
 
   if (request.entityKind === 'thread') {
+    const client = sqliteClient()
+    if (client) releaseOwnerAssetReferences(client, 'conversation', request.entityId)
     deleteConversationRow(request.entityId, request.actorId)
     return
   }

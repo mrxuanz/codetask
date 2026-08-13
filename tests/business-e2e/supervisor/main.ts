@@ -30,11 +30,7 @@ import {
   runProcessOracle,
   type OracleResult
 } from '../oracles/http-state'
-import {
-  runChatImageAttachmentOracle,
-  runDraftChatImageAttachmentOracle,
-  runDraftReferencePathOracle
-} from '../oracles/image-attachment'
+import { runChatImageAttachmentOracle } from '../oracles/image-attachment'
 import { OperationLedger } from '../reports/ledger'
 import { assertNoSecrets, redactValue } from '../reports/redaction'
 import { ReportWriter, type CaseReport, type FailureClass } from '../reports/writer'
@@ -64,7 +60,12 @@ import { localStamp, progress } from '../reports/progress'
 import { setLang, tFailure, tSuccess } from '../i18n'
 import { htmlFileNameForConversationCore } from '../config/sdk-html'
 import { assertNoTimeoutAllowed } from '../config/timeouts'
-import { runOpencodeCanary, type OpencodeCanaryResult } from '../drivers/opencode-canary'
+import {
+  OPERATOR_PROTOCOLS,
+  resolveCaseDriver,
+  resolveOperatorSelection,
+  type OperatorSelection
+} from '../config/operators'
 
 function readFlag(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name)
@@ -86,18 +87,19 @@ Examples:
   npm run business:e2e:conversation
   npm run business:e2e:chat-html
   npm run business:e2e:chat-image
-  npm run business:e2e:draft-chat-image
-  npm run business:e2e:draft-job
-  npm run business:e2e:draft-ref-path
+  npm run business:e2e:design
   npm run business:e2e:settings-mcp
   npm run business:e2e:phases
-  npm run business:e2e -- --providers opencode --part conversation,draft-job,settings-mcp
-  npm run business:e2e -- --providers claude --part conversation
-  npm run business:e2e -- --providers codex --part conversation
-  npm run business:e2e -- --providers cursor,opencode --case chat-basic --lang en
-  npm run business:e2e -- --providers all --suite both
+  npm run business:e2e -- --operator opencode --providers opencode --case chat-basic
+  npm run business:e2e -- --operator codex --providers claude --case chat-basic
+  npm run business:e2e -- --operator cursor --providers cursor --case chat-image-attachment
+  npm run business:e2e -- --operator fake --providers all --suite both
 
-OpenCode driver uses the host OpenCode installation, authentication, and default model.
+--operator (alias --driver) selects the outer actor that operates CodeTask:
+  manifest | fake | opencode(local-server) | codex(SDK) | claude(SDK) | cursor(ACP)
+--providers selects the CodeTask-internal conversation/planner/execution core.
+Without --operator, catalog defaults are preserved: AI cases use OpenCode and scripted cases use fake.
+Live operators use the host installation, authentication, and default model.
 
 Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
   (completed|failed|cancelled). Case workers are not wall-clock-killed by default.
@@ -109,6 +111,10 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
 
   const noTimeout = hasFlag(argv, '--no-timeout')
   assertNoTimeoutAllowed(noTimeout)
+  const operatorSelection = resolveOperatorSelection({
+    operator: readFlag(argv, '--operator'),
+    driver: readFlag(argv, '--driver')
+  })
 
   const providerQueue = resolveProviderQueue({
     providers: readFlag(argv, '--providers'),
@@ -139,6 +145,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
   runPreflightCleanup()
 
   progress('supervisor', 'run.start', {
+    operator: operatorSelection,
     providers: providerQueue.map((p) => ({
       alias: p.alias,
       core: p.core,
@@ -169,6 +176,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
 
   reports.writeManifest({
     runId,
+    operator: operatorSelection,
     providers: providerQueue.map((p) => ({
       alias: p.alias,
       core: p.core,
@@ -190,7 +198,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
   let skipped = 0
 
   try {
-    // Ensure build artifact exists (G0-001 may also assert this).
+    // Ensure the standalone service artifact exists before any business case runs.
     assertExists(join(repoRoot, 'out/main/standalone.js'), 'standalone_entry')
 
     server = await startDedicatedServer({ repoRoot, runRoot, registry, ledger })
@@ -200,7 +208,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
       ledger
     })
 
-    // Auth bootstrap for cases that need it. G1-003 owns the setup assertion.
+    // Auth bootstrap for cases that need it. setup-login owns the assertion.
     const account = randomAccount()
     vault.setAccount(account.username, account.password)
 
@@ -210,24 +218,12 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
     })
     progress('supervisor', 'mcp.ready', { url: mcp.url })
 
-    const needsSettingsProbe = caseIds.includes('SETTINGS-MCP-001')
+    const needsSettingsProbe = caseIds.includes('settings-mcp-probe')
     if (needsSettingsProbe) {
       settingsProbe = await startSettingsMcpProbe()
       progress('supervisor', 'settings.probe.ready', {
         name: settingsProbe.name,
         url: settingsProbe.url
-      })
-    }
-
-    const needsOpencodeDriver = caseIds.some((id) => MANIFESTS[id]?.driver === 'opencode')
-    let opencodeCanary: OpencodeCanaryResult | null = null
-    if (needsOpencodeDriver && mcp) {
-      const canaryWorkspace = join(runRoot, 'canary-workspace')
-      mkdirSync(canaryWorkspace, { recursive: true })
-      writeFileSync(join(canaryWorkspace, 'README.md'), 'business-e2e opencode canary\n', 'utf8')
-      opencodeCanary = await runOpencodeCanary({
-        mcpUrl: mcp.url,
-        workspaceRoot: canaryWorkspace
       })
     }
 
@@ -305,8 +301,11 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
         const caseRunId = createCaseRunId(`${id}-${slot.alias}`)
         const started = Date.now()
         let report: CaseReport
+        const caseDriver = resolveCaseDriver(manifest.driver, operatorSelection)
         progress(scope, 'case.start', {
-          driver: manifest.driver,
+          driver: caseDriver,
+          protocol: caseDriver === 'supervisor' ? 'supervisor' : OPERATOR_PROTOCOLS[caseDriver],
+          manifestDriver: manifest.driver,
           title: manifest.title,
           provider: slot.alias,
           skipReason: manifest.skipReason ?? null
@@ -317,8 +316,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
             runId,
             caseRunId,
             caseId: id,
-            driverProvider:
-              manifest.driver === 'supervisor' ? 'supervisor' : profile.driverProvider,
+            driverProvider: caseDriver,
             roleProviders: profile.roleProviders,
             agentReportedCompleted: false,
             requiredOperationsObserved: true,
@@ -335,37 +333,6 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
             classification: 'skipped'
           })
           skipped += 1
-          reports.writeCase(report)
-          continue
-        }
-
-        if (manifest.driver === 'opencode' && opencodeCanary && !opencodeCanary.ok) {
-          report = {
-            runId,
-            caseRunId,
-            caseId: id,
-            driverProvider: profile.driverProvider,
-            roleProviders: profile.roleProviders,
-            agentReportedCompleted: false,
-            requiredOperationsObserved: false,
-            oraclePassed: false,
-            noProcessLeak: true,
-            classification: opencodeCanary.classification ?? 'provider_unavailable',
-            summary: `opencode_canary_failed:${opencodeCanary.error ?? 'unknown'}`,
-            durationMs: Date.now() - started,
-            serverPid: server?.pid,
-            error: opencodeCanary.error
-          }
-          progress(scope, 'case.skipped', {
-            reason: 'opencode_canary_failed',
-            classification: report.classification,
-            error: opencodeCanary.error
-          })
-          caseSummaries.push({
-            caseId: `${labelForCaseId(id)}/${slot.alias}`,
-            classification: report.classification
-          })
-          failed += 1
           reports.writeCase(report)
           continue
         }
@@ -390,7 +357,8 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
             registry,
             probeMcpUrl: settingsProbe?.url,
             probeMcpName: settingsProbe?.name ?? PROBE_SERVER_NAME,
-            noTimeout
+            noTimeout,
+            operatorSelection
           })
         } catch (error) {
           const classification = classifyError(error)
@@ -398,8 +366,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
             runId,
             caseRunId,
             caseId: id,
-            driverProvider:
-              manifest.driver === 'supervisor' ? 'supervisor' : profile.driverProvider,
+            driverProvider: caseDriver,
             roleProviders: profile.roleProviders,
             agentReportedCompleted: false,
             requiredOperationsObserved: false,
@@ -472,6 +439,7 @@ Timeouts: turn/job waits omit timeoutMs → wait for CodeTask API terminal
 
   const summary = {
     runId,
+    operator: operatorSelection,
     providers: providerQueue.map((p) => ({
       alias: p.alias,
       core: p.core,
@@ -524,6 +492,7 @@ async function executeCase(ctx: {
   probeMcpUrl?: string
   probeMcpName?: string
   noTimeout?: boolean
+  operatorSelection: OperatorSelection
 }): Promise<CaseReport> {
   const {
     manifest,
@@ -539,7 +508,8 @@ async function executeCase(ctx: {
     layout,
     probeMcpUrl,
     probeMcpName,
-    noTimeout
+    noTimeout,
+    operatorSelection
   } = ctx
   const started = Date.now()
   const caseDir = join(layout.cases, caseRunId)
@@ -629,14 +599,17 @@ async function executeCase(ctx: {
 
   const conversationCore = profile.roleProviders.conversation
   const expectedHtmlFile =
-    manifest.caseId === 'CHAT-HTML-001'
+    manifest.caseId === 'chat-create-html'
       ? htmlFileNameForConversationCore(conversationCore)
       : undefined
 
   const agentRoot = join(layout.agents, caseRunId)
   const resultPath = join(caseDir, 'worker-result.json')
+  const caseDriver = resolveCaseDriver(manifest.driver, operatorSelection)
+  if (caseDriver === 'supervisor') throw new Error('supervisor_driver_routed_to_worker')
   progress(scopeLabelForCaseId(manifest.caseId), 'worker.start', {
-    driver: manifest.driver,
+    driver: caseDriver,
+    protocol: OPERATOR_PROTOCOLS[caseDriver],
     // <=0: unbounded case wait (business API terminal). Positive = explicit ceiling.
     timeoutMs: manifest.timeoutMs ?? 0,
     noTimeout: Boolean(noTimeout),
@@ -647,7 +620,7 @@ async function executeCase(ctx: {
     {
       caseId: manifest.caseId,
       caseRunId,
-      driver: manifest.driver,
+      driver: caseDriver,
       mcpUrl: mcp.url,
       capabilityId: capability.capabilityId,
       workspaceRoot,
@@ -661,7 +634,8 @@ async function executeCase(ctx: {
       executionConfig,
       expectedHtmlFile,
       probeMcpUrl,
-      probeMcpName
+      probeMcpName,
+      allowedTools: manifest.allowedTools
     },
     { repoRoot, registry }
   )
@@ -721,7 +695,7 @@ async function executeCase(ctx: {
     runId: ctx.runRoot.split('/').pop() ?? caseRunId,
     caseRunId,
     caseId: manifest.caseId,
-    driverProvider: manifest.driver,
+    driverProvider: caseDriver,
     roleProviders: profile.roleProviders,
     agentReportedCompleted,
     requiredOperationsObserved,
@@ -770,18 +744,18 @@ async function runSupervisorCase(ctx: {
   let summary = manifest.title
 
   switch (manifest.caseId) {
-    case 'G0-001': {
+    case 'build-artifact': {
       assertExists(join(repoRoot, 'out/main/standalone.js'), 'standalone_entry')
       oracleResults.push({ name: 'standalone_exists', passed: true })
       break
     }
-    case 'G0-002': {
+    case 'server-health': {
       const ok = await scoped.health()
       oracleResults.push({ name: 'health_ok', passed: ok })
       if (!ok) classification = 'assertion_failed'
       break
     }
-    case 'G0-003': {
+    case 'isolated-dirs': {
       const dataOk = server.dataDir.startsWith(runRoot)
       oracleResults.push({
         name: 'data_dir_isolated',
@@ -791,13 +765,13 @@ async function runSupervisorCase(ctx: {
       if (!dataOk) classification = 'assertion_failed'
       break
     }
-    case 'G0-004': {
+    case 'isolated-port': {
       const ok = server.baseUrl.startsWith('http://127.0.0.1:') && server.port > 0
       oracleResults.push({ name: 'localhost_port', passed: ok, detail: { port: server.port } })
       if (!ok) classification = 'assertion_failed'
       break
     }
-    case 'G0-005': {
+    case 'single-server': {
       oracleResults.push({
         name: 'single_server_pid',
         passed: isAlive(server.pid),
@@ -806,7 +780,7 @@ async function runSupervisorCase(ctx: {
       if (!isAlive(server.pid)) classification = 'sut_crash'
       break
     }
-    case 'G0-006': {
+    case 'worker-crash': {
       const before = server.pid
       await runCrashingWorker({ repoRoot, registry, caseRunId })
       const healthy = isAlive(before) && (await scoped.health())
@@ -818,7 +792,7 @@ async function runSupervisorCase(ctx: {
       if (!healthy) classification = 'sut_crash'
       break
     }
-    case 'G1-003': {
+    case 'setup-login': {
       if (!server.setupToken) {
         classification = 'assertion_failed'
         summary = 'setup_token_missing_from_server_output'
@@ -836,7 +810,7 @@ async function runSupervisorCase(ctx: {
       if (!ok) classification = 'assertion_failed'
       break
     }
-    case 'G1-007': {
+    case 'auth-bearer': {
       const noAuth = await new PublicApiClient(server.baseUrl, { ledger, caseRunId }).request(
         'GET',
         '/api/projects',
@@ -857,7 +831,7 @@ async function runSupervisorCase(ctx: {
       if (!ok) classification = 'http_contract'
       break
     }
-    case 'G1-008': {
+    case 'token-redaction': {
       const sample = {
         authorization: vault.peekBearerToken() ?? 'secret-token-value',
         nested: { token: 'abc123token' }
@@ -865,7 +839,7 @@ async function runSupervisorCase(ctx: {
       const { redactValue } = await import('../reports/redaction')
       const redacted = redactValue(sample)
       try {
-        assertNoSecrets(redacted, 'g1_008')
+        assertNoSecrets(redacted, 'token_redaction')
         oracleResults.push({ name: 'redaction', passed: true, detail: redacted })
       } catch (error) {
         classification = 'security_violation'
@@ -1004,20 +978,7 @@ async function buildOracleResults(input: {
     )
   }
 
-  if (input.manifest.caseId === 'G6-001' || input.manifest.caseId === 'G6-002') {
-    const workspaceRoot = input.capability?.workspaceRoot
-    if (workspaceRoot) {
-      results.push(await runNotesSearchFileOracle(workspaceRoot))
-    } else {
-      results.push({
-        name: 'notes_search_file_oracle',
-        passed: false,
-        detail: { reason: 'workspace_missing' }
-      })
-    }
-  }
-
-  if (input.manifest.caseId === 'CHAT-HTML-001') {
+  if (input.manifest.caseId === 'chat-create-html') {
     const workspaceRoot = input.capability?.workspaceRoot
     const fileName = input.expectedHtmlFile || 'opencode.html'
     progress(input.manifest.caseId, 'html.oracle', { fileName, workspaceRoot })
@@ -1033,7 +994,7 @@ async function buildOracleResults(input: {
   }
 
   if (
-    input.manifest.caseId === 'CHAT-IMG-001' &&
+    input.manifest.caseId === 'chat-image-attachment' &&
     input.artifacts.threadId &&
     input.artifacts.turnId &&
     input.artifacts.attachmentId
@@ -1049,68 +1010,9 @@ async function buildOracleResults(input: {
         evidenceDir: input.evidenceDir
       }))
     )
-  } else if (input.manifest.caseId === 'CHAT-IMG-001') {
+  } else if (input.manifest.caseId === 'chat-image-attachment') {
     results.push({
       name: 'chat_image_text_recognized',
-      passed: false,
-      detail: { reason: 'artifacts_incomplete', artifacts: input.artifacts }
-    })
-  }
-
-  if (
-    input.manifest.caseId === 'DRAFT-CHAT-IMG-001' &&
-    input.artifacts.threadId &&
-    input.artifacts.draftMessageId &&
-    input.artifacts.attachmentId
-  ) {
-    results.push(
-      ...(await runDraftChatImageAttachmentOracle({
-        client: input.client,
-        threadId: input.artifacts.threadId,
-        draftMessageId: input.artifacts.draftMessageId,
-        attachmentId: input.artifacts.attachmentId,
-        evidenceDir: input.evidenceDir
-      }))
-    )
-  } else if (input.manifest.caseId === 'DRAFT-CHAT-IMG-001') {
-    results.push({
-      name: 'draft_image_text_recognized',
-      passed: false,
-      detail: { reason: 'artifacts_incomplete', artifacts: input.artifacts }
-    })
-  }
-
-  if (
-    input.manifest.caseId === 'DRAFT-REF-PATH-001' &&
-    input.artifacts.threadId &&
-    input.artifacts.draftMessageId &&
-    input.artifacts.attachmentId &&
-    input.artifacts.directoryReferenceId &&
-    input.artifacts.designSessionId &&
-    input.artifacts.launchedJobId &&
-    input.artifacts.launchedThreadId &&
-    input.artifacts.localCorpusPath &&
-    input.capability?.workspaceRoot
-  ) {
-    results.push(
-      ...(await runDraftReferencePathOracle({
-        client: input.client,
-        threadId: input.artifacts.threadId,
-        draftMessageId: input.artifacts.draftMessageId,
-        attachmentId: input.artifacts.attachmentId,
-        directoryReferenceId: input.artifacts.directoryReferenceId,
-        designSessionId: input.artifacts.designSessionId,
-        launchedJobId: input.artifacts.launchedJobId,
-        launchedThreadId: input.artifacts.launchedThreadId,
-        localCorpusPath: input.artifacts.localCorpusPath,
-        workspaceRoot: input.capability.workspaceRoot,
-        evidenceDir: input.evidenceDir
-      }))
-    )
-    results.push(await runReferenceProofFileOracle(input.capability.workspaceRoot))
-  } else if (input.manifest.caseId === 'DRAFT-REF-PATH-001') {
-    results.push({
-      name: 'reference_proof_file_oracle',
       passed: false,
       detail: { reason: 'artifacts_incomplete', artifacts: input.artifacts }
     })
@@ -1160,27 +1062,6 @@ async function runExecutionProfileOracle(input: {
   }
 }
 
-async function runNotesSearchFileOracle(workspaceRoot: string): Promise<OracleResult> {
-  const { spawnSync } = await import('node:child_process')
-  const { join } = await import('node:path')
-  const oraclePath = join(
-    repoRootFromHere(),
-    'tests/business-e2e/fixtures/validators/notes-search-oracle.mjs'
-  )
-  const result = spawnSync(process.execPath, [oraclePath, '--workspace', workspaceRoot], {
-    encoding: 'utf8'
-  })
-  return {
-    name: 'notes_search_file_oracle',
-    passed: result.status === 0,
-    detail: {
-      status: result.status,
-      stdout: result.stdout?.slice(0, 500),
-      stderr: result.stderr?.slice(0, 500)
-    }
-  }
-}
-
 async function runChatHtmlFileOracle(
   workspaceRoot: string,
   fileName: string
@@ -1201,27 +1082,6 @@ async function runChatHtmlFileOracle(
     passed: result.status === 0,
     detail: {
       fileName,
-      status: result.status,
-      stdout: result.stdout?.slice(0, 500),
-      stderr: result.stderr?.slice(0, 500)
-    }
-  }
-}
-
-async function runReferenceProofFileOracle(workspaceRoot: string): Promise<OracleResult> {
-  const { spawnSync } = await import('node:child_process')
-  const { join } = await import('node:path')
-  const oraclePath = join(
-    repoRootFromHere(),
-    'tests/business-e2e/fixtures/validators/reference-proof-oracle.mjs'
-  )
-  const result = spawnSync(process.execPath, [oraclePath, '--workspace', workspaceRoot], {
-    encoding: 'utf8'
-  })
-  return {
-    name: 'reference_proof_node_oracle',
-    passed: result.status === 0,
-    detail: {
       status: result.status,
       stdout: result.stdout?.slice(0, 500),
       stderr: result.stderr?.slice(0, 500)

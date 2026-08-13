@@ -19,7 +19,7 @@ export { allowedJobActions } from '../../job/domain/job-actions.ts'
 
 import type { JobControlIntent, JobState } from '@codetask/contracts'
 import type { WorkItemRecord } from '../domain/work-item.ts'
-import type { WorkDependencyRecord } from '../domain/work-item.ts'
+import type { SliceDependencyRecord, WorkDependencyRecord } from '../domain/work-item.ts'
 import {
   computeDeadlock,
   computeJobCompletion,
@@ -27,6 +27,9 @@ import {
   computeReadyWork,
   computeSliceReadyForVerification
 } from '../domain/readiness.ts'
+
+/** Each work item may own a CLI process/SDK session; never fan out without a hard cap. */
+export const MAX_PARALLEL_WORK_ITEMS = 4
 import { VerificationRepository } from '../../verification/infrastructure/verification-repository.ts'
 
 export function decideNextStep(input: {
@@ -36,6 +39,7 @@ export function decideNextStep(input: {
   generation: number
   workItems: WorkItemRecord[]
   dependencies: WorkDependencyRecord[]
+  sliceDependencies: SliceDependencyRecord[]
   succeededWorkIds: Set<string>
   verification: VerificationRepository
 }): CoordinatorDecision {
@@ -62,12 +66,33 @@ export function decideNextStep(input: {
     succeededWorkIds
   })
 
-  if (ready.workIds.length > 0) {
-    const byId = new Map(workItems.map((item) => [item.id, item]))
-    const parallelWorkIds = ready.workIds.filter((workId) => byId.get(workId)?.canRunInParallel)
+  const byId = new Map(workItems.map((item) => [item.id, item]))
+  const sliceDeps = new Map<string, string[]>()
+  for (const dependency of input.sliceDependencies) {
+    const current = sliceDeps.get(dependency.fromSliceId) ?? []
+    current.push(dependency.dependsOnSliceId)
+    sliceDeps.set(dependency.fromSliceId, current)
+  }
+  const dispatchableWorkIds = ready.workIds.filter((workId) => {
+    const sliceId = byId.get(workId)?.sliceId
+    if (!sliceId) return false
+    return (sliceDeps.get(sliceId) ?? []).every(
+      (dependsOnSliceId) =>
+        input.verification.getSliceVerificationState(jobId, generation, dependsOnSliceId) ===
+        'progress-ok'
+    )
+  })
+
+  if (dispatchableWorkIds.length > 0) {
+    const parallelWorkIds = dispatchableWorkIds.filter(
+      (workId) => byId.get(workId)?.canRunInParallel
+    )
     return {
       kind: 'dispatch-work',
-      workIds: parallelWorkIds.length > 1 ? parallelWorkIds : [ready.workIds[0]!]
+      workIds:
+        parallelWorkIds.length > 1
+          ? parallelWorkIds.slice(0, MAX_PARALLEL_WORK_ITEMS)
+          : [dispatchableWorkIds[0]!]
     }
   }
 
@@ -142,7 +167,7 @@ export function decideNextStep(input: {
   const deadlock = computeDeadlock({
     jobState,
     controlIntent,
-    readyWorkIds: ready.workIds,
+    readyWorkIds: dispatchableWorkIds,
     pendingWorkCount: pendingCount,
     blocked: ready.blocked
   })

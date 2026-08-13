@@ -10,13 +10,20 @@ import type {
   ExecutionSettingsSnapshot
 } from '@codetask/contracts'
 import type { DesignRealtimeEventName } from '@codetask/contracts'
+import { normalizeProviderCode } from '@codetask/provider-spec'
 import {
   allNodesConfirmed,
   assertTransition,
   isActivePlanningStatus,
+  validateTreeAgainstDraft,
   type PlanningRunRecord,
   type PlanningSessionRecord
 } from '../domain/planning.ts'
+import {
+  confirmEntireExecutionTree,
+  confirmExecutionTreeNode,
+  patchExecutionTreeNode
+} from '../domain/tree-mutations.ts'
 import {
   DesignConflictError,
   DesignForbiddenError,
@@ -51,6 +58,7 @@ export interface PlanningRepository {
     expectedTreeRevision?: number
   ): Promise<PlanningSessionRecord>
   insertRun(run: PlanningRunRecord): Promise<void>
+  nextRunAttemptNo(sessionId: string): Promise<number>
   updateRun(run: PlanningRunRecord): Promise<void>
   getRun(runId: string): Promise<PlanningRunRecord | null>
   saveReferenceSnapshot(input: {
@@ -74,23 +82,26 @@ export interface PlanningRepository {
     runUpdate?: PlanningRunRecord
   }): Promise<void>
   getTree(sessionId: string): Promise<ExecutionTreeSnapshot | null>
-  insertHandoff(input: {
+  beginHandoff(input: {
+    session: PlanningSessionRecord
+    expectedTreeRevision: number
     submissionId: string
-    planningSessionId: string
     idempotencyKey: string
     payloadJson: string
     createdAt: number
   }): Promise<{ created: boolean; existingJobId: string | null }>
-  markHandoffAccepted(input: {
+  completeHandoff(input: {
     submissionId: string
+    planningSessionId: string
     jobId: string
     acceptedAt: number
-  }): Promise<void>
+  }): Promise<PlanningSessionRecord>
   findHandoffByIdempotency(key: string): Promise<{
     submissionId: string
     status: string
     jobId: string | null
     payloadJson: string
+    lastErrorJson: string | null
   } | null>
 }
 
@@ -189,6 +200,13 @@ export class PlanningApplication {
     if (!draftSnapshot.executionProfile) {
       throw new DesignValidationError('Execution profile required')
     }
+    if (
+      !normalizeProviderCode(draftSnapshot.executionProfile.plannerCoreCode) ||
+      !normalizeProviderCode(draftSnapshot.executionProfile.sliceVerifierCoreCode) ||
+      !normalizeProviderCode(draftSnapshot.executionProfile.milestoneVerifierCoreCode)
+    ) {
+      throw new DesignValidationError('Execution profile contains an unsupported provider')
+    }
     const existing = await this.repo.listActiveForDraft(draftSnapshot.draftId)
     if (existing.some((s) => isActivePlanningStatus(s.status))) {
       throw new DesignValidationError('Draft already has an active planning session')
@@ -268,7 +286,7 @@ export class PlanningApplication {
       id: runId,
       planningSessionId: session.id,
       status: 'running',
-      attemptNo: 1,
+      attemptNo: await this.repo.nextRunAttemptNo(session.id),
       provider: session.executionProfile.plannerCoreCode,
       model: null,
       fencingToken,
@@ -429,6 +447,7 @@ export class PlanningApplication {
 
     const revision = session.treeRevision + 1
     const tree = { ...input.tree, revision, planningSessionId: session.id }
+    await this.validateTreeForSession(session, tree)
     const now = nowMs()
     const nextSession = {
       ...session,
@@ -468,62 +487,10 @@ export class PlanningApplication {
     const tree = await this.repo.getTree(sessionId)
     if (!tree) throw new DesignNotFoundError('Execution tree not found')
 
-    let found = false
-    const milestones = tree.milestones.map((m) => {
-      if (m.id === nodeId) {
-        found = true
-        return {
-          ...m,
-          title: body.title ?? m.title,
-          description: body.description ?? m.description,
-          successCriteria: body.successCriteria ?? m.successCriteria,
-          confirmed: false
-        }
-      }
-      return {
-        ...m,
-        slices: m.slices.map((s) => {
-          if (s.id === nodeId) {
-            found = true
-            return {
-              ...s,
-              title: body.title ?? s.title,
-              description: body.description ?? s.description,
-              successCriteria: body.successCriteria ?? s.successCriteria,
-              confirmed: false
-            }
-          }
-          return {
-            ...s,
-            tasks: s.tasks.map((t) => {
-              if (t.id !== nodeId) return t
-              found = true
-              return {
-                ...t,
-                title: body.title ?? t.title,
-                description: body.description ?? t.description,
-                successCriteria: body.successCriteria ?? t.successCriteria,
-                contextMarkdown: body.contextMarkdown ?? t.contextMarkdown,
-                abilityCode: body.abilityCode ?? t.abilityCode,
-                coreCode: body.coreCode ?? t.coreCode,
-                canRunInParallel: body.canRunInParallel ?? t.canRunInParallel,
-                referenceIds: body.referenceIds ?? t.referenceIds,
-                dependsOnTaskIds: body.dependsOnTaskIds ?? t.dependsOnTaskIds,
-                confirmed: false
-              }
-            })
-          }
-        })
-      }
-    })
-    if (!found) throw new DesignNotFoundError('Node not found')
-
     const revision = session.treeRevision + 1
-    const nextTree: ExecutionTreeSnapshot = {
-      ...tree,
-      revision,
-      milestones
-    }
+    const nextTree = patchExecutionTreeNode(tree, nodeId, body, revision)
+    if (!nextTree) throw new DesignNotFoundError('Node not found')
+    await this.validateTreeForSession(session, nextTree)
     const nextSession = {
       ...session,
       status: 'plan_editing' as const,
@@ -555,34 +522,10 @@ export class PlanningApplication {
     const tree = await this.repo.getTree(sessionId)
     if (!tree) throw new DesignNotFoundError('Execution tree not found')
 
-    let found = false
-    const milestones = tree.milestones.map((m) => {
-      if (m.id === nodeId) {
-        found = true
-        return { ...m, confirmed: true }
-      }
-      return {
-        ...m,
-        slices: m.slices.map((s) => {
-          if (s.id === nodeId) {
-            found = true
-            return { ...s, confirmed: true }
-          }
-          return {
-            ...s,
-            tasks: s.tasks.map((t) => {
-              if (t.id !== nodeId) return t
-              found = true
-              return { ...t, confirmed: true }
-            })
-          }
-        })
-      }
-    })
-    if (!found) throw new DesignNotFoundError('Node not found')
-
     const revision = session.treeRevision + 1
-    const nextTree: ExecutionTreeSnapshot = { ...tree, revision, milestones }
+    const nextTree = confirmExecutionTreeNode(tree, nodeId, revision)
+    if (!nextTree) throw new DesignNotFoundError('Node not found')
+    await this.validateTreeForSession(session, nextTree)
     const ready = allNodesConfirmed(nextTree)
     const nextSession = {
       ...session,
@@ -600,6 +543,42 @@ export class PlanningApplication {
     this.events.publish(sessionId, 'planning.tree.changed', {
       treeRevision: revision,
       readyToPublish: ready
+    })
+    return nextTree
+  }
+
+  async confirmTree(
+    actor: Actor,
+    sessionId: string,
+    expectedRevision: number
+  ): Promise<ExecutionTreeSnapshot> {
+    const session = await this.requireOwned(actor, sessionId)
+    if (session.status !== 'plan_editing' && session.status !== 'ready_to_publish') {
+      throw new DesignValidationError('Tree is not confirmable')
+    }
+    if (session.treeRevision !== expectedRevision) throw new DesignConflictError()
+    const tree = await this.repo.getTree(sessionId)
+    if (!tree) throw new DesignNotFoundError('Execution tree not found')
+
+    const revision = session.treeRevision + 1
+    const nextTree = confirmEntireExecutionTree(tree, revision)
+    await this.validateTreeForSession(session, nextTree)
+    const nextSession = {
+      ...session,
+      status: 'ready_to_publish' as const,
+      treeRevision: revision,
+      updatedAt: nowMs()
+    }
+    await this.repo.saveTree({
+      planId: nextTree.treeId,
+      sessionId,
+      tree: nextTree,
+      contentHash: stableHash(JSON.stringify(nextTree)),
+      sessionUpdate: { session: nextSession, expectedTreeRevision: expectedRevision }
+    })
+    this.events.publish(sessionId, 'planning.tree.changed', {
+      treeRevision: revision,
+      readyToPublish: true
     })
     return nextTree
   }
@@ -626,7 +605,31 @@ export class PlanningApplication {
       ) {
         throw new DesignConflictError('Idempotency key is already used by another publish')
       }
-      if (existing.jobId) return { session, jobId: existing.jobId }
+      if (existing.jobId) {
+        const current = await this.requireOwned(actor, sessionId)
+        return { session: current, jobId: existing.jobId }
+      }
+      if (existing.status === 'failed') {
+        let message = 'Publish failed'
+        if (existing.lastErrorJson) {
+          try {
+            message =
+              (JSON.parse(existing.lastErrorJson) as { message?: string }).message ?? message
+          } catch {
+            message = existing.lastErrorJson
+          }
+        }
+        throw new DesignValidationError(message)
+      }
+      const accepted = await this.jobSubmission.accept(prior)
+      const published = await this.repo.completeHandoff({
+        submissionId: prior.submissionId,
+        planningSessionId: sessionId,
+        jobId: accepted.jobId,
+        acceptedAt: nowMs()
+      })
+      this.events.publish(sessionId, 'planning.published', { jobId: accepted.jobId })
+      return { session: published, jobId: accepted.jobId }
     }
 
     if (session.status !== 'ready_to_publish') {
@@ -643,6 +646,12 @@ export class PlanningApplication {
       ? await this.repo.getReferenceManifest(session.referenceSnapshotId)
       : null
     if (!manifest) throw new DesignValidationError('Missing reference manifest')
+    validateTreeAgainstDraft({
+      tree,
+      abilities: draftSnapshot.abilities,
+      references: draftSnapshot.references,
+      manifest
+    })
 
     const submissionId = newId('sub')
     const taskProvider = firstTaskCoreCode(tree)
@@ -687,35 +696,61 @@ export class PlanningApplication {
       status: 'publishing' as const,
       updatedAt: nowMs()
     }
-    await this.repo.updateSession(publishing, expectedRevision)
-
-    const handoff = await this.repo.insertHandoff({
+    const handoff = await this.repo.beginHandoff({
+      session: publishing,
+      expectedTreeRevision: expectedRevision,
       submissionId,
-      planningSessionId: session.id,
       idempotencyKey,
       payloadJson: JSON.stringify(submission),
       createdAt: nowMs()
     })
     if (!handoff.created && handoff.existingJobId) {
-      return { session: publishing, jobId: handoff.existingJobId }
+      const current = await this.requireOwned(actor, sessionId)
+      return { session: current, jobId: handoff.existingJobId }
+    }
+    if (!handoff.created) {
+      const concurrent = await this.repo.findHandoffByIdempotency(idempotencyKey)
+      if (!concurrent) throw new DesignConflictError('Publish handoff disappeared')
+      const prior = JSON.parse(concurrent.payloadJson) as JobSubmission
+      if (prior.actorId !== actor.userId || prior.source.planningSessionId !== sessionId) {
+        throw new DesignConflictError('Idempotency key is already used by another publish')
+      }
+      const accepted = await this.jobSubmission.accept(prior)
+      const published = await this.repo.completeHandoff({
+        submissionId: prior.submissionId,
+        planningSessionId: session.id,
+        jobId: accepted.jobId,
+        acceptedAt: nowMs()
+      })
+      this.events.publish(sessionId, 'planning.published', { jobId: accepted.jobId })
+      return { session: published, jobId: accepted.jobId }
     }
 
     const accepted = await this.jobSubmission.accept(submission)
-    await this.repo.markHandoffAccepted({
+    const published = await this.repo.completeHandoff({
       submissionId,
+      planningSessionId: session.id,
       jobId: accepted.jobId,
       acceptedAt: nowMs()
     })
-    const published: PlanningSessionRecord = {
-      ...publishing,
-      status: 'published',
-      publishedJobId: accepted.jobId,
-      publishedAt: nowMs(),
-      updatedAt: nowMs()
-    }
-    await this.repo.updateSession(published)
     this.events.publish(sessionId, 'planning.published', { jobId: accepted.jobId })
     return { session: published, jobId: accepted.jobId }
+  }
+
+  private async validateTreeForSession(
+    session: PlanningSessionRecord,
+    tree: ExecutionTreeSnapshot
+  ): Promise<void> {
+    const draftSnapshot = JSON.parse(session.draftSnapshotJson) as DraftSnapshot
+    const manifest = session.referenceSnapshotId
+      ? await this.repo.getReferenceManifest(session.referenceSnapshotId)
+      : null
+    validateTreeAgainstDraft({
+      tree,
+      abilities: draftSnapshot.abilities,
+      references: draftSnapshot.references,
+      manifest
+    })
   }
 
   private async failSession(sessionId: string, message: string): Promise<void> {

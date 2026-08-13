@@ -1,5 +1,4 @@
 import type { MiddlewareHandler } from 'hono'
-import type { SecurityContext } from '../context/types'
 import { AppError } from '../error'
 import { runWithRequestAbortSignal } from '../context/request-abort'
 import { normalizedApiPath } from './require-auth'
@@ -13,7 +12,6 @@ declare module 'hono' {
 
 export const REQUEST_TIMEOUT_MS = DEFAULT_APP_CONFIG.http.requestTimeoutMs
 export const MAX_SSE_CLIENTS_PER_USER = DEFAULT_APP_CONFIG.http.maxSseClientsPerUser
-export const MAX_CONCURRENT_TURNS_PER_USER = DEFAULT_APP_CONFIG.http.maxConcurrentTurnsPerUser
 
 const SSE_STREAM_PATHS = new Set(['/realtime/stream'])
 
@@ -74,23 +72,6 @@ export function getRequestAbortSignal(c: {
   return c.get('requestAbortSignal') ?? new AbortController().signal
 }
 
-export function assertConcurrentTurnCapacity(
-  inflightForUser: number,
-  max = MAX_CONCURRENT_TURNS_PER_USER
-): void {
-  if (inflightForUser >= max) {
-    throw new AppError(
-      42901,
-      `At most ${max} concurrent turns allowed`,
-      {
-        error: `At most ${max} concurrent turns allowed`,
-        turnErrorCode: 'conversation.concurrent_turn_limit'
-      },
-      429
-    )
-  }
-}
-
 export function countActiveSseClientsForUser(
   activeByKey: Iterable<string>,
   username: string
@@ -121,8 +102,4 @@ export function assertSseClientCapacity(
 
 export function isSseStreamRoute(path: string): boolean {
   return SSE_STREAM_PATHS.has(normalizedApiPath(path))
-}
-
-export function httpResourceLimits(_security: SecurityContext): MiddlewareHandler {
-  return async (_c, next) => next()
 }

@@ -1,10 +1,26 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
+import type { AgentRuntime } from '@codetask/agent-runtime'
+import type { ExecutionTreeSnapshot } from '@codetask/contracts'
 import { composeDesignModule } from '../../packages/server-core/src/modules/design/index.ts'
-import { composeExecutionModule } from '../../packages/server-core/src/modules/execution/index.ts'
+import {
+  composeExecutionModule as composeProductionExecutionModule,
+  FakeAgentRuntime
+} from '../../packages/server-core/src/modules/execution/index.ts'
 import { migration043DesignModuleTables } from '../../packages/database/src/migrations/index.ts'
 import { migration045ExecutionModuleTables } from '../../packages/database/src/migrations/execution.ts'
+
+function composeExecutionModule(
+  deps: Omit<Parameters<typeof composeProductionExecutionModule>[0], 'agentRuntime'> & {
+    agentRuntime?: AgentRuntime
+  }
+): ReturnType<typeof composeProductionExecutionModule> {
+  return composeProductionExecutionModule({
+    ...deps,
+    agentRuntime: deps.agentRuntime ?? new FakeAgentRuntime()
+  })
+}
 
 function composeTestModules(
   db: Database.Database,
@@ -25,6 +41,48 @@ function composeTestModules(
     execution.startup()
   }
   return { design, execution }
+}
+
+async function createReadyPlanningSession(
+  design: ReturnType<typeof composeDesignModule>,
+  actor: { userId: string; sessionId: string },
+  suffix: string
+): Promise<{ session: { id: string }; tree: ExecutionTreeSnapshot }> {
+  let draft = await design.drafts.create(actor, {
+    projectId: `project-${suffix}`,
+    title: `Ready plan ${suffix}`,
+    requirementsMarkdown: '# Requirements\n- implement the feature'
+  })
+  draft = await design.drafts.patchAbilities(actor, draft.id, draft.lockRevision, [
+    {
+      abilityCode: 'general',
+      label: 'General',
+      description: 'General implementation',
+      reason: 'default',
+      recommendedCoreCode: 'opencode'
+    }
+  ])
+  draft = await design.drafts.patchExecutionProfile(actor, draft.id, draft.lockRevision, {
+    plannerCoreCode: 'opencode',
+    sliceVerifierCoreCode: 'opencode',
+    milestoneVerifierCoreCode: 'opencode'
+  })
+  draft = await design.drafts.confirm(actor, draft.id, draft.lockRevision)
+  const snapshot = await design.drafts.captureConfirmedSnapshot(actor, draft.id)
+  const session = await design.planning.createSession({
+    actor,
+    draftSnapshot: snapshot,
+    references: []
+  })
+  for (let i = 0; i < 50; i += 1) {
+    const current = await design.planning.get(actor, session.id)
+    if (current.session.status === 'plan_editing' && current.tree) {
+      const tree = await design.planning.confirmTree(actor, session.id, current.tree.revision)
+      return { session, tree }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error('Planner did not produce a tree')
 }
 
 describe('design module (01)', () => {
@@ -81,19 +139,17 @@ describe('design module (01)', () => {
     // Let startPlanning's finally (capacity.release) settle before later db.close().
     await new Promise((r) => setImmediate(r))
 
-    let revision = tree!.revision
-    for (const milestone of tree!.milestones) {
-      tree = await design.planning.confirmNode(actor, session.id, milestone.id, revision)
-      revision = tree.revision
-      for (const slice of milestone.slices) {
-        tree = await design.planning.confirmNode(actor, session.id, slice.id, revision)
-        revision = tree.revision
-        for (const task of slice.tasks) {
-          tree = await design.planning.confirmNode(actor, session.id, task.id, revision)
-          revision = tree.revision
-        }
-      }
-    }
+    tree = await design.planning.confirmTree(actor, session.id, tree!.revision)
+    const revision = tree.revision
+    assert.ok(
+      tree.milestones.every(
+        (milestone) =>
+          milestone.confirmed &&
+          milestone.slices.every(
+            (slice) => slice.confirmed && slice.tasks.every((task) => task.confirmed)
+          )
+      )
+    )
 
     db.prepare(
       `INSERT INTO job_handoffs (
@@ -115,18 +171,10 @@ describe('design module (01)', () => {
       /Idempotency key is already used/
     )
 
-    const first = await design.planning.publish(
-      actor,
-      session.id,
-      revision,
-      'idem-design-publish-1'
-    )
-    const second = await design.planning.publish(
-      actor,
-      session.id,
-      revision,
-      'idem-design-publish-1'
-    )
+    const [first, second] = await Promise.all([
+      design.planning.publish(actor, session.id, revision, 'idem-design-publish-1'),
+      design.planning.publish(actor, session.id, revision, 'idem-design-publish-1')
+    ])
     assert.equal(first.jobId, second.jobId)
     assert.equal(first.session.status, 'published')
 
@@ -422,6 +470,75 @@ describe('design module (01)', () => {
       persisted.tree?.milestones.find((milestone) => milestone.id === nodeId)?.title,
       fulfilled[0]!.value.milestones.find((milestone) => milestone.id === nodeId)?.title
     )
+    design.outbox.stop()
+    db.close()
+  })
+
+  it('rejects invalid tree edits before publish state can change', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+    const { design } = composeTestModules(db)
+    const actor = { userId: 'tree-editor', sessionId: 'session-tree-editor' }
+    const { session, tree } = await createReadyPlanningSession(design, actor, 'invalid-provider')
+    const taskId = tree.milestones[0]!.slices[0]!.tasks[0]!.id
+
+    await assert.rejects(
+      () =>
+        design.planning.patchNode(actor, session.id, taskId, {
+          expectedRevision: tree.revision,
+          coreCode: 'not-a-provider'
+        }),
+      /Unsupported provider/
+    )
+
+    const current = await design.planning.get(actor, session.id)
+    assert.equal(current.session.status, 'ready_to_publish')
+    assert.equal(
+      (db.prepare(`SELECT COUNT(*) AS count FROM job_handoffs`).get() as { count: number }).count,
+      0
+    )
+    design.outbox.stop()
+    db.close()
+  })
+
+  it('moves an unrecoverable publish handoff to failed after bounded retries', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    const design = composeDesignModule({
+      db,
+      async resolveWorkspaceRoot() {
+        return '/tmp/codetask-outbox-test'
+      },
+      jobSubmission: {
+        async accept() {
+          throw new Error('execution service unavailable')
+        }
+      }
+    })
+    const actor = { userId: 'outbox-user', sessionId: 'session-outbox' }
+    const { session, tree } = await createReadyPlanningSession(design, actor, 'outbox')
+
+    await assert.rejects(
+      () => design.planning.publish(actor, session.id, tree.revision, 'publish-outbox'),
+      /execution service unavailable/
+    )
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      db.prepare(
+        `UPDATE job_handoffs SET next_attempt_at = 0 WHERE idempotency_key = 'publish-outbox'`
+      ).run()
+      await design.outbox.drainOnce()
+    }
+
+    const current = await design.planning.get(actor, session.id)
+    const handoff = db
+      .prepare(`SELECT status, attempts FROM job_handoffs WHERE idempotency_key = ?`)
+      .get('publish-outbox') as { status: string; attempts: number }
+    assert.equal(current.session.status, 'failed')
+    assert.equal(handoff.status, 'failed')
+    assert.equal(handoff.attempts, 5)
     design.outbox.stop()
     db.close()
   })

@@ -1,11 +1,11 @@
 import { sandboxTurnDebug } from '../debug/sandbox-turn'
-import { TURN_CANCELLED } from '../../shared/turn-errors.ts'
+import { TURN_CANCELLED } from '@codetask/contracts/turn-errors'
 import {
   isCapacityTurnError,
   isRetryableTurnError,
   isUserTurnCancellation
-} from '../../shared/turn-errors.ts'
-import { isTurnError, createTurnError } from '../../shared/turn-errors.ts'
+} from '@codetask/contracts/turn-errors'
+import { isTurnError, createTurnError } from '@codetask/contracts/turn-errors'
 import type { AgentTurnChunk } from './types'
 import { DEFAULT_APP_CONFIG } from '../config/app-config'
 
@@ -22,7 +22,7 @@ export function resolveTurnMaxRetries(configured = DEFAULT_MAX_RETRIES): number 
   return Math.min(Math.floor(configured), ABSOLUTE_MAX_RETRIES)
 }
 
-export { isRetryableTurnError } from '../../shared/turn-errors.ts'
+export { isRetryableTurnError } from '@codetask/contracts/turn-errors'
 
 export function turnRetryDelayMs(attempt: number, error: unknown): number {
   if (isCapacityTurnError(error)) {

@@ -199,6 +199,7 @@ export const executionPlanTasks = sqliteTable('execution_plan_tasks', {
   contextMarkdown: text('context_markdown').notNull().default(''),
   successCriteria: text('success_criteria').notNull().default(''),
   referenceReason: text('reference_reason').notNull().default(''),
+  requiredInputsJson: text('required_inputs_json').notNull().default('[]'),
   canRunInParallel: integer('can_run_in_parallel').notNull().default(0),
   confirmed: integer('confirmed').notNull().default(0)
 })
@@ -232,21 +233,6 @@ export const executionPlanTaskReferences = sqliteTable(
   (table) => [primaryKey({ columns: [table.planId, table.taskId, table.referenceId] })]
 )
 
-export const executionPlanRevisions = sqliteTable(
-  'execution_plan_revisions',
-  {
-    planningSessionId: text('planning_session_id')
-      .notNull()
-      .references(() => planningSessions.id, { onDelete: 'cascade' }),
-    revision: integer('revision').notNull(),
-    snapshotGzip: text('snapshot_gzip').notNull(),
-    contentHash: text('content_hash').notNull(),
-    createdAt: integer('created_at').notNull(),
-    expiresAt: integer('expires_at')
-  },
-  (table) => [primaryKey({ columns: [table.planningSessionId, table.revision] })]
-)
-
 export const jobHandoffs = sqliteTable(
   'job_handoffs',
   {
@@ -260,8 +246,10 @@ export const jobHandoffs = sqliteTable(
     jobId: text('job_id'),
     attempts: integer('attempts').notNull().default(0),
     lastErrorJson: text('last_error_json'),
+    nextAttemptAt: integer('next_attempt_at'),
     createdAt: integer('created_at').notNull(),
-    acceptedAt: integer('accepted_at')
+    acceptedAt: integer('accepted_at'),
+    failedAt: integer('failed_at')
   },
   (table) => [
     uniqueIndex('idx_job_handoffs_idempotency').on(table.idempotencyKey),

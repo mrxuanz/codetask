@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { resolvePackagedServiceEntry } from '../../src/main/service-entry'
+import { resolvePackagedServiceEntry } from '../../apps/desktop/src/service-entry'
 
 test('packaged service entry resolves from a main chunk directory', () => {
   const outMain = mkdtempSync(join(tmpdir(), 'codetask-service-entry-'))

@@ -16,9 +16,9 @@ export function allowedJobActions(input: {
     case 'queued':
       return ['cancel', 'delete']
     case 'running':
-      return controlIntent === 'pause' ? ['continue'] : ['pause', 'cancel']
+      return controlIntent === 'none' ? ['pause', 'cancel'] : ['cancel']
     case 'pausing':
-      return ['continue', 'cancel']
+      return ['cancel']
     case 'paused':
       return ['continue', 'cancel', 'restart', 'delete']
     case 'cancelling':

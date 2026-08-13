@@ -4,8 +4,8 @@ import {
   createOpencodeLongTurnFetch,
   isTransientOpencodeTransportDetail
 } from '../../src/server/agent-runtime/providers/opencode-transport.ts'
-import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'
-import { isRetryableTurnError } from '../../src/shared/turn-errors.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors/turn-error'
+import { isRetryableTurnError } from '@codetask/contracts/turn-errors'
 
 describe('OpenCode transport classification', () => {
   it('treats undici fetch failed / socket errors as transient', () => {

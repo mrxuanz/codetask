@@ -108,10 +108,18 @@ export function classifyDriverCatchError(error: unknown): FailureClass {
   }
   if (text.includes('agent_no_report:')) return 'agent_no_report'
   if (text.includes('mcp_') || text.includes('capability-report')) return 'mcp_failed'
-  if (text.includes('provider_auth') || text.includes('ProviderAuthError')) {
+  if (
+    /provider_auth|ProviderAuthError|not.authenticated|authentication.required|unauthorized/i.test(
+      text
+    )
+  ) {
     return 'provider_auth_missing'
   }
-  if (text.includes('provider_unavailable') || text.includes('No provider available')) {
+  if (
+    /provider_unavailable|No provider available|not installed|is disabled|unknown provider driver/i.test(
+      text
+    )
+  ) {
     return 'provider_unavailable'
   }
   if (

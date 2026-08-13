@@ -37,10 +37,11 @@ const props = defineProps<{
   onCaptchaRequired?: () => void
 }>()
 
+const setupToken = defineModel<string>('setupToken', { default: '' })
+
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const setupToken = ref('')
 const error = ref<string | null>(null)
 const submitting = ref(false)
 const captchaChallenge = ref<CaptchaChallenge | null>(null)
@@ -166,7 +167,7 @@ async function handleSubmit(): Promise<void> {
 <template>
   <Card class="w-full min-w-0 overflow-hidden">
     <CardHeader class="space-y-2 px-4 pt-5 sm:px-6 sm:pt-6">
-      <CardTitle class="text-lg sm:text-xl">{{ title }}</CardTitle>
+      <CardTitle as="h1" class="text-lg sm:text-xl">{{ title }}</CardTitle>
       <CardDescription class="text-sm leading-relaxed break-words">{{
         description
       }}</CardDescription>
@@ -179,7 +180,6 @@ async function handleSubmit(): Promise<void> {
     </CardHeader>
     <CardContent class="px-4 pb-5 sm:px-6 sm:pb-6">
       <form class="flex min-w-0 flex-col gap-3 sm:gap-4" @submit.prevent="handleSubmit">
-        <slot name="before" :disabled="submitting || captchaLoading" />
         <div v-if="showSetupToken" class="flex min-w-0 flex-col gap-2">
           <Label for="setupToken">{{ t('setup.setupTokenLabel') }}</Label>
           <Input
@@ -191,6 +191,7 @@ async function handleSubmit(): Promise<void> {
             @blur="handleFieldBlur"
           />
         </div>
+        <slot name="before" :disabled="submitting || captchaLoading" />
         <div class="flex min-w-0 flex-col gap-2">
           <Label for="username">{{ t('common.username') }}</Label>
           <Input

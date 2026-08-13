@@ -1,4 +1,8 @@
 {
-  "files": [],
-  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": ["node", "electron-vite/node"]
+  },
+  "include": ["electron.vite.config.*", "build/**/*.ts"]
 }

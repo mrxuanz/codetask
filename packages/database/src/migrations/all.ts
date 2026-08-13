@@ -66,6 +66,8 @@ import { migration063ProjectFkAndAssetStorageKeys } from './project-fk-and-asset
 import { migration064DropBackupAndMarkerTables } from './drop-backup-and-marker-tables.ts'
 import { migration065DropLegacyThreadTables } from './drop-legacy-thread-tables.ts'
 import { migration066PlanningCapacityIndex } from './planning-capacity-index.ts'
+import { migration067ExecutionTreeContracts } from './execution-tree-contracts.ts'
+import { migration068ConversationQueryIndexes } from './conversation-query-indexes.ts'
 
 export type { Migration } from './v001_042/types.ts'
 export { runMigrations } from './runner.ts'
@@ -133,11 +135,12 @@ export const allMigrations: Migration[] = [
   migration063ProjectFkAndAssetStorageKeys,
   migration064DropBackupAndMarkerTables,
   migration065DropLegacyThreadTables,
-  migration066PlanningCapacityIndex
+  migration066PlanningCapacityIndex,
+  migration067ExecutionTreeContracts,
+  migration068ConversationQueryIndexes
 ]
 
-export function applyMigrations(db: Database.Database): void {
-  runMigrations(db, allMigrations)
+export function assertNoMigrationFailures(db: Database.Database): void {
   try {
     const failures = db.prepare(`SELECT COUNT(*) AS c FROM migration_failures`).get() as {
       c: number
@@ -151,5 +154,14 @@ export function applyMigrations(db: Database.Database): void {
     if (error instanceof Error && error.message.startsWith('Design migration recorded')) {
       throw error
     }
+    if (error instanceof Error && /no such table:\s*migration_failures\b/i.test(error.message)) {
+      return
+    }
+    throw error
   }
+}
+
+export function applyMigrations(db: Database.Database): void {
+  runMigrations(db, allMigrations)
+  assertNoMigrationFailures(db)
 }

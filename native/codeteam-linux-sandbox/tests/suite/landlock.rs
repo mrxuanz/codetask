@@ -16,22 +16,23 @@ use std::time::Duration;
 use tempfile::NamedTempFile;
 use tokio::process::Command;
 
-// At least on GitHub CI, the arm64 tests appear to need longer timeouts.
+// Sandbox integration tests launch nested Bubblewrap and network subprocesses.
+// Keep enough headroom for shared CI runners, with additional allowance on arm64.
 
 #[cfg(not(target_arch = "aarch64"))]
-const SHORT_TIMEOUT_MS: u64 = 5_000;
+const SHORT_TIMEOUT_MS: u64 = 10_000;
 #[cfg(target_arch = "aarch64")]
-const SHORT_TIMEOUT_MS: u64 = 5_000;
+const SHORT_TIMEOUT_MS: u64 = 20_000;
 
 #[cfg(not(target_arch = "aarch64"))]
-const LONG_TIMEOUT_MS: u64 = 5_000;
+const LONG_TIMEOUT_MS: u64 = 15_000;
 #[cfg(target_arch = "aarch64")]
-const LONG_TIMEOUT_MS: u64 = 5_000;
+const LONG_TIMEOUT_MS: u64 = 30_000;
 
 #[cfg(not(target_arch = "aarch64"))]
-const NETWORK_TIMEOUT_MS: u64 = 10_000;
+const NETWORK_TIMEOUT_MS: u64 = 20_000;
 #[cfg(target_arch = "aarch64")]
-const NETWORK_TIMEOUT_MS: u64 = 10_000;
+const NETWORK_TIMEOUT_MS: u64 = 40_000;
 
 const BWRAP_UNAVAILABLE_ERR: &str = "bubblewrap is unavailable: no system bwrap was found";
 const USER_NAMESPACE_FAILURES: &[&str] = &[

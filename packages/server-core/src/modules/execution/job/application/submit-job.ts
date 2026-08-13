@@ -1,12 +1,16 @@
 import type {
+  DraftReference,
   ExecutionTreeSnapshot,
   ExecutionTask,
   JobSubmission,
-  ProviderCode
+  ProviderCode,
+  ReferenceManifest
 } from '@codetask/contracts'
+import { findExecutionTreeLimitViolation, MAX_JOB_SUBMISSION_BYTES } from '@codetask/contracts'
 import type Database from 'better-sqlite3'
 import {
   canonicalizeWorkspaceRoot,
+  ExecutionConflictError,
   ExecutionValidationError,
   isoFromMs,
   newId,
@@ -14,7 +18,7 @@ import {
   stableHash
 } from '../../shared.ts'
 import { hasCycle } from '../../work/domain/dependency-graph.ts'
-import type { WorkDependencyRecord } from '../../work/domain/work-item.ts'
+import type { SliceDependencyRecord, WorkDependencyRecord } from '../../work/domain/work-item.ts'
 import { hashSubmission, JobSubmissionDedup } from '../infrastructure/job-submission-dedup.ts'
 import { ExecutionOutbox } from '../../events/execution-outbox.ts'
 
@@ -49,6 +53,96 @@ function collectTasks(tree: ExecutionTreeSnapshot): ExecutionTask[] {
     }
   }
   return tasks
+}
+
+function validateExecutionTreeShape(tree: ExecutionTreeSnapshot): void {
+  const nodeIds = new Set<string>()
+  const requireUnique = (id: string, label: string): void => {
+    if (!id.trim()) throw new ExecutionValidationError(`${label} id is required`)
+    if (nodeIds.has(id)) throw new ExecutionValidationError(`Duplicate execution node id: ${id}`)
+    nodeIds.add(id)
+  }
+
+  if (tree.milestones.length === 0) {
+    throw new ExecutionValidationError('Execution tree must contain a milestone')
+  }
+  for (const milestone of tree.milestones) {
+    requireUnique(milestone.id, 'Milestone')
+    if (milestone.slices.length === 0) {
+      throw new ExecutionValidationError(`Milestone ${milestone.id} has no slices`)
+    }
+    for (const slice of milestone.slices) {
+      requireUnique(slice.id, 'Slice')
+      if (slice.milestoneId !== milestone.id) {
+        throw new ExecutionValidationError(`Slice ${slice.id} has an invalid milestoneId`)
+      }
+      if (slice.tasks.length === 0) {
+        throw new ExecutionValidationError(`Slice ${slice.id} has no tasks`)
+      }
+      for (const task of slice.tasks) {
+        requireUnique(task.id, 'Task')
+        if (task.sliceId !== slice.id) {
+          throw new ExecutionValidationError(`Task ${task.id} has an invalid sliceId`)
+        }
+        normalizeProvider(task.coreCode)
+      }
+    }
+  }
+}
+
+function validateSubmissionConsistency(submission: JobSubmission): void {
+  const snapshot = submission.draftSnapshot
+  if (snapshot.actorId !== submission.actorId) {
+    throw new ExecutionValidationError('Draft snapshot actor does not match submission actor')
+  }
+  if (snapshot.projectId !== submission.projectId) {
+    throw new ExecutionValidationError('Draft snapshot project does not match submission project')
+  }
+  if (snapshot.draftId !== submission.source.draftId) {
+    throw new ExecutionValidationError('Draft snapshot does not match source draft')
+  }
+  if (
+    canonicalizeWorkspaceRoot(snapshot.workspaceRoot) !==
+    canonicalizeWorkspaceRoot(submission.workspaceRoot)
+  ) {
+    throw new ExecutionValidationError('Draft snapshot workspace does not match submission')
+  }
+  if (submission.referenceManifest.draftId !== submission.source.draftId) {
+    throw new ExecutionValidationError('Reference manifest does not match source draft')
+  }
+  if (submission.referenceManifest.draftLockRevision !== snapshot.lockRevision) {
+    throw new ExecutionValidationError('Reference manifest lock revision does not match draft')
+  }
+  if (submission.executionTree.planningSessionId !== submission.source.planningSessionId) {
+    throw new ExecutionValidationError('Execution tree does not match planning session')
+  }
+
+  const referenceIds = new Set<string>()
+  for (const reference of submission.referenceManifest.references) {
+    if (!reference.id.trim()) {
+      throw new ExecutionValidationError('Reference id is required')
+    }
+    if (referenceIds.has(reference.id)) {
+      throw new ExecutionValidationError(`Duplicate reference id: ${reference.id}`)
+    }
+    referenceIds.add(reference.id)
+  }
+  for (const task of collectTasks(submission.executionTree)) {
+    const seen = new Set<string>()
+    for (const referenceId of task.referenceIds) {
+      if (seen.has(referenceId)) {
+        throw new ExecutionValidationError(
+          `Task ${task.id} contains duplicate reference: ${referenceId}`
+        )
+      }
+      seen.add(referenceId)
+      if (!referenceIds.has(referenceId)) {
+        throw new ExecutionValidationError(
+          `Task ${task.id} references missing manifest entry: ${referenceId}`
+        )
+      }
+    }
+  }
 }
 
 function materializeDependencies(input: {
@@ -99,6 +193,49 @@ function materializeDependencies(input: {
   return deps
 }
 
+function materializeSliceDependencies(input: {
+  jobId: string
+  generation: number
+  tree: ExecutionTreeSnapshot
+  sliceIdToJobSliceId: Map<string, string>
+}): SliceDependencyRecord[] {
+  const sourceSliceIds = new Set(input.sliceIdToJobSliceId.keys())
+  const edges = new Map<string, string[]>()
+  const dependencies: SliceDependencyRecord[] = []
+  for (const milestone of input.tree.milestones) {
+    for (const slice of milestone.slices) {
+      const dependencyIds = slice.dependsOnSliceIds ?? []
+      edges.set(slice.id, dependencyIds)
+      for (const dependencyId of dependencyIds) {
+        if (!sourceSliceIds.has(dependencyId)) {
+          throw new ExecutionValidationError(`Missing dependency slice: ${dependencyId}`)
+        }
+        dependencies.push({
+          jobId: input.jobId,
+          generation: input.generation,
+          fromSliceId: input.sliceIdToJobSliceId.get(slice.id)!,
+          dependsOnSliceId: input.sliceIdToJobSliceId.get(dependencyId)!
+        })
+      }
+    }
+  }
+
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (sliceId: string): void => {
+    if (visiting.has(sliceId)) {
+      throw new ExecutionValidationError('Execution tree has cyclic slice dependencies')
+    }
+    if (visited.has(sliceId)) return
+    visiting.add(sliceId)
+    for (const dependencyId of edges.get(sliceId) ?? []) visit(dependencyId)
+    visiting.delete(sliceId)
+    visited.add(sliceId)
+  }
+  for (const sliceId of sourceSliceIds) visit(sliceId)
+  return dependencies
+}
+
 export type SubmitJobService = {
   accept(submission: JobSubmission): Promise<{
     submissionId: string
@@ -107,9 +244,23 @@ export type SubmitJobService = {
   }>
 }
 
+export type JobAssetPort = {
+  prepareReferences(input: {
+    actorId: string
+    projectId: string
+    draftId: string
+    references: DraftReference[]
+  }): DraftReference[]
+  promoteReferences(input: { jobId: string; draftId: string; references: DraftReference[] }): void
+  releaseJob(jobId: string): void
+  resolveAttachmentPath(attachmentId: string): string | null
+  onReferencesReleased?(): void
+}
+
 export function createSubmitJobService(deps: {
   db: Database.Database
   outbox: ExecutionOutbox
+  assets?: JobAssetPort
 }): SubmitJobService {
   const dedup = new JobSubmissionDedup(deps.db)
 
@@ -118,6 +269,9 @@ export function createSubmitJobService(deps: {
       const submissionHash = hashSubmission(submission)
       const bySubmissionId = dedup.checkSubmissionId(submission.submissionId)
       if (bySubmissionId) {
+        if (bySubmissionId.submissionHash !== submissionHash) {
+          throw new ExecutionConflictError('Submission id reused with different payload')
+        }
         return {
           submissionId: submission.submissionId,
           jobId: bySubmissionId.jobId,
@@ -138,6 +292,35 @@ export function createSubmitJobService(deps: {
       if (!allNodesConfirmed(submission.executionTree)) {
         throw new ExecutionValidationError('All tree nodes must be confirmed')
       }
+      const submissionBytes = new TextEncoder().encode(JSON.stringify(submission)).byteLength
+      if (submissionBytes > MAX_JOB_SUBMISSION_BYTES) {
+        throw new ExecutionValidationError(
+          `Job submission exceeds ${MAX_JOB_SUBMISSION_BYTES} bytes`
+        )
+      }
+      const limitViolation = findExecutionTreeLimitViolation(submission.executionTree)
+      if (limitViolation) throw new ExecutionValidationError(limitViolation)
+      validateSubmissionConsistency(submission)
+      validateExecutionTreeShape(submission.executionTree)
+
+      const preparedReferences =
+        deps.assets?.prepareReferences({
+          actorId: submission.actorId,
+          projectId: submission.projectId,
+          draftId: submission.source.draftId,
+          references: submission.referenceManifest.references
+        }) ?? submission.referenceManifest.references
+      const preparedManifest: ReferenceManifest = {
+        ...submission.referenceManifest,
+        references: preparedReferences
+      }
+      const preparedDraftSnapshot = {
+        ...submission.draftSnapshot,
+        references: submission.draftSnapshot.references.map(
+          (reference) =>
+            preparedReferences.find((candidate) => candidate.id === reference.id) ?? reference
+        )
+      }
 
       const jobId = newId('job')
       const now = nowMs()
@@ -150,8 +333,12 @@ export function createSubmitJobService(deps: {
         .get() as { next: number }
 
       const taskIdToWorkId = new Map<string, string>()
+      const milestoneIdToJobMilestoneId = new Map<string, string>()
+      const sliceIdToJobSliceId = new Map<string, string>()
       for (const milestone of submission.executionTree.milestones) {
+        milestoneIdToJobMilestoneId.set(milestone.id, newId('jm'))
         for (const slice of milestone.slices) {
+          sliceIdToJobSliceId.set(slice.id, newId('js'))
           for (const task of slice.tasks) {
             taskIdToWorkId.set(task.id, `work_${jobId}_${task.id}`)
           }
@@ -163,6 +350,12 @@ export function createSubmitJobService(deps: {
         generation,
         tree: submission.executionTree,
         taskIdToWorkId
+      })
+      const sliceDependencies = materializeSliceDependencies({
+        jobId,
+        generation,
+        tree: submission.executionTree,
+        sliceIdToJobSliceId
       })
 
       const tx = deps.db.transaction(() => {
@@ -194,6 +387,12 @@ export function createSubmitJobService(deps: {
             now
           )
 
+        deps.assets?.promoteReferences({
+          jobId,
+          draftId: submission.source.draftId,
+          references: preparedReferences
+        })
+
         deps.db
           .prepare(
             `INSERT INTO job_snapshots (
@@ -204,10 +403,10 @@ export function createSubmitJobService(deps: {
           )
           .run(
             jobId,
-            JSON.stringify(submission.draftSnapshot),
+            JSON.stringify(preparedDraftSnapshot),
             JSON.stringify(submission.executionProfile),
             JSON.stringify(submission.executionSettings),
-            JSON.stringify(submission.referenceManifest),
+            JSON.stringify(preparedManifest),
             JSON.stringify(submission.executionTree),
             settingsHash,
             contentHash,
@@ -216,7 +415,7 @@ export function createSubmitJobService(deps: {
 
         let milestoneSort = 0
         for (const milestone of submission.executionTree.milestones) {
-          const milestoneId = newId('jm')
+          const milestoneId = milestoneIdToJobMilestoneId.get(milestone.id)!
           deps.db
             .prepare(
               `INSERT INTO job_milestones (
@@ -238,7 +437,7 @@ export function createSubmitJobService(deps: {
 
           let sliceSort = 0
           for (const slice of milestone.slices) {
-            const sliceId = newId('js')
+            const sliceId = sliceIdToJobSliceId.get(slice.id)!
             deps.db
               .prepare(
                 `INSERT INTO job_slices (
@@ -266,10 +465,11 @@ export function createSubmitJobService(deps: {
                 .prepare(
                   `INSERT INTO job_work_items (
                     id, job_id, generation, source_task_id, parent_work_id,
-                    milestone_id, slice_id, kind, sort_order, title, description,
+                    milestone_id, slice_id, kind, task_kind, sort_order, title, description,
                     context_markdown, ability_code, provider_code, success_criteria,
-                    can_run_in_parallel, state, state_revision, created_at, updated_at
-                  ) VALUES (?, ?, ?, ?, NULL, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`
+                    reference_reason, required_inputs_json, can_run_in_parallel,
+                    state, state_revision, created_at, updated_at
+                  ) VALUES (?, ?, ?, ?, NULL, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`
                 )
                 .run(
                   workId,
@@ -278,6 +478,7 @@ export function createSubmitJobService(deps: {
                   task.id,
                   milestoneId,
                   sliceId,
+                  task.taskKind ?? 'general-implementation',
                   taskSort,
                   task.title,
                   task.description,
@@ -285,6 +486,8 @@ export function createSubmitJobService(deps: {
                   task.abilityCode,
                   normalizeProvider(task.coreCode),
                   task.successCriteria,
+                  task.referenceReason ?? '',
+                  JSON.stringify(task.requiredInputs ?? []),
                   task.canRunInParallel ? 1 : 0,
                   now,
                   now
@@ -301,6 +504,21 @@ export function createSubmitJobService(deps: {
               taskSort += 1
             }
           }
+        }
+
+        for (const dependency of sliceDependencies) {
+          deps.db
+            .prepare(
+              `INSERT INTO job_slice_dependencies (
+                job_id, generation, from_slice_id, depends_on_slice_id
+              ) VALUES (?, ?, ?, ?)`
+            )
+            .run(
+              dependency.jobId,
+              dependency.generation,
+              dependency.fromSliceId,
+              dependency.dependsOnSliceId
+            )
         }
 
         for (const dep of dependencies) {
@@ -324,7 +542,13 @@ export function createSubmitJobService(deps: {
         deps.outbox.enqueue(
           jobId,
           'job.submitted',
-          { jobId, submissionId: submission.submissionId },
+          {
+            jobId,
+            actorId: submission.actorId,
+            submissionId: submission.submissionId,
+            state: 'queued',
+            revision: 0
+          },
           deps.db
         )
       })

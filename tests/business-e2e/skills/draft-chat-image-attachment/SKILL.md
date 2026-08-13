@@ -1,9 +1,11 @@
 # draft-chat-image-attachment
 
 ## Role
+
 Drive Design draft collection so an uploaded image is read and bound onto a confirmable draft. Stop at Draft (no Planner / Job).
 
 ## Goal
+
 1. Isolated project + chat conversation with Runtime `conversationCore`.
 2. Upload fixture as `attachment.png`.
 3. `codetask_start_turn` with fixture message + `attachmentIds` (attachments only on the first turn).
@@ -17,6 +19,7 @@ Drive Design draft collection so an uploaded image is read and bound onto a conf
 Supervisor oracle checks: draft confirmable, references/sourceAttachments include attachmentId, title or summary recognizes the image phrase, SHA-256 matches fixture.
 
 ## Forbidden
+
 - Do not paste the image answer into prompts/titles/fileName
 - Do not confirm draft / enter Planner / launch Job
 - Do not use retired `create_task` thread kinds

@@ -1,10 +1,18 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { Value } from '@sinclair/typebox/value'
 import type {
   CreateConversationBody,
   CreateConversationTurnBody,
   RenameConversationBody,
   SwitchProviderBody
 } from '@codetask/contracts'
+import {
+  CreateConversationBodySchema,
+  CreateConversationTurnBodySchema,
+  RenameConversationBodySchema,
+  SwitchProviderBodySchema
+} from '@codetask/contracts'
+import type { TSchema } from '@sinclair/typebox'
 import type { ConversationApplication } from '../application/conversation-application.ts'
 import type { Actor } from '../shared.ts'
 import {
@@ -37,7 +45,7 @@ function mapError(error: unknown): { status: number; code: string; message: stri
   return {
     status: 500,
     code: 'conversation.internal',
-    message: error instanceof Error ? error.message : String(error)
+    message: 'Internal server error'
   }
 }
 
@@ -46,6 +54,12 @@ function fail(
   error: unknown
 ): Response {
   const mapped = mapError(error)
+  if (mapped.status === 500) {
+    console.error('[conversation] unhandled HTTP error', {
+      requestId: c.get('requestId') ?? 'unknown',
+      error
+    })
+  }
   return c.json(
     {
       success: false,
@@ -54,6 +68,29 @@ function fail(
     },
     mapped.status as 400
   )
+}
+
+async function parseBody<T>(
+  c: Context,
+  schema: TSchema,
+  message: string,
+  allowEmpty = false
+): Promise<T> {
+  const raw = await c.req.text()
+  let body: unknown
+  if (!raw.trim() && allowEmpty) {
+    body = {}
+  } else {
+    try {
+      body = JSON.parse(raw)
+    } catch {
+      throw new ConversationValidationError('Request body must be valid JSON')
+    }
+  }
+  if (!Value.Check(schema, body)) {
+    throw new ConversationValidationError(message)
+  }
+  return body as T
 }
 
 function ok(
@@ -94,7 +131,12 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
 
   routes.post('/projects/:projectId/conversations', async (c) => {
     try {
-      const body = (await c.req.json().catch(() => ({}))) as CreateConversationBody
+      const body = await parseBody<CreateConversationBody>(
+        c,
+        CreateConversationBodySchema,
+        'Invalid create conversation body',
+        true
+      )
       const created = app.create(c.get('actor'), c.req.param('projectId'), body)
       return ok(c, created, 201)
     } catch (error) {
@@ -112,7 +154,11 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
 
   routes.patch('/conversations/:conversationId', async (c) => {
     try {
-      const body = (await c.req.json()) as RenameConversationBody
+      const body = await parseBody<RenameConversationBody>(
+        c,
+        RenameConversationBodySchema,
+        'Invalid rename conversation body'
+      )
       return ok(c, app.rename(c.get('actor'), c.req.param('conversationId'), body.title))
     } catch (error) {
       return fail(c, error)
@@ -121,7 +167,11 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
 
   routes.patch('/conversations/:conversationId/provider', async (c) => {
     try {
-      const body = (await c.req.json()) as SwitchProviderBody
+      const body = await parseBody<SwitchProviderBody>(
+        c,
+        SwitchProviderBodySchema,
+        'Invalid switch provider body'
+      )
       const updated = await app.switchProvider(
         c.get('actor'),
         c.req.param('conversationId'),
@@ -164,7 +214,11 @@ export function createConversationRoutes(app: ConversationApplication): Hono<Con
 
   routes.post('/conversations/:conversationId/turns', async (c) => {
     try {
-      const body = (await c.req.json()) as CreateConversationTurnBody
+      const body = await parseBody<CreateConversationTurnBody>(
+        c,
+        CreateConversationTurnBodySchema,
+        'Invalid conversation turn body'
+      )
       // Reject Design leakage fields if clients still send them
       const raw = body as CreateConversationTurnBody & {
         generateDraft?: unknown

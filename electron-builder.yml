@@ -2,14 +2,37 @@ appId: io.github.mrxuanz.codetask
 productName: codetask
 directories:
   buildResources: build
+# Keep only the UI languages shipped by codetask. Electron otherwise bundles
+# every Chromium locale on every platform.
+electronLanguages:
+  - en
+  - en-US
+  - zh-CN
+  - zh_CN
+  - ja
 files:
-  - '!codetask-data.json'
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  # Keep application sources and repository tooling out of app.asar. Production
+  # dependencies are collected separately by electron-builder.
+  - package.json
+  - out/main/**
+  - out/renderer/**
+  - resources/**
+  - native/codeteam-sandbox/index.js
+  - native/codeteam-sandbox/package.json
+  - native/codeteam-sandbox/runner-entry.js
+  - native/codeteam-sandbox/setup-entry.js
+  - native/codeteam-sandbox/*.node
+  - native/codeteam-sandbox/helpers/**
+  - '!node_modules/**/{test,tests,__tests__,example,examples}/**'
+  - '!node_modules/**/*.map'
+  - '!node_modules/**/*.ts'
+extraResources:
+  - from: LICENSE
+    to: LICENSE
+  - from: NOTICE
+    to: NOTICE
+  - from: THIRD_PARTY_DEPENDENCIES.md
+    to: THIRD_PARTY_DEPENDENCIES.md
 asarUnpack:
   - resources/**
   - native/codeteam-sandbox/**

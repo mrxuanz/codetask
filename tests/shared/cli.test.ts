@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseCliArgs, parseServerCliArgs } from '../../src/main/cli'
+import { parseCliArgs, parseServerCliArgs } from '../../apps/service/src/cli'
 
 test('packaged smoke mode uses the headless loopback server', () => {
   assert.deepEqual(parseCliArgs(['codetask', '--smoke-test']), {

@@ -21,7 +21,7 @@ const PUBLIC_ALLOWLIST: AllowlistEntry[] = [
   { method: 'POST', path: '/auth/captcha' }
 ]
 
-export const ATTACHMENT_GET_PATH = /^\/(?:conversations|threads)\/[^/]+\/attachments\/[^/]+$/
+export const ATTACHMENT_GET_PATH = /^\/conversations\/[^/]+\/attachments\/[^/]+$/
 const API_PREFIX = '/api'
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 

@@ -168,4 +168,48 @@ describe('design planner MCP', () => {
     assert.equal(tree.milestones[0]!.slices[0]!.tasks[1]!.contextMarkdown, 'ctx2')
     assert.ok(tree.milestones[0]!.slices[0]!.tasks[1]!.dependsOnTaskIds.length === 1)
   })
+
+  it('preserves slice dependencies and task assignment metadata', () => {
+    const outline = minimalOutline()
+    const firstSlice = outline.milestones[0]!.slices[0]!
+    firstSlice.tasks[0] = {
+      ...firstSlice.tasks[0]!,
+      referenceIds: ['ref-1'],
+      referenceReason: 'Use the API example as the compatibility contract.',
+      requiredInputs: ['Existing API response fixture']
+    }
+    outline.milestones[0]!.slices.push({
+      title: 'Integrate',
+      description: 'Wire the implementation',
+      successCriteria: 'Integration works',
+      dependsOnSliceRefs: ['m1-s1'],
+      tasks: [
+        {
+          title: 'Integration task',
+          taskKind: 'integration',
+          abilityCode: 'backend-implementation'
+        }
+      ]
+    })
+
+    const tree = registeredPlanToExecutionTree({
+      planningSessionId: 'plan-metadata',
+      plan: outline,
+      contexts: new Map([
+        ['m1-s1-t1', { taskTitle: 'Scaffold', content: 'ctx1' }],
+        ['m1-s1-t2', { taskTitle: 'Service', content: 'ctx2' }],
+        ['m1-s1-t3', { taskTitle: 'Routes', content: 'ctx3' }],
+        ['m1-s2-t1', { taskTitle: 'Integration task', content: 'ctx4' }]
+      ]),
+      defaultCoreCode: 'codex'
+    })
+
+    const [implementation, integration] = tree.milestones[0]!.slices
+    assert.deepEqual(integration!.dependsOnSliceIds, [implementation!.id])
+    assert.equal(
+      implementation!.tasks[0]!.referenceReason,
+      'Use the API example as the compatibility contract.'
+    )
+    assert.deepEqual(implementation!.tasks[0]!.requiredInputs, ['Existing API response fixture'])
+  })
 })

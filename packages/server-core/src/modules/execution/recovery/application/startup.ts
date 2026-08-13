@@ -19,7 +19,7 @@ export function createRecoverWorkService(deps: { db: Database.Database }): Recov
       const result = deps.db
         .prepare(
           `UPDATE work_attempts SET status = 'interrupted', ended_at = ?
-           WHERE status = 'running'`
+           WHERE status IN ('starting', 'running')`
         )
         .run(now)
       return result.changes
@@ -75,24 +75,72 @@ export function createStartupReconcileService(deps: {
 
         deps.db
           .prepare(
-            `UPDATE work_attempts SET status = 'interrupted', ended_at = ? WHERE status = 'running'`
+            `UPDATE job_work_items SET state = 'pending', state_revision = state_revision + 1,
+             last_error_json = NULL, updated_at = ?
+             WHERE state IN ('leased', 'running', 'reported')
+               AND EXISTS (
+                 SELECT 1 FROM jobs
+                 WHERE jobs.id = job_work_items.job_id
+                   AND jobs.state IN ('running', 'pausing')
+               )`
           )
           .run(now)
 
         deps.db
           .prepare(
             `UPDATE jobs SET state = 'paused', current_run_id = NULL,
-             recovery_reason = 'uncertain_provider_outcome', updated_at = ?
-             WHERE id IN (
-               SELECT DISTINCT job_id FROM work_attempts WHERE status = 'interrupted'
-             ) AND state = 'running'`
+             control_intent = 'none', recovery_reason = 'uncertain_provider_outcome',
+             state_revision = state_revision + 1, updated_at = ?
+             WHERE state IN ('running', 'pausing') AND EXISTS (
+               SELECT 1 FROM work_attempts
+               WHERE work_attempts.job_id = jobs.id
+                 AND work_attempts.status IN ('starting', 'running')
+             )`
           )
           .run(now)
 
         deps.db
           .prepare(
-            `UPDATE jobs SET state = 'queued', current_run_id = NULL, updated_at = ?
+            `UPDATE jobs SET state = 'paused', current_run_id = NULL,
+             control_intent = 'none', recovery_reason = NULL,
+             state_revision = state_revision + 1, updated_at = ?
+             WHERE state = 'pausing'`
+          )
+          .run(now)
+
+        deps.db
+          .prepare(
+            `UPDATE job_work_items SET state = 'cancelled', state_revision = state_revision + 1,
+             updated_at = ? WHERE state NOT IN ('succeeded', 'failed', 'cancelled')
+             AND EXISTS (
+               SELECT 1 FROM jobs
+               WHERE jobs.id = job_work_items.job_id AND jobs.state = 'cancelling'
+             )`
+          )
+          .run(now)
+
+        deps.db
+          .prepare(
+            `UPDATE jobs SET state = 'cancelled', current_run_id = NULL,
+             control_intent = 'none', recovery_reason = NULL, terminal_at = ?,
+             state_revision = state_revision + 1, updated_at = ?
+             WHERE state = 'cancelling'`
+          )
+          .run(now, now)
+
+        deps.db
+          .prepare(
+            `UPDATE jobs SET state = 'queued', current_run_id = NULL,
+             control_intent = 'none', recovery_reason = NULL,
+             state_revision = state_revision + 1, updated_at = ?
              WHERE state = 'running'`
+          )
+          .run(now)
+
+        deps.db
+          .prepare(
+            `UPDATE work_attempts SET status = 'interrupted', ended_at = ?
+             WHERE status IN ('starting', 'running')`
           )
           .run(now)
 
@@ -107,6 +155,18 @@ export function createStartupReconcileService(deps: {
              )`
           )
           .run()
+
+        deps.db
+          .prepare(
+            `UPDATE execution_queue_entries SET status = 'removed', removed_at = ?
+             WHERE status = 'claimed' AND EXISTS (
+               SELECT 1 FROM jobs
+               WHERE jobs.id = execution_queue_entries.job_id
+                 AND jobs.execution_generation = execution_queue_entries.generation
+                 AND jobs.state IN ('paused', 'cancelled')
+             )`
+          )
+          .run(now)
       })
       tx()
     }

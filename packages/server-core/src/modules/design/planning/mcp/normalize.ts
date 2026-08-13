@@ -5,6 +5,18 @@ import type {
   PlannerRegisteredTask,
   PlannerRegisteredTaskContext
 } from './types.ts'
+import {
+  MAX_DRAFT_REFERENCES,
+  MAX_EXECUTION_MILESTONES,
+  MAX_EXECUTION_SLICES,
+  MAX_EXECUTION_SLICES_PER_MILESTONE,
+  MAX_EXECUTION_TASKS,
+  MAX_EXECUTION_TASKS_PER_SLICE,
+  MAX_NODE_DESCRIPTION_CHARS,
+  MAX_NODE_LIST_ITEMS,
+  MAX_NODE_TITLE_CHARS,
+  MAX_SUCCESS_CRITERIA_CHARS
+} from '@codetask/contracts'
 
 function collectPlanReferenceIds(plan: PlannerRegisteredPlan): Set<string> {
   const used = new Set<string>()
@@ -197,6 +209,63 @@ export function validatePlanShape(plan: PlannerRegisteredPlan): void {
     throw new Error(
       `plan has only ${counts.tasks} tasks. Break scaffolding, per-component implementation, styling, and integration into separate small tasks (~10 minutes each).`
     )
+  }
+  if (counts.milestones > MAX_EXECUTION_MILESTONES) {
+    throw new Error(`plan exceeds ${MAX_EXECUTION_MILESTONES} milestones`)
+  }
+  if (counts.slices > MAX_EXECUTION_SLICES) {
+    throw new Error(`plan exceeds ${MAX_EXECUTION_SLICES} slices`)
+  }
+  if (counts.tasks > MAX_EXECUTION_TASKS) {
+    throw new Error(`plan exceeds ${MAX_EXECUTION_TASKS} tasks`)
+  }
+  for (const milestone of plan.milestones) {
+    if ((milestone.title?.length ?? 0) > MAX_NODE_TITLE_CHARS) {
+      throw new Error('milestone title is too large')
+    }
+    if ((milestone.description?.length ?? 0) > MAX_NODE_DESCRIPTION_CHARS) {
+      throw new Error('milestone description is too large')
+    }
+    if ((milestone.successCriteria?.length ?? 0) > MAX_SUCCESS_CRITERIA_CHARS) {
+      throw new Error('milestone success criteria is too large')
+    }
+    if (milestone.slices.length > MAX_EXECUTION_SLICES_PER_MILESTONE) {
+      throw new Error(`a milestone exceeds ${MAX_EXECUTION_SLICES_PER_MILESTONE} slices`)
+    }
+    for (const slice of milestone.slices) {
+      if ((slice.title?.length ?? 0) > MAX_NODE_TITLE_CHARS) {
+        throw new Error('slice title is too large')
+      }
+      if ((slice.description?.length ?? 0) > MAX_NODE_DESCRIPTION_CHARS) {
+        throw new Error('slice description is too large')
+      }
+      if (slice.successCriteria.length > MAX_SUCCESS_CRITERIA_CHARS) {
+        throw new Error('slice success criteria is too large')
+      }
+      if (slice.tasks.length > MAX_EXECUTION_TASKS_PER_SLICE) {
+        throw new Error(`a slice exceeds ${MAX_EXECUTION_TASKS_PER_SLICE} tasks`)
+      }
+      for (const task of slice.tasks) {
+        if ((task.title?.length ?? 0) > MAX_NODE_TITLE_CHARS) {
+          throw new Error('task title is too large')
+        }
+        if ((task.description?.length ?? 0) > MAX_NODE_DESCRIPTION_CHARS) {
+          throw new Error('task description is too large')
+        }
+        if ((task.successCriteria?.length ?? 0) > MAX_SUCCESS_CRITERIA_CHARS) {
+          throw new Error('task success criteria is too large')
+        }
+        if ((task.referenceIds?.length ?? 0) > MAX_DRAFT_REFERENCES) {
+          throw new Error('task has too many references')
+        }
+        if (
+          (task.requiredInputs?.length ?? 0) > MAX_NODE_LIST_ITEMS ||
+          (task.dependsOnTaskRefs?.length ?? 0) > MAX_NODE_LIST_ITEMS
+        ) {
+          throw new Error('task has too many inputs or dependencies')
+        }
+      }
+    }
   }
   const hasFrontendOrBackend = plan.milestones.some((milestone) =>
     milestone.slices.some((slice) =>

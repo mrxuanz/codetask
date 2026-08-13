@@ -65,8 +65,7 @@ describe('architecture 03 DoD', () => {
       const source = readFileSync(file, 'utf8')
       assert.doesNotMatch(source, /legacy-wizard|wizardPhase|wizardStage|threads\/service/)
     }
-    const history = readFileSync(join(root, 'src/server/conversation/history.ts'), 'utf8')
-    assert.doesNotMatch(history, /wizard|createTaskMode|task-launch-draft/)
+    assert.equal(exists('src/server/conversation/history.ts'), false)
   })
 
   it('host threads service and legacy-wizard directories are removed', () => {

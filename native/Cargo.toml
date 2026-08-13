@@ -19,20 +19,21 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+publish = false
 
 [workspace.dependencies]
-anyhow = "1.0"
+anyhow = "1.0.103"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
-codeteam-network-proxy = { path = "codeteam-network-proxy" }
-codeteam-otel = { path = "codeteam-otel" }
-codeteam-process-hardening = { path = "codeteam-process-hardening" }
-codeteam-sandbox-policy = { path = "codeteam-sandbox-policy" }
-codeteam-sandboxing = { path = "codeteam-sandboxing" }
-codeteam-utils-absolute-path = { path = "codeteam-utils-absolute-path" }
-codeteam-utils-pty = { path = "codeteam-utils-pty" }
-codeteam-utils-string = { path = "codeteam-utils-string" }
+codeteam-network-proxy = { path = "codeteam-network-proxy", version = "0.1.0" }
+codeteam-otel = { path = "codeteam-otel", version = "0.1.0" }
+codeteam-process-hardening = { path = "codeteam-process-hardening", version = "0.1.0" }
+codeteam-sandbox-policy = { path = "codeteam-sandbox-policy", version = "0.1.0" }
+codeteam-sandboxing = { path = "codeteam-sandboxing", version = "0.1.0" }
+codeteam-utils-absolute-path = { path = "codeteam-utils-absolute-path", version = "0.1.0" }
+codeteam-utils-pty = { path = "codeteam-utils-pty", version = "0.1.0" }
+codeteam-utils-string = { path = "codeteam-utils-string", version = "0.1.0" }
 dunce = "1.0"
 dirs = "6"
 glob = "0.3"

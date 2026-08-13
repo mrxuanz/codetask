@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createShutdownSignalHandler } from '../../src/main/shutdown-signal'
+import { createShutdownSignalHandler } from '../../packages/service-bootstrap/src/shutdown'
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))

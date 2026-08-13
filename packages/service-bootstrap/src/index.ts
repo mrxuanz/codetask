@@ -10,6 +10,13 @@ export {
 export { parseServiceBootstrapArgs, type ServiceBootstrapCli } from './cli.ts'
 
 export {
+  createShutdownSignalHandler,
+  shutdownSignalExitCode,
+  DEFAULT_FORCE_SHUTDOWN_MS,
+  type ShutdownSignal
+} from './shutdown.ts'
+
+export {
   spawnSupervisedService,
   type SpawnServiceOptions,
   type SupervisedService

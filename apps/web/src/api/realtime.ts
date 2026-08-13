@@ -38,7 +38,7 @@ function authorizationHeader(): string | null {
 export async function connectRealtimeStream(
   connectionId: string,
   onEnvelope: (envelope: RealtimeEnvelope) => void,
-  options?: { signal?: AbortSignal; lastEventId?: number | null }
+  options?: { signal?: AbortSignal; lastEventId?: number | null; onOpen?: () => void }
 ): Promise<void> {
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
@@ -64,6 +64,7 @@ export async function connectRealtimeStream(
 
   const reader = res.body?.getReader()
   if (!reader) throw new ApiError('SSE 响应无 body', res.status, null)
+  options?.onOpen?.()
 
   const decoder = new TextDecoder()
   let buffer = ''

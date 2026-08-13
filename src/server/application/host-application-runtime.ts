@@ -3,12 +3,12 @@ import { pruneOrphanRuntimeTrees } from '../runtime/cleanup'
 import { runRetentionJanitorPass } from '../retention/lifecycle'
 import { runAuthJanitorPass } from '../auth/janitor'
 import { StartupCoordinator } from './startup-coordinator'
-import { SafeLoggerImpl } from './safe-logger'
+import type { SafeLogger } from './ports/safe-logger'
 import type { ApplicationRuntime } from './application-runtime'
 import type { ShutdownReason } from './shutdown-types'
 
 export function createHostApplicationRuntime(ctx: AppContext): ApplicationRuntime {
-  const logger = new SafeLoggerImpl()
+  const logger = ctx.logger
 
   const startup = new StartupCoordinator({
     logger,
@@ -60,7 +60,7 @@ export function createHostApplicationRuntime(ctx: AppContext): ApplicationRuntim
   }
 }
 
-async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
+async function runRetentionStartupPass(logger: SafeLogger): Promise<void> {
   try {
     const result = await runRetentionJanitorPass()
     if (
@@ -83,10 +83,7 @@ async function runRetentionStartupPass(logger: SafeLoggerImpl): Promise<void> {
   }
 }
 
-async function startConversationCursorReaper(
-  ctx: AppContext,
-  logger: SafeLoggerImpl
-): Promise<void> {
+async function startConversationCursorReaper(ctx: AppContext, logger: SafeLogger): Promise<void> {
   try {
     const module = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')
     module.configureConversationCursorReaper({
@@ -115,7 +112,7 @@ export async function startHostApplicationRuntime(runtime: ApplicationRuntime): 
 }
 
 async function startHostApplicationRuntimeOnce(runtime: ApplicationRuntime): Promise<void> {
-  const logger = new SafeLoggerImpl()
+  const logger = runtime.ctx.logger
 
   await runtime.startup.ensureReady()
 
@@ -145,7 +142,7 @@ export async function shutdownHostApplicationRuntime(
 }
 
 async function runShutdown(runtime: ApplicationRuntime, reason: ShutdownReason): Promise<void> {
-  const logger = new SafeLoggerImpl()
+  const logger = runtime.ctx.logger
   logger.info('application shutdown started', { reason })
 
   try {
@@ -162,7 +159,7 @@ async function runShutdown(runtime: ApplicationRuntime, reason: ShutdownReason):
   logger.info('application shutdown completed')
 }
 
-async function closeCursorAcpRuntimes(logger: SafeLoggerImpl): Promise<void> {
+async function closeCursorAcpRuntimes(logger: SafeLogger): Promise<void> {
   const failures: unknown[] = []
   try {
     const reaper = await import('../agent-runtime/cursor-acp/conversation-cursor-reaper')

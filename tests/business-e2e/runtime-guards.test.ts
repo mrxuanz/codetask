@@ -7,6 +7,12 @@ import { inflateSync } from 'node:zlib'
 import type { PublicApiClient } from './api/client.ts'
 import { waitJobTerminal, waitTurnTerminal } from './api/operations.ts'
 import { partitionProviderScopedCases, resolveSelection } from './cases/selection.ts'
+import {
+  OPERATOR_PROTOCOLS,
+  resolveCaseDriver,
+  resolveOperatorSelection
+} from './config/operators.ts'
+import { buildOperatorMcpServers } from './drivers/provider-agent.ts'
 import { createTemporaryRunRoot, removeTemporaryRunRoot } from './supervisor/run-layout.ts'
 
 test('E2E run roots are ephemeral and outside the repository', () => {
@@ -122,49 +128,103 @@ function inspectRgbaPng(path: URL): {
 
 test('unknown --case values fail instead of reporting a skipped SUCCESS', () => {
   assert.throws(() => resolveSelection({ caseId: 'settings-mcp' }), /unknown_case:settings-mcp/)
-  assert.deepEqual(resolveSelection({ caseId: 'settings-mcp-probe' }).caseIds, ['SETTINGS-MCP-001'])
+  assert.deepEqual(resolveSelection({ caseId: 'settings-mcp-probe' }).caseIds, [
+    'settings-mcp-probe'
+  ])
 })
 
-test('image attachment case aliases resolve into phase 1/2 defaults', () => {
-  assert.deepEqual(resolveSelection({ caseId: 'chat-image-attachment' }).caseIds, ['CHAT-IMG-001'])
-  assert.deepEqual(resolveSelection({ caseId: 'draft-chat-image-attachment' }).caseIds, [
-    'DESIGN-DRAFT-001'
+test('case selection uses business names and rejects misleading retired aliases', () => {
+  assert.deepEqual(resolveSelection({ caseId: 'chat-image-attachment' }).caseIds, [
+    'chat-image-attachment'
   ])
-  assert.deepEqual(resolveSelection({ caseId: 'draft-reference-path-job' }).caseIds, [
-    'DESIGN-DRAFT-001'
-  ])
-  assert.deepEqual(resolveSelection({ caseId: 'notes-search' }).caseIds, ['DESIGN-DRAFT-001'])
-  // legacy aliases
-  assert.deepEqual(resolveSelection({ caseId: 'chat-image-ocr' }).caseIds, ['CHAT-IMG-001'])
-  assert.deepEqual(resolveSelection({ caseId: 'draft-image-ocr' }).caseIds, ['DESIGN-DRAFT-001'])
+  assert.deepEqual(resolveSelection({ caseId: 'design-draft' }).caseIds, ['design-draft-confirm'])
+  for (const retired of [
+    'draft-chat-image-attachment',
+    'draft-reference-path-job',
+    'notes-search',
+    'chat-image-ocr',
+    'draft-image-ocr',
+    'full-chain'
+  ]) {
+    assert.throws(() => resolveSelection({ caseId: retired }), /unknown_case:/)
+  }
   assert.deepEqual(resolveSelection({ part: 'conversation' }).caseIds, [
-    'G3-001',
-    'CHAT-HTML-001',
-    'CHAT-IMG-001'
+    'chat-basic',
+    'chat-create-html',
+    'chat-image-attachment'
   ])
-  assert.deepEqual(resolveSelection({ part: 'draft-job' }).caseIds, ['DESIGN-DRAFT-001'])
+  assert.deepEqual(resolveSelection({ part: 'design' }).caseIds, ['design-draft-confirm'])
 })
 
 test('--suite all includes foundation plus every part default case', () => {
   const ids = resolveSelection({ suite: 'all' }).caseIds
-  assert.ok(ids.includes('FOUNDATION-FAKE-001'))
-  assert.ok(ids.includes('G0-001'))
-  assert.ok(ids.includes('G3-001'))
-  assert.ok(ids.includes('DESIGN-DRAFT-001'))
-  assert.ok(ids.includes('SETTINGS-MCP-001'))
+  assert.ok(ids.includes('foundation-probe'))
+  assert.ok(ids.includes('build-artifact'))
+  assert.ok(ids.includes('chat-basic'))
+  assert.ok(ids.includes('design-draft-confirm'))
+  assert.ok(ids.includes('settings-mcp-probe'))
   assert.equal(ids.length, 16)
 })
 
 test('supervisor cases run once; agent cases stay per-provider', () => {
   const { sharedOnce, perProvider } = partitionProviderScopedCases([
-    'G1-003',
-    'G0-002',
-    'G3-001',
-    'DESIGN-DRAFT-001',
-    'SETTINGS-MCP-001'
+    'setup-login',
+    'server-health',
+    'chat-basic',
+    'design-draft-confirm',
+    'settings-mcp-probe'
   ])
-  assert.deepEqual(sharedOnce, ['G1-003', 'G0-002'])
-  assert.deepEqual(perProvider, ['G3-001', 'DESIGN-DRAFT-001', 'SETTINGS-MCP-001'])
+  assert.deepEqual(sharedOnce, ['setup-login', 'server-health'])
+  assert.deepEqual(perProvider, ['chat-basic', 'design-draft-confirm', 'settings-mcp-probe'])
+})
+
+test('outer operator selection is independent from the CodeTask provider matrix', () => {
+  assert.equal(resolveOperatorSelection({}), 'manifest')
+  assert.equal(resolveOperatorSelection({ operator: 'codex-sdk' }), 'codex')
+  assert.equal(resolveOperatorSelection({ driver: 'cursor-acp' }), 'cursor')
+  assert.throws(
+    () => resolveOperatorSelection({ operator: 'codex', driver: 'claude' }),
+    /operator_flag_conflict/
+  )
+
+  assert.equal(resolveCaseDriver('opencode', 'codex'), 'codex')
+  assert.equal(resolveCaseDriver('fake', 'cursor'), 'cursor')
+  assert.equal(resolveCaseDriver('fake', 'manifest'), 'fake')
+  assert.equal(resolveCaseDriver('supervisor', 'claude'), 'supervisor')
+  assert.deepEqual(OPERATOR_PROTOCOLS, {
+    opencode: 'local-server',
+    codex: 'sdk',
+    claude: 'sdk',
+    cursor: 'acp',
+    fake: 'scripted'
+  })
+})
+
+test('SDK and ACP operator MCP configs carry the case capability without product changes', () => {
+  const common = {
+    mcpUrl: 'http://127.0.0.1:4567/mcp',
+    capabilityId: 'cap-operator',
+    allowedTools: ['codetask_start_turn', 'report_case_result']
+  } as const
+
+  const codex = buildOperatorMcpServers({ ...common, operator: 'codex' })
+  const codexServer = codex['codetask-business-test'] as Record<string, unknown>
+  assert.deepEqual(codexServer.http_headers, {
+    Accept: 'application/json, text/event-stream',
+    'X-Business-Capability': 'cap-operator'
+  })
+  assert.deepEqual(codexServer.tools, {
+    codetask_start_turn: { approval_mode: 'approve' },
+    report_case_result: { approval_mode: 'approve' }
+  })
+
+  const claude = buildOperatorMcpServers({ ...common, operator: 'claude' })
+  assert.equal((claude['codetask-business-test'] as { type: string }).type, 'http')
+  const cursor = buildOperatorMcpServers({ ...common, operator: 'cursor' })
+  assert.deepEqual(
+    (cursor['codetask-business-test'] as { headers: Record<string, string> }).headers,
+    codexServer.http_headers
+  )
 })
 
 test('image attachment matcher requires contiguous phrase, not scattered tokens', async () => {
@@ -296,6 +356,14 @@ test('E2E source has no model, executable-path, HOME, or HTML-simulation switche
     'utf8'
   )
   const driverSource = readFileSync(new URL('./drivers/opencode.ts', import.meta.url), 'utf8')
+  const operatorPromptSource = readFileSync(
+    new URL('./drivers/operator-prompt.ts', import.meta.url),
+    'utf8'
+  )
+  const providerAgentSource = readFileSync(
+    new URL('./drivers/provider-agent.ts', import.meta.url),
+    'utf8'
+  )
   const canarySource = readFileSync(
     new URL('./drivers/opencode-canary.ts', import.meta.url),
     'utf8'
@@ -303,8 +371,12 @@ test('E2E source has no model, executable-path, HOME, or HTML-simulation switche
   const fakeSource = readFileSync(new URL('./drivers/fake.ts', import.meta.url), 'utf8')
   const supervisorSource = readFileSync(new URL('./supervisor/main.ts', import.meta.url), 'utf8')
   const opencodeSources = `${promptSource}\n${driverSource}\n${canarySource}`
+  const liveOperatorSources = `${opencodeSources}\n${providerAgentSource}\n${operatorPromptSource}`
 
-  assert.doesNotMatch(opencodeSources, /BUSINESS_OPENCODE_MODEL|CODETASK_OPENCODE_BIN|OPENCODE_BIN/)
+  assert.doesNotMatch(
+    liveOperatorSources,
+    /BUSINESS_OPENCODE_MODEL|CODETASK_OPENCODE_BIN|OPENCODE_BIN/
+  )
   assert.doesNotMatch(promptSource, /\bHOME\s*:/)
   assert.doesNotMatch(promptSource, /\bmodel\s*:\s*input\./)
   assert.doesNotMatch(fakeSource, /BUSINESS_E2E_REQUIRE_AGENT_HTML|created-by=fake-driver/)
@@ -319,5 +391,7 @@ test('E2E source has no model, executable-path, HOME, or HTML-simulation switche
   assert.match(fakeSource, /codetask_confirm_design_draft/)
   assert.doesNotMatch(fakeSource, /codetask_update_draft_execution_config/)
   assert.doesNotMatch(driverSource, /codetask_confirm_draft_final/)
-  assert.match(driverSource, /DESIGN-DRAFT-001/)
+  assert.match(operatorPromptSource, /design-draft-confirm/)
+  assert.match(providerAgentSource, /getAgentTurnProvider/)
+  assert.match(providerAgentSource, /capabilityProfile: 'chat-read'/)
 })

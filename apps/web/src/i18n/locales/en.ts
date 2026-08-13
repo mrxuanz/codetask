@@ -204,10 +204,18 @@ export default {
       backToList: 'Back to task list',
       loadFailed: 'Failed to load task list',
       detailFailed: 'Failed to load task detail',
+      deleteConfirmTitle: 'Delete task?',
+      deleteConfirmMessage:
+        'Delete “{title}” and all of its execution history? This cannot be undone.',
       executionTree: 'Execution tree',
       taskParameters: 'Task parameters',
       runHistory: 'Run history',
       cliLabel: 'CLI: {summary}',
+      pagination: {
+        previous: 'Previous',
+        next: 'Next',
+        page: '{page} / {total}'
+      },
       filters: {
         all: 'All',
         pending: 'Queued',

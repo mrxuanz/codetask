@@ -25,7 +25,7 @@ test('agent runner loads sandbox orchestration only inside the sandbox branch', 
 })
 
 test('application startup does not require sandbox supervisor readiness', () => {
-  const source = readFileSync(join(process.cwd(), 'src/main/server.ts'), 'utf8')
+  const source = readFileSync(join(process.cwd(), 'apps/service/src/server.ts'), 'utf8')
   assert.doesNotMatch(source, /confirmSandboxReadyOrThrow/)
   assert.doesNotMatch(source, /getSandboxSupervisorManager/)
 })
@@ -64,7 +64,7 @@ test('Cursor ACP turns have a bounded no-update wait', () => {
 })
 
 test('HTTP listen path initializes Conversation MCP after the port is bound', () => {
-  const source = readFileSync(join(process.cwd(), 'src/main/server.ts'), 'utf8')
+  const source = readFileSync(join(process.cwd(), 'apps/service/src/server.ts'), 'utf8')
   assert.match(source, /initConversationMcpBackend/)
   assert.match(source, /async function createReadyApp\(/)
   assert.doesNotMatch(source, /scheduleLegacyQueueResume|resumeJobQueuesAfterServerReady/)

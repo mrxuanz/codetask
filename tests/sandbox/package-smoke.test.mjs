@@ -54,17 +54,24 @@ test('package smoke resolves exact Windows and macOS application names', () => {
 })
 
 test('packaged application smoke covers setup, login, and an assistant reply', () => {
-  const appMain = readFileSync(new URL('../../src/main/app-main.ts', import.meta.url), 'utf8')
-  const sidecar = readFileSync(
-    new URL('../../src/main/desktop-service.ts', import.meta.url),
+  const appMain = readFileSync(
+    new URL('../../apps/desktop/src/app-main.ts', import.meta.url),
     'utf8'
   )
-  assert.match(appMain, /\/api\/auth\/setup/)
-  assert.match(appMain, /\/api\/auth\/login/)
-  assert.match(appMain, /\/api\/projects/)
-  assert.match(appMain, /\/turns/)
-  assert.match(appMain, /conversation: 'reply-ok'/)
-  assert.match(appMain, /turnStatus = current\.state/)
+  const smoke = readFileSync(
+    new URL('../../apps/desktop/src/package-smoke.ts', import.meta.url),
+    'utf8'
+  )
+  const sidecar = readFileSync(
+    new URL('../../apps/desktop/src/desktop-service.ts', import.meta.url),
+    'utf8'
+  )
+  assert.match(smoke, /\/api\/auth\/setup/)
+  assert.match(smoke, /\/api\/auth\/login/)
+  assert.match(smoke, /\/api\/projects/)
+  assert.match(smoke, /\/turns/)
+  assert.match(smoke, /conversation: 'reply-ok'/)
+  assert.match(smoke, /turnStatus = current\.state/)
   assert.match(sidecar, /options\.smokeTest.*--smoke-test/)
   assert.match(sidecar, /package-smoke-data/)
   assert.match(appMain, /await gracefulShutdownFromApp\(\)\.catch/)

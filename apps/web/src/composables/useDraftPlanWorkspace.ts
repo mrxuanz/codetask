@@ -10,13 +10,12 @@ import {
 } from 'vue'
 import type { ThreadDraftSummaryDto, PlanningSessionViewDto } from '@codetask/contracts'
 import {
-  fetchThreadDrafts,
-  fetchThreadPlans,
   fetchJob,
   launchDesignSession,
   mapExecutionJobToPlanView,
   retryJobPlanning
 } from '@renderer/api/jobs'
+import { loadConversationDesignWorkspace } from '@renderer/api/design-workspace'
 import { getDesignDraft } from '@renderer/api/design'
 import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 import { conversationTopic } from '@codetask/contracts'
@@ -29,6 +28,7 @@ import {
   type TaskLaunchDraftPayload
 } from '@renderer/lib/draftForm'
 import { buildPlanTree } from '@renderer/lib/jobProgress'
+import { findLatestPlanForDraft } from '@renderer/lib/draftPlanAssociation'
 import type { TranslateFn } from '@renderer/lib/jobProgress'
 import { toast, toastError } from '@renderer/lib/toast'
 
@@ -50,7 +50,6 @@ export interface DraftPlanWorkspaceContext {
   planTree: Ref<ReturnType<typeof buildPlanTree>>
   showPlanEditor: Ref<boolean>
   confirmingPlan: Ref<boolean>
-  freezingCorpus: Ref<boolean>
   retryingPlan: Ref<boolean>
   loadWorkspace: () => Promise<void>
   selectDraft: (messageId: string) => Promise<void>
@@ -58,7 +57,6 @@ export interface DraftPlanWorkspaceContext {
   onDraftUpdated: (draftId: string, draft: TaskLaunchDraftPayload) => void
   handlePlanStarted: (jobId: string) => Promise<void>
   handleConfirmPlan: () => Promise<void>
-  handleRefreezeCorpus: () => Promise<void>
   handleRetryPlanning: () => Promise<void>
   refreshPlan: () => Promise<void>
   stopPlanStream: () => void
@@ -89,7 +87,6 @@ export function provideDraftPlanWorkspace(options: {
   const centerView = ref<CenterView>('draft')
   const currentStep = ref(0)
   const confirmingPlan = ref(false)
-  const freezingCorpus = ref(false)
   const retryingPlan = ref(false)
   let loadToken = 0
   let planHubRelease: (() => void) | null = null
@@ -163,7 +160,8 @@ export function provideDraftPlanWorkspace(options: {
       const byJob = plans.value.find((plan) => plan.id === refs.launchedJobId)
       if (byJob) return byJob
     }
-    return null
+    const draftId = draft.draftId || draft.messageId
+    return findLatestPlanForDraft(draftId, plans.value)
   }
 
   const selectedPlan = computed(() => {
@@ -183,7 +181,7 @@ export function provideDraftPlanWorkspace(options: {
   }
 
   function draftHasPlan(draft: ThreadDraftSummaryDto): boolean {
-    return Boolean(draftPlanRefs(draft).activePlanId)
+    return Boolean(findPlanForDraft(draft))
   }
 
   async function mergeLaunchedJobs(): Promise<void> {
@@ -269,14 +267,11 @@ export function provideDraftPlanWorkspace(options: {
     loading.value = true
     error.value = null
     try {
-      const [draftRes, planRes] = await Promise.all([
-        fetchThreadDrafts(threadId),
-        fetchThreadPlans(threadId)
-      ])
+      const workspaceRes = await loadConversationDesignWorkspace(threadId)
       if (token !== loadToken || options.threadId.value !== threadId) return
 
-      drafts.value = draftRes.data.drafts
-      plans.value = planRes.data.plans
+      drafts.value = workspaceRes.data.drafts
+      plans.value = workspaceRes.data.plans
       await mergeLaunchedJobs()
       if (token !== loadToken || options.threadId.value !== threadId) return
 
@@ -299,8 +294,8 @@ export function provideDraftPlanWorkspace(options: {
         }
         syncStepFromState()
         const draft = drafts.value.find((d) => (d.draftId || d.messageId) === selectedDraftId.value)
-        const activePlanId = draft ? draftPlanRefs(draft, payloadForSelected()).activePlanId : null
-        if (activePlanId) void watchPlan(activePlanId)
+        const activePlan = draft ? findPlanForDraft(draft, payloadForSelected()) : null
+        if (activePlan) void watchPlan(activePlan.id)
       }
     } catch (err) {
       if (token !== loadToken) return
@@ -314,8 +309,9 @@ export function provideDraftPlanWorkspace(options: {
   }
 
   async function refreshPlansAfterWatch(threadId: string): Promise<void> {
-    const planRes = await fetchThreadPlans(threadId)
-    plans.value = planRes.data.plans
+    const workspaceRes = await loadConversationDesignWorkspace(threadId)
+    drafts.value = workspaceRes.data.drafts
+    plans.value = workspaceRes.data.plans
     await mergeLaunchedJobs()
     syncStepFromState()
   }
@@ -324,9 +320,15 @@ export function provideDraftPlanWorkspace(options: {
     const threadId = options.threadId.value
     if (!threadId) return
     stopPlanStream()
-    planHubRelease = realtime.watchTopic(`planning-session:${sessionId}`, (envelope) => {
+    const plan = plans.value.find(
+      (item) => item.id === sessionId || item.designSessionId === sessionId
+    )
+    const isExecutionJob = Boolean(plan?.designSessionId && plan.id !== plan.designSessionId)
+    const listener: Parameters<typeof realtime.watchJob>[1] = (envelope) => {
       if (options.threadId.value !== threadId) return
-      if (
+      if (isExecutionJob) {
+        void refreshPlansAfterWatch(threadId)
+      } else if (
         envelope.type === 'planning.changed' ||
         envelope.type === 'planning.progress' ||
         envelope.type === 'planning.tree.changed' ||
@@ -335,7 +337,10 @@ export function provideDraftPlanWorkspace(options: {
       ) {
         void refreshPlansAfterWatch(threadId)
       }
-    })
+    }
+    planHubRelease = isExecutionJob
+      ? realtime.watchJob(plan!.id, listener)
+      : realtime.watchTopic(`planning-session:${sessionId}`, listener)
   }
 
   async function selectDraft(messageId: string): Promise<void> {
@@ -358,10 +363,10 @@ export function provideDraftPlanWorkspace(options: {
           : { draftId: messageId, status: draft.status, title: draft.title, summary: draft.summary }
     }
 
-    const refs = draftPlanRefs(draft, selectedDraftPayload.value)
     if (options.threadId.value !== threadId) return
     syncStepFromState()
-    if (refs.activePlanId) void watchPlan(refs.activePlanId)
+    const plan = findPlanForDraft(draft, selectedDraftPayload.value)
+    if (plan) void watchPlan(plan.id)
   }
 
   async function onDraftCreated(messageId: string): Promise<void> {
@@ -382,27 +387,21 @@ export function provideDraftPlanWorkspace(options: {
       return
     }
     const summary = drafts.value.find((d) => (d.draftId || d.messageId) === draftId)
-    const activePlanId = summary
-      ? draftPlanRefs(summary, draft).activePlanId
-      : (draft.linkedPlanId ?? null)
-    if (activePlanId) void watchPlan(activePlanId)
+    const activePlan = summary ? findPlanForDraft(summary, draft) : null
+    if (activePlan) void watchPlan(activePlan.id)
     else syncStepFromState()
   }
 
-  async function handlePlanStarted(jobId: string): Promise<void> {
+  async function handlePlanStarted(sessionId: string): Promise<void> {
     setStep(2)
     await loadWorkspace()
-    void watchPlan(jobId)
+    void watchPlan(sessionId)
   }
 
   async function handleConfirmPlan(): Promise<void> {
     const plan = selectedPlan.value
     const threadId = options.threadId.value
     if (!plan || !threadId) return
-    if (plan.referenceManifestStale) {
-      toast.warning(options.t('workspace.draftPanel.referenceManifestStaleHint'))
-      return
-    }
     confirmingPlan.value = true
     error.value = null
     successMessage.value = null
@@ -444,26 +443,6 @@ export function provideDraftPlanWorkspace(options: {
     const planId = selectedPlan.value?.id
     await loadWorkspace()
     if (planId) void watchPlan(planId)
-  }
-
-  async function handleRefreezeCorpus(): Promise<void> {
-    const plan = selectedPlan.value
-    const threadId = options.threadId.value
-    if (!plan || !threadId) return
-    freezingCorpus.value = true
-    error.value = null
-    successMessage.value = null
-    try {
-      // Design freezes the reference manifest when the planning session is created;
-      // there is no separate freeze API. Refresh workspace state for the UI action.
-      await refreshPlan()
-      successMessage.value = options.t('workspace.draftPanel.refreezeSuccess')
-      toast.success(options.t('workspace.draftPanel.refreezeSuccess'))
-    } catch (err) {
-      toastError(err, String(err))
-    } finally {
-      freezingCorpus.value = false
-    }
   }
 
   watch(
@@ -510,7 +489,6 @@ export function provideDraftPlanWorkspace(options: {
     planTree,
     showPlanEditor,
     confirmingPlan,
-    freezingCorpus,
     retryingPlan,
     loadWorkspace,
     selectDraft,
@@ -518,7 +496,6 @@ export function provideDraftPlanWorkspace(options: {
     onDraftUpdated,
     handlePlanStarted,
     handleConfirmPlan,
-    handleRefreezeCorpus,
     handleRetryPlanning,
     refreshPlan,
     stopPlanStream,

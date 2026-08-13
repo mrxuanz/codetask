@@ -10,7 +10,7 @@ import {
   conversationTurnTopic,
   SETTINGS_SELF_TOPIC
 } from '../../packages/contracts/src/events.ts'
-import { parseSseBlock } from '../../src/shared/sse'
+import { parseSseBlock } from '@codetask/contracts/sse'
 import { LiveFanout } from '../../packages/server-core/src/modules/realtime/live-fanout.ts'
 
 test('parseRealtimeTopic accepts canonical topics only', () => {

@@ -8,7 +8,7 @@ import {
   resolveNodeDefaultDataDir,
   resolveNodeInitializationConfigPath,
   writeNodeDataInitializationConfig
-} from '../../src/standalone/data-dir'
+} from '../../apps/service/src/node-data-dir'
 
 function fixture(t: test.TestContext): {
   root: string

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
-import type { AgentRole, AgentTurnEvent } from '@codetask/agent-runtime'
+import type { AgentRole, AgentRuntime, AgentTurnEvent } from '@codetask/agent-runtime'
 import type { JobSubmission } from '@codetask/contracts'
 import { allowedJobActions } from '../../packages/server-core/src/modules/execution/job/domain/job-actions.ts'
 import {
@@ -9,15 +9,28 @@ import {
   JobSubmissionDedup
 } from '../../packages/server-core/src/modules/execution/job/infrastructure/job-submission-dedup.ts'
 import {
-  composeExecutionModule,
+  composeExecutionModule as composeProductionExecutionModule,
+  FakeAgentRuntime,
   ScriptedAgentRuntime
 } from '../../packages/server-core/src/modules/execution/index.ts'
 import { migration043DesignModuleTables } from '../../packages/database/src/migrations/index.ts'
 import { migration045ExecutionModuleTables } from '../../packages/database/src/migrations/execution.ts'
 import {
   ExecutionConflictError,
-  ExecutionValidationError
+  ExecutionValidationError,
+  stableHash
 } from '../../packages/server-core/src/modules/execution/shared.ts'
+
+function composeExecutionModule(
+  deps: Omit<Parameters<typeof composeProductionExecutionModule>[0], 'agentRuntime'> & {
+    agentRuntime?: AgentRuntime
+  }
+): ReturnType<typeof composeProductionExecutionModule> {
+  return composeProductionExecutionModule({
+    ...deps,
+    agentRuntime: deps.agentRuntime ?? new FakeAgentRuntime()
+  })
+}
 
 function minimalSubmission(overrides: Partial<JobSubmission> = {}): JobSubmission {
   const now = new Date().toISOString()
@@ -46,6 +59,11 @@ function minimalSubmission(overrides: Partial<JobSubmission> = {}): JobSubmissio
       requirementsMarkdown: '# Req',
       requirementsStatus: 'confirmed',
       lockedSections: {},
+      workspaceRoot: '/tmp/codetask-exec-test',
+      status: 'confirmed',
+      lockRevision: 1,
+      abilities: [],
+      references: [],
       executionProfile: {
         plannerCoreCode: 'opencode',
         sliceVerifierCoreCode: 'opencode',
@@ -89,6 +107,7 @@ function minimalSubmission(overrides: Partial<JobSubmission> = {}): JobSubmissio
               title: 'Slice',
               description: 'Slice work',
               successCriteria: 'Slice done',
+              dependsOnSliceIds: [],
               confirmed: true,
               tasks: [
                 {
@@ -102,6 +121,8 @@ function minimalSubmission(overrides: Partial<JobSubmission> = {}): JobSubmissio
                   contextMarkdown: 'context',
                   successCriteria: 'Task done',
                   referenceIds: [],
+                  referenceReason: '',
+                  requiredInputs: [],
                   dependsOnTaskIds: [],
                   canRunInParallel: false,
                   confirmed: true
@@ -240,7 +261,8 @@ describe('execution job-actions', () => {
   it('denies pause while already pausing', () => {
     const actions = allowedJobActions({ state: 'pausing', controlIntent: 'pause' })
     assert.ok(!actions.includes('pause'))
-    assert.ok(actions.includes('continue'))
+    assert.ok(!actions.includes('continue'))
+    assert.ok(actions.includes('cancel'))
   })
 
   it('allows delete on terminal succeeded', () => {
@@ -299,6 +321,52 @@ describe('execution submission dedup', () => {
 })
 
 describe('execution module integration', () => {
+  it('rejects a submission id replayed with different content', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+    const execution = composeExecutionModule({ db })
+    const submission = minimalSubmission({
+      submissionId: 'sub_conflicting_replay',
+      idempotencyKey: 'idem_conflicting_replay'
+    })
+    await execution.submitJob.accept(submission)
+
+    await assert.rejects(
+      () =>
+        execution.submitJob.accept({
+          ...submission,
+          idempotencyKey: 'idem_conflicting_replay_second',
+          title: 'Changed content'
+        }),
+      ExecutionConflictError
+    )
+    execution.drain()
+    db.close()
+  })
+
+  it('rejects task references that are absent from the frozen manifest', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+    const execution = composeExecutionModule({ db })
+    const submission = minimalSubmission({
+      submissionId: 'sub_missing_reference',
+      idempotencyKey: 'idem_missing_reference'
+    })
+    submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!.referenceIds = ['missing-ref']
+
+    await assert.rejects(
+      () => execution.submitJob.accept(submission),
+      (error: unknown) =>
+        error instanceof ExecutionValidationError && /missing manifest entry/.test(error.message)
+    )
+    execution.drain()
+    db.close()
+  })
+
   it('submit → list queued → tick to succeeded with FakeAgentRuntime', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
@@ -461,14 +529,14 @@ describe('execution module integration', () => {
       })
     )
     await new Promise((r) => setTimeout(r, 5))
-    const second = await execution.submitJob.accept(
-      minimalSubmission({
-        submissionId: 'sub_b',
-        idempotencyKey: 'idem_b',
-        title: 'Second',
-        workspaceRoot: '/tmp/codetask-exec-test-b'
-      })
-    )
+    const secondSubmission = minimalSubmission({
+      submissionId: 'sub_b',
+      idempotencyKey: 'idem_b',
+      title: 'Second',
+      workspaceRoot: '/tmp/codetask-exec-test-b'
+    })
+    secondSubmission.draftSnapshot.workspaceRoot = secondSubmission.workspaceRoot
+    const second = await execution.submitJob.accept(secondSubmission)
     const ordered = db
       .prepare(
         `SELECT job_id, sequence FROM execution_queue_entries
@@ -516,13 +584,13 @@ describe('execution module integration', () => {
       minimalSubmission({ submissionId: 'sub_wake_first', idempotencyKey: 'idem_wake_first' })
     )
     await firstStarted
-    const second = await execution.submitJob.accept(
-      minimalSubmission({
-        submissionId: 'sub_wake_second',
-        idempotencyKey: 'idem_wake_second',
-        workspaceRoot: '/tmp/codetask-exec-test-second'
-      })
-    )
+    const secondSubmission = minimalSubmission({
+      submissionId: 'sub_wake_second',
+      idempotencyKey: 'idem_wake_second',
+      workspaceRoot: '/tmp/codetask-exec-test-second'
+    })
+    secondSubmission.draftSnapshot.workspaceRoot = secondSubmission.workspaceRoot
+    const second = await execution.submitJob.accept(secondSubmission)
 
     releaseFirst()
     await waitUntil(
@@ -651,26 +719,35 @@ describe('execution continue authorizeReplay', () => {
     migration043DesignModuleTables.up(db)
     migration045ExecutionModuleTables.up(db)
 
-    const execution = composeExecutionModule({ db })
+    const seedingExecution = composeExecutionModule({ db })
+    seedingExecution.drain()
     const actor = { userId: 'alice', sessionId: 'sess-1' }
-    const accepted = await execution.submitJob.accept(minimalSubmission())
+    const accepted = await seedingExecution.submitJob.accept(minimalSubmission())
     const jobId = accepted.jobId
     const now = Date.now()
 
     const work = db
-      .prepare(`SELECT id FROM job_work_items WHERE job_id = ? LIMIT 1`)
-      .get(jobId) as { id: string }
+      .prepare(
+        `SELECT id, source_task_id AS sourceTaskId, generation
+           FROM job_work_items WHERE job_id = ? LIMIT 1`
+      )
+      .get(jobId) as { id: string; sourceTaskId: string; generation: number }
 
     db.prepare(
       `UPDATE jobs SET state = 'paused', recovery_reason = 'uncertain_provider_outcome', state_revision = 2, updated_at = ? WHERE id = ?`
     ).run(now, jobId)
 
+    const legacyAttemptKey = stableHash(
+      `${jobId}:${work.id}:${work.generation}:${work.sourceTaskId}`
+    )
     db.prepare(
       `INSERT INTO work_attempts (
         id, job_id, work_id, generation, run_id, attempt_number, idempotency_key,
         status, started_at, ended_at
-      ) VALUES (?, ?, ?, 0, 'run-test', 1, 'attempt-idem-1', 'interrupted', ?, ?)`
-    ).run('attempt-1', jobId, work.id, now, now)
+      ) VALUES (?, ?, ?, 0, 'run-test', 1, ?, 'interrupted', ?, ?)`
+    ).run('attempt-1', jobId, work.id, legacyAttemptKey, now, now)
+
+    const execution = composeExecutionModule({ db })
 
     assert.throws(
       () =>
@@ -696,8 +773,18 @@ describe('execution continue authorizeReplay', () => {
       .get() as { replay_authorized_at: number | null }
     assert.ok(attempt.replay_authorized_at !== null)
 
-    execution.drain()
     await settleExecution(execution, { jobId: accepted.jobId })
+    const attempts = db
+      .prepare(
+        `SELECT attempt_number AS attemptNumber, idempotency_key AS idempotencyKey
+           FROM work_attempts WHERE work_id = ? ORDER BY attempt_number`
+      )
+      .all(work.id) as Array<{ attemptNumber: number; idempotencyKey: string }>
+    assert.deepEqual(
+      attempts.map((row) => row.attemptNumber),
+      [1, 2]
+    )
+    assert.equal(new Set(attempts.map((row) => row.idempotencyKey)).size, 2)
     db.close()
   })
 })
@@ -1039,7 +1126,10 @@ describe('execution ScriptedAgentRuntime provider path', () => {
         sortOrder: 0
       }
     ]
-    submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!.referenceIds = ['ref-api-contract']
+    const assignedTask = submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!
+    assignedTask.referenceIds = ['ref-api-contract']
+    assignedTask.referenceReason = 'Keep the implementation compatible with the documented API.'
+    assignedTask.requiredInputs = ['Existing response fixture']
 
     const accepted = await execution.submitJob.accept(submission)
     await settleExecution(execution, { jobId: accepted.jobId })
@@ -1049,6 +1139,8 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     assert.deepEqual(taskTurn.readRoots, ['/tmp/codetask-references/api'])
     assert.match(taskTurn.prompt, /API contract/)
     assert.match(taskTurn.prompt, /\/tmp\/codetask-references\/api\/contract\.md/)
+    assert.match(taskTurn.prompt, /compatible with the documented API/)
+    assert.match(taskTurn.prompt, /Existing response fixture/)
 
     execution.drain()
     db.close()
@@ -1135,6 +1227,63 @@ describe('execution ScriptedAgentRuntime provider path', () => {
     assert.equal(maxActiveTaskTurns, 2)
     assert.equal(
       execution.jobs.query.get({ userId: 'alice', sessionId: 'parallel' }, accepted.jobId).state,
+      'succeeded'
+    )
+    execution.drain()
+    db.close()
+  })
+
+  it('caps a large parallel-ready batch at four provider turns', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    let activeTaskTurns = 0
+    let maxActiveTaskTurns = 0
+    let releaseFirstWave!: () => void
+    const firstWaveStarted = new Promise<void>((resolve) => {
+      releaseFirstWave = resolve
+    })
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'task-worker') {
+        activeTaskTurns += 1
+        maxActiveTaskTurns = Math.max(maxActiveTaskTurns, activeTaskTurns)
+        if (activeTaskTurns === 4) releaseFirstWave()
+        await firstWaveStarted
+        activeTaskTurns -= 1
+      }
+      return successfulRuntimeEvents(input.role)
+    })
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const submission = minimalSubmission({
+      submissionId: 'sub_parallel_cap',
+      idempotencyKey: 'idem_parallel_cap'
+    })
+    const template = submission.executionTree.milestones[0]!.slices[0]!.tasks[0]!
+    submission.executionTree.milestones[0]!.slices[0]!.tasks = Array.from(
+      { length: 6 },
+      (_, index) => ({
+        ...template,
+        id: `parallel-task-${index + 1}`,
+        title: `Parallel task ${index + 1}`,
+        dependsOnTaskIds: [],
+        canRunInParallel: true
+      })
+    )
+
+    const accepted = await execution.submitJob.accept(submission)
+    await waitUntil(
+      () => runtime.turns.filter((turn) => turn.role === 'task-worker').length >= 4,
+      'the bounded first wave should start'
+    )
+    await settleExecution(execution, { jobId: accepted.jobId })
+
+    assert.equal(maxActiveTaskTurns, 4)
+    assert.equal(runtime.turns.filter((turn) => turn.role === 'task-worker').length, 6)
+    assert.equal(
+      execution.jobs.query.get({ userId: 'alice', sessionId: 'parallel-cap' }, accepted.jobId)
+        .state,
       'succeeded'
     )
     execution.drain()
@@ -1277,6 +1426,128 @@ describe('execution MCP report_task_result path', () => {
     assert.ok(result, 'expected work_results row')
     assert.equal(result.status, 'completed')
     assert.match(result.summary, /Implemented via provider MCP/)
+
+    execution.drain()
+    db.close()
+  })
+})
+
+describe('execution slice dependency gating', () => {
+  it('waits for the prerequisite slice verdict before dispatching dependent work', async () => {
+    const db = new Database(':memory:')
+    db.pragma('foreign_keys = ON')
+    migration043DesignModuleTables.up(db)
+    migration045ExecutionModuleTables.up(db)
+
+    const submission = minimalSubmission({
+      submissionId: 'sub_slice_dependency',
+      idempotencyKey: 'idem_slice_dependency'
+    })
+    const milestone = submission.executionTree.milestones[0]!
+    const firstSlice = milestone.slices[0]!
+    firstSlice.id = 'sl-first'
+    firstSlice.tasks[0]!.sliceId = firstSlice.id
+    firstSlice.tasks[0]!.contextMarkdown = 'FIRST_SLICE_CONTEXT'
+    const secondSlice = {
+      ...firstSlice,
+      id: 'sl-second',
+      title: 'Dependent slice',
+      dependsOnSliceIds: [firstSlice.id],
+      tasks: [
+        {
+          ...firstSlice.tasks[0]!,
+          id: 'task-second',
+          sliceId: 'sl-second',
+          title: 'Dependent task',
+          contextMarkdown: 'SECOND_SLICE_CONTEXT'
+        }
+      ]
+    }
+    milestone.slices = [firstSlice, secondSlice]
+
+    const order: string[] = []
+    const { ScriptedAgentRuntime } =
+      await import('../../packages/server-core/src/modules/execution/pool/infrastructure/scripted-agent-runtime.ts')
+    const runtime = new ScriptedAgentRuntime(async (input) => {
+      if (input.role === 'task-worker') {
+        order.push(
+          input.systemPrompt?.includes('SECOND_SLICE_CONTEXT') ? 'task-second' : 'task-first'
+        )
+        return [
+          {
+            type: 'tool_call',
+            name: 'report_task_result',
+            arguments: {
+              status: 'completed',
+              summary: 'Task completed',
+              changedFiles: [],
+              evidence: ['done'],
+              validation: { ran: true, outcome: 'passed' }
+            }
+          },
+          { type: 'completed', reason: 'slice-dependency-test' }
+        ]
+      }
+      if (input.role === 'slice-verifier') {
+        order.push('slice-verifier')
+        return [
+          {
+            type: 'tool_call',
+            name: 'complete_slice_verification',
+            arguments: {
+              status: 'progress-ok',
+              confidence: 'high',
+              summary: 'Slice passed',
+              satisfiedSignals: [],
+              missingSignals: [],
+              questionableClaims: [],
+              evidenceTrace: [],
+              repairSuggestions: []
+            }
+          },
+          { type: 'completed', reason: 'slice-dependency-test' }
+        ]
+      }
+      order.push('milestone-verifier')
+      return [
+        {
+          type: 'tool_call',
+          name: 'complete_milestone_verification',
+          arguments: {
+            status: 'passed',
+            confidence: 'high',
+            summary: 'Milestone passed',
+            requirementTrace: [],
+            sliceAssessments: [],
+            repairTasks: []
+          }
+        },
+        { type: 'completed', reason: 'slice-dependency-test' }
+      ]
+    })
+
+    const execution = composeExecutionModule({ db, agentRuntime: runtime })
+    const accepted = await execution.submitJob.accept(submission)
+    await settleExecution(execution, { jobId: accepted.jobId })
+
+    assert.deepEqual(order.slice(0, 3), ['task-first', 'slice-verifier', 'task-second'])
+    const dependency = db
+      .prepare(
+        `SELECT source.from_slice, prerequisite.source_slice_id AS prerequisite_source_slice
+         FROM (
+           SELECT d.from_slice_id, s.source_slice_id AS from_slice
+           FROM job_slice_dependencies d
+           JOIN job_slices s ON s.id = d.from_slice_id
+           WHERE d.job_id = ?
+         ) source
+         JOIN job_slice_dependencies dependency ON dependency.from_slice_id = source.from_slice_id
+         JOIN job_slices prerequisite ON prerequisite.id = dependency.depends_on_slice_id`
+      )
+      .get(accepted.jobId) as { from_slice: string; prerequisite_source_slice: string }
+    assert.deepEqual(dependency, {
+      from_slice: 'sl-second',
+      prerequisite_source_slice: 'sl-first'
+    })
 
     execution.drain()
     db.close()

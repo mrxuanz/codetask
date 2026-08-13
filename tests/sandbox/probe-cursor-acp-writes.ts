@@ -18,7 +18,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runAcpBootstrapProbe } from './acp-bootstrap-probe'
 import { buildCursorTurnPlan } from '../../src/server/providers/cursor/turn-plan'
@@ -151,11 +151,14 @@ function resolveSandboxRunner(probeScript: string): {
     join(process.cwd(), 'node_modules'),
     dirname(tsxLoader)
   ]
+  const nodeName = process.platform === 'win32' ? 'node.exe' : 'node'
   const nodeCandidates = [
-    process.env.VOLTA_HOME ? join(process.env.VOLTA_HOME, 'tools/image/node/24.18.0/bin/node') : '',
-    '/Users/xhz/.volta/tools/image/node/24.18.0/bin/node',
-    '/usr/local/bin/node',
-    '/usr/bin/node'
+    process.execPath,
+    process.env.VOLTA_HOME ? join(process.env.VOLTA_HOME, 'bin', nodeName) : '',
+    ...(process.env.PATH ?? '')
+      .split(delimiter)
+      .filter(Boolean)
+      .map((dir) => join(dir, nodeName))
   ].filter(Boolean)
 
   for (const command of nodeCandidates) {

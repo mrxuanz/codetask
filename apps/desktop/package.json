@@ -4,7 +4,15 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json --composite false"
+  },
   "dependencies": {
-    "@codetask/server-core": "*"
+    "@codetask/service-bootstrap": "*",
+    "@electron-toolkit/utils": "^4.0.0"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "typescript": "^5.9.3"
   }
 }

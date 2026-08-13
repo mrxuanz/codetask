@@ -1,0 +1,29 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "baseUrl": "..",
+    "paths": {
+      "@renderer/*": ["apps/web/src/*"],
+      "@server/*": ["src/server/*"],
+      "@codetask/contracts": ["packages/contracts/src/index.ts"],
+      "@codetask/contracts/*": ["packages/contracts/src/*"],
+      "@codetask/database": ["packages/database/src/index.ts"],
+      "@codetask/database/*": ["packages/database/src/*"],
+      "@codetask/agent-runtime": ["packages/agent-runtime/src/index.ts"],
+      "@codetask/agent-runtime/*": ["packages/agent-runtime/src/*"],
+      "@codetask/provider-spec": ["packages/provider-spec/src/index.ts"],
+      "@codetask/provider-spec/*": ["packages/provider-spec/src/*"],
+      "@codetask/provider-runtime-node": ["packages/provider-runtime-node/src/index.ts"],
+      "@codetask/provider-runtime-node/*": ["packages/provider-runtime-node/src/*"],
+      "@codetask/server-core": ["packages/server-core/src/index.ts"],
+      "@codetask/server-core/*": ["packages/server-core/src/*"],
+      "@codetask/service-bootstrap": ["packages/service-bootstrap/src/index.ts"],
+      "@codetask/service-bootstrap/*": ["packages/service-bootstrap/src/*"]
+    }
+  },
+  "include": ["**/*.ts"]
+}

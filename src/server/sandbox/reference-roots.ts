@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'fs'
 import { dirname } from 'path'
 import { getAppContext } from '../bootstrap'
 import { threadAttachmentsDir } from '../data-paths'
-import type { JobReferenceManifest } from '../../shared/job-references.ts'
+import type { JobReferenceManifest } from '@codetask/contracts/job-references'
 import type { TaskLaunchDraftPayload } from '@codetask/contracts'
 
 import {

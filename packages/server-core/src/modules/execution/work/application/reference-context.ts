@@ -9,7 +9,9 @@ export type AssignedReferenceContext = {
 /** Build the frozen, read-only reference projection shared by planners and task workers. */
 export function buildAssignedReferenceContext(
   manifest: ReferenceManifest,
-  referenceIds: readonly string[]
+  referenceIds: readonly string[],
+  assignment: { referenceReason?: string; requiredInputs?: readonly string[] } = {},
+  resolveAttachmentPath?: (attachmentId: string) => string | null
 ): AssignedReferenceContext {
   const byId = new Map(manifest.references.map((reference) => [reference.id, reference]))
   const roots = new Map<string, string>()
@@ -19,13 +21,28 @@ export function buildAssignedReferenceContext(
     ''
   ]
 
+  const referenceReason = assignment.referenceReason?.trim()
+  if (referenceReason) lines.push(`Assignment reason: ${referenceReason}`, '')
+  const requiredInputs = (assignment.requiredInputs ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean)
+  if (requiredInputs.length > 0) {
+    lines.push('Required inputs:')
+    for (const requiredInput of requiredInputs) lines.push(`- ${requiredInput}`)
+    lines.push('')
+  }
+
   for (const id of referenceIds) {
     const reference = byId.get(id)
     if (!reference) {
       lines.push(`- id: ${id} (missing from frozen manifest)`)
       continue
     }
-    const rawPath = reference.resolvedPath?.trim() || reference.localPath?.trim() || ''
+    const registeredPath = reference.attachmentId
+      ? resolveAttachmentPath?.(reference.attachmentId)?.trim()
+      : ''
+    const rawPath =
+      registeredPath || reference.resolvedPath?.trim() || reference.localPath?.trim() || ''
     const resolvedPath = rawPath && isAbsolute(rawPath) ? normalize(rawPath) : ''
     if (resolvedPath) {
       const root = reference.kind === 'directory' ? resolvedPath : dirname(resolvedPath)
@@ -42,6 +59,9 @@ export function buildAssignedReferenceContext(
 
   return {
     readRoots: [...roots.values()],
-    promptAppendix: referenceIds.length > 0 ? lines.join('\n') : ''
+    promptAppendix:
+      referenceIds.length > 0 || referenceReason || requiredInputs.length > 0
+        ? lines.join('\n')
+        : ''
   }
 }

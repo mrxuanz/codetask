@@ -1,9 +1,11 @@
 # chat-image-attachment
 
 ## Role
+
 Drive a chat that attaches `attachment.png` and checks the selected Core can read the image (1–4 turns if the model asks for clarification).
 
 ## Goal
+
 1. Create an isolated project/thread (`threadKind: chat`) with Runtime `conversationCore`.
 2. Upload the image fixture as **fileName=`attachment.png`** (neutral name).
 3. Record existing message ids.
@@ -18,6 +20,7 @@ Drive a chat that attaches `attachment.png` and checks the selected Core can rea
 Supervisor oracle checks **only new assistant messages** for contiguous `Dream of 1000 Cats` (case/whitespace insensitive), user message attachment binding, asset download SHA-256, and thread core.
 
 ## Forbidden
+
 - Do not put Dream / 1000 / Cats into message, titles, or fileName
 - Do not use a TXT file oracle
 - Do not call unbounded `codetask_wait_turn` without `timeoutMs`

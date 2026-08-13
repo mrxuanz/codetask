@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { ProviderInstallation } from '../../src/shared/providers/installation.ts'
-import { CODEX_DESCRIPTOR } from '../../src/shared/providers/descriptors/codex.ts'
-import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
+import type { ProviderInstallation } from '@codetask/provider-spec/installation'
+import { CODEX_DESCRIPTOR } from '@codetask/provider-spec/descriptors/codex'
+import { DEFAULT_PROVIDERS_CONFIG } from '@codetask/provider-spec/settings'
 import type { AgentTurnChunk } from '../../src/server/agent-runtime/types.ts'
 import {
   buildProviderTurnContext,

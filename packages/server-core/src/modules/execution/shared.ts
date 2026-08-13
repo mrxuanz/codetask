@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 
 export type Actor = {
   userId: string
@@ -47,12 +48,7 @@ export function newId(prefix: string): string {
 }
 
 export function stableHash(input: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
+  return createHash('sha256').update(input).digest('hex')
 }
 
 export function canonicalizeWorkspaceRoot(workspaceRoot: string): string {

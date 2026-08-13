@@ -23,6 +23,10 @@ exfiltration over the network by code running inside the sandbox is a known,
 accepted limitation — not a reportable sandbox escape. Reports about bypassing
 the filesystem or process boundary are always in scope.
 
+Do not run untrusted repositories or task instructions when sensitive files are
+inside the configured read roots. Keep credentials and unrelated source trees
+outside each task's granted filesystem scope.
+
 ## Reporting a Vulnerability
 
 Please do not open a public issue for an unpatched vulnerability.

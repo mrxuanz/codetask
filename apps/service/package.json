@@ -5,11 +5,26 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --import ../../scripts/tooling/tsx-tsconfig.mjs src/main.ts",
-    "start": "tsx --import ../../scripts/tooling/tsx-tsconfig.mjs src/main.ts"
+    "dev": "node ../../scripts/check-node-major.mjs && node ../../scripts/ensure-node-native.mjs && tsx watch --import ../../scripts/tooling/tsx-tsconfig.mjs src/main.ts",
+    "start": "node ../../scripts/check-node-major.mjs && node ../../scripts/ensure-node-native.mjs && tsx --import ../../scripts/tooling/tsx-tsconfig.mjs src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json --composite false"
   },
   "dependencies": {
+    "@codetask/agent-runtime": "*",
+    "@codetask/contracts": "*",
+    "@codetask/database": "*",
+    "@codetask/provider-runtime-node": "*",
+    "@codetask/provider-spec": "*",
     "@codetask/server-core": "*",
-    "@codetask/service-bootstrap": "*"
+    "@codetask/service-bootstrap": "*",
+    "@hono/node-server": "^2.1.0",
+    "@sinclair/typebox": "^0.34.52",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3"
   }
 }

@@ -8,6 +8,7 @@ import type { ProviderRegistry } from '../providers/registry'
 import type { ProviderRuntimeManager } from '../providers/lifecycle'
 import type { SecureAuthService } from '../auth/service'
 import type { RealtimeModule } from '@codetask/server-core'
+import type { SafeLogger } from '../application/ports/safe-logger'
 
 export interface SecurityContext {
   mode: 'desktop' | 'server'
@@ -20,6 +21,7 @@ export interface AppContext {
   config: AppConfig
   dataDir: string
   db: AppDatabase
+  logger: SafeLogger
   settings: SettingsStore
   /** Unified durable + ephemeral browser realtime gateway (06). */
   realtime: RealtimeModule

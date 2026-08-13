@@ -14,14 +14,18 @@ codetask 是面向软件交付的桌面端 AI 任务编排应用。你在对话�
 
 支持 **Codex**、**Claude Code**、**OpenCode**、**Cursor CLI** 作为规划与执行引擎；可跑 **Electron** 桌面，也可 **Server** 模式用浏览器访问。
 
+> [!WARNING]
+> 沙箱任务仍可访问外部网络。任务可读取的文件都应视为可能被外传；不要让不可信仓库或任务指令接触允许读取范围内的敏感数据。
+
 ## 仓库布局
 
-仓库正处于 `src/` → `apps/` + `packages/` 迁移中期：
+仓库采用按宿主职责划分的 monorepo 布局：
 
 - `apps/web` — Vue 渲染层
-- `apps/desktop` / `apps/service` — 宿主包占位（Electron 入口仍在 `src/main`）
+- `apps/desktop` — Electron 薄壳与 Service 子进程监管
+- `apps/service` — Hono 进程入口、HTTP 宿主、存储初始化与独立 Node 适配器
 - `packages/*` — `@codetask/*` 共享库
-- `src/server` / `src/shared` / `src/main` — 组合根与宿主适配，逐步迁入 packages
+- `src/server` / `src/sandbox` — Service 组合与仍在迁移的兼容适配
 - `native/codeteam-*` — OS 沙箱 crate；`codeteam` 是上游 `codex-*` 的**历史重命名**（见 `NOTICE`），不是第二套产品名
 
 ## 要解决什么问题
@@ -102,7 +106,7 @@ Task Worker / Verifier 在 OS 级沙箱中运行，思路借鉴 [OpenAI Codex](h
 4. **执行阶段**：单用户同时仅一个 running job；支持暂停、恢复、取消、重试与阻塞恢复
 5. **验收阶段**：Verifier 按层级检查；失败任务可单独重跑
 
-数据通过 **SSE** 推送作业快照；内嵌 **Hono** HTTP 服务供 Renderer 调用。
+数据通过 **SSE** 推送作业快照；受监管的本地 **Hono Service** 为 Renderer 提供服务。
 
 ## 技术栈
 
@@ -122,12 +126,12 @@ Task Worker / Verifier 在 OS 级沙箱中运行，思路借鉴 [OpenAI Codex](h
 
 ## 运行模式
 
-codetask 支持 **两种启动模式**，共用同一套内嵌 Hono 后端、SQLite 数据目录与沙箱 supervisor：
+codetask 支持 **两种启动模式**，共用同一套 Hono Service 核心、SQLite 数据目录与沙箱 supervisor：
 
-| 模式                    | 说明                                   | 默认监听         |
-| ----------------------- | -------------------------------------- | ---------------- |
-| **Desktop**（默认）     | Electron 打开原生窗口，加载本地 Web UI | `127.0.0.1:3000` |
-| **Server**（`--serve`） | 无窗口 headless，用任意浏览器访问 URL  | `0.0.0.0:8080`   |
+| 模式                    | 说明                                    | 默认监听          |
+| ----------------------- | --------------------------------------- | ----------------- |
+| **Desktop**（默认）     | Electron 监管 Service 并加载本地 Web UI | loopback 临时端口 |
+| **Server**（`--serve`） | 无窗口 headless，用任意浏览器访问 URL   | `0.0.0.0:8080`    |
 
 ```bash
 # 桌面模式（默认）
@@ -136,9 +140,6 @@ npm run dev
 # 服务模式 / headless — 适合远程访问、WSL、无图形界面 Linux、纯浏览器工作流
 npm run dev:serve
 
-# 自定义 host/port（开发或打包后的应用）
-electron . --serve --host 127.0.0.1 --port 9000
-
 # 纯 Node 服务端——不依赖 Electron、DISPLAY 或 Xvfb
 npm run build:server
 npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
@@ -146,9 +147,9 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 说明：
 
-- **Server** 模式下 Electron 跳过 GPU 初始化，便于 WSL / CI / 无头环境运行。
+- **Server** 模式完全不启动 Electron，是标准的无头 Hono 宿主。
 - 绑定 `0.0.0.0` 时，局域网内其他设备可通过 `http://<你的IP>:<端口>` 访问 UI。
-- 两种模式下 Job 执行、Planner、沙箱行为完全一致，仅外壳不同。
+- 两种模式下 Job 执行、Planner、沙箱行为完全一致；Electron 只负责外壳与进程监管。
 - 独立 Node 入口固定为 Server 模式，因此 `start:server` 不要求额外传入 `--serve`。
 
 ## 快速开始
@@ -164,7 +165,10 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 ```bash
 npm install
+npm run build:sandbox
 ```
+
+修改 Rust 沙箱代码后需要重新运行 `npm run build:sandbox`；各平台打包命令也会自动构建沙箱。
 
 ### 开发模式
 
@@ -187,12 +191,6 @@ npm run build:mac
 
 # Linux
 npm run build:linux
-```
-
-沙箱 native 需先编译：
-
-```bash
-npm run build:sandbox
 ```
 
 ### 测试

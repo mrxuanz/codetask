@@ -70,7 +70,8 @@ export class LiveFanout {
     return this.connections.get(key)
   }
 
-  unregister(key: string): void {
+  unregister(key: string, expected?: RealtimeConnectionState): void {
+    if (expected && this.connections.get(key) !== expected) return
     this.connections.delete(key)
   }
 

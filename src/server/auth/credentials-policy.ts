@@ -1,6 +1,6 @@
 import { AppError } from '../error'
-import { formatTurnErrorMessage } from '../../shared/turn-errors/turn-error'
-import { validateSetupCredentials } from '../../shared/auth/credentials-policy'
+import { validateSetupCredentials } from '@codetask/contracts/auth'
+import { formatTurnErrorMessage } from '@codetask/contracts/turn-errors/turn-error'
 
 export function assertSetupCredentialsAllowed(username: string, password: string): void {
   const violation = validateSetupCredentials(username, password)

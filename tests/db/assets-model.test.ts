@@ -3,7 +3,13 @@ import test from 'node:test'
 import Database from 'better-sqlite3'
 import { migration048ConversationModuleTables } from '../../packages/database/src/migrations/conversation.ts'
 import { migration062AssetsAndDropDeadRuntimeTables } from '../../packages/database/src/migrations/assets-and-drop-dead-runtime.ts'
-import { registerAttachmentAsset, listAssetOwnerIds } from '../../src/server/assets/registry'
+import {
+  registerAttachmentAsset,
+  listAssetOwnerIds,
+  releaseAssetReference,
+  releaseUnattachedConversationReferences,
+  retainAssetReference
+} from '../../src/server/assets/registry'
 
 test('migration 062 drops dead tables, creates assets, and backfills conversation attachments', () => {
   const db = new Database(':memory:')
@@ -63,5 +69,60 @@ test('registerAttachmentAsset upserts asset and owner reference', () => {
     sizeBytes: 9
   })
   assert.deepEqual(listAssetOwnerIds(db, 'conversation'), ['conv-x'])
+  db.close()
+})
+
+test('draft and Job references transfer ownership without duplicating the asset', () => {
+  const db = new Database(':memory:')
+  migration062AssetsAndDropDeadRuntimeTables.up(db)
+  registerAttachmentAsset(db, {
+    assetId: 'att-owned',
+    ownerType: 'conversation',
+    ownerId: 'conv-owned',
+    storageKey: 'attachments/conv-owned/att-owned',
+    sizeBytes: 9
+  })
+
+  retainAssetReference(db, {
+    assetId: 'att-owned',
+    ownerType: 'draft',
+    ownerId: 'draft-1',
+    purpose: 'reference:ref-1'
+  })
+  releaseUnattachedConversationReferences(db, 'att-owned')
+  assert.deepEqual(listAssetOwnerIds(db, 'conversation'), [])
+  assert.deepEqual(listAssetOwnerIds(db, 'draft'), ['draft-1'])
+
+  retainAssetReference(db, {
+    assetId: 'att-owned',
+    ownerType: 'job',
+    ownerId: 'job-1',
+    purpose: 'reference:ref-1'
+  })
+  releaseAssetReference(db, {
+    assetId: 'att-owned',
+    ownerType: 'draft',
+    ownerId: 'draft-1',
+    purpose: 'reference:ref-1'
+  })
+  assert.deepEqual(listAssetOwnerIds(db, 'draft'), [])
+  assert.deepEqual(listAssetOwnerIds(db, 'job'), ['job-1'])
+  assert.equal(
+    (db.prepare(`SELECT state FROM assets WHERE id = 'att-owned'`).get() as { state: string })
+      .state,
+    'active'
+  )
+
+  releaseAssetReference(db, {
+    assetId: 'att-owned',
+    ownerType: 'job',
+    ownerId: 'job-1',
+    purpose: 'reference:ref-1'
+  })
+  assert.equal(
+    (db.prepare(`SELECT state FROM assets WHERE id = 'att-owned'`).get() as { state: string })
+      .state,
+    'pending_delete'
+  )
   db.close()
 })

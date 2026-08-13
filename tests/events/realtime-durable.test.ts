@@ -66,6 +66,14 @@ test('durable append is idempotent and replayable across reconnect', async () =>
     assert.equal(replay.events.length, 2)
     assert.equal(replay.events[0]?.type, 'job.changed')
     assert.equal(replay.events[1]?.type, 'job.completed')
+    const limitedReplay = log.replayAfter({
+      actorId: 'actor-1',
+      topics: ['job:j1'],
+      afterEventId: 0,
+      limit: 1
+    })
+    assert.equal(limitedReplay.events.length, 1)
+    assert.equal(limitedReplay.hasMore, true)
 
     const stream = openRealtimeStream({
       fanout,
@@ -89,7 +97,7 @@ test('durable append is idempotent and replayable across reconnect', async () =>
       if (value.type) received.push(value.type)
     }
     stream.close()
-    assert.ok(received.includes('job.completed') || received.length >= 0)
+    assert.deepEqual(received, ['job.completed'])
   } finally {
     await resetAppContextForTests()
     rmSync(dataDir, { recursive: true, force: true })
@@ -168,7 +176,19 @@ test('live queue byte accounting is released after delivery', async () => {
     assert.ok(conn.queuedBytes > 0)
     await stream.stream.next()
     assert.equal(conn.queuedBytes, 0)
+
+    const replacement = openRealtimeStream({
+      fanout,
+      log,
+      actorId: 'actor-1',
+      sessionId: 's1',
+      connectionId: 'c-bytes',
+      lastEventId: null,
+      initialTopics: ['job:j1']
+    })
     stream.close()
+    assert.equal(fanout.get(replacement.key)?.connectionId, 'c-bytes')
+    replacement.close()
   } finally {
     await resetAppContextForTests()
     rmSync(dataDir, { recursive: true, force: true })

@@ -24,6 +24,9 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      - run: npm run audit:npm
+      - run: npm run format:check
+      - run: npm run check:third-party-dependencies
       - run: npm run lint:ci
       - run: npm run typecheck
       - run: npm run test:ci-scripts
@@ -40,6 +43,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:fast
+
+  business-api-e2e:
+    name: Hono lifecycle and E2E contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npm run test:acceptance-contracts
 
   rust:
     runs-on: ubuntu-latest
@@ -68,6 +84,16 @@ jobs:
         run: cargo test --manifest-path native/Cargo.toml --no-fail-fast -- --test-threads=1
       - name: Rust build check
         run: cargo check --manifest-path native/Cargo.toml --release
+
+  cargo-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check Rust advisories, licenses, bans, and sources
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: native/Cargo.toml
 
   rust-macos:
     runs-on: macos-15
@@ -102,7 +128,7 @@ jobs:
         run: cargo check --manifest-path native/Cargo.toml --release
 
   package-smoke:
-    needs: [quality, test]
+    needs: [quality, test, business-api-e2e]
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ github.sha }}

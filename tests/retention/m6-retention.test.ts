@@ -31,6 +31,7 @@ import {
   threadAttachmentsDir
 } from '../../src/server/data-paths'
 import { seedMinimalJob } from '../helpers/seed-minimal-job'
+import { registerAttachmentAsset, retainAssetReference } from '../../src/server/assets/registry'
 
 async function seedThreadGraph(
   db: ReturnType<typeof createIsolatedTestDatabase>,
@@ -149,6 +150,7 @@ test('purgeThreadFilesystem removes attachments and message artifacts', async ()
   try {
     const { threadId, messageId, attachmentId } = await seedThreadGraph(db)
     const targets = await collectThreadPurgeTargets(db, threadId)
+    assert.deepEqual(targets.attachmentIds, [attachmentId])
 
     mkdirSync(attachmentDir(dataDir, threadId, attachmentId), { recursive: true })
     writeFileSync(join(attachmentDir(dataDir, threadId, attachmentId), 'ref.png'), 'png')
@@ -161,6 +163,41 @@ test('purgeThreadFilesystem removes attachments and message artifacts', async ()
     assert.equal(existsSync(threadAttachmentsDir(dataDir, threadId)), false)
     assert.equal(existsSync(messageArtifactDir(dataDir, messageId)), false)
     assert.equal(existsSync(join(join(dataDir, 'runtimes'), threadId)), false)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('purgeThreadFilesystem preserves an attachment promoted to a draft', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'retention-m6-promoted-purge-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    const { threadId, attachmentId } = await seedThreadGraph(db)
+    const client = (db as { $client?: import('better-sqlite3').Database }).$client
+    assert.ok(client)
+    registerAttachmentAsset(client, {
+      assetId: attachmentId,
+      ownerType: 'conversation',
+      ownerId: threadId,
+      storageKey: `attachments/${threadId}/${attachmentId}`,
+      sizeBytes: 3
+    })
+    retainAssetReference(client, {
+      assetId: attachmentId,
+      ownerType: 'draft',
+      ownerId: 'draft-promoted',
+      purpose: 'reference:ref-promoted'
+    })
+    const targets = await collectThreadPurgeTargets(db, threadId)
+    assert.deepEqual(targets.attachmentIds, [])
+
+    const promotedFile = join(attachmentDir(dataDir, threadId, attachmentId), 'ref.png')
+    mkdirSync(attachmentDir(dataDir, threadId, attachmentId), { recursive: true })
+    writeFileSync(promotedFile, 'png')
+    await purgeThreadFilesystem(dataDir, threadId, targets)
+
+    assert.equal(existsSync(promotedFile), true)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

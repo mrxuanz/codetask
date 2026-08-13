@@ -5,7 +5,18 @@ export type RealtimeStreamHandle = ReturnType<typeof openRealtimeStream>
 
 /** actorId::sessionId::connectionId → stream handle */
 const activeHandles = new Map<string, RealtimeStreamHandle>()
-const pendingTopics = new Map<string, RealtimeTopic[]>()
+const PENDING_TOPICS_TTL_MS = 60_000
+const MAX_PENDING_TOPIC_SETS = 256
+const pendingTopics = new Map<
+  string,
+  { topics: RealtimeTopic[]; expiresAt: number; queuedAt: number }
+>()
+
+function prunePendingTopics(now = Date.now()): void {
+  for (const [key, value] of pendingTopics) {
+    if (value.expiresAt <= now) pendingTopics.delete(key)
+  }
+}
 
 export function realtimeKey(actorId: string, sessionId: string, connectionId: string): string {
   return `${actorId}::${sessionId}::${connectionId}`
@@ -18,6 +29,8 @@ export function bindRealtimeHandle(
   handle: RealtimeStreamHandle
 ): string {
   const key = realtimeKey(actorId, sessionId, connectionId)
+  const previous = activeHandles.get(key)
+  if (previous && previous !== handle) previous.close()
   activeHandles.set(key, handle)
   return key
 }
@@ -27,21 +40,40 @@ export function getRealtimeHandle(key: string): RealtimeStreamHandle | undefined
 }
 
 export function takePendingTopics(key: string): RealtimeTopic[] | undefined {
+  prunePendingTopics()
   const queued = pendingTopics.get(key)
   if (queued === undefined) return undefined
   pendingTopics.delete(key)
-  return queued
+  return queued.topics
 }
 
 export function queuePendingTopics(key: string, topics: RealtimeTopic[]): void {
-  pendingTopics.set(key, topics)
+  const now = Date.now()
+  prunePendingTopics(now)
+  if (!pendingTopics.has(key) && pendingTopics.size >= MAX_PENDING_TOPIC_SETS) {
+    let oldestKey: string | undefined
+    let oldestAt = Number.POSITIVE_INFINITY
+    for (const [candidateKey, value] of pendingTopics) {
+      if (value.queuedAt < oldestAt) {
+        oldestAt = value.queuedAt
+        oldestKey = candidateKey
+      }
+    }
+    if (oldestKey) pendingTopics.delete(oldestKey)
+  }
+  pendingTopics.set(key, {
+    topics: [...topics],
+    queuedAt: now,
+    expiresAt: now + PENDING_TOPICS_TTL_MS
+  })
 }
 
 export function activeRealtimeKeys(): IterableIterator<string> {
   return activeHandles.keys()
 }
 
-export function unbindRealtimeHandle(key: string): void {
+export function unbindRealtimeHandle(key: string, expected?: RealtimeStreamHandle): void {
+  if (expected && activeHandles.get(key) !== expected) return
   activeHandles.delete(key)
   pendingTopics.delete(key)
 }

@@ -1,5 +1,9 @@
 import type Database from 'better-sqlite3'
-import type { WorkDependencyRecord, WorkItemRecord } from '../../work/domain/work-item.ts'
+import type {
+  SliceDependencyRecord,
+  WorkDependencyRecord,
+  WorkItemRecord
+} from '../../work/domain/work-item.ts'
 import { ExecutionNotFoundError } from '../../shared.ts'
 
 function mapWork(row: Record<string, unknown>): WorkItemRecord {
@@ -12,6 +16,7 @@ function mapWork(row: Record<string, unknown>): WorkItemRecord {
     milestoneId: row.milestone_id as string,
     sliceId: row.slice_id as string,
     kind: row.kind as WorkItemRecord['kind'],
+    taskKind: (row.task_kind as string | undefined) ?? 'general-implementation',
     sortOrder: row.sort_order as number,
     title: row.title as string,
     description: row.description as string,
@@ -19,6 +24,10 @@ function mapWork(row: Record<string, unknown>): WorkItemRecord {
     abilityCode: row.ability_code as string,
     providerCode: row.provider_code as WorkItemRecord['providerCode'],
     successCriteria: row.success_criteria as string,
+    referenceReason: (row.reference_reason as string | undefined) ?? '',
+    requiredInputs: JSON.parse(
+      (row.required_inputs_json as string | undefined) ?? '[]'
+    ) as string[],
     canRunInParallel: Boolean(row.can_run_in_parallel),
     state: row.state as WorkItemRecord['state'],
     stateRevision: row.state_revision as number,
@@ -63,6 +72,18 @@ export class WorkRepository {
       fromWorkId: row.from_work_id as string,
       dependsOnWorkId: row.depends_on_work_id as string,
       reason: row.reason as WorkDependencyRecord['reason']
+    }))
+  }
+
+  listSliceDependencies(jobId: string, generation: number): SliceDependencyRecord[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM job_slice_dependencies WHERE job_id = ? AND generation = ?`)
+      .all(jobId, generation) as Array<Record<string, unknown>>
+    return rows.map((row) => ({
+      jobId: row.job_id as string,
+      generation: row.generation as number,
+      fromSliceId: row.from_slice_id as string,
+      dependsOnSliceId: row.depends_on_slice_id as string
     }))
   }
 

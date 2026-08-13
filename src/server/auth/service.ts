@@ -11,8 +11,8 @@ import {
   type AuthData
 } from '@codetask/server-core/modules/auth'
 import type { AppDatabase } from '../db'
-import { validateSetupCredentials } from '../../shared/auth/credentials-policy'
-import { formatTurnErrorMessage } from '../../shared/turn-errors/turn-error'
+import { validateSetupCredentials } from '@codetask/contracts/auth'
+import { formatTurnErrorMessage } from '@codetask/contracts/turn-errors/turn-error'
 import { AppError, code } from '../error'
 
 function sqliteClient(db: AppDatabase): import('better-sqlite3').Database {
@@ -93,10 +93,6 @@ export class SecureAuthService {
 
   generateCaptcha(clientIp: string): CaptchaChallenge {
     return this.app.generateCaptcha(clientIp)
-  }
-
-  verifyCaptchaForClient(id: string, answer: string, clientIp: string): boolean {
-    return this.app.verifyCaptchaForClient(id, answer, clientIp)
   }
 
   cleanup(): void {

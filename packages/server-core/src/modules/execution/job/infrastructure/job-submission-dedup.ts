@@ -29,12 +29,18 @@ export class JobSubmissionDedup {
     return { kind: 'conflict' }
   }
 
-  checkSubmissionId(submissionId: string): { jobId: string; acceptedAt: number } | null {
+  checkSubmissionId(
+    submissionId: string
+  ): { jobId: string; acceptedAt: number; submissionHash: string } | null {
     const row = this.db
-      .prepare(`SELECT id, created_at FROM jobs WHERE submission_id = ?`)
-      .get(submissionId) as { id: string; created_at: number } | undefined
+      .prepare(`SELECT id, created_at, submission_hash FROM jobs WHERE submission_id = ?`)
+      .get(submissionId) as { id: string; created_at: number; submission_hash: string } | undefined
     if (!row) return null
-    return { jobId: row.id, acceptedAt: row.created_at }
+    return {
+      jobId: row.id,
+      acceptedAt: row.created_at,
+      submissionHash: row.submission_hash
+    }
   }
 
   assertNoConflict(dedup: ReturnType<JobSubmissionDedup['checkIdempotency']>): void {

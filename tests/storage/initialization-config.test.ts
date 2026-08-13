@@ -10,7 +10,7 @@ import {
   resolveInitializationConfigPath,
   resolveInitializationDefaultDataDir,
   writeInitializationConfig
-} from '../../src/main/initialization-config'
+} from '../../packages/service-bootstrap/src/storage/initialization-config'
 
 function fixture(t: test.TestContext): string {
   const root = mkdtempSync(join(tmpdir(), 'codetask-initialization-'))

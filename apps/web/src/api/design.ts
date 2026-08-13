@@ -23,6 +23,39 @@ import type { ApiSuccess } from './types'
 
 export type { DraftAbility, DraftReference, ExecutionProfile, ExecutionTreeSnapshot }
 
+type WireMilestone = ExecutionTreeSnapshot['milestones'][number]
+type WireSlice = WireMilestone['slices'][number]
+type WireTask = WireSlice['tasks'][number]
+
+/** Renderer-facing tree: providerCode is canonical; coreCode stays at the HTTP wire boundary. */
+export type DesignExecutionTreeSnapshot = Omit<ExecutionTreeSnapshot, 'milestones'> & {
+  milestones: Array<
+    Omit<WireMilestone, 'slices'> & {
+      slices: Array<
+        Omit<WireSlice, 'tasks'> & {
+          tasks: Array<Omit<WireTask, 'coreCode'> & { providerCode: string }>
+        }
+      >
+    }
+  >
+}
+
+function toDesignExecutionTree(tree: ExecutionTreeSnapshot): DesignExecutionTreeSnapshot {
+  return {
+    ...tree,
+    milestones: tree.milestones.map((milestone) => ({
+      ...milestone,
+      slices: milestone.slices.map((slice) => ({
+        ...slice,
+        tasks: slice.tasks.map((task) => {
+          const { coreCode, ...rest } = task
+          return { ...rest, providerCode: coreCode }
+        })
+      }))
+    }))
+  }
+}
+
 export type DesignDraftDto = {
   id: string
   actorId: string
@@ -176,8 +209,16 @@ export async function listPlanningSessionsForDraft(
 
 export async function getPlanningSession(
   sessionId: string
-): Promise<ApiSuccess<{ session: PlanningSessionDto; tree: ExecutionTreeSnapshot | null }>> {
-  return api(`/api/planning-sessions/${encodeURIComponent(sessionId)}`)
+): Promise<ApiSuccess<{ session: PlanningSessionDto; tree: DesignExecutionTreeSnapshot | null }>> {
+  return api<{ session: PlanningSessionDto; tree: ExecutionTreeSnapshot | null }>(
+    `/api/planning-sessions/${encodeURIComponent(sessionId)}`
+  ).then((res) => ({
+    ...res,
+    data: {
+      ...res.data,
+      tree: res.data.tree ? toDesignExecutionTree(res.data.tree) : null
+    }
+  }))
 }
 
 export async function patchPlanningTreeNode(
@@ -194,9 +235,12 @@ export async function patchPlanningTreeNode(
     providerCode?: string
     canRunInParallel?: boolean
     referenceIds?: string[]
+    referenceReason?: string
+    requiredInputs?: string[]
+    dependsOnSliceIds?: string[]
     dependsOnTaskIds?: string[]
   }
-): Promise<ApiSuccess<ExecutionTreeSnapshot>> {
+): Promise<ApiSuccess<DesignExecutionTreeSnapshot>> {
   const wire = {
     expectedRevision: body.expectedRevision,
     title: body.title,
@@ -207,32 +251,50 @@ export async function patchPlanningTreeNode(
     coreCode: body.providerCode,
     canRunInParallel: body.canRunInParallel,
     referenceIds: body.referenceIds,
+    referenceReason: body.referenceReason,
+    requiredInputs: body.requiredInputs,
+    dependsOnSliceIds: body.dependsOnSliceIds,
     dependsOnTaskIds: body.dependsOnTaskIds
   }
   assertBody(PatchTreeNodeBodySchema, wire, 'tree patch')
-  return api(
+  return api<ExecutionTreeSnapshot>(
     `/api/planning-sessions/${encodeURIComponent(sessionId)}/tree/nodes/${encodeURIComponent(nodeId)}`,
     {
       method: 'PATCH',
       body: JSON.stringify(wire)
     }
-  )
+  ).then((res) => ({ ...res, data: toDesignExecutionTree(res.data) }))
 }
 
 export async function confirmPlanningTreeNode(
   sessionId: string,
   nodeId: string,
   expectedRevision: number
-): Promise<ApiSuccess<ExecutionTreeSnapshot>> {
+): Promise<ApiSuccess<DesignExecutionTreeSnapshot>> {
   const body = { expectedRevision }
   assertBody(ConfirmTreeNodeBodySchema, body, 'confirm node')
-  return api(
+  return api<ExecutionTreeSnapshot>(
     `/api/planning-sessions/${encodeURIComponent(sessionId)}/tree/nodes/${encodeURIComponent(nodeId)}/confirm`,
     {
       method: 'POST',
       body: JSON.stringify(body)
     }
-  )
+  ).then((res) => ({ ...res, data: toDesignExecutionTree(res.data) }))
+}
+
+export async function confirmPlanningTree(
+  sessionId: string,
+  expectedRevision: number
+): Promise<ApiSuccess<DesignExecutionTreeSnapshot>> {
+  const body = { expectedRevision }
+  assertBody(ConfirmTreeNodeBodySchema, body, 'confirm tree')
+  return api<ExecutionTreeSnapshot>(
+    `/api/planning-sessions/${encodeURIComponent(sessionId)}/tree/confirm`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }
+  ).then((res) => ({ ...res, data: toDesignExecutionTree(res.data) }))
 }
 
 export async function publishPlanningSession(

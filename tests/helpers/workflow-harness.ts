@@ -222,23 +222,23 @@ export class WorkflowHarness {
 
   async drainActiveJobs(): Promise<void> {
     try {
-      const data = await this.json<{ jobs: Array<{ id: string; status: string }> }>(
+      const data = await this.json<{ jobs: Array<{ id: string; state: string }> }>(
         'GET',
         '/api/jobs?limit=50'
       )
       for (const job of data.jobs ?? []) {
-        if (!['completed', 'failed', 'cancelled'].includes(String(job.status))) {
+        if (!['succeeded', 'failed', 'cancelled'].includes(String(job.state))) {
           await this.cancelJob(String(job.id)).catch(() => undefined)
         }
       }
       const deadline = Date.now() + 5_000
       while (Date.now() < deadline) {
-        const again = await this.json<{ jobs: Array<{ id: string; status: string }> }>(
+        const again = await this.json<{ jobs: Array<{ id: string; state: string }> }>(
           'GET',
           '/api/jobs?limit=50'
         )
         const active = (again.jobs ?? []).filter(
-          (job) => !['completed', 'failed', 'cancelled', 'paused'].includes(String(job.status))
+          (job) => !['succeeded', 'failed', 'cancelled', 'paused'].includes(String(job.state))
         )
         if (active.length === 0) break
         await sleep(100)
@@ -327,6 +327,16 @@ export class WorkflowHarness {
       mcpCalls: [{ tool: 'report_task_result', args: { ...FIXTURE_TASK_EVIDENCE } }]
     }
     this.registry.setDefaultTaskWorkerScript(workerScript)
+    this.registry.setDefaultSliceVerifierScript({
+      reply: 'slice verification passed',
+      mcpCalls: [{ tool: 'complete_slice_verification', args: FIXTURE_SLICE_VERDICT_PASSED }]
+    })
+    this.registry.setDefaultMilestoneVerifierScript({
+      reply: 'milestone verification passed',
+      mcpCalls: [
+        { tool: 'complete_milestone_verification', args: FIXTURE_MILESTONE_VERDICT_PASSED }
+      ]
+    })
     for (const taskId of ['m1-s1-t1', 'm1-s2-t1', 'm1-s2-t2']) {
       this.registry.set(`task-worker:${taskId}`, workerScript)
     }
@@ -346,6 +356,7 @@ export class WorkflowHarness {
   private authHeaders(): Record<string, string> {
     return {
       Authorization: `Bearer ${this.token}`,
+      Host: new URL(this.baseUrl).host,
       'x-codetask-auth-transport': 'bearer',
       'Content-Type': 'application/json'
     }
@@ -494,9 +505,9 @@ export class WorkflowHarness {
         'GET',
         `/api/conversations/${threadId}/turns/${accepted.turnId}`
       )
-      const status = String(turn.status ?? '')
+      const status = String(turn.state ?? turn.status ?? '')
       if (status === 'completed' || status === 'failed' || status === 'cancelled') {
-        return { ...turn, id: turn.id ?? accepted.turnId }
+        return { ...turn, id: turn.id ?? accepted.turnId, state: status, status }
       }
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
@@ -600,35 +611,31 @@ export class WorkflowHarness {
   }
 
   async getJob(jobId: string): Promise<Record<string, unknown>> {
-    const data = await this.json<{ job: Record<string, unknown> }>('GET', `/api/jobs/${jobId}`)
-    return data.job
+    return this.json<Record<string, unknown>>('GET', `/api/jobs/${jobId}`)
   }
 
   async pauseJob(jobId: string): Promise<Record<string, unknown>> {
-    const data = await this.json<{ job: Record<string, unknown> }>(
-      'POST',
-      `/api/jobs/${jobId}/pause`,
-      {}
-    )
-    return data.job
+    const job = await this.getJob(jobId)
+    return this.json<Record<string, unknown>>('POST', `/api/jobs/${jobId}/pause`, {
+      expectedRevision: job.stateRevision,
+      idempotencyKey: `pause-${jobId}-${String(job.stateRevision)}`
+    })
   }
 
   async resumeJob(jobId: string): Promise<Record<string, unknown>> {
-    const data = await this.json<{ job: Record<string, unknown> }>(
-      'POST',
-      `/api/jobs/${jobId}/resume`,
-      {}
-    )
-    return data.job
+    const job = await this.getJob(jobId)
+    return this.json<Record<string, unknown>>('POST', `/api/jobs/${jobId}/continue`, {
+      expectedRevision: job.stateRevision,
+      idempotencyKey: `continue-${jobId}-${String(job.stateRevision)}`
+    })
   }
 
   async cancelJob(jobId: string): Promise<Record<string, unknown>> {
-    const data = await this.json<{ job: Record<string, unknown> }>(
-      'POST',
-      `/api/jobs/${jobId}/cancel`,
-      {}
-    )
-    return data.job
+    const job = await this.getJob(jobId)
+    return this.json<Record<string, unknown>>('POST', `/api/jobs/${jobId}/cancel`, {
+      expectedRevision: job.stateRevision,
+      idempotencyKey: `cancel-${jobId}-${String(job.stateRevision)}`
+    })
   }
 
   async uploadAttachment(
@@ -668,7 +675,7 @@ export class WorkflowHarness {
     }
     const last = await this.getJob(jobId)
     throw new Error(
-      `waitForJob timeout: status=${String(last.status)} phase=${String((last.taskProgress as Record<string, unknown>)?.phase)}`
+      `waitForJob timeout: state=${String(last.state)} generation=${String(last.executionGeneration)}`
     )
   }
 }

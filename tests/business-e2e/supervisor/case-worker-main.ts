@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { FakeDriver } from '../drivers/fake'
 import { OpenCodeDriver } from '../drivers/opencode'
+import { ProviderAgentDriver } from '../drivers/provider-agent'
 import { readJson } from './run-layout'
 import type { CaseWorkerInput, CaseWorkerResult } from './case-process'
 
@@ -14,7 +15,12 @@ async function main(): Promise<void> {
   if (!contextPath) throw new Error('worker.context_required')
   const input = readJson<CaseWorkerInput>(contextPath)
 
-  const driver = input.driver === 'opencode' ? new OpenCodeDriver() : new FakeDriver()
+  const driver =
+    input.driver === 'fake'
+      ? new FakeDriver()
+      : input.driver === 'opencode'
+        ? new OpenCodeDriver()
+        : new ProviderAgentDriver(input.driver)
 
   let fixture: Record<string, unknown> | undefined
   if (input.fixturePath) {
@@ -36,7 +42,8 @@ async function main(): Promise<void> {
     executionConfig: input.executionConfig,
     expectedHtmlFile: input.expectedHtmlFile,
     probeMcpUrl: input.probeMcpUrl,
-    probeMcpName: input.probeMcpName
+    probeMcpName: input.probeMcpName,
+    allowedTools: input.allowedTools
   })
 
   const payload: CaseWorkerResult = {

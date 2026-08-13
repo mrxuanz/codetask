@@ -244,6 +244,7 @@ const confirmDeleteMessage = computed(() => {
                 : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'
             )
           "
+          :aria-current="item.match(route.path) ? 'page' : undefined"
           @click="navigate(item.to)"
         >
           <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
@@ -327,6 +328,7 @@ const confirmDeleteMessage = computed(() => {
             <button
               type="button"
               class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 pr-8 text-left text-sm hover:bg-background"
+              :aria-pressed="project.id === activeProjectId && !activeThreadId"
               @click="
                 () => {
                   workspace.setActiveProjectId(project.id)

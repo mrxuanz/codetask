@@ -1,9 +1,9 @@
-import { createTurnError } from '../../shared/turn-errors.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 import {
   SUPPORTED_CORE_CODES,
   normalizeProviderCode,
   type SupportedCoreCode
-} from '../../shared/providers'
+} from '@codetask/provider-runtime-node/spec'
 
 export { SUPPORTED_CORE_CODES, type SupportedCoreCode }
 

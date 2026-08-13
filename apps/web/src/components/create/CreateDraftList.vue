@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { Trash2 } from 'lucide-vue-next'
-import { deleteUserDraft, fetchUserDrafts, type UserDraftListItem } from '@renderer/api/jobs'
+import type { UserDraftListItemDto } from '@codetask/contracts'
+import { deleteUserDraft } from '@renderer/api/jobs'
+import { listUserDraftViews } from '@renderer/api/design-workspace'
 import Button from '@renderer/components/ui/Button.vue'
 import ConfirmDialog from '@renderer/components/ui/ConfirmDialog.vue'
 import ErrorAlert from '@renderer/components/ui/ErrorAlert.vue'
@@ -11,7 +13,7 @@ import Input from '@renderer/components/ui/Input.vue'
 import { DRAFT_WIZARD_STEP_COUNT } from '@renderer/lib/draftForm'
 import { toastError } from '@renderer/lib/toast'
 
-export type DraftListEntry = UserDraftListItem
+export type DraftListEntry = UserDraftListItemDto
 
 const emit = defineEmits<{
   continueDraft: [entry: DraftListEntry]
@@ -104,7 +106,7 @@ async function loadAllDrafts(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const res = await fetchUserDrafts({
+    const res = await listUserDraftViews({
       q: searchQuery.value,
       completion: completionFilter.value
     })
@@ -160,7 +162,7 @@ defineExpose({ reload: loadAllDrafts })
   <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h1 class="text-lg font-semibold">{{ t('workspace.create.draftListTitle') }}</h1>
+        <h2 class="text-lg font-semibold">{{ t('workspace.create.draftListTitle') }}</h2>
         <p class="mt-1 text-sm text-muted-foreground">{{ t('workspace.create.draftListHint') }}</p>
       </div>
       <Button type="button" class="shrink-0" @click="emit('createNew')">

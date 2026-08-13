@@ -110,6 +110,54 @@ export class SqliteDraftRepository implements DraftRepository {
   }
 
   async update(draft: DraftRecord, expectedRevision: number): Promise<DraftRecord> {
+    this.updateRow(draft, expectedRevision)
+    return (await this.getById(draft.id))!
+  }
+
+  async updateAbilities(
+    draft: DraftRecord,
+    expectedRevision: number,
+    abilities: DraftAbility[]
+  ): Promise<DraftRecord> {
+    const tx = this.db.transaction(() => {
+      this.updateRow(draft, expectedRevision)
+      this.replaceAbilityRows(draft.id, abilities)
+    })
+    tx()
+    return (await this.getById(draft.id))!
+  }
+
+  async updateReferences(
+    draft: DraftRecord,
+    expectedRevision: number,
+    references: DraftReference[]
+  ): Promise<DraftRecord> {
+    const tx = this.db.transaction(() => {
+      this.updateRow(draft, expectedRevision)
+      this.replaceReferenceRows(draft.id, references)
+    })
+    tx()
+    return (await this.getById(draft.id))!
+  }
+
+  async setExecutionProfile(draftId: string, profile: ExecutionProfile | null): Promise<void> {
+    this.db
+      .prepare(`UPDATE drafts SET execution_profile_json = ? WHERE id = ?`)
+      .run(profile ? JSON.stringify(profile) : null, draftId)
+  }
+
+  async delete(draftId: string): Promise<void> {
+    this.db.prepare(`DELETE FROM drafts WHERE id = ?`).run(draftId)
+  }
+
+  async countActivePlanningSessions(draftId: string): Promise<number> {
+    const rows = this.db
+      .prepare(`SELECT status FROM planning_sessions WHERE source_draft_id = ?`)
+      .all(draftId) as Array<{ status: PlanningSessionStatus }>
+    return rows.filter((r) => isActivePlanningStatus(r.status)).length
+  }
+
+  private updateRow(draft: DraftRecord, expectedRevision: number): void {
     const result = this.db
       .prepare(
         `UPDATE drafts SET
@@ -143,79 +191,55 @@ export class SqliteDraftRepository implements DraftRepository {
         expectedRevision
       )
     if (result.changes !== 1) throw new DesignConflictError()
-    return (await this.getById(draft.id))!
   }
 
-  async replaceAbilities(draftId: string, abilities: DraftAbility[]): Promise<void> {
-    const tx = this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM draft_abilities WHERE draft_id = ?`).run(draftId)
-      const insert = this.db.prepare(
-        `INSERT INTO draft_abilities (
-          draft_id, ability_code, label, description, reason, recommended_core_code, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  private replaceAbilityRows(draftId: string, abilities: DraftAbility[]): void {
+    this.db.prepare(`DELETE FROM draft_abilities WHERE draft_id = ?`).run(draftId)
+    const insert = this.db.prepare(
+      `INSERT INTO draft_abilities (
+        draft_id, ability_code, label, description, reason, recommended_core_code, sort_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    abilities.forEach((ability, index) => {
+      insert.run(
+        draftId,
+        ability.abilityCode,
+        ability.label,
+        ability.description,
+        ability.reason,
+        ability.recommendedCoreCode,
+        ability.sortOrder ?? index
       )
-      abilities.forEach((ability, index) => {
-        insert.run(
-          draftId,
-          ability.abilityCode,
-          ability.label,
-          ability.description,
-          ability.reason,
-          ability.recommendedCoreCode,
-          ability.sortOrder ?? index
-        )
-      })
     })
-    tx()
   }
 
-  async replaceReferences(draftId: string, references: DraftReference[]): Promise<void> {
+  private replaceReferenceRows(draftId: string, references: DraftReference[]): void {
     const now = Date.now()
-    const tx = this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM design_draft_references WHERE draft_id = ?`).run(draftId)
-      const insert = this.db.prepare(
-        `INSERT INTO design_draft_references (
-          id, draft_id, source, name, kind, mime_type, description,
-          attachment_id, local_path, resolved_path, asset_url, sort_order, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    this.db.prepare(`DELETE FROM design_draft_references WHERE draft_id = ?`).run(draftId)
+    const insert = this.db.prepare(
+      `INSERT INTO design_draft_references (
+        id, draft_id, source, name, kind, mime_type, description,
+        attachment_id, local_path, resolved_path, asset_url, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    references.forEach((ref, index) => {
+      insert.run(
+        ref.id,
+        draftId,
+        ref.source ?? null,
+        ref.name,
+        ref.kind,
+        ref.mimeType ?? null,
+        ref.description,
+        ref.attachmentId ?? null,
+        ref.localPath ?? null,
+        ref.resolvedPath ?? null,
+        ref.assetUrl ?? null,
+        ref.sortOrder ?? index,
+        now,
+        now
       )
-      references.forEach((ref, index) => {
-        insert.run(
-          ref.id,
-          draftId,
-          ref.source ?? null,
-          ref.name,
-          ref.kind,
-          ref.mimeType ?? null,
-          ref.description,
-          ref.attachmentId ?? null,
-          ref.localPath ?? null,
-          ref.resolvedPath ?? null,
-          ref.assetUrl ?? null,
-          ref.sortOrder ?? index,
-          now,
-          now
-        )
-      })
     })
-    tx()
-  }
-
-  async setExecutionProfile(draftId: string, profile: ExecutionProfile | null): Promise<void> {
-    this.db
-      .prepare(`UPDATE drafts SET execution_profile_json = ? WHERE id = ?`)
-      .run(profile ? JSON.stringify(profile) : null, draftId)
-  }
-
-  async delete(draftId: string): Promise<void> {
-    this.db.prepare(`DELETE FROM drafts WHERE id = ?`).run(draftId)
-  }
-
-  async countActivePlanningSessions(draftId: string): Promise<number> {
-    const rows = this.db
-      .prepare(`SELECT status FROM planning_sessions WHERE source_draft_id = ?`)
-      .all(draftId) as Array<{ status: PlanningSessionStatus }>
-    return rows.filter((r) => isActivePlanningStatus(r.status)).length
   }
 
   private hydrate(row: DraftRow): DraftRecord {

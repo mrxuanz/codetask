@@ -10,7 +10,7 @@ import {
   createTurnError,
   indicatesCursorProviderCapacity,
   normalizeTurnError
-} from '../../src/shared/turn-errors'
+} from '@codetask/contracts/turn-errors'
 
 test('isEmptyAcpReply treats blank as empty', () => {
   assert.equal(isEmptyAcpReply(''), true)

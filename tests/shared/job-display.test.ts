@@ -6,7 +6,7 @@ import {
   resolveJobDisplay,
   resolveJobStatusBadgeClass,
   resolveJobStatusDisplay
-} from '../../src/shared/job-display'
+} from '@codetask/contracts/job-display'
 
 test('isExecutionDisplayStatus recognizes execution queue statuses', () => {
   assert.equal(isExecutionDisplayStatus('pending'), true)

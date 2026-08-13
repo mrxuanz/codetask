@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { SUPPORTED_CORE_CODES } from '../../src/shared/providers/codes.ts'
+import { SUPPORTED_CORE_CODES } from '@codetask/provider-spec/codes'
 import { PROVIDER_CLI_CANDIDATES } from '../../src/server/providers/commands.ts'
 import { createProviderRegistry } from '../../src/server/providers/composition.ts'
 

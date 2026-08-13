@@ -6,7 +6,7 @@ import { SettingsError } from '../domain/settings-errors.ts'
 export type SettingsHttpDeps = {
   app: SettingsApplication
   requireAuth: () => void
-  ok: <T>(data: T) => unknown
+  ok: <T>(data: T, requestId: string) => unknown
   badRequest: (message: string, code?: string, details?: Record<string, unknown>) => never
   conflict: (message: string, code?: string, details?: Record<string, unknown>) => never
   getEffectiveProviders: () => ProviderRuntimeSettings
@@ -58,16 +58,38 @@ function mapSettingsError(
   deps.badRequest(error.message, String(error.code), error.details)
 }
 
-function onSettingsError(error: unknown, deps: SettingsHttpDeps, c: Context): Response {
+function onSettingsError(error: unknown, _deps: SettingsHttpDeps, c: Context): Response {
   if (error instanceof SettingsError) {
-    const status = error.httpStatus
-    const body = deps.ok({
+    const requestId = (c.get('requestId' as never) as string | undefined) ?? 'local'
+    const body = {
       success: false,
-      error: { code: error.code, message: error.message, details: error.details }
-    })
-    return c.json(body, status as 400)
+      error: {
+        code: String(error.code),
+        message: error.message,
+        ...(error.details ? { details: error.details } : {})
+      },
+      requestId
+    } as const
+    return c.json(body, error.httpStatus as 400 | 409)
   }
   throw error
+}
+
+function requestId(c: Context): string {
+  return (c.get('requestId' as never) as string | undefined) ?? 'unknown'
+}
+
+async function parseSettingsBody(c: Context): Promise<Record<string, unknown>> {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    throw SettingsError.badRequest('settings.invalid_payload', 'Request body must be valid JSON')
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw SettingsError.badRequest('settings.invalid_payload', 'Invalid settings request body')
+  }
+  return body as Record<string, unknown>
 }
 
 /**
@@ -81,17 +103,17 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
 
   routes.get('/agent-defaults', (c) => {
     deps.requireAuth()
-    return c.json(deps.ok(app.getAgentDefaults()))
+    return c.json(deps.ok(app.getAgentDefaults(), requestId(c)))
   })
 
   routes.put('/agent-defaults', async (c) => {
     deps.requireAuth()
-    const body = await c.req.json<{ expectedRevision?: number } & Record<string, unknown>>()
+    const body = await parseSettingsBody(c)
     const expectedRevision = requireExpectedRevision(body.expectedRevision)
     const { expectedRevision: _ignored, ...value } = body
     try {
       const result = await app.updateAgentDefaults(expectedRevision, value)
-      return c.json(deps.ok(result))
+      return c.json(deps.ok(result, requestId(c)))
     } catch (error) {
       if (error instanceof SettingsError) mapSettingsError(error, deps)
       throw error
@@ -100,19 +122,17 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
 
   routes.get('/prompts', (c) => {
     deps.requireAuth()
-    return c.json(deps.ok(app.getPrompts()))
+    return c.json(deps.ok(app.getPrompts(), requestId(c)))
   })
 
   routes.put('/prompts', async (c) => {
     deps.requireAuth()
-    const body = await c.req.json<
-      { expectedRevision?: number; settings?: unknown } & Record<string, unknown>
-    >()
+    const body = await parseSettingsBody(c)
     const expectedRevision = requireExpectedRevision(body.expectedRevision)
     const { settings } = unwrapSettings(body)
     try {
       const result = await app.updatePrompts(expectedRevision, settings)
-      return c.json(deps.ok(result))
+      return c.json(deps.ok(result, requestId(c)))
     } catch (error) {
       if (error instanceof SettingsError) mapSettingsError(error, deps)
       throw error
@@ -121,19 +141,17 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
 
   routes.get('/mcp', (c) => {
     deps.requireAuth()
-    return c.json(deps.ok(app.getMcp()))
+    return c.json(deps.ok(app.getMcp(), requestId(c)))
   })
 
   routes.put('/mcp', async (c) => {
     deps.requireAuth()
-    const body = await c.req.json<
-      { expectedRevision?: number; settings?: unknown } & Record<string, unknown>
-    >()
+    const body = await parseSettingsBody(c)
     const expectedRevision = requireExpectedRevision(body.expectedRevision)
     const { settings } = unwrapSettings(body)
     try {
       const result = await app.updateMcp(expectedRevision, settings)
-      return c.json(deps.ok(result))
+      return c.json(deps.ok(result, requestId(c)))
     } catch (error) {
       if (error instanceof SettingsError) mapSettingsError(error, deps)
       throw error
@@ -142,12 +160,12 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
 
   routes.get('/providers', (c) => {
     deps.requireAuth()
-    return c.json(deps.ok(app.getProviders(deps.getEffectiveProviders())))
+    return c.json(deps.ok(app.getProviders(deps.getEffectiveProviders()), requestId(c)))
   })
 
   routes.put('/providers', async (c) => {
     deps.requireAuth()
-    const body = await c.req.json<{ expectedRevision?: number; providers?: unknown }>()
+    const body = await parseSettingsBody(c)
     const expectedRevision = requireExpectedRevision(body.expectedRevision)
     if (body.providers === undefined) {
       deps.badRequest('providers is required', 'settings.invalid_payload')
@@ -158,7 +176,7 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
         { providers: body.providers },
         deps.getEffectiveProviders()
       )
-      return c.json(deps.ok(result))
+      return c.json(deps.ok(result, requestId(c)))
     } catch (error) {
       if (error instanceof SettingsError) mapSettingsError(error, deps)
       throw error
@@ -167,19 +185,19 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
 
   routes.get('/secrets', (c) => {
     deps.requireAuth()
-    return c.json(deps.ok({ secrets: app.listSecrets() }))
+    return c.json(deps.ok({ secrets: app.listSecrets() }, requestId(c)))
   })
 
   routes.put('/secrets/:name', async (c) => {
     deps.requireAuth()
     const name = c.req.param('name')
-    const body = await c.req.json<{ value?: string }>()
+    const body = await parseSettingsBody(c)
     if (typeof body.value !== 'string') {
       deps.badRequest('value is required', 'settings.invalid_payload')
     }
     try {
       const secret = app.putSecret(name, body.value)
-      return c.json(deps.ok({ secret }))
+      return c.json(deps.ok({ secret }, requestId(c)))
     } catch (error) {
       if (error instanceof SettingsError) mapSettingsError(error, deps)
       throw error
@@ -191,7 +209,7 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
     const name = c.req.param('name')
     try {
       app.deleteSecret(name)
-      return c.json(deps.ok({ deleted: true, name }))
+      return c.json(deps.ok({ deleted: true, name }, requestId(c)))
     } catch (error) {
       if (error instanceof SettingsError) mapSettingsError(error, deps)
       throw error
@@ -202,7 +220,7 @@ export function createSettingsHttpRoutes(deps: SettingsHttpDeps): Hono {
     routes.get('/provider-catalog', async (c) => {
       deps.requireAuth()
       const providers = await deps.listProviderCores!()
-      return c.json(deps.ok({ providers }))
+      return c.json(deps.ok({ providers }, requestId(c)))
     })
   }
 

@@ -23,7 +23,10 @@ export interface FolderBrowseReturn {
   start: () => void
 }
 
-export function useFolderBrowse(options?: { active?: Ref<boolean> }): FolderBrowseReturn {
+export function useFolderBrowse(options?: {
+  active?: Ref<boolean>
+  requestHeaders?: () => HeadersInit
+}): FolderBrowseReturn {
   const { t } = useI18n()
 
   const query = ref(defaultBrowsePath())
@@ -46,7 +49,7 @@ export function useFolderBrowse(options?: { active?: Ref<boolean> }): FolderBrow
     loading.value = true
     error.value = null
     try {
-      const res = await browseFilesystem(partialPath)
+      const res = await browseFilesystem(partialPath, { headers: options?.requestHeaders?.() })
       parentPath.value = res.data.parentPath
       entries.value = res.data.entries
       if (!partialPath.trim()) {
@@ -77,7 +80,7 @@ export function useFolderBrowse(options?: { active?: Ref<boolean> }): FolderBrow
     loading.value = true
     error.value = null
     try {
-      const res = await fetchBrowseParent(target)
+      const res = await fetchBrowseParent(target, { headers: options?.requestHeaders?.() })
       query.value = withTrailingSeparator(res.data.parentPath)
       newFolderName.value = ''
       await loadBrowse(query.value)
@@ -106,7 +109,9 @@ export function useFolderBrowse(options?: { active?: Ref<boolean> }): FolderBrow
     loading.value = true
     error.value = null
     try {
-      const result = await resolveFilesystemFolder(target, createIfMissing)
+      const result = await resolveFilesystemFolder(target, createIfMissing, {
+        headers: options?.requestHeaders?.()
+      })
       return result.data.path
     } catch (err) {
       const message = err instanceof Error ? err.message : t('folderPicker.browseFailed')

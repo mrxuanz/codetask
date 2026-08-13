@@ -201,10 +201,17 @@ export default {
       backToList: '返回任务列表',
       loadFailed: '加载任务列表失败',
       detailFailed: '加载任务详情失败',
+      deleteConfirmTitle: '删除任务？',
+      deleteConfirmMessage: '确定删除「{title}」及其全部执行历史吗？此操作无法撤销。',
       executionTree: '执行树',
       taskParameters: '任务参数',
       runHistory: '运行历史',
       cliLabel: 'CLI: {summary}',
+      pagination: {
+        previous: '上一页',
+        next: '下一页',
+        page: '第 {page} / {total} 页'
+      },
       filters: {
         all: '全部',
         pending: '排队中',
@@ -251,6 +258,7 @@ export default {
         cleanupFailed: '沙箱异常退出，请重启应用后重试',
         planReady: '计划已生成',
         planStepsDone: '计划 {done}/{total} 步',
+        stepsDone: '已完成 {done}/{total} 个子任务',
         planning: '正在生成计划 {done}/{total}',
         planningPartial: '正在生成计划 · 已完成 {done} 步',
         planningRunning: '正在生成计划…',

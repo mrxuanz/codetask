@@ -14,9 +14,9 @@ describe('conversation mode resolution (03)', () => {
     assert.match(routes, /Draft\/Plan fields are not accepted/)
   })
 
-  it('legacy threads route file is gone; stub returns conversation.moved', () => {
+  it('legacy threads route and compatibility stub are both gone', () => {
     assert.equal(existsSync(join(root, 'src/server/routes/threads.ts')), false)
     const api = readFileSync(join(root, 'src/server/routes/api.ts'), 'utf8')
-    assert.match(api, /createRemovedThreadsStub|conversation\.moved/)
+    assert.doesNotMatch(api, /createRemovedThreadsStub|conversation\.moved|route\(['"]\/threads/)
   })
 })

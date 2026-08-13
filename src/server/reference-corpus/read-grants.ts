@@ -1,6 +1,6 @@
 import { detectSandboxReadCapabilities } from './sandbox-capabilities'
-import type { JobReferenceManifest } from '../../shared/job-references'
-import { resolveAssignedReferences } from '../../shared/job-references'
+import type { JobReferenceManifest } from '@codetask/contracts/job-references'
+import { resolveAssignedReferences } from '@codetask/contracts/job-references'
 
 export type ReadGrant = { kind: 'directory'; path: string } | { kind: 'file'; path: string }
 

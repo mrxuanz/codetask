@@ -66,9 +66,10 @@ describe('architecture gates — Batch H', () => {
 
   it('jobs façade does not invent empty threadId for draft list items', () => {
     const jobs = readFileSync(join(root, 'apps/web/src/api/jobs.ts'), 'utf8')
+    const mappers = readFileSync(join(root, 'apps/web/src/api/planning-view-mappers.ts'), 'utf8')
     assert.doesNotMatch(jobs, /threadId:\s*''/)
     assert.match(jobs, /uploadConversationAttachment/)
-    assert.match(jobs, /job\.state/)
+    assert.match(mappers, /job\.state/)
   })
 
   it('UI production sources do not assign coreCode fields', () => {
@@ -106,9 +107,13 @@ describe('architecture gates — Batch H', () => {
     assert.match(vite, /@renderer/)
     assert.doesNotMatch(vite, /src\/renderer/)
     const electronVite = readFileSync(join(root, 'electron.vite.config.ts'), 'utf8')
-    assert.match(electronVite, /input:\s*resolve\('apps\/web\/index\.html'\)/)
-    assert.match(electronVite, /'@server':\s*resolve\('src\/server'\)/)
+    const sharedVite = readFileSync(join(root, 'build/electron-vite.shared.ts'), 'utf8')
+    assert.match(electronVite, /rendererInput/)
+    assert.match(electronVite, /mainAliases/)
+    assert.match(sharedVite, /rendererInput\s*=\s*resolve\('apps\/web\/index\.html'\)/)
+    assert.match(sharedVite, /'@server':\s*resolve\('src\/server'\)/)
     assert.doesNotMatch(electronVite, /src\/renderer/)
+    assert.doesNotMatch(sharedVite, /src\/renderer/)
   })
 
   it('server response helpers emit requestId (ApiSuccess/ApiFailure)', () => {

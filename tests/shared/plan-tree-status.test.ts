@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildUnifiedProgressTree } from '../../src/shared/plan-tree.ts'
+import { buildUnifiedProgressTree } from '@codetask/contracts/plan-tree'
 
 const minimalPlan = {
   milestones: [

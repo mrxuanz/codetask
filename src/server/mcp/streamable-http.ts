@@ -26,6 +26,7 @@ interface StreamableTransport {
   subscribers: Set<StreamSubscriber>
   closed: boolean
   lastActivityAt: number
+  lastEventId: number
 }
 
 const transports = new Map<string, StreamableTransport>()
@@ -61,7 +62,8 @@ function getOrCreateTransport(
       mcpSessionId,
       subscribers: new Set(),
       closed: false,
-      lastActivityAt: Date.now()
+      lastActivityAt: Date.now(),
+      lastEventId: 0
     }
     transports.set(key, transport)
   } else {
@@ -80,7 +82,8 @@ function publishToTransport(
   requestId: JsonRpcId,
   body: McpJsonRpcBody
 ): void {
-  const eventId = Date.now()
+  const eventId = Math.max(Date.now(), transport.lastEventId + 1)
+  transport.lastEventId = eventId
   for (const subscriber of transport.subscribers) {
     subscriber.push(eventId, { ...body, id: body.id ?? requestId })
   }

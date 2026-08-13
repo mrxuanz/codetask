@@ -46,6 +46,7 @@ export type AttachmentResolverPort = {
     conversationId: string
     attachmentIds: string[]
   }): ResolvedTurnAttachments
+  releaseConversation?(conversationId: string): void
 }
 
 /** Host binds Conversation system MCP (read_reference_attachment) for one turn. */
@@ -95,8 +96,14 @@ export type TurnRepository = {
   countActiveForActor(actorId: string): number
   hasActiveForConversation(conversationId: string): boolean
   getActiveForConversation(conversationId: string): TurnRecord | null
+  listActiveForConversation(conversationId: string): TurnRecord[]
   listActive(): TurnRecord[]
-  listQueued(actorId?: string): TurnRecord[]
+  listAdmittableQueued(
+    actorId: string | undefined,
+    limit: number,
+    maxActivePerActor: number
+  ): TurnRecord[]
+  queuedStats(actorId: string): { count: number; payloadBytes: number }
   countQueuedAhead(conversationId: string, createdAt: string, turnId: string): number
   deleteForConversation(conversationId: string): void
 }
@@ -113,6 +120,8 @@ export type ConversationModulePorts = {
   attachments?: AttachmentResolverPort
   /** Host Conversation system MCP — optional when HTTP MCP port is unavailable. */
   systemMcp?: ConversationSystemMcpPort
+  /** All repositories share this SQLite transaction boundary. */
+  transaction: <T>(operation: () => T) => T
   maxConcurrentTurnsPerUser: number
   defaultProviderCode: ProviderCode
   resolveSystemPrompt: () => string

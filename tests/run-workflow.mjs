@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-process.env.TSX_TSCONFIG_PATH = join(root, 'tsconfig.node.json')
+process.env.TSX_TSCONFIG_PATH = join(root, 'tests', 'tsconfig.json')
 
 const workflowDir = join(root, 'tests', 'workflow')
 const files = readdirSync(workflowDir)

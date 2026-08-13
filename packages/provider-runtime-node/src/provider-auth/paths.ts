@@ -1,10 +1,13 @@
-import { createRequire } from 'module'
-import { execFileSync } from 'child_process'
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs'
-import type { Dirent } from 'fs'
-import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
+import type { Dirent } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { processHostEnvironmentSource } from '@codetask/agent-runtime/host-environment'
+
+const moduleFilename = fileURLToPath(import.meta.url)
 
 type HostEnvironment = Readonly<Record<string, string | undefined>>
 
@@ -505,7 +508,7 @@ export function resolveCodexInstallDirs(): string[] {
   const dirs = new Set<string>()
 
   try {
-    const codexPkgJson = resolvePackageJson('@openai/codex', __filename)
+    const codexPkgJson = resolvePackageJson('@openai/codex', moduleFilename)
     if (!codexPkgJson) return []
     const codexRoot = dirname(codexPkgJson)
     addExistingDir(dirs, codexRoot)
@@ -525,7 +528,7 @@ export function resolveClaudeInstallDirs(): string[] {
   const dirs = new Set<string>()
 
   try {
-    const sdkPkgJson = resolvePackageJson('@anthropic-ai/claude-agent-sdk', __filename)
+    const sdkPkgJson = resolvePackageJson('@anthropic-ai/claude-agent-sdk', moduleFilename)
     if (!sdkPkgJson) return []
     const sdkRoot = dirname(sdkPkgJson)
     addExistingDir(dirs, sdkRoot)
@@ -569,7 +572,7 @@ export function resolveOpencodeInstallDirs(): string[] {
 
   for (const pkg of ['opencode-ai', '@opencode-ai/sdk'] as const) {
     try {
-      const req = createRequire(__filename)
+      const req = createRequire(moduleFilename)
       const pkgJson = req.resolve(`${pkg}/package.json`)
       const pkgRoot = dirname(pkgJson)
       addExistingDir(dirs, pkgRoot)
@@ -612,7 +615,7 @@ export function resolveOpencodeExecutable(
 ): string {
   // Prefer unified ProviderInstallation resolution; BIN env is no longer a config source.
   try {
-    const nodeRequire = createRequire(__filename)
+    const nodeRequire = createRequire(moduleFilename)
     const { resolveProviderExecutable } = nodeRequire(
       '../providers/executable.ts'
     ) as typeof import('../providers/executable')

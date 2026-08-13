@@ -12,10 +12,12 @@ import {
   composeConversationModule,
   composeDesignModule,
   composeExecutionModule,
+  DesignValidationError,
   getPlannerMcpBackendPort,
   type ConversationModule,
   type DesignModule
 } from '@codetask/server-core'
+import type { DraftReference } from '@codetask/contracts'
 import type { AppContext } from './bootstrap'
 import type { AppDatabase } from './db'
 import { AppError } from './error'
@@ -33,6 +35,14 @@ import {
 } from './conversation/mcp/session'
 import { buildConversationMcpUrl, getConversationMcpBackendPort } from './conversation/mcp/url'
 import { getOrComposeSettings } from './settings/service'
+import {
+  releaseAssetReference,
+  releaseOwnerAssetReferences,
+  releaseUnattachedConversationReferences,
+  resolveRegisteredAssetFile,
+  retainAssetReference
+} from './assets/registry'
+import { processPendingAssetDeletes } from './retention/janitor'
 
 const designByDb = new WeakMap<object, DesignModule>()
 const executionByDb = new WeakMap<object, ReturnType<typeof composeExecutionModule>>()
@@ -47,6 +57,55 @@ function getSqliteClient(ctx: AppContext): Database.Database {
     throw new Error('SQLite client missing on AppDatabase')
   }
   return rawDb
+}
+
+function schedulePendingAssetCleanup(ctx: AppContext): void {
+  queueMicrotask(() => {
+    void processPendingAssetDeletes(ctx.dataDir, ctx.db).catch((error) => {
+      console.warn('[assets] pending attachment cleanup failed', error)
+    })
+  })
+}
+
+function prepareDraftReference(
+  ctx: AppContext,
+  db: Database.Database,
+  input: {
+    actorId: string
+    projectId: string
+    draftId: string
+    reference: DraftReference
+  }
+): DraftReference {
+  const attachmentId = input.reference.attachmentId?.trim()
+  if (!attachmentId) return input.reference
+
+  const authorized = db
+    .prepare(
+      `SELECT 1 AS ok
+         FROM assets a
+         JOIN asset_references ar ON ar.asset_id = a.id
+         LEFT JOIN conversation_threads ct
+           ON ar.owner_type = 'conversation' AND ct.id = ar.owner_id
+        WHERE a.id = ? AND a.state = 'active'
+          AND (
+            (ar.owner_type = 'draft' AND ar.owner_id = ?)
+            OR (ar.owner_type = 'conversation' AND ct.actor_id = ? AND ct.project_id = ?)
+          )
+        LIMIT 1`
+    )
+    .get(attachmentId, input.draftId, input.actorId, input.projectId) as { ok: number } | undefined
+  if (!authorized) {
+    throw new DesignValidationError('Attachment is missing or does not belong to this project')
+  }
+  const resolvedPath = resolveRegisteredAssetFile(db, ctx.dataDir, attachmentId)
+  if (!resolvedPath) throw new DesignValidationError('Attachment file is missing')
+  return {
+    ...input.reference,
+    source: 'attachment',
+    attachmentId,
+    resolvedPath
+  }
 }
 
 /**
@@ -136,10 +195,9 @@ export function getOrCreateAgentRuntime(ctx: AppContext): ReturnType<typeof crea
     },
     async closeScopeImpl(scopeId: string) {
       try {
-        const { closeConversationCursorRuntime } =
+        const { closeCursorRuntimeScope } =
           await import('./agent-runtime/cursor-acp/stream-session-turn')
-        const match = /^conversation:([^:]+):provider:/.exec(scopeId)
-        if (match) await closeConversationCursorRuntime(match[1]!)
+        await closeCursorRuntimeScope(scopeId)
       } catch {
         // optional close
       }
@@ -157,16 +215,78 @@ function composeExecutionForDb(ctx: AppContext, rawDb: Database.Database): Execu
     execution = composeExecutionModule({
       db: rawDb,
       agentRuntime,
+      assets: {
+        prepareReferences(input) {
+          return input.references.map((reference) => {
+            const attachmentId = reference.attachmentId?.trim()
+            if (!attachmentId) return reference
+            const authorized = rawDb
+              .prepare(
+                `SELECT 1 AS ok
+                   FROM assets a
+                   JOIN drafts d ON d.id = ? AND d.actor_id = ? AND d.project_id = ?
+                   JOIN design_draft_references dr
+                     ON dr.draft_id = d.id AND dr.attachment_id = a.id
+                  WHERE a.id = ? AND a.state = 'active'
+                  LIMIT 1`
+              )
+              .get(input.draftId, input.actorId, input.projectId, attachmentId) as
+              | { ok: number }
+              | undefined
+            if (!authorized) {
+              throw new DesignValidationError(
+                `Attachment ${attachmentId} is missing or is not owned by the source draft`
+              )
+            }
+            const resolvedPath = resolveRegisteredAssetFile(rawDb, ctx.dataDir, attachmentId)
+            if (!resolvedPath) {
+              throw new DesignValidationError(`Attachment file ${attachmentId} is missing`)
+            }
+            return { ...reference, source: 'attachment', attachmentId, resolvedPath }
+          })
+        },
+        promoteReferences({ jobId, draftId, references }) {
+          for (const reference of references) {
+            const attachmentId = reference.attachmentId?.trim()
+            if (!attachmentId) continue
+            retainAssetReference(rawDb, {
+              assetId: attachmentId,
+              ownerType: 'job',
+              ownerId: jobId,
+              purpose: `reference:${reference.id}`
+            })
+            releaseAssetReference(rawDb, {
+              assetId: attachmentId,
+              ownerType: 'draft',
+              ownerId: draftId,
+              purpose: `reference:${reference.id}`
+            })
+          }
+        },
+        releaseJob(jobId) {
+          releaseOwnerAssetReferences(rawDb, 'job', jobId)
+        },
+        resolveAttachmentPath(attachmentId) {
+          return resolveRegisteredAssetFile(rawDb, ctx.dataDir, attachmentId)
+        },
+        onReferencesReleased() {
+          schedulePendingAssetCleanup(ctx)
+        }
+      },
       onEvent(jobId, eventType, payload, outboxId) {
+        const payloadRecord =
+          payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null
+        const persisted = resolveJobRealtimeIdentity(rawDb, jobId)
         const entityRevision =
-          payload &&
-          typeof payload === 'object' &&
-          'revision' in payload &&
-          typeof (payload as { revision: unknown }).revision === 'number'
-            ? (payload as { revision: number }).revision
-            : 0
+          typeof payloadRecord?.revision === 'number'
+            ? payloadRecord.revision
+            : (persisted?.revision ?? 0)
+        const actorId =
+          typeof payloadRecord?.actorId === 'string'
+            ? payloadRecord.actorId
+            : (persisted?.actorId ?? 'unknown')
         ctx.realtime.dispatcher.publishDurable({
-          actorId: resolveJobActorId(rawDb, jobId),
+          actorId,
           sourceModule: 'execution',
           sourceOutboxId: outboxId,
           topic: `job:${jobId}`,
@@ -183,11 +303,14 @@ function composeExecutionForDb(ctx: AppContext, rawDb: Database.Database): Execu
   return execution
 }
 
-function resolveJobActorId(db: Database.Database, jobId: string): string {
-  const row = db.prepare(`SELECT actor_id FROM jobs WHERE id = ?`).get(jobId) as
-    | { actor_id: string }
+function resolveJobRealtimeIdentity(
+  db: Database.Database,
+  jobId: string
+): { actorId: string; revision: number } | null {
+  const row = db.prepare(`SELECT actor_id, state_revision FROM jobs WHERE id = ?`).get(jobId) as
+    | { actor_id: string; state_revision: number }
     | undefined
-  return row?.actor_id ?? 'unknown'
+  return row ? { actorId: row.actor_id, revision: row.state_revision } : null
 }
 
 function resolvePlanningActorId(db: Database.Database, sessionId: string): string {
@@ -255,6 +378,41 @@ export function getOrComposeDesign(ctx: AppContext): DesignModule {
     jobSubmission: execution.submitJob,
     agentRuntime: getOrCreateAgentRuntime(ctx),
     getMcpBackendPort: getPlannerMcpBackendPort,
+    assets: {
+      prepareReference(input) {
+        return prepareDraftReference(ctx, rawDb, input)
+      },
+      retainReference(draftId, reference) {
+        const attachmentId = reference.attachmentId?.trim()
+        if (!attachmentId) return
+        retainAssetReference(rawDb, {
+          assetId: attachmentId,
+          ownerType: 'draft',
+          ownerId: draftId,
+          purpose: `reference:${reference.id}`
+        })
+      },
+      commitReference(_draftId, reference) {
+        const attachmentId = reference.attachmentId?.trim()
+        if (!attachmentId) return
+        releaseUnattachedConversationReferences(rawDb, attachmentId)
+      },
+      releaseReference(draftId, reference) {
+        const attachmentId = reference.attachmentId?.trim()
+        if (!attachmentId) return
+        releaseAssetReference(rawDb, {
+          assetId: attachmentId,
+          ownerType: 'draft',
+          ownerId: draftId,
+          purpose: `reference:${reference.id}`
+        })
+        schedulePendingAssetCleanup(ctx)
+      },
+      releaseDraft(draftId) {
+        releaseOwnerAssetReferences(rawDb, 'draft', draftId)
+        schedulePendingAssetCleanup(ctx)
+      }
+    },
     async resolveWorkspaceRoot({ actorId, projectId }) {
       const project = await getProject(actorId, projectId)
       if (!project) {
@@ -330,7 +488,12 @@ export function getOrComposeConversation(ctx: AppContext): ConversationModule {
     },
     realtime: {
       publish(topic, event, payload) {
-        const ephemeral = event === 'assistant.thinking.delta' || event === 'assistant.text.delta'
+        // Message bodies are already durable in conversation_messages and may exceed
+        // the realtime log's 32 KiB envelope cap. Terminal turn events drive REST resync.
+        const ephemeral =
+          event === 'assistant.thinking.delta' ||
+          event === 'assistant.text.delta' ||
+          event === 'message.committed'
         const actorId =
           typeof payload.actorId === 'string'
             ? payload.actorId
@@ -389,6 +552,10 @@ export function getOrComposeConversation(ctx: AppContext): ConversationModule {
             attachments: resolved
           })
         }
+      },
+      releaseConversation(conversationId) {
+        releaseOwnerAssetReferences(rawDb, 'conversation', conversationId)
+        schedulePendingAssetCleanup(ctx)
       }
     },
     systemMcp: {

@@ -27,6 +27,7 @@ export const hostAgentTurnStreamer: HostTurnStreamer = async function* (
     systemPrompt: input.systemPrompt,
     capabilityProfile: input.capabilityProfile as AgentCapabilityProfile,
     providerRuntimeScopeId: input.scopeId,
+    runtimeSessionId: input.runtimeSessionId,
     readRoots: input.readRoots,
     signal: options.signal,
     mcpUrl: input.mcpServers?.[0]?.url,

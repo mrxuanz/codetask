@@ -6,6 +6,7 @@ const REGISTER_PLAN_OUTLINE_TOOL_JSON = `{
     "properties": {
       "milestones": {
         "type": "array",
+        "maxItems": 32,
         "description": "Ordered milestone list. Each milestone contains slices; each slice contains tasks.",
         "items": {
           "type": "object",
@@ -18,6 +19,7 @@ const REGISTER_PLAN_OUTLINE_TOOL_JSON = `{
             },
             "slices": {
               "type": "array",
+              "maxItems": 64,
               "items": {
                 "type": "object",
                 "properties": {
@@ -34,6 +36,7 @@ const REGISTER_PLAN_OUTLINE_TOOL_JSON = `{
                   },
                   "tasks": {
                     "type": "array",
+                    "maxItems": 128,
                     "items": {
                       "type": "object",
                       "properties": {
@@ -106,8 +109,8 @@ export function registerTaskContextToolDefinition(): Record<string, unknown> {
         milestone: { type: 'integer', minimum: 1 },
         slice: { type: 'integer', minimum: 1 },
         task: { type: 'integer', minimum: 1 },
-        taskTitle: { type: 'string', minLength: 1 },
-        content: { type: 'string', minLength: 1 }
+        taskTitle: { type: 'string', minLength: 1, maxLength: 512 },
+        content: { type: 'string', minLength: 1, maxLength: 65536 }
       },
       required: ['milestone', 'slice', 'task', 'taskTitle', 'content'],
       additionalProperties: false
@@ -126,8 +129,8 @@ export function updateTaskContextToolDefinition(): Record<string, unknown> {
         milestone: { type: 'integer', minimum: 1 },
         slice: { type: 'integer', minimum: 1 },
         task: { type: 'integer', minimum: 1 },
-        taskTitle: { type: 'string', minLength: 1 },
-        content: { type: 'string', minLength: 1 }
+        taskTitle: { type: 'string', minLength: 1, maxLength: 512 },
+        content: { type: 'string', minLength: 1, maxLength: 65536 }
       },
       required: ['milestone', 'slice', 'task', 'taskTitle', 'content'],
       additionalProperties: false

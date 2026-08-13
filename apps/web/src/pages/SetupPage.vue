@@ -19,6 +19,7 @@ import {
   recoverStorageTarget,
   validateStorageTarget
 } from '@renderer/api/storage'
+import { SETUP_TOKEN_HEADER } from '@codetask/contracts'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -36,6 +37,7 @@ const storagePath = ref('')
 const storageIssue = ref<string | null>(null)
 const pickerOpen = ref(false)
 const creatingFolder = ref(false)
+const setupToken = ref('')
 
 const {
   query,
@@ -51,7 +53,13 @@ const {
   selectFolder,
   createFolder,
   start: startBrowse
-} = useFolderBrowse({ active: pickerOpen })
+} = useFolderBrowse({
+  active: pickerOpen,
+  requestHeaders: () => {
+    const token = setupToken.value.trim()
+    return token ? new Headers({ [SETUP_TOKEN_HEADER]: token }) : new Headers()
+  }
+})
 
 watch(storagePath, () => {
   storageIssue.value = null
@@ -59,6 +67,10 @@ watch(storagePath, () => {
 
 onMounted(async () => {
   if (!needsStorage.value) return
+  // Server mode keeps filesystem paths behind the console setup token. The user can still open
+  // the authenticated folder browser after entering the token; desktop mode preloads its local
+  // candidate as before.
+  if (needSetupToken.value) return
   try {
     const response = await fetchStorageBootstrap()
     storagePath.value = response.data.defaultCandidate
@@ -103,12 +115,13 @@ async function createAndSelectFolder(): Promise<void> {
 
 async function ensureStorageReady(): Promise<void> {
   storageIssue.value = null
-  const response = await validateStorageTarget(storagePath.value)
+  const token = setupToken.value.trim()
+  const response = await validateStorageTarget(storagePath.value, token)
   const action = response.data.action ?? 'initialize'
   if (action === 'recover') {
-    await recoverStorageTarget(response.data.canonicalPath, response.data.nonce)
+    await recoverStorageTarget(response.data.canonicalPath, response.data.nonce, token)
   } else {
-    await initializeStorageTarget(response.data.canonicalPath, response.data.nonce)
+    await initializeStorageTarget(response.data.canonicalPath, response.data.nonce, token)
   }
   await refresh()
 }
@@ -119,6 +132,7 @@ async function onSubmit(payload: {
   setupToken?: string
 }): Promise<void> {
   if (needsStorage.value) {
+    setupToken.value = payload.setupToken?.trim() ?? ''
     if (!storagePath.value.trim()) {
       // Keep the error next to the path field only — do not rethrow into CredentialsForm.
       storageIssue.value = t('setup.storagePathRequired')
@@ -148,6 +162,7 @@ async function onSubmit(payload: {
   <div class="h-full min-h-0 min-w-0">
     <PageShell max-width="xl">
       <CredentialsForm
+        v-model:setup-token="setupToken"
         :title="t('setup.title')"
         :description="t(needsStorage ? 'setup.combinedDescription' : 'setup.description')"
         :submit-label="t('setup.submit')"

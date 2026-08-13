@@ -1,4 +1,3 @@
-import { createHash } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { JobCommandBody, JobCommandResult } from '@codetask/contracts'
 import type { Actor } from '../../shared.ts'
@@ -7,11 +6,14 @@ import {
   ExecutionForbiddenError,
   ExecutionValidationError,
   newId,
-  nowMs
+  nowMs,
+  stableHash
 } from '../../shared.ts'
 import { JobRepository } from '../infrastructure/job-repository.ts'
 import { QueueRepository } from '../../queue/infrastructure/queue-repository.ts'
 import { ExecutionOutbox } from '../../events/execution-outbox.ts'
+
+export const MAX_RETAINED_JOB_GENERATIONS = 2
 import { normalizeProvider } from './submit-job.ts'
 import type { WakeSchedulerFn } from '../../queue/application/wake-scheduler.ts'
 
@@ -45,16 +47,14 @@ export class ControlJobService {
     body: JobCommandBody,
     fn: () => JobCommandResult
   ): JobCommandResult {
-    const requestHash = createHash('sha256')
-      .update(
-        JSON.stringify({
-          jobId,
-          command,
-          expectedRevision: body.expectedRevision,
-          authorizeReplay: body.authorizeReplay ?? false
-        })
-      )
-      .digest('hex')
+    const requestHash = stableHash(
+      JSON.stringify({
+        jobId,
+        command,
+        expectedRevision: body.expectedRevision,
+        authorizeReplay: body.authorizeReplay ?? false
+      })
+    )
 
     const execute = this.db.transaction(() => {
       const existing = this.jobs.getCommandReceipt(actor.userId, body.idempotencyKey)
@@ -101,7 +101,12 @@ export class ControlJobService {
         }
       })
       this.abortActiveRun?.(jobId, 'job-pause')
-      this.outbox.enqueue(jobId, 'job.changed', { jobId, state: updated.state })
+      this.outbox.enqueue(jobId, 'job.changed', {
+        jobId,
+        actorId: actor.userId,
+        state: updated.state,
+        revision: updated.stateRevision
+      })
       this.wakeScheduler()
       return {
         jobId,
@@ -116,7 +121,7 @@ export class ControlJobService {
     return this.withReceipt(actor, jobId, 'continue', body, () => {
       const job = this.jobs.requireById(jobId)
       this.assertOwner(actor, job.actorId)
-      if (job.state !== 'paused' && job.state !== 'failed') {
+      if (job.state !== 'paused') {
         throw new ExecutionValidationError('Job cannot be continued')
       }
       if (recoveryNeedsReplayAuthorization(job.recoveryReason) && body.authorizeReplay !== true) {
@@ -141,6 +146,7 @@ export class ControlJobService {
           next: {
             state: 'queued',
             controlIntent: 'none',
+            currentRunId: null,
             recoveryReason: null,
             queuedAt: now,
             updatedAt: now
@@ -153,7 +159,17 @@ export class ControlJobService {
             ) VALUES (?, ?, 'queued', 0, ?, ?)`
           )
           .run(jobId, updated.executionGeneration, sequence, now)
-        this.outbox.enqueue(jobId, 'job.queue.changed', { jobId }, this.db)
+        this.outbox.enqueue(
+          jobId,
+          'job.queue.changed',
+          {
+            jobId,
+            actorId: actor.userId,
+            state: updated.state,
+            revision: updated.stateRevision
+          },
+          this.db
+        )
         return updated
       })
       const updated = tx()
@@ -185,7 +201,8 @@ export class ControlJobService {
         expectedRevision: body.expectedRevision,
         next: {
           state: nextState,
-          controlIntent: 'cancel',
+          controlIntent: nextState === 'cancelled' ? 'none' : 'cancel',
+          currentRunId: nextState === 'cancelled' ? null : job.currentRunId,
           terminalAt: nextState === 'cancelled' ? now : job.terminalAt,
           updatedAt: now
         }
@@ -194,14 +211,19 @@ export class ControlJobService {
         this.db
           .prepare(
             `UPDATE execution_queue_entries SET status = 'removed', removed_at = ?
-             WHERE job_id = ? AND generation = ? AND status = 'queued'`
+             WHERE job_id = ? AND generation = ? AND status IN ('queued', 'claimed')`
           )
           .run(now, jobId, job.executionGeneration)
       }
       if (nextState === 'cancelling') {
         this.abortActiveRun?.(jobId, 'job-cancel')
       }
-      this.outbox.enqueue(jobId, 'job.changed', { jobId, state: updated.state })
+      this.outbox.enqueue(jobId, 'job.changed', {
+        jobId,
+        actorId: actor.userId,
+        state: updated.state,
+        revision: updated.stateRevision
+      })
       this.wakeScheduler()
       return {
         jobId,
@@ -247,6 +269,7 @@ export class ControlJobService {
 
         // Re-materialize work from immutable snapshot for new generation
         this.rebuildGeneration(jobId, nextGeneration, tree, now)
+        this.pruneOldGenerations(jobId, nextGeneration)
 
         this.db
           .prepare(
@@ -259,7 +282,13 @@ export class ControlJobService {
         this.outbox.enqueue(
           jobId,
           'job.queue.changed',
-          { jobId, generation: nextGeneration },
+          {
+            jobId,
+            actorId: actor.userId,
+            generation: nextGeneration,
+            state: updated.state,
+            revision: updated.stateRevision
+          },
           this.db
         )
         return updated
@@ -290,16 +319,20 @@ export class ControlJobService {
           title: string
           description: string
           successCriteria: string
+          dependsOnSliceIds?: string[]
           tasks: Array<{
             id: string
             title: string
             description: string
+            taskKind?: string
             contextMarkdown: string
             abilityCode: string
             coreCode: string
             successCriteria: string
             canRunInParallel: boolean
             referenceIds: string[]
+            referenceReason?: string
+            requiredInputs?: string[]
             dependsOnTaskIds: string[]
           }>
         }>
@@ -308,8 +341,12 @@ export class ControlJobService {
     now: number
   ): void {
     const taskIdToWorkId = new Map<string, string>()
+    const milestoneIdToJobMilestoneId = new Map<string, string>()
+    const sliceIdToJobSliceId = new Map<string, string>()
     for (const milestone of tree.milestones) {
+      milestoneIdToJobMilestoneId.set(milestone.id, newId('jm'))
       for (const slice of milestone.slices) {
+        sliceIdToJobSliceId.set(slice.id, newId('js'))
         for (const task of slice.tasks) {
           taskIdToWorkId.set(task.id, generation === 0 ? `work_${task.id}` : newId('work'))
         }
@@ -318,7 +355,7 @@ export class ControlJobService {
 
     let milestoneSort = 0
     for (const milestone of tree.milestones) {
-      const milestoneId = newId('jm')
+      const milestoneId = milestoneIdToJobMilestoneId.get(milestone.id)!
       this.db
         .prepare(
           `INSERT INTO job_milestones (
@@ -340,7 +377,7 @@ export class ControlJobService {
 
       let sliceSort = 0
       for (const slice of milestone.slices) {
-        const sliceId = newId('js')
+        const sliceId = sliceIdToJobSliceId.get(slice.id)!
         this.db
           .prepare(
             `INSERT INTO job_slices (
@@ -359,6 +396,19 @@ export class ControlJobService {
             slice.description,
             slice.successCriteria
           )
+        for (const dependencyId of slice.dependsOnSliceIds ?? []) {
+          const dependsOnSliceId = sliceIdToJobSliceId.get(dependencyId)
+          if (!dependsOnSliceId) {
+            throw new ExecutionValidationError(`Missing dependency slice: ${dependencyId}`)
+          }
+          this.db
+            .prepare(
+              `INSERT INTO job_slice_dependencies (
+                job_id, generation, from_slice_id, depends_on_slice_id
+              ) VALUES (?, ?, ?, ?)`
+            )
+            .run(jobId, generation, sliceId, dependsOnSliceId)
+        }
         sliceSort += 1
 
         let taskSort = 0
@@ -369,10 +419,11 @@ export class ControlJobService {
             .prepare(
               `INSERT INTO job_work_items (
                 id, job_id, generation, source_task_id, parent_work_id,
-                milestone_id, slice_id, kind, sort_order, title, description,
+                milestone_id, slice_id, kind, task_kind, sort_order, title, description,
                 context_markdown, ability_code, provider_code, success_criteria,
-                can_run_in_parallel, state, state_revision, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, NULL, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`
+                reference_reason, required_inputs_json, can_run_in_parallel,
+                state, state_revision, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, NULL, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`
             )
             .run(
               workId,
@@ -381,6 +432,7 @@ export class ControlJobService {
               task.id,
               milestoneId,
               sliceId,
+              task.taskKind ?? 'general-implementation',
               taskSort,
               task.title,
               task.description,
@@ -388,6 +440,8 @@ export class ControlJobService {
               task.abilityCode,
               normalizeProvider(task.coreCode),
               task.successCriteria,
+              task.referenceReason ?? '',
+              JSON.stringify(task.requiredInputs ?? []),
               task.canRunInParallel ? 1 : 0,
               now,
               now
@@ -427,5 +481,42 @@ export class ControlJobService {
         }
       }
     }
+  }
+
+  private pruneOldGenerations(jobId: string, currentGeneration: number): void {
+    const cutoff = currentGeneration - (MAX_RETAINED_JOB_GENERATIONS - 1)
+    if (cutoff <= 0) return
+
+    this.db
+      .prepare(`DELETE FROM verification_attempts WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM work_attempts WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM repair_generations WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM job_slice_dependencies WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM job_work_dependencies WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM job_work_references WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM execution_queue_entries WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM execution_runs WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM job_work_items WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
+    this.db.prepare(`DELETE FROM job_slices WHERE job_id = ? AND generation < ?`).run(jobId, cutoff)
+    this.db
+      .prepare(`DELETE FROM job_milestones WHERE job_id = ? AND generation < ?`)
+      .run(jobId, cutoff)
   }
 }

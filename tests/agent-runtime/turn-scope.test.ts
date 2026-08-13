@@ -8,7 +8,7 @@ import {
   recordOpencodeToolPartActivity
 } from '../../src/server/agent-runtime/turn-scope'
 import { ProgressGuard } from '../../src/server/agent-runtime/progress-guard'
-import { createTurnError } from '../../src/shared/turn-errors.ts'
+import { createTurnError } from '@codetask/contracts/turn-errors'
 
 describe('turn-scope', () => {
   it('preserves an explicit external abort reason', async () => {

@@ -1,4 +1,4 @@
-import type { SupportedCoreCode } from '../../src/shared/providers/codes.ts'
+import type { SupportedCoreCode } from '@codetask/provider-spec/codes'
 import type { ProviderRuntimeProfile } from '../../src/server/sandbox/provider-auth/types.ts'
 import { createProviderRegistry } from '../../src/server/providers/composition.ts'
 import type { ProviderDriver } from '../../src/server/providers/driver.ts'

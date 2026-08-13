@@ -58,6 +58,7 @@ export function composeConversationModule(deps: ConversationModuleDeps): Convers
     realtime: deps.realtime,
     ...(deps.attachments ? { attachments: deps.attachments } : {}),
     ...(deps.systemMcp ? { systemMcp: deps.systemMcp } : {}),
+    transaction: <T>(operation: () => T): T => deps.db.transaction(operation)(),
     maxConcurrentTurnsPerUser: deps.maxConcurrentTurnsPerUser ?? 2,
     defaultProviderCode: deps.defaultProviderCode ?? 'codex',
     resolveSystemPrompt: deps.resolveSystemPrompt ?? (() => ''),

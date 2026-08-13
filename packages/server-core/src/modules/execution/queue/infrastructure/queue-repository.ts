@@ -30,6 +30,7 @@ export class QueueRepository {
     const row = this.db
       .prepare(
         `SELECT COUNT(*) + 1 AS position FROM execution_queue_entries ahead
+         JOIN jobs ahead_job ON ahead_job.id = ahead.job_id
          WHERE ahead.status = 'queued'
            AND (
              ahead.priority > ?
@@ -48,23 +49,32 @@ export class QueueRepository {
     return row.position
   }
 
-  listQueued(): QueueEntryDto[] {
+  listQueued(actorId: string): QueueEntryDto[] {
     const rows = this.db
       .prepare(
-        `SELECT q.*, j.title, j.state FROM execution_queue_entries q
-         JOIN jobs j ON j.id = q.job_id
-         WHERE q.status = 'queued'
-         ORDER BY q.priority DESC, q.enqueued_at ASC, q.sequence ASC, q.job_id ASC`
+        `WITH ranked AS (
+           SELECT q.*,
+             ROW_NUMBER() OVER (
+               ORDER BY q.priority DESC, q.enqueued_at ASC, q.sequence ASC, q.job_id ASC
+             ) AS queue_position
+           FROM execution_queue_entries q
+           JOIN jobs queued_job ON queued_job.id = q.job_id
+           WHERE q.status = 'queued'
+         )
+         SELECT ranked.*, j.title, j.state FROM ranked
+         JOIN jobs j ON j.id = ranked.job_id
+         WHERE j.actor_id = ?
+         ORDER BY ranked.queue_position`
       )
-      .all() as Array<Record<string, unknown>>
+      .all(actorId) as Array<Record<string, unknown>>
 
-    return rows.map((row, index) => ({
+    return rows.map((row) => ({
       jobId: row.job_id as string,
       generation: row.generation as number,
       status: row.status as string,
       priority: row.priority as number,
       sequence: row.sequence as number,
-      position: index + 1,
+      position: row.queue_position as number,
       enqueuedAt: isoFromMs(row.enqueued_at as number),
       title: row.title as string,
       state: row.state as QueueEntryDto['state']

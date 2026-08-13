@@ -8,7 +8,12 @@ import {
   type ConversationMessage
 } from '@renderer/api/conversation'
 import { getDesignDraft } from '@renderer/api/design'
-import { fetchJob, fetchThreadPlans, type PlanningSessionViewDto } from '@renderer/api/jobs'
+import {
+  fetchJob,
+  mapExecutionJobToPlanView,
+  type PlanningSessionViewDto
+} from '@renderer/api/jobs'
+import { loadConversationDesignWorkspace } from '@renderer/api/design-workspace'
 import TaskLaunchDraftCard from '@renderer/components/home/TaskLaunchDraftCard.vue'
 import { designDraftToPayload, type TaskLaunchDraftPayload } from '@renderer/lib/draftForm'
 import PlanReviewAccordion from '@renderer/components/tasks/PlanReviewAccordion.vue'
@@ -52,7 +57,7 @@ onMounted(async () => {
   try {
     const [messagesRes, plansRes, coresRes, jobRes] = await Promise.all([
       fetchConversationMessages(props.threadId, 200),
-      fetchThreadPlans(props.threadId),
+      loadConversationDesignWorkspace(props.threadId),
       fetchConversationProviderOptions(),
       fetchJob(props.jobId)
     ])
@@ -66,11 +71,10 @@ onMounted(async () => {
     const plans = plansRes.data.plans
     plan.value =
       plans.find((item) => item.id === props.jobId) ??
-      plans.find((item) => item.designSessionId === props.jobId) ??
+      plans.find((item) => item.designSessionId === jobRes.data.job.sourcePlanningSessionId) ??
       null
     if (!plan.value && jobRes.data.job) {
-      // Execution job loaded; plan tree may be empty until Design plan DTO is linked.
-      plan.value = null
+      plan.value = mapExecutionJobToPlanView(jobRes.data.job)
     }
     cores.value = coresRes.data.cores
     if (!draftPayload.value) {
@@ -88,7 +92,7 @@ onMounted(async () => {
   <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div class="min-w-0">
-        <h1 class="text-lg font-semibold">{{ title || t('workspace.create.completedTitle') }}</h1>
+        <h2 class="text-lg font-semibold">{{ title || t('workspace.create.completedTitle') }}</h2>
         <p class="mt-1 text-sm text-muted-foreground">{{ t('workspace.create.completedHint') }}</p>
       </div>
       <Button type="button" @click="goToTask">

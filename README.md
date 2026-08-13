@@ -14,14 +14,20 @@ codetask is a desktop AI task orchestration app for software delivery. You freez
 
 Supports **Codex**, **Claude Code**, **OpenCode**, and **Cursor CLI** as planners and workers. Run as a native **Electron** app or headless **server** mode in the browser.
 
+> [!WARNING]
+> Sandboxed tasks retain outbound network access. Treat every file a task can read as potentially
+> exfiltratable, and do not run untrusted repositories or task instructions with sensitive data in
+> the allowed read roots.
+
 ## Repository layout
 
-The tree is mid-migration toward a monorepo layout:
+The repository uses a host-oriented monorepo layout:
 
 - `apps/web` — Vue renderer
-- `apps/desktop` / `apps/service` — host package placeholders (Electron main still lives under `src/main`)
+- `apps/desktop` — thin Electron shell and supervised Service lifecycle
+- `apps/service` — Hono process entry, HTTP host, storage setup, and standalone Node adapter
 - `packages/*` — shared `@codetask/*` libraries (`contracts`, `database`, `server-core`, …)
-- `src/server` / `src/shared` / `src/main` — composition root and host adapters still being moved into packages
+- `src/server` / `src/sandbox` — Service composition and compatibility adapters still being moved into packages
 - `native/codeteam-*` — OS sandbox crates; the `codeteam` prefix is a **historical** rename from upstream `codex-*` (see `NOTICE`), not a second product name
 - Runtime MCP server id is `codetask-manager` (and `codetask-*-verifier`); native crate/package paths remain `codeteam-*`
 
@@ -104,7 +110,7 @@ Draft chat → confirm REQUIREMENTS CONTRACT → Planner generates plan
 4. **Execution** — one running job per user; pause, resume, cancel, retry, and blocked recovery
 5. **Verification** — Verifier checks per layer; failed tasks can be rerun individually
 
-Data is pushed via **SSE** job snapshots; embedded **Hono** HTTP server serves the Renderer.
+Data is pushed via **SSE** job snapshots; a supervised local **Hono Service** serves the Renderer.
 
 ## Tech Stack
 
@@ -133,18 +139,24 @@ This repository includes adapted sandbox-related code derived from the OpenAI Co
 
 Additional third-party code notices remain in the affected source files for MIT-licensed reused components such as the Windows PTY helpers and absolute-path utility.
 
+## Contributing and Support
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, [SUPPORT.md](SUPPORT.md) for
+usage and bug-reporting guidance, [SECURITY.md](SECURITY.md) for private vulnerability reporting,
+and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
+
 ## License
 
 Unless otherwise noted, this repository is licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Run Modes
 
-codetask supports **two launch modes** that share the same embedded Hono backend, SQLite data store, and sandbox supervisor:
+codetask supports **two launch modes** that share the same Hono Service core, SQLite data store, and sandbox supervisor:
 
-| Mode                   | Description                                               | Default bind     |
-| ---------------------- | --------------------------------------------------------- | ---------------- |
-| **Desktop** (default)  | Electron opens a native window and loads the local web UI | `127.0.0.1:3000` |
-| **Server** (`--serve`) | Headless — no window; open the URL in any browser         | `0.0.0.0:8080`   |
+| Mode                   | Description                                            | Default bind       |
+| ---------------------- | ------------------------------------------------------ | ------------------ |
+| **Desktop** (default)  | Electron supervises Service and opens its local web UI | loopback ephemeral |
+| **Server** (`--serve`) | Headless — no window; open the URL in any browser      | `0.0.0.0:8080`     |
 
 ```bash
 # Desktop (default)
@@ -153,9 +165,6 @@ npm run dev
 # Server / headless — remote access, WSL, headless Linux, browser-only workflow
 npm run dev:serve
 
-# Custom host/port (dev or packaged app)
-electron . --serve --host 127.0.0.1 --port 9000
-
 # Pure Node server — no Electron, DISPLAY, or Xvfb required
 npm run build:server
 npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
@@ -163,9 +172,9 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 Notes:
 
-- In **server** mode, Electron skips GPU init (helpful on WSL / CI / headless hosts).
+- **Server mode never starts Electron**; it is the canonical headless Hono host.
 - Plain HTTP is suitable only for loopback development. For LAN or internet access, bind the Service behind an HTTPS reverse proxy; otherwise passwords and session cookies cross the network unencrypted.
-- Job execution, planner, and sandbox behavior are identical in both modes — only the shell differs.
+- Job execution, planner, and sandbox behavior are identical in both modes; Electron is only a shell and supervisor.
 - The dedicated Node entry is always server mode, so `--serve` is optional for `start:server`.
 
 ## Quick Start
@@ -181,7 +190,11 @@ Notes:
 
 ```bash
 npm install
+npm run build:sandbox
 ```
+
+Re-run `npm run build:sandbox` after changing Rust sandbox code. Platform packaging commands also
+build the sandbox automatically.
 
 Optional Electron download mirrors (unset by default; see `CONTRIBUTING.md`):
 
@@ -211,12 +224,6 @@ npm run build:mac
 
 # Linux
 npm run build:linux
-```
-
-Build sandbox native first:
-
-```bash
-npm run build:sandbox
 ```
 
 ### Test

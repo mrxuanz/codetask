@@ -1,11 +1,10 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import type { AgentDriver, DriverResult, DriverStartInput } from './contract'
 import { progress } from '../reports/progress'
-import { buildCreateHtmlUserMessage, htmlFileNameForConversationCore } from '../config/sdk-html'
 import { resolveOpencodeBudgets } from '../config/timeouts'
 import { classifyDriverCatchError } from './opencode-errors'
 import { runIsolatedOpencodePrompt, waitForCapabilityReport } from './opencode-prompt'
+import { buildAgentOperatorPrompt } from './operator-prompt'
 
 /**
  * OpenCode SDK driver: one server + one session per case.
@@ -52,52 +51,11 @@ export class OpenCodeDriver implements AgentDriver {
       }
     }
 
-    // create_task-era draft-job cases deleted from catalog (architecture 03).
+    // create_task-era cases were deleted from the catalog in architecture 03.
 
     mkdirSync(input.agentRoot, { recursive: true })
-    const skillText = input.skillPaths
-      .filter((path) => existsSync(path))
-      .map((path) => readFileSync(path, 'utf8'))
-      .join('\n\n---\n\n')
-
-    const message =
-      typeof input.fixture?.message === 'string'
-        ? input.fixture.message
-        : input.caseId === 'CHAT-HTML-001'
-          ? buildCreateHtmlUserMessage(
-              input.expectedHtmlFile?.trim() || htmlFileNameForConversationCore(conversationCore)
-            )
-          : '请用中文简短回答：1+1等于几？'
-
-    const caseHints: Record<string, string> = {
-      'CHAT-HTML-001':
-        'Create project/thread with the conversation coreCode. Ask the product agent to create the SDK-named HTML file in workspace root (opencode.html / cursor.html / …) containing BUSINESS_E2E_CHAT_HTML. If the agent asks for details, follow up up to 3 more turns (4 total) restating filename+marker; stop early if the file exists. Then report with expectedHtmlFile in artifacts.',
-      'CHAT-IMG-001':
-        'Upload image fixture as attachment.png only. start_turn with attachmentIds on the first turn only. If the agent asks for details, follow up up to 3 more turns without re-attaching. Do not put Dream/1000/Cats into message, titles, or fileName. Report messageIdsBefore + attachmentId + turnId.',
-      'DESIGN-DRAFT-001':
-        'Create a chat thread first. Clarify requirements in at most 4 turns if the agent asks for details, then use Design MCP only: codetask_create_draft → patch abilities → patch execution profile → codetask_confirm_design_draft. Do not use create_task turns.'
-    }
-
-    const prompt = [
-      skillText,
-      '',
-      '## Runtime context',
-      `- caseId: ${input.caseId}`,
-      `- workspaceRoot to use when creating project: ${input.workspaceRoot}`,
-      `- conversationCore to use for every CodeTask thread: ${conversationCore}`,
-      `- draft executionConfig (per-run Design execution-profile, NOT global settings):`,
-      `  - plannerCoreCode: ${input.executionConfig.plannerCoreCode}`,
-      `  - sliceVerifierCoreCode: ${input.executionConfig.sliceVerifierCoreCode}`,
-      `  - milestoneVerifierCoreCode: ${input.executionConfig.milestoneVerifierCoreCode}`,
-      `- user message for the conversation turn: ${message}`,
-      caseHints[input.caseId] ? `- case-specific instructions: ${caseHints[input.caseId]}` : '',
-      '',
-      'Execute the skill using only the allowed Test MCP tools. Call report_case_result exactly once when done.'
-    ]
-      .filter(Boolean)
-      .join('\n')
-
-    writeFileSync(join(input.agentRoot, 'prompt.md'), prompt, 'utf8')
+    const prompt = buildAgentOperatorPrompt(input)
+    writeFileSync(`${input.agentRoot}/prompt.md`, prompt, 'utf8')
 
     try {
       await runIsolatedOpencodePrompt({

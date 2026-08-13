@@ -6,7 +6,7 @@ import type {
   ExecutionSettingsSnapshot
 } from '@codetask/contracts'
 import { DraftApplication } from './draft/application/draft-application.ts'
-import type { ProjectWorkspacePort } from './draft/application/ports.ts'
+import type { DraftAssetPort, ProjectWorkspacePort } from './draft/application/ports.ts'
 import { SqliteDraftRepository } from './draft/infrastructure/sqlite-draft-repository.ts'
 import { createDraftRoutes, createPlanningRoutes } from './draft/http/routes.ts'
 import {
@@ -51,18 +51,19 @@ export type DesignModuleDeps = {
     taskProvider: string,
     verificationProvider: string
   ) => ExecutionSettingsSnapshot
+  assets?: DraftAssetPort
 }
 
 export function composeDesignModule(deps: DesignModuleDeps): DesignModule {
   const draftRepo = new SqliteDraftRepository(deps.db)
   const planningRepo = new SqlitePlanningRepository(deps.db)
   const capacity = new SqlitePlanningCapacity(deps.db)
-  const outbox = new JobSubmissionOutbox(deps.db, deps.jobSubmission)
   const events: PlanningEventPort = {
     publish(sessionId, event, payload) {
       deps.publishEvent?.(sessionId, event, payload)
     }
   }
+  const outbox = new JobSubmissionOutbox(deps.db, deps.jobSubmission, events.publish)
 
   const planningHolder: { app?: PlanningApplication } = {}
   const getPlanningApp = (): PlanningApplication => {
@@ -90,9 +91,11 @@ export function composeDesignModule(deps: DesignModuleDeps): DesignModule {
     }
   )
   planningHolder.app = planningApp
-  const drafts = new DraftApplication(draftRepo, {
-    resolveWorkspaceRoot: deps.resolveWorkspaceRoot
-  })
+  const drafts = new DraftApplication(
+    draftRepo,
+    { resolveWorkspaceRoot: deps.resolveWorkspaceRoot },
+    deps.assets
+  )
 
   const routes = new Hono<DesignHttpEnv>()
   routes.route('/drafts', createDraftRoutes(drafts, planningApp))
@@ -115,6 +118,11 @@ export {
   DesignValidationError
 } from './shared.ts'
 export { registeredPlanToExecutionTree } from './planning/domain/registered-plan-to-tree.ts'
+export {
+  buildPlanSummary,
+  clearPlanConfirmedFlags,
+  isPlanFullyConfirmed
+} from './planning/domain/plan-mutations.ts'
 export {
   AgentRuntimePlannerRunner,
   SnapshotPlannerRunner

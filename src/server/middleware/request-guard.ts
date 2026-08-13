@@ -18,24 +18,58 @@ function originForbidden(message: string, requestId: string): Response {
   )
 }
 
+function normalizeHostname(hostname: string): string {
+  const normalized = hostname.toLowerCase()
+  return normalized.startsWith('[') && normalized.endsWith(']')
+    ? normalized.slice(1, -1)
+    : normalized
+}
+
 function parseAuthority(hostHeader: string): { authority: string; hostname: string } | null {
   const trimmed = hostHeader.trim()
-  if (!trimmed) return null
+  if (!trimmed || /[\s/@?#]/.test(trimmed)) return null
   try {
     const parsed = new URL(`http://${trimmed}`)
-    return { authority: parsed.host.toLowerCase(), hostname: parsed.hostname.toLowerCase() }
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== '/' ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null
+    }
+    return {
+      authority: parsed.host.toLowerCase(),
+      hostname: normalizeHostname(parsed.hostname)
+    }
   } catch {
     return null
   }
 }
 
-function parseOrigin(originHeader: string): { authority: string; hostname: string } | null {
+function parseOrigin(
+  originHeader: string
+): { authority: string; hostname: string; protocol: string } | null {
   const trimmed = originHeader.trim()
   if (!trimmed) return null
   try {
     const parsed = new URL(trimmed)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
-    return { authority: parsed.host.toLowerCase(), hostname: parsed.hostname.toLowerCase() }
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== '/' ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null
+    }
+    return {
+      authority: parsed.host.toLowerCase(),
+      hostname: normalizeHostname(parsed.hostname),
+      protocol: parsed.protocol
+    }
   } catch {
     return null
   }
@@ -43,10 +77,20 @@ function parseOrigin(originHeader: string): { authority: string; hostname: strin
 
 function isLoopbackHost(host: string): boolean {
   const normalized = host.toLowerCase()
+  const ipv4Parts = normalized.split('.')
+  const isIpv4Loopback =
+    ipv4Parts.length === 4 &&
+    ipv4Parts[0] === '127' &&
+    ipv4Parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+  const mappedIpv4 = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  const isMappedIpv4Loopback = Boolean(
+    mappedIpv4 && Number.parseInt(mappedIpv4[1], 16) >> 8 === 127
+  )
   return (
-    normalized === '127.0.0.1' ||
+    isIpv4Loopback ||
     normalized === '::1' ||
-    normalized === '::ffff:127.0.0.1' ||
+    (normalized.startsWith('::ffff:') && isLoopbackHost(normalized.slice('::ffff:'.length))) ||
+    isMappedIpv4Loopback ||
     normalized === 'localhost'
   )
 }
@@ -61,9 +105,9 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
     const host = parseAuthority(hostHeader)
 
     if (security.mode === 'desktop') {
-      if (host && !isLoopbackHost(host.hostname)) {
+      if (!host || !isLoopbackHost(host.hostname)) {
         return originForbidden(
-          'External host not allowed in desktop mode',
+          'A valid loopback Host is required in desktop mode',
           c.get('requestId') ?? 'unknown'
         )
       }
@@ -86,7 +130,18 @@ export function requestGuard(security: SecurityContext): MiddlewareHandler {
           }
         }
 
-        const sameOriginAsHost = Boolean(host && origin.authority === host.authority)
+        let requestProtocol: string | null = null
+        try {
+          requestProtocol = new URL(c.req.url).protocol
+        } catch {
+          requestProtocol = null
+        }
+        const sameOriginAsHost = Boolean(
+          host &&
+          requestProtocol &&
+          origin.protocol === requestProtocol &&
+          origin.authority === host.authority
+        )
         if (!sameOriginAsHost) {
           return originForbidden(
             'Cross-origin write requests not allowed',

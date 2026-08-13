@@ -4,7 +4,7 @@ import {
   assertFrozenAttachmentId,
   assertFrozenThreadId,
   FrozenIdError
-} from '../../src/shared/frozen-ids'
+} from '@codetask/server-core/modules/conversation'
 
 const THREAD_ID = '11111111-1111-4111-8111-111111111111'
 const ATTACHMENT_ID = 'att-22222222-2222-4222-8222-222222222222'

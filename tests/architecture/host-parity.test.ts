@@ -24,8 +24,7 @@ export const SHARED_API_CAPABILITY_PREFIXES = [
   '/projects',
   '/realtime',
   '/settings',
-  '/system',
-  '/threads'
+  '/system'
 ].sort()
 
 function assertSourceMentionsPrefix(source: string, prefix: string): void {
@@ -58,26 +57,40 @@ describe('host parity (01)', () => {
     assert.equal(body.data?.status, 'ok')
   })
 
-  it('desktop package is a thin host placeholder; real Electron entry remains src/main', () => {
+  it('desktop package is the thin Electron host and the Service owns Hono startup', () => {
     const desktopPkg = readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')
     const service = readFileSync(join(root, 'apps/service/src/main.ts'), 'utf8')
-    const mainIndex = readFileSync(join(root, 'src/main/index.ts'), 'utf8')
-    const appMain = readFileSync(join(root, 'src/main/app-main.ts'), 'utf8')
-    const desktopService = readFileSync(join(root, 'src/main/desktop-service.ts'), 'utf8')
-    const server = readFileSync(join(root, 'src/main/server.ts'), 'utf8')
+    const mainIndex = readFileSync(join(root, 'apps/desktop/src/index.ts'), 'utf8')
+    const appMain = readFileSync(join(root, 'apps/desktop/src/app-main.ts'), 'utf8')
+    const desktopService = readFileSync(join(root, 'apps/desktop/src/desktop-service.ts'), 'utf8')
+    const server = readFileSync(join(root, 'apps/service/src/server.ts'), 'utf8')
 
     assert.match(desktopPkg, /@codetask\/desktop/)
+    assert.doesNotMatch(desktopPkg, /@codetask\/server-core/)
+    assert.match(desktopPkg, /@codetask\/service-bootstrap/)
     assert.match(mainIndex, /app-main/)
-    // Batch D: Electron shell spawns Service; does not import startAppServer in-process.
     assert.match(appMain, /startDesktopService/)
     assert.doesNotMatch(appMain, /startAppServer/)
+    assert.doesNotMatch(appMain, /ipcMain|get-server-info/)
     assert.match(desktopService, /spawnSupervisedService/)
-    // Dev: Service child uses host Node (Node ABI). Packaged: Electron-as-Node.
     assert.match(desktopService, /resolveHostNodeBinary/)
     assert.match(desktopService, /CODETASK_HOST_NODE/)
     assert.match(desktopService, /ELECTRON_RUN_AS_NODE/)
     assert.match(service, /startAppServer/)
+    assert.match(service, /@codetask\/agent-runtime\/host-environment/)
+    assert.doesNotMatch(service, /src\/server\/host-environment/)
     assert.match(server, /\bcreateApp\b/)
+  })
+
+  it('desktop package contains runtime artifacts rather than repository sources', () => {
+    const builder = readFileSync(join(root, 'electron-builder.yml'), 'utf8')
+
+    assert.match(builder, /- out\/main\/\*\*/)
+    assert.match(builder, /- out\/renderer\/\*\*/)
+    assert.doesNotMatch(builder, /- out\/preload/)
+    assert.match(builder, /- native\/codeteam-sandbox\/\*\.node/)
+    assert.doesNotMatch(builder, /^\s*- \*\*\/\*\s*$/m)
+    assert.doesNotMatch(builder, /^\s*- (?:apps|docs|packages|scripts|src|tests)\//m)
   })
 
   it('createApiRoutes exposes a stable shared capability manifest', () => {

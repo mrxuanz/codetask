@@ -4,7 +4,7 @@ export type RealtimeEventHandler = (event: RealtimeEnvelope) => void
 
 /**
  * Tracks the durable SSE cursor. Ephemeral events do not advance it.
- * Entity revision gaps are handled by entity stores + REST resync.
+ * Entity revision gaps are handled by snapshot consumers through REST resync.
  */
 export class RealtimeReducer {
   private lastEventId = 0

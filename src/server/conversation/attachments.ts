@@ -1,17 +1,24 @@
 import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync
+} from 'fs'
 import { join, extname, basename, dirname } from 'path'
 import { getAppContext } from '../bootstrap'
 import { attachmentDir, attachmentStorageKey, threadAttachmentsDir } from '../data-paths'
 import { resolveAttachmentAbsolutePath } from '../reference-corpus/paths'
-import { assertAttachmentOwnerId, assertFrozenAttachmentId } from '../../shared/frozen-ids'
+import {
+  assertAttachmentOwnerId,
+  assertFrozenAttachmentId
+} from '@codetask/server-core/modules/conversation'
 import { registerAttachmentAsset } from '../assets/registry'
 import type { MessageAttachment } from './types'
 import type { AppDatabase } from '../db'
-
-export function initAttachmentStore(_dir: string): void {
-  getAppContext()
-}
 
 function attachmentDataDir(): string {
   return getAppContext().dataDir
@@ -134,6 +141,15 @@ export function readThreadAttachment(
   attachment: MessageAttachment
   buffer: Buffer
 } | null {
+  const located = locateThreadAttachment(threadIdInput, attachmentIdInput)
+  if (!located) return null
+  return { attachment: located.attachment, buffer: readFileSync(located.absolutePath) }
+}
+
+export function locateThreadAttachment(
+  threadIdInput: string,
+  attachmentIdInput: string
+): { attachment: MessageAttachment; absolutePath: string } | null {
   const threadId = assertAttachmentOwnerId(threadIdInput)
   const attachmentId = assertFrozenAttachmentId(attachmentIdInput)
   migrateFlatAttachmentIfNeeded(threadId, attachmentId)
@@ -148,7 +164,14 @@ export function readThreadAttachment(
     return null
   }
 
-  const buffer = readFileSync(absolutePath)
+  let sizeBytes: number
+  try {
+    const stat = statSync(absolutePath)
+    if (!stat.isFile()) return null
+    sizeBytes = stat.size
+  } catch {
+    return null
+  }
   const filename = basename(relativePath)
   const ext = extname(filename).toLowerCase()
   const mimeType =
@@ -163,16 +186,16 @@ export function readThreadAttachment(
             : 'application/octet-stream'
 
   return {
+    absolutePath,
     attachment: {
       id: attachmentId,
       name: filename,
       mimeType,
-      sizeBytes: buffer.length,
+      sizeBytes,
       kind: inferKind(mimeType),
       relativePath,
       assetUrl: `/api/conversations/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachmentId)}`
-    },
-    buffer
+    }
   }
 }
 
@@ -242,7 +265,7 @@ export function resolveThreadAttachments(
 ): MessageAttachment[] {
   const resolved: MessageAttachment[] = []
   for (const attachmentId of attachmentIds) {
-    const result = readThreadAttachment(threadId, attachmentId)
+    const result = locateThreadAttachment(threadId, attachmentId)
     if (result) resolved.push(result.attachment)
   }
   return resolved

@@ -3,7 +3,7 @@ import {
   createProvidersConfig,
   type ProvidersConfig,
   type ProvidersConfigOverrides
-} from '../../shared/providers/settings'
+} from '@codetask/provider-spec/settings'
 import { DEFAULT_RETENTION_SETTINGS, type RetentionSettings } from '@codetask/contracts'
 import {
   DEFAULT_RUNTIME_FEATURES,

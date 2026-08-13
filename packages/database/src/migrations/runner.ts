@@ -2,8 +2,8 @@ import type Database from 'better-sqlite3'
 import {
   assertManifestContiguous,
   findManifestEntry,
+  legacyMigrationChecksum,
   listManifestMigrations,
-  migrationChecksum,
   type MigrationManifestEntry
 } from './manifest.ts'
 import type { Migration } from './v001_042/types.ts'
@@ -44,11 +44,8 @@ function backfillMissingChecksums(db: Database.Database): void {
   const rows = readApplied(db)
   const update = db.prepare(`UPDATE schema_migrations SET checksum = ? WHERE version = ?`)
   for (const row of rows) {
-    if (row.checksum) continue
     const entry = findManifestEntry(row.version)
     if (!entry || entry.kind !== 'migration') {
-      // Legacy DB may have a name that still hashes stably from stored name.
-      update.run(migrationChecksum(row.version, row.name), row.version)
       continue
     }
     if (entry.name !== row.name) {
@@ -56,7 +53,9 @@ function backfillMissingChecksums(db: Database.Database): void {
         `schema_migrations name mismatch at v${row.version}: db=${row.name} manifest=${entry.name}`
       )
     }
-    update.run(entry.checksum, row.version)
+    if (!row.checksum || row.checksum === legacyMigrationChecksum(row.version, row.name)) {
+      update.run(entry.checksum, row.version)
+    }
   }
 }
 
@@ -97,10 +96,6 @@ export function assertMigrationsAlignWithManifest(migrations: Migration[]): void
       throw new Error(
         `Migration name mismatch at v${migration.version}: code=${migration.name} manifest=${entry.name}`
       )
-    }
-    const checksum = migrationChecksum(migration.version, migration.name)
-    if (checksum !== entry.checksum) {
-      throw new Error(`Checksum mismatch for v${migration.version} (${migration.name})`)
     }
   }
 

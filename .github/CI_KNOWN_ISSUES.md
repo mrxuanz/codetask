@@ -183,13 +183,10 @@ error; generated runtime data remains excluded explicitly.
 
 ## BUSINESS-009: Linux sandbox integration tests use contention-sensitive timeouts
 
-- Status: open (**intentionally deferred** with the sandbox remediation track;
-  not blocking non-sandbox open-source hygiene batches)
+- Status: resolved (2026-08-13)
 - Target phase: Phase 7 (open-source release gate / native platform matrix)
-  — sandbox track deferred by owner decision (2026-08-05)
-- Exit criteria: flaky contention failures identified from authenticated logs and
-  fixed via platform-aware timeouts or explicit serialization; suite is stable
-  on CI.
+- Exit criteria: met. Integration tests use platform-aware timeouts and the CI
+  workspace suite remains explicitly serialized.
 - Location: `native/codeteam-linux-sandbox/tests/suite/landlock.rs:20-34`
 - Finding: the Linux sandbox integration suite launches many Bubblewrap and
   network subprocesses in parallel with 5-second command timeouts. Source
@@ -200,12 +197,13 @@ error; generated runtime data remains excluded explicitly.
   unauthenticated Actions view does not expose the individual failing test log.
 - Impact: the full native workspace test can fail nondeterministically without a
   Rust source change.
-- CI handling: Rust workspace tests run serially and with `--no-fail-fast` so
-  every test still executes while avoiding subprocess contention and retaining
-  complete failure diagnostics. No test is skipped or baselined.
-- Decision needed: use a future authenticated failure log to identify the exact
-  test, then choose platform-aware per-test timeouts or explicit test-level
-  serialization in native test code.
+- Resolution: short, long, and network subprocess budgets now have distinct
+  values, and ARM64 receives twice the non-ARM64 allowance as the existing source
+  comment intended. Assertions and sandbox behavior are unchanged.
+- CI handling: Rust workspace tests continue to run serially and with
+  `--no-fail-fast`, retaining complete diagnostics without skipping or baselining
+  tests.
+- Decision needed: none.
 
 ## BUSINESS-010: Codex internal HTTP MCP can disappear without failing the turn
 
@@ -238,18 +236,25 @@ error; generated runtime data remains excluded explicitly.
   treated as healthy. The live Codex probe consumes these production settings
   directly so a regression cannot be masked by diagnostic-only overrides.
 
-## BUSINESS-013: business-e2e draft-job G4–G8 Fake/OpenCode rewrite onto Design
+## BUSINESS-013: business-e2e catalog aligned to product workflows
 
-- Status: resolved (2026-08-02)
+- Status: resolved (2026-08-12)
 - Target phase: Architecture 03 follow-up
-- Exit criteria: create_task-era G4–G8 / DRAFT-\* / JOB-CHAT-RO cases removed from
-  catalog; draft-job defaults to Design smoke; no ARCH03 skip stubs remain.
+- Exit criteria: create_task-era numbered cases removed from the catalog;
+  the Design suite defaults to Design confirmation; no ARCH03 skip stubs remain; case names
+  describe the behavior they actually exercise.
 - Resolution: permanently deleted retired create_task catalog entries and Fake/
-  OpenCode stubs. Friendly CLI aliases (`notes-search`, `draft-multiturn`, …)
-  resolve to `DESIGN-DRAFT-001`. Draft-job depth beyond Design smoke is covered by
-  `tests/design` + `tests/execution` unit gates, not legacy e2e case IDs.
+  OpenCode stubs. The catalog now uses canonical business slugs such as
+  `project-conversation`, `chat-basic`, and `design-draft-confirm`. Misleading
+  aliases such as `notes-search`, `draft-image-ocr`, and `full-chain` were removed
+  instead of pretending that Design confirmation covered those behaviors. A
+  deterministic Hono lifecycle gate covers conversation, Design planning,
+  publication, Execution, verification, and evidence through real HTTP/SQLite.
+  The live harness launches OpenCode in its own process group, awaits HTTP-agent
+  shutdown, and reaps the whole CLI tree so a successful canary cannot hang CI.
 - Locations: `tests/business-e2e/cases/catalog.ts`,
   `tests/business-e2e/cases/selection.ts`, `tests/business-e2e/drivers/*`
-- CI handling: `--part draft-job` / `--case design-draft`; prefer design/execution
-  unit tests for merge gates.
+- CI handling: merge and release gates run `test:business-api-e2e`; the scheduled
+  `opencode-live.yml` workflow separately checks the real OpenCode provider using
+  the dedicated `OPENCODE_API_KEY` secret.
 - Decision needed: none.

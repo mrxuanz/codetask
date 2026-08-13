@@ -30,6 +30,9 @@
     "@codetask/contracts": "*",
     "@codetask/provider-spec": "*",
     "@openai/codex-sdk": "^0.146.0",
-    "@opencode-ai/sdk": "^1.18.13"
+    "@opencode-ai/sdk": "^1.18.13",
+    "cross-spawn": "^7.0.6",
+    "undici": "^6.28.0",
+    "zod": "^4.4.3"
   }
 }

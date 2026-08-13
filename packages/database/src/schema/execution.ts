@@ -90,6 +90,21 @@ export const jobSlices = sqliteTable(
   (table) => [index('idx_job_slices_job').on(table.jobId, table.generation, table.sortOrder)]
 )
 
+export const jobSliceDependencies = sqliteTable(
+  'job_slice_dependencies',
+  {
+    jobId: text('job_id').notNull(),
+    generation: integer('generation').notNull(),
+    fromSliceId: text('from_slice_id').notNull(),
+    dependsOnSliceId: text('depends_on_slice_id').notNull()
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.jobId, table.generation, table.fromSliceId, table.dependsOnSliceId]
+    })
+  ]
+)
+
 export const jobWorkItems = sqliteTable(
   'job_work_items',
   {
@@ -103,6 +118,7 @@ export const jobWorkItems = sqliteTable(
     milestoneId: text('milestone_id').notNull(),
     sliceId: text('slice_id').notNull(),
     kind: text('kind').notNull(),
+    taskKind: text('task_kind').notNull().default('general-implementation'),
     sortOrder: integer('sort_order').notNull(),
     title: text('title').notNull(),
     description: text('description').notNull().default(''),
@@ -110,6 +126,8 @@ export const jobWorkItems = sqliteTable(
     abilityCode: text('ability_code').notNull(),
     providerCode: text('provider_code').notNull(),
     successCriteria: text('success_criteria').notNull().default(''),
+    referenceReason: text('reference_reason').notNull().default(''),
+    requiredInputsJson: text('required_inputs_json').notNull().default('[]'),
     canRunInParallel: integer('can_run_in_parallel').notNull().default(0),
     state: text('state').notNull().default('pending'),
     stateRevision: integer('state_revision').notNull().default(0),

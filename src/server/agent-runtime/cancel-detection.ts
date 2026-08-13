@@ -1,1 +1,1 @@
-export { isUserTurnCancellation } from '../../shared/turn-errors/normalize.ts'
+export { isUserTurnCancellation } from '@codetask/contracts/turn-errors/normalize'

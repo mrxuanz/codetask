@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildConversationCursorRuntimeScope } from '../../src/server/agent-runtime/cursor-acp/runtime-registry'
 import { shouldInvalidateCursorScopedRuntime } from '../../src/server/agent-runtime/cursor-acp/turn-guards'
-import { createTurnError, TURN_CANCELLED } from '../../src/shared/turn-errors.ts'
+import { createTurnError, TURN_CANCELLED } from '@codetask/contracts/turn-errors'
 
 test('shouldInvalidateCursorScopedRuntime keeps conversation process on soft failures', () => {
   const scopeId = buildConversationCursorRuntimeScope('thread-soft', 'chat')

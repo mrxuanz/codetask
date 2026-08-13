@@ -1,6 +1,8 @@
+export type CaseGate = 'bootstrap' | 'conversation' | 'design' | 'settings-mcp'
+
 export type CaseManifest = {
   caseId: string
-  gate: string
+  gate: CaseGate
   title: string
   driver: 'supervisor' | 'fake' | 'opencode'
   skills: string[]
@@ -24,28 +26,28 @@ export type CaseManifest = {
    */
   timeoutMs?: number
   skipReason?: string
-  /** When set, matching classification counts as passed (e.g. G6-002 oracle_failed). */
+  /** When set, a matching negative-test classification counts as passed. */
   expectClassification?: string
 }
 
 export const SMOKE_CASES = [
-  'G0-001',
-  'G0-002',
-  'G0-003',
-  'G0-004',
-  'G0-005',
-  'G1-003',
-  'G1-007',
-  'G1-008',
-  'G0-006',
-  'G2-001',
-  'G3-001'
+  'build-artifact',
+  'server-health',
+  'isolated-dirs',
+  'isolated-port',
+  'single-server',
+  'setup-login',
+  'auth-bearer',
+  'token-redaction',
+  'worker-crash',
+  'project-conversation',
+  'chat-basic'
 ] as const
 
 export const MANIFESTS: Record<string, CaseManifest> = {
-  'G0-001': {
-    caseId: 'G0-001',
-    gate: 'G0',
+  'build-artifact': {
+    caseId: 'build-artifact',
+    gate: 'bootstrap',
     title: 'standalone build artifact exists',
     driver: 'supervisor',
     skills: [],
@@ -53,9 +55,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G0-002': {
-    caseId: 'G0-002',
-    gate: 'G0',
+  'server-health': {
+    caseId: 'server-health',
+    gate: 'bootstrap',
     title: 'headless startup health',
     driver: 'supervisor',
     skills: [],
@@ -63,9 +65,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: ['health.get'],
     oracle: {}
   },
-  'G0-003': {
-    caseId: 'G0-003',
-    gate: 'G0',
+  'isolated-dirs': {
+    caseId: 'isolated-dirs',
+    gate: 'bootstrap',
     title: 'independent data and bootstrap dirs',
     driver: 'supervisor',
     skills: [],
@@ -73,9 +75,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G0-004': {
-    caseId: 'G0-004',
-    gate: 'G0',
+  'isolated-port': {
+    caseId: 'isolated-port',
+    gate: 'bootstrap',
     title: 'independent localhost port',
     driver: 'supervisor',
     skills: [],
@@ -83,9 +85,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G0-005': {
-    caseId: 'G0-005',
-    gate: 'G0',
+  'single-server': {
+    caseId: 'single-server',
+    gate: 'bootstrap',
     title: 'single dedicated server',
     driver: 'supervisor',
     skills: [],
@@ -93,9 +95,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G0-006': {
-    caseId: 'G0-006',
-    gate: 'G0',
+  'worker-crash': {
+    caseId: 'worker-crash',
+    gate: 'bootstrap',
     title: 'case worker crash does not kill server',
     driver: 'supervisor',
     skills: [],
@@ -103,9 +105,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G1-003': {
-    caseId: 'G1-003',
-    gate: 'G1',
+  'setup-login': {
+    caseId: 'setup-login',
+    gate: 'bootstrap',
     title: 'correct setup',
     driver: 'supervisor',
     skills: [],
@@ -113,9 +115,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: ['auth.setup', 'auth.login'],
     oracle: {}
   },
-  'G1-007': {
-    caseId: 'G1-007',
-    gate: 'G1',
+  'auth-bearer': {
+    caseId: 'auth-bearer',
+    gate: 'bootstrap',
     title: 'missing or invalid bearer rejected',
     driver: 'supervisor',
     skills: [],
@@ -123,9 +125,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G1-008': {
-    caseId: 'G1-008',
-    gate: 'G1',
+  'token-redaction': {
+    caseId: 'token-redaction',
+    gate: 'bootstrap',
     title: 'token redaction in reports',
     driver: 'supervisor',
     skills: [],
@@ -133,10 +135,10 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     requiredOperations: [],
     oracle: {}
   },
-  'G2-001': {
-    caseId: 'G2-001',
-    gate: 'G2',
-    title: 'project and thread CRUD via Test MCP',
+  'project-conversation': {
+    caseId: 'project-conversation',
+    gate: 'bootstrap',
+    title: 'project and conversation CRUD via Test MCP',
     driver: 'fake',
     skills: ['common-blackbox', 'project-thread'],
     allowedTools: [
@@ -158,9 +160,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
       requireThread: true
     }
   },
-  'G3-001': {
-    caseId: 'G3-001',
-    gate: 'G3',
+  'chat-basic': {
+    caseId: 'chat-basic',
+    gate: 'conversation',
     title: 'single-turn Chinese conversation via OpenCode driver',
     driver: 'opencode',
     skills: ['common-blackbox', 'project-thread', 'conversation-basic'],
@@ -190,9 +192,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     },
     fixture: 'conversation/basic-zh.json'
   },
-  'CHAT-HTML-001': {
-    caseId: 'CHAT-HTML-001',
-    gate: 'G3',
+  'chat-create-html': {
+    caseId: 'chat-create-html',
+    gate: 'conversation',
     title: 'conversation creates SDK-named HTML file then Node oracle checks',
     driver: 'fake',
     skills: ['common-blackbox', 'project-thread', 'conversation-create-html'],
@@ -223,9 +225,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     fixture: 'conversation/create-html.json',
     workspaceFixture: 'empty-project'
   },
-  'CHAT-IMG-001': {
-    caseId: 'CHAT-IMG-001',
-    gate: 'G3',
+  'chat-image-attachment': {
+    caseId: 'chat-image-attachment',
+    gate: 'conversation',
     title: 'chat can read uploaded image attachment via selected core',
     driver: 'fake',
     skills: ['common-blackbox', 'project-thread', 'chat-image-attachment'],
@@ -258,9 +260,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     fixture: 'conversation/chat-image-attachment.json',
     workspaceFixture: 'empty-project'
   },
-  'SETTINGS-MCP-001': {
-    caseId: 'SETTINGS-MCP-001',
-    gate: 'G2',
+  'settings-mcp-probe': {
+    caseId: 'settings-mcp-probe',
+    gate: 'settings-mcp',
     title: 'phase-3: register business-e2e-probe into conversation/task/verification MCP settings',
     driver: 'fake',
     skills: ['common-blackbox', 'settings-mcp-probe'],
@@ -277,9 +279,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     ],
     oracle: {}
   },
-  'FOUNDATION-FAKE-001': {
-    caseId: 'FOUNDATION-FAKE-001',
-    gate: 'foundation',
+  'foundation-probe': {
+    caseId: 'foundation-probe',
+    gate: 'design',
     title: 'Fake Driver exercises chat clarify-loop + Design draft MCP surface (architecture 03)',
     driver: 'fake',
     skills: ['common-blackbox', 'project-thread', 'draft-multiturn'],
@@ -314,9 +316,9 @@ export const MANIFESTS: Record<string, CaseManifest> = {
     workspaceFixture: 'notes-search-project',
     stagedFixture: 'conversation/draft-multiturn.json'
   },
-  'DESIGN-DRAFT-001': {
-    caseId: 'DESIGN-DRAFT-001',
-    gate: 'draft-job',
+  'design-draft-confirm': {
+    caseId: 'design-draft-confirm',
+    gate: 'design',
     title:
       'Chat clarify-loop then Design draft create → abilities → execution profile → confirm (/api/drafts)',
     driver: 'fake',
@@ -358,47 +360,48 @@ export const MANIFESTS: Record<string, CaseManifest> = {
 export function resolveCaseIds(options: { gate?: string; caseId?: string }): string[] {
   if (options.caseId) return [options.caseId]
   if (options.gate === 'smoke') return [...SMOKE_CASES]
-  if (options.gate === 'foundation') return ['FOUNDATION-FAKE-001']
-  if (
-    options.gate === 'draft-core' ||
-    options.gate === 'draft-job' ||
-    options.gate === 'draft' ||
-    options.gate === 'job'
-  ) {
-    return ['DESIGN-DRAFT-001']
+  if (options.gate === 'foundation') return ['foundation-probe']
+  if (options.gate === 'draft-core' || options.gate === 'design' || options.gate === 'draft') {
+    return ['design-draft-confirm']
   }
   if (options.gate === 'conversation' || options.gate === 'chat') {
-    return ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001']
+    return ['chat-basic', 'chat-create-html', 'chat-image-attachment']
   }
-  if (options.gate === 'settings-mcp' || options.gate === 'mcp') return ['SETTINGS-MCP-001']
+  if (options.gate === 'settings-mcp' || options.gate === 'mcp') return ['settings-mcp-probe']
   if (options.gate === 'both' || options.gate === 'a-b') {
-    return ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001', 'DESIGN-DRAFT-001']
+    return ['chat-basic', 'chat-create-html', 'chat-image-attachment', 'design-draft-confirm']
   }
   if (options.gate === 'phases') {
-    return ['G3-001', 'CHAT-HTML-001', 'CHAT-IMG-001', 'DESIGN-DRAFT-001', 'SETTINGS-MCP-001']
+    return [
+      'chat-basic',
+      'chat-create-html',
+      'chat-image-attachment',
+      'design-draft-confirm',
+      'settings-mcp-probe'
+    ]
   }
   if (options.gate === 'all') {
     return [
-      'G0-001',
-      'G0-002',
-      'G0-003',
-      'G0-004',
-      'G0-005',
-      'G1-003',
-      'G1-007',
-      'G1-008',
-      'G0-006',
-      'G2-001',
-      'FOUNDATION-FAKE-001',
-      'G3-001',
-      'CHAT-HTML-001',
-      'CHAT-IMG-001',
-      'DESIGN-DRAFT-001',
-      'SETTINGS-MCP-001'
+      'build-artifact',
+      'server-health',
+      'isolated-dirs',
+      'isolated-port',
+      'single-server',
+      'setup-login',
+      'auth-bearer',
+      'token-redaction',
+      'worker-crash',
+      'project-conversation',
+      'foundation-probe',
+      'chat-basic',
+      'chat-create-html',
+      'chat-image-attachment',
+      'design-draft-confirm',
+      'settings-mcp-probe'
     ]
   }
   if (options.gate === 'fixed-opencode-full') {
-    return [...SMOKE_CASES, 'FOUNDATION-FAKE-001', 'DESIGN-DRAFT-001']
+    return [...SMOKE_CASES, 'foundation-probe', 'design-draft-confirm']
   }
   if (options.gate) {
     return Object.values(MANIFESTS)

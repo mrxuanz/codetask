@@ -1,3 +1,5 @@
+import { scrubLogString, scrubLogValue } from '@codetask/contracts/log-redaction'
+
 let enabled = false
 let seq = 0
 const t0 = Date.now()
@@ -11,14 +13,14 @@ export function configureSandboxTurnDebug(options: { enabled: boolean }): void {
 function formatDetail(detail: unknown): string {
   if (detail === undefined) return ''
   try {
-    return ` ${JSON.stringify(detail, (_key, value) => {
+    return ` ${JSON.stringify(scrubLogValue(detail), (_key, value) => {
       if (typeof value === 'string' && value.length > 240) {
         return `${value.slice(0, 240)}…`
       }
       return value
     })}`
   } catch {
-    return ` ${String(detail)}`
+    return ` ${scrubLogString(String(detail))}`
   }
 }
 

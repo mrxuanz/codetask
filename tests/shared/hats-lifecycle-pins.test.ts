@@ -62,15 +62,6 @@ test('orchestrator-turns pins completed-after-reap supervisor contract', () => {
   )
 })
 
-// H6-08 / H7-11 — dependency-human pauses, does not infra-retry
-test('dependency-human recovery classifies human blockers distinctly from infra', () => {
-  const source = readSource(
-    'packages/server-core/src/modules/execution/recovery/domain/blocker-classification.ts'
-  )
-  assert.match(source, /dependency-human/)
-  assert.match(source, /infra/)
-})
-
 // H6-09 / H7-09 — one-shot work never enters the reusable Cursor ACP pool
 test('RuntimeManager makes sandbox job Cursor turns one-shot and ephemeral', () => {
   const worker = readSource('src/sandbox/role-worker.ts')

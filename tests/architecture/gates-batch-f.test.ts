@@ -8,7 +8,7 @@ import { join, relative } from 'node:path'
 import { ProviderCodeSchema, SettingsProviderCodeSchema } from '@codetask/contracts'
 import { PROVIDER_CODES } from '@codetask/server-core/modules/settings'
 import { RuntimeRegistry } from '../../src/server/context/runtime-registry'
-import { SUPPORTED_CORE_CODES } from '../../src/shared/providers/codes'
+import { SUPPORTED_CORE_CODES } from '@codetask/provider-spec/codes'
 import { createProviderRegistry } from '@codetask/provider-runtime-node'
 
 const root = join(import.meta.dirname, '../..')

@@ -160,6 +160,7 @@ export const migration043DesignModuleTables: DesignMigration = {
         context_markdown TEXT NOT NULL DEFAULT '',
         success_criteria TEXT NOT NULL DEFAULT '',
         reference_reason TEXT NOT NULL DEFAULT '',
+        required_inputs_json TEXT NOT NULL DEFAULT '[]',
         can_run_in_parallel INTEGER NOT NULL DEFAULT 0,
         confirmed INTEGER NOT NULL DEFAULT 0
       );
@@ -179,16 +180,6 @@ export const migration043DesignModuleTables: DesignMigration = {
         PRIMARY KEY (plan_id, task_id, reference_id)
       );
 
-      CREATE TABLE IF NOT EXISTS execution_plan_revisions (
-        planning_session_id TEXT NOT NULL REFERENCES planning_sessions(id) ON DELETE CASCADE,
-        revision INTEGER NOT NULL,
-        snapshot_gzip TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        expires_at INTEGER,
-        PRIMARY KEY (planning_session_id, revision)
-      );
-
       CREATE TABLE IF NOT EXISTS job_handoffs (
         submission_id TEXT PRIMARY KEY NOT NULL,
         planning_session_id TEXT NOT NULL REFERENCES planning_sessions(id),
@@ -198,8 +189,10 @@ export const migration043DesignModuleTables: DesignMigration = {
         job_id TEXT,
         attempts INTEGER NOT NULL DEFAULT 0,
         last_error_json TEXT,
+        next_attempt_at INTEGER,
         created_at INTEGER NOT NULL,
-        accepted_at INTEGER
+        accepted_at INTEGER,
+        failed_at INTEGER
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_job_handoffs_idempotency ON job_handoffs(idempotency_key);
       CREATE INDEX IF NOT EXISTS idx_job_handoffs_status ON job_handoffs(status, created_at);

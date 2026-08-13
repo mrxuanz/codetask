@@ -30,9 +30,13 @@ import {
 
 const SESSION_RECHECK_MS = 60_000
 const CONNECTION_ID_HEADER = REALTIME_CONNECTION_ID_HEADER.toLowerCase()
+const CONNECTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
 function readConnectionId(c: Context, fromBody?: unknown): string {
   const header = c.req.header(CONNECTION_ID_HEADER)?.trim() ?? ''
+  if (header && !CONNECTION_ID_PATTERN.test(header)) {
+    throw AppError.badRequest('Invalid realtime connection id', 'events.invalid_connection_id')
+  }
   if (header) return header
   // Body connectionId is rejected — protocol requires header only.
   void fromBody
@@ -145,7 +149,9 @@ async function handleSubscriptions(c: Context): Promise<Response> {
   } else {
     queuePendingTopics(key, topics)
   }
-  return c.json(ok({ connectionId, topics }))
+  return c.json(
+    ok({ connectionId, topics }, (c.get('requestId' as never) as string | undefined) ?? 'unknown')
+  )
 }
 
 async function handleStream(c: Context, ctx: AppContext): Promise<Response> {
@@ -248,7 +254,7 @@ async function handleStream(c: Context, ctx: AppContext): Promise<Response> {
       closed = true
       clearInterval(recheck)
       handle.close()
-      unbindRealtimeHandle(key)
+      unbindRealtimeHandle(key, handle)
     }
   })
 }

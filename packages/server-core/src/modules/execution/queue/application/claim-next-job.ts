@@ -89,7 +89,21 @@ export function createClaimNextJobService(deps: {
           )
           .run(runId, now, now, entry.job_id)
 
-        deps.outbox.enqueue(entry.job_id, 'job.started', { jobId: entry.job_id, runId }, deps.db)
+        const started = deps.db
+          .prepare(`SELECT actor_id, state, state_revision FROM jobs WHERE id = ?`)
+          .get(entry.job_id) as { actor_id: string; state: string; state_revision: number }
+        deps.outbox.enqueue(
+          entry.job_id,
+          'job.started',
+          {
+            jobId: entry.job_id,
+            actorId: started.actor_id,
+            runId,
+            state: started.state,
+            revision: started.state_revision
+          },
+          deps.db
+        )
 
         return { runId, jobId: entry.job_id }
       })

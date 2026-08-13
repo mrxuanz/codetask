@@ -1,4 +1,6 @@
 import type { SupportedCoreCode } from '../conversation/cores'
+import { scrubLogString } from '@codetask/contracts/log-redaction'
+import type { WorkspaceAccessMode } from '@codetask/contracts/workspace-access'
 import type { ConversationRole } from '../agent-runtime/roles'
 import type { AgentTurnInput, AgentTurnChunk } from '../agent-runtime/types'
 import { formatSdkTurnError } from '../agent-runtime/errors'
@@ -23,10 +25,9 @@ import { DEFAULT_SANDBOX_TURN_TIMEOUT_MS } from './session-state'
 import { SandboxError } from './types'
 import { sandboxErrorFromErrorChunk, readStderrPreview } from './stdout-reader'
 import { throwIfSandboxTurnAborted } from './turn-guards'
-import type { WorkspaceAccessMode } from '../../shared/workspace-access.ts'
 import type { AgentCapabilityProfile } from '../agent-runtime/capabilities'
-import type { ProviderInstallation } from '../../shared/providers/installation'
-import type { ProviderSettings } from '../../shared/providers/settings'
+import type { ProviderInstallation } from '@codetask/provider-spec/installation'
+import type { ProviderSettings } from '@codetask/provider-spec/settings'
 import { processHostEnvironmentSource } from '../host-environment'
 import { getRuntimeFeatures } from '../config/runtime-features'
 export { isOuterSandboxEnabled } from './outer-sandbox-flag'
@@ -111,7 +112,7 @@ async function* readWorkerJsonl(
     }
     sandboxTurnDebug('sandbox orchestrator: stdout drained', { lineCount })
     if (lineCount === 0) {
-      const stderrPreview = readStderrPreview(handle)
+      const stderrPreview = scrubLogString(readStderrPreview(handle))
       if (stderrPreview.trim()) {
         sandboxTurnDebug('sandbox orchestrator: stderr preview', {
           stderr: stderrPreview.trim().slice(0, 2000)
@@ -133,7 +134,7 @@ async function* readWorkerJsonl(
       code: exitResult.code,
       status: exitResult.status
     })
-    stderr += readStderrPreview(handle)
+    stderr += scrubLogString(readStderrPreview(handle))
     handle.close()
   }
 

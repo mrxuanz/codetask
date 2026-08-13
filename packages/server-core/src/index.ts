@@ -10,6 +10,7 @@ export {
   initPlannerMcpBackend,
   getPlannerMcpBackendPort,
   buildPlannerSystemPrompt,
+  DesignValidationError,
   type DesignModule,
   type DesignModuleDeps,
   type Actor

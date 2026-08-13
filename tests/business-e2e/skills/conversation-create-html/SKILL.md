@@ -1,9 +1,11 @@
 # conversation-create-html
 
 ## Role
+
 Drive a conversation (1–4 turns) that asks the product agent to create an SDK-named HTML file in the project workspace, then report via Test MCP.
 
 ## Goal
+
 1. Create project with the provided `workspaceRoot` (empty project fixture).
 2. Create thread with `coreCode` matching the active conversation SDK (e.g. `opencode`).
 3. `codetask_start_turn` with the user message that requests creating `{sdk}.html` (e.g. `opencode.html`, `cursor.html`).
@@ -17,6 +19,7 @@ Drive a conversation (1–4 turns) that asks the product agent to create an SDK-
 8. `report_case_result` with artifacts including `projectId`, `threadId`, last `turnId` (or `turnIds`), and `expectedHtmlFile`.
 
 ## File naming
+
 - conversation core `opencode` → `opencode.html`
 - conversation core `cursor` / `cursoracp` → `cursor.html`
 - other cores → `{core}.html`
@@ -24,6 +27,7 @@ Drive a conversation (1–4 turns) that asks the product agent to create an SDK-
 The HTML body must include the marker text `BUSINESS_E2E_CHAT_HTML`. A Node file oracle checks the workspace after MCP report.
 
 ## Allowed tools
+
 - codetask_create_project
 - codetask_create_thread
 - codetask_get_thread
@@ -36,11 +40,13 @@ The HTML body must include the marker text `BUSINESS_E2E_CHAT_HTML`. A Node file
 - report_case_result
 
 ## Required checkpoints
+
 - project_created
 - thread_created
 - turn_completed
 
 ## Forbidden behavior
+
 - Do not invent a different filename than the SDK mapping
 - Do not skip waiting for terminal turn status
 - Do not report completed if the turn failed
@@ -49,4 +55,5 @@ The HTML body must include the marker text `BUSINESS_E2E_CHAT_HTML`. A Node file
 - Do not start a follow-up when the assistant already finished (or the HTML file exists)
 
 ## Completion
+
 Call `report_case_result` once with status=completed.

@@ -1,4 +1,8 @@
 import { Type, type Static } from '@sinclair/typebox'
+
+export const MAX_CONVERSATION_MESSAGE_CHARS = 512 * 1024
+export const MAX_CONVERSATION_ATTACHMENTS = 20
+export const MAX_CONVERSATION_TITLE_CHARS = 256
 import { ProviderCodeSchema } from './execution.ts'
 
 export const ConversationStateSchema = Type.Union([
@@ -119,25 +123,39 @@ export const ConversationTurnDtoSchema = Type.Object({
   completedAt: Type.Optional(Type.String())
 })
 
-export const CreateConversationBodySchema = Type.Object({
-  title: Type.Optional(Type.String()),
-  providerCode: Type.Optional(ProviderCodeSchema)
-})
+export const CreateConversationBodySchema = Type.Object(
+  {
+    title: Type.Optional(Type.String({ maxLength: MAX_CONVERSATION_TITLE_CHARS })),
+    providerCode: Type.Optional(ProviderCodeSchema)
+  },
+  { additionalProperties: false }
+)
 
-export const RenameConversationBodySchema = Type.Object({
-  title: Type.String({ minLength: 1 })
-})
+export const RenameConversationBodySchema = Type.Object(
+  {
+    title: Type.String({ minLength: 1, maxLength: MAX_CONVERSATION_TITLE_CHARS })
+  },
+  { additionalProperties: false }
+)
 
-export const SwitchProviderBodySchema = Type.Object({
-  providerCode: ProviderCodeSchema
-})
+export const SwitchProviderBodySchema = Type.Object(
+  {
+    providerCode: ProviderCodeSchema
+  },
+  { additionalProperties: false }
+)
 
-export const CreateConversationTurnBodySchema = Type.Object({
-  message: Type.String(),
-  attachmentIds: Type.Array(Type.String()),
-  idempotencyKey: Type.String({ minLength: 1 }),
-  providerCode: Type.Optional(ProviderCodeSchema)
-})
+export const CreateConversationTurnBodySchema = Type.Object(
+  {
+    message: Type.String({ maxLength: MAX_CONVERSATION_MESSAGE_CHARS }),
+    attachmentIds: Type.Array(Type.String({ maxLength: 256 }), {
+      maxItems: MAX_CONVERSATION_ATTACHMENTS
+    }),
+    idempotencyKey: Type.String({ minLength: 1, maxLength: 256 }),
+    providerCode: Type.Optional(ProviderCodeSchema)
+  },
+  { additionalProperties: false }
+)
 
 export const CreateTurnAcceptedDtoSchema = Type.Object({
   turnId: Type.String(),

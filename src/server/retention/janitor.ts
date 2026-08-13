@@ -1,8 +1,8 @@
 import { existsSync } from 'fs'
-import { readdir, rm } from 'fs/promises'
+import { readdir, rm, rmdir } from 'fs/promises'
 import { join } from 'path'
 import { eq } from 'drizzle-orm'
-import { parseJobReferenceManifest } from '../../shared/job-references.ts'
+import { parseJobReferenceManifest } from '@codetask/contracts/job-references'
 import type { getDb } from '../db'
 import { jobArtifacts, messageArtifacts } from '../db/schema'
 
@@ -55,6 +55,24 @@ function collectValidAttachmentOwnerIds(db: AppDatabase): Set<string> {
       // asset tables may be absent pre-062
     }
   }
+  if (client && tableExists(client, 'assets') && tableExists(client, 'asset_references')) {
+    try {
+      const rows = client
+        .prepare(
+          `SELECT DISTINCT a.storage_key AS storageKey
+             FROM assets a
+             JOIN asset_references ar ON ar.asset_id = a.id
+            WHERE a.state = 'active' AND a.storage_key LIKE 'attachments/%'`
+        )
+        .all() as Array<{ storageKey: string }>
+      for (const row of rows) {
+        const ownerDir = row.storageKey.split('/')[1]
+        if (ownerDir) valid.add(ownerDir)
+      }
+    } catch {
+      // asset tables may be absent in narrow fixtures
+    }
+  }
   return valid
 }
 
@@ -87,6 +105,18 @@ export async function removeThreadAttachmentsDir(
   const path = threadAttachmentsDir(dataDir, threadId)
   if (!existsSync(path)) return false
   await rm(path, { recursive: true, force: true })
+  return true
+}
+
+export async function removeThreadAttachmentsDirIfEmpty(
+  dataDir: string,
+  threadId: string
+): Promise<boolean> {
+  const path = threadAttachmentsDir(dataDir, threadId)
+  if (!existsSync(path)) return false
+  const entries = await readdir(path)
+  if (entries.length > 0) return false
+  await rmdir(path)
   return true
 }
 
@@ -203,6 +233,19 @@ function collectProjectScopedAttachmentIds(db: AppDatabase, conversationId: stri
   const client = sqliteClient(db)
   if (!client) return []
   const ids: string[] = []
+  try {
+    const assetRows = client
+      .prepare(
+        `SELECT DISTINCT a.id
+           FROM assets a
+           JOIN asset_references ar ON ar.asset_id = a.id
+          WHERE a.state = 'active' AND a.storage_key LIKE ?`
+      )
+      .all(`attachments/${conversationId}/%`) as Array<{ id: string }>
+    for (const row of assetRows) ids.push(row.id)
+  } catch {
+    // asset tables may be absent in narrow fixtures
+  }
   try {
     const designRows = client
       .prepare(

@@ -1,9 +1,11 @@
 # conversation-basic
 
 ## Role
+
 Drive a short Chinese conversation against CodeTask through Test MCP (1–4 turns if the model asks for clarification).
 
 ## Goal
+
 1. Create project and thread (see project-thread skill).
 2. Call `codetask_start_turn` with the fixture user message.
 3. Wait until the turn is terminal using **sliced** `codetask_wait_turn`:
@@ -19,6 +21,7 @@ Drive a short Chinese conversation against CodeTask through Test MCP (1–4 turn
 6. Call `case_checkpoint` with name `turn_completed`.
 
 ## Allowed tools
+
 - codetask_create_project
 - codetask_create_thread
 - codetask_get_thread
@@ -31,11 +34,13 @@ Drive a short Chinese conversation against CodeTask through Test MCP (1–4 turn
 - report_case_result
 
 ## Required checkpoints
+
 - project_created
 - thread_created
 - turn_completed
 
 ## Forbidden behavior
+
 - Do not cancel a healthy turn
 - Do not skip waiting for terminal status
 - Do not report completed if turn status is failed/cancelled
@@ -44,4 +49,5 @@ Drive a short Chinese conversation against CodeTask through Test MCP (1–4 turn
 - Do not keep clarifying after a final numeric answer
 
 ## Completion
+
 Call `report_case_result` once with status=completed, include projectId, threadId, turnId (or turnIds) in artifacts, and a short summary in Chinese or English.

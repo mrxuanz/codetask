@@ -56,31 +56,61 @@ export function provideRealtimeGateway(): RealtimeGateway {
   let desiredTopics: RealtimeTopic[] = []
   let reconnectAttempt = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let subscriptionRetryTimer: ReturnType<typeof setTimeout> | null = null
   let idleCloseTimer: ReturnType<typeof setTimeout> | null = null
+  let streamOpen = false
+  let subscriptionsHealthy = false
+  let subscriptionRetryAttempt = 0
   let stopped = false
   const ZERO_TOPIC_CLOSE_MS = 30_000
 
-  const flushSubscriptions = useDebounceFn(async () => {
-    if (!connected.value || stopped) return
+  function updateConnected(): void {
+    connected.value = streamOpen && subscriptionsHealthy
+  }
+
+  function scheduleSubscriptionRetry(): void {
+    if (stopped || subscriptionRetryTimer) return
+    const delay = Math.min(30_000, 1000 * 2 ** subscriptionRetryAttempt)
+    subscriptionRetryAttempt += 1
+    subscriptionRetryTimer = setTimeout(() => {
+      subscriptionRetryTimer = null
+      void syncSubscriptions()
+    }, delay)
+  }
+
+  async function syncSubscriptions(): Promise<void> {
+    if (stopped) return
     try {
       await putRealtimeSubscriptions(connectionId, desiredTopics)
+      subscriptionsHealthy = true
+      subscriptionRetryAttempt = 0
+      if (subscriptionRetryTimer) {
+        clearTimeout(subscriptionRetryTimer)
+        subscriptionRetryTimer = null
+      }
     } catch (error) {
+      subscriptionsHealthy = false
+      scheduleSubscriptionRetry()
       console.warn('[realtime] subscription flush failed', error)
+    } finally {
+      updateConnected()
     }
+  }
+
+  const flushSubscriptions = useDebounceFn(async () => {
+    await syncSubscriptions()
   }, 50)
 
   function recomputeDesiredTopics(): void {
     desiredTopics = [...refCounts.keys()].filter((topic) => (refCounts.get(topic) ?? 0) > 0)
+    subscriptionsHealthy = false
+    updateConnected()
     void flushSubscriptions()
     ensureStreamForTopics()
   }
 
   async function flushSubscriptionsNow(): Promise<void> {
-    try {
-      await putRealtimeSubscriptions(connectionId, desiredTopics)
-    } catch (error) {
-      console.warn('[realtime] subscription flush failed', error)
-    }
+    await syncSubscriptions()
   }
 
   function dispatch(envelope: RealtimeEnvelope): void {
@@ -90,9 +120,9 @@ export function provideRealtimeGateway(): RealtimeGateway {
       for (const listener of resyncListeners) {
         listener(desiredTopics)
       }
-      void putRealtimeSubscriptions(connectionId, desiredTopics).catch((error) => {
-        console.warn('[realtime] resync subscription failed', error)
-      })
+      subscriptionsHealthy = false
+      updateConnected()
+      void syncSubscriptions()
       return
     }
 
@@ -141,7 +171,8 @@ export function provideRealtimeGateway(): RealtimeGateway {
           idleCloseTimer = null
           if (desiredTopics.length > 0 || stopped) return
           abort?.abort()
-          connected.value = false
+          streamOpen = false
+          updateConnected()
           abort = null
         }, ZERO_TOPIC_CLOSE_MS)
       }
@@ -157,15 +188,21 @@ export function provideRealtimeGateway(): RealtimeGateway {
     abort?.abort()
     const controller = new AbortController()
     abort = controller
-    connected.value = true
+    streamOpen = false
+    subscriptionsHealthy = false
+    updateConnected()
 
-    void putRealtimeSubscriptions(connectionId, desiredTopics).catch((error) => {
-      console.warn('[realtime] initial subscription failed', error)
-    })
+    void syncSubscriptions()
 
     void connectRealtimeStream(connectionId, dispatch, {
       signal: controller.signal,
-      lastEventId: reducer.getLastEventId() || null
+      lastEventId: reducer.getLastEventId() || null,
+      onOpen: () => {
+        if (abort !== controller || controller.signal.aborted) return
+        streamOpen = true
+        reconnectAttempt = 0
+        updateConnected()
+      }
     })
       .catch((error) => {
         if (controller.signal.aborted) return
@@ -178,7 +215,8 @@ export function provideRealtimeGateway(): RealtimeGateway {
       })
       .finally(() => {
         if (abort === controller) {
-          connected.value = false
+          streamOpen = false
+          updateConnected()
           abort = null
           if (!stopped && desiredTopics.length > 0) {
             scheduleReconnect()
@@ -190,16 +228,19 @@ export function provideRealtimeGateway(): RealtimeGateway {
   function onOnline(): void {
     if (stopped) return
     reconnectAttempt = 0
+    void syncSubscriptions()
     if (!connected.value && desiredTopics.length > 0) {
-      startStream()
+      if (!abort) startStream()
     }
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === 'visible') onOnline()
   }
 
   if (typeof window !== 'undefined') {
     window.addEventListener('online', onOnline)
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') onOnline()
-    })
+    document.addEventListener('visibilitychange', onVisibilityChange)
   }
 
   const gateway: RealtimeGateway = {
@@ -237,9 +278,11 @@ export function provideRealtimeGateway(): RealtimeGateway {
     stopped = true
     abort?.abort()
     if (reconnectTimer) clearTimeout(reconnectTimer)
+    if (subscriptionRetryTimer) clearTimeout(subscriptionRetryTimer)
     if (idleCloseTimer) clearTimeout(idleCloseTimer)
     if (typeof window !== 'undefined') {
       window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   })
 

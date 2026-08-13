@@ -26,8 +26,7 @@ export default defineConfig({
   plugins: [vue(), tailwindcss()],
   resolve: {
     alias: {
-      '@renderer': resolve(import.meta.dirname, 'src'),
-      '@shared': resolve(root, 'src/shared')
+      '@renderer': resolve(import.meta.dirname, 'src')
     }
   },
   server: {

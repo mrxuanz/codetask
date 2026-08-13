@@ -100,6 +100,14 @@ export const migration045ExecutionModuleTables: ExecutionMigration = {
       CREATE INDEX IF NOT EXISTS idx_job_slices_job
         ON job_slices(job_id, generation, sort_order);
 
+      CREATE TABLE IF NOT EXISTS job_slice_dependencies (
+        job_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        from_slice_id TEXT NOT NULL,
+        depends_on_slice_id TEXT NOT NULL,
+        PRIMARY KEY (job_id, generation, from_slice_id, depends_on_slice_id)
+      );
+
       CREATE TABLE IF NOT EXISTS job_work_items (
         id TEXT PRIMARY KEY NOT NULL,
         job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -109,6 +117,7 @@ export const migration045ExecutionModuleTables: ExecutionMigration = {
         milestone_id TEXT NOT NULL,
         slice_id TEXT NOT NULL,
         kind TEXT NOT NULL,
+        task_kind TEXT NOT NULL DEFAULT 'general-implementation',
         sort_order INTEGER NOT NULL,
         title TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
@@ -116,6 +125,8 @@ export const migration045ExecutionModuleTables: ExecutionMigration = {
         ability_code TEXT NOT NULL,
         provider_code TEXT NOT NULL,
         success_criteria TEXT NOT NULL DEFAULT '',
+        reference_reason TEXT NOT NULL DEFAULT '',
+        required_inputs_json TEXT NOT NULL DEFAULT '[]',
         can_run_in_parallel INTEGER NOT NULL DEFAULT 0,
         state TEXT NOT NULL DEFAULT 'pending',
         state_revision INTEGER NOT NULL DEFAULT 0,

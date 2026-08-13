@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 import { Value } from '@sinclair/typebox/value'
 import {
+  AddDraftReferenceBodySchema,
   ConfirmDraftBodySchema,
   ConfirmTreeNodeBodySchema,
   CreateDraftBodySchema,
   CreatePlanningSessionBodySchema,
   PatchAbilitiesBodySchema,
+  PatchDraftReferenceBodySchema,
   PatchDraftBodySchema,
   PatchExecutionProfileBodySchema,
   PatchTreeNodeBodySchema,
@@ -79,12 +81,8 @@ function mapError(
   if (error instanceof DesignForbiddenError) {
     return fail(error.code, error.message, 403, requestId)
   }
-  return fail(
-    'design.internal',
-    error instanceof Error ? error.message : String(error),
-    500,
-    requestId
-  )
+  console.error('[design] unhandled HTTP error', { requestId, error })
+  return fail('design.internal', 'Internal server error', 500, requestId)
 }
 
 function requireActor(c: { get: (k: 'actor') => Actor | undefined; var?: unknown }): Actor {
@@ -294,9 +292,7 @@ export function createDraftRoutes(
   app.post('/:draftId/references', async (c) => {
     try {
       const body = await c.req.json()
-      const expectedRevision =
-        typeof body?.expectedRevision === 'number' ? body.expectedRevision : -1
-      if (expectedRevision < 0 || !body?.name || !body?.kind || !body?.description) {
+      if (!Value.Check(AddDraftReferenceBodySchema, body)) {
         return c.json(
           fail('design.validation', 'Invalid reference body', 400, c.get('requestId')).body,
           400
@@ -306,9 +302,9 @@ export function createDraftRoutes(
         requireActor(c),
         c.req.param('draftId'),
         {
-          name: String(body.name),
+          name: body.name,
           kind: body.kind,
-          description: String(body.description),
+          description: body.description,
           source: body.source,
           mimeType: body.mimeType,
           attachmentId: body.attachmentId,
@@ -316,7 +312,7 @@ export function createDraftRoutes(
           resolvedPath: body.resolvedPath,
           assetUrl: body.assetUrl
         },
-        expectedRevision
+        body.expectedRevision
       )
       return c.json(ok(data, c.get('requestId')), 201)
     } catch (error) {
@@ -328,11 +324,9 @@ export function createDraftRoutes(
   app.patch('/:draftId/references/:referenceId', async (c) => {
     try {
       const body = await c.req.json()
-      const expectedRevision =
-        typeof body?.expectedRevision === 'number' ? body.expectedRevision : -1
-      if (expectedRevision < 0) {
+      if (!Value.Check(PatchDraftReferenceBodySchema, body)) {
         return c.json(
-          fail('design.validation', 'expectedRevision required', 400, c.get('requestId')).body,
+          fail('design.validation', 'Invalid reference patch body', 400, c.get('requestId')).body,
           400
         )
       }
@@ -341,7 +335,7 @@ export function createDraftRoutes(
         c.req.param('draftId'),
         c.req.param('referenceId'),
         { name: body.name, description: body.description },
-        expectedRevision
+        body.expectedRevision
       )
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
@@ -497,6 +491,27 @@ export function createPlanningRoutes(planning: PlanningApplication): Hono<Design
         requireActor(c),
         c.req.param('sessionId'),
         c.req.param('nodeId'),
+        body.expectedRevision
+      )
+      return c.json(ok(data, c.get('requestId')))
+    } catch (error) {
+      const mapped = mapError(error, c.get('requestId'))
+      return c.json(mapped.body, mapped.status as 400)
+    }
+  })
+
+  app.post('/:sessionId/tree/confirm', async (c) => {
+    try {
+      const body = await c.req.json()
+      if (!Value.Check(ConfirmTreeNodeBodySchema, body)) {
+        return c.json(
+          fail('design.validation', 'Invalid confirm tree body', 400, c.get('requestId')).body,
+          400
+        )
+      }
+      const data = await planning.confirmTree(
+        requireActor(c),
+        c.req.param('sessionId'),
         body.expectedRevision
       )
       return c.json(ok(data, c.get('requestId')))

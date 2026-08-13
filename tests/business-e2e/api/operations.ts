@@ -1,5 +1,6 @@
 import type { PublicApiClient } from './client'
 import { TIMEOUTS } from '../config/timeouts'
+import { HONO_BUSINESS_ROUTES } from '../../helpers/hono-business-routes'
 
 /** Map host CLI codes ↔ canonical Conversation provider codes (architecture 03). */
 export function toCanonicalProviderCode(coreCode: string): string {
@@ -88,7 +89,7 @@ export async function createProject(
 ): Promise<{ id: string; workspaceRoot: string }> {
   const result = await client.request<{ id: string; workspaceRoot: string }>(
     'POST',
-    '/api/projects',
+    HONO_BUSINESS_ROUTES.projects,
     { ...input, createIfMissing: true },
     { operationId: 'project.create' }
   )
@@ -114,7 +115,7 @@ export async function createThread(
   const providerCode = toCanonicalProviderCode(input.coreCode)
   const result = await client.request<{ id: string; providerCode?: string }>(
     'POST',
-    `/api/projects/${projectId}/conversations`,
+    HONO_BUSINESS_ROUTES.projectConversations(projectId),
     {
       title: input.title ?? 'Business E2E Chat',
       providerCode
@@ -139,7 +140,7 @@ export async function getThread(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/conversations/${threadId}`,
+    HONO_BUSINESS_ROUTES.conversation(threadId),
     undefined,
     { operationId: 'conversation.get' }
   )
@@ -154,9 +155,14 @@ export async function getThread(
 }
 
 export async function listCores(client: PublicApiClient): Promise<unknown> {
-  const result = await client.request('GET', '/api/conversations/providers', undefined, {
-    operationId: 'providers.list'
-  })
+  const result = await client.request(
+    'GET',
+    HONO_BUSINESS_ROUTES.conversationProviders,
+    undefined,
+    {
+      operationId: 'providers.list'
+    }
+  )
   return result.data
 }
 
@@ -180,7 +186,7 @@ export async function startTurn(
   }
   const result = await client.request<{ turnId: string }>(
     'POST',
-    `/api/conversations/${threadId}/turns`,
+    HONO_BUSINESS_ROUTES.conversationTurns(threadId),
     body,
     { operationId: 'conversation.start_turn' }
   )
@@ -197,7 +203,7 @@ export async function getTurn(
 ): Promise<{ turn: Record<string, unknown> }> {
   const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/conversations/${threadId}/turns/${turnId}`,
+    HONO_BUSINESS_ROUTES.conversationTurn(threadId, turnId),
     undefined,
     { operationId: 'conversation.get_turn' }
   )
@@ -238,7 +244,7 @@ export async function listMessages(
 ): Promise<Array<Record<string, unknown>>> {
   const result = await client.request<
     Array<Record<string, unknown>> | { messages?: Array<Record<string, unknown>> }
-  >('GET', `/api/conversations/${threadId}/messages`, undefined, {
+  >('GET', HONO_BUSINESS_ROUTES.conversationMessages(threadId), undefined, {
     operationId: 'conversation.list_messages'
   })
   const data = result.data
@@ -253,7 +259,7 @@ export async function cancelTurn(
 ): Promise<unknown> {
   const result = await client.request(
     'POST',
-    `/api/conversations/${threadId}/turns/${turnId}/cancel`,
+    HONO_BUSINESS_ROUTES.conversationTurnCancel(threadId, turnId),
     undefined,
     { operationId: 'conversation.cancel_turn' }
   )
@@ -270,9 +276,14 @@ export async function createDesignDraft(
     requirementsMarkdown?: string
   }
 ): Promise<Record<string, unknown>> {
-  const result = await client.request<Record<string, unknown>>('POST', '/api/drafts', input, {
-    operationId: 'draft.create'
-  })
+  const result = await client.request<Record<string, unknown>>(
+    'POST',
+    HONO_BUSINESS_ROUTES.drafts,
+    input,
+    {
+      operationId: 'draft.create'
+    }
+  )
   if (result.status >= 400 || !result.data) {
     throw new Error(`draft.create_failed:${result.status}:${result.raw.message ?? ''}`)
   }
@@ -280,7 +291,7 @@ export async function createDesignDraft(
 }
 
 export async function listDesignDrafts(client: PublicApiClient): Promise<unknown> {
-  const result = await client.request('GET', '/api/drafts', undefined, {
+  const result = await client.request('GET', HONO_BUSINESS_ROUTES.drafts, undefined, {
     operationId: 'draft.list'
   })
   if (result.status >= 400) {
@@ -295,7 +306,7 @@ export async function getDesignDraft(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/drafts/${draftId}`,
+    HONO_BUSINESS_ROUTES.draft(draftId),
     undefined,
     { operationId: 'draft.get' }
   )
@@ -313,7 +324,7 @@ export async function patchDesignDraftAbilities(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'PATCH',
-    `/api/drafts/${draftId}/abilities`,
+    HONO_BUSINESS_ROUTES.draftAbilities(draftId),
     { expectedRevision, abilities },
     { operationId: 'draft.patch_abilities' }
   )
@@ -335,7 +346,7 @@ export async function patchDesignExecutionProfile(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'PATCH',
-    `/api/drafts/${draftId}/execution-profile`,
+    HONO_BUSINESS_ROUTES.draftExecutionProfile(draftId),
     { expectedRevision, executionProfile },
     { operationId: 'draft.patch_execution_profile' }
   )
@@ -352,7 +363,7 @@ export async function confirmDesignDraft(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'POST',
-    `/api/drafts/${draftId}/confirm`,
+    HONO_BUSINESS_ROUTES.draftConfirm(draftId),
     { expectedRevision },
     { operationId: 'draft.confirm' }
   )
@@ -369,7 +380,7 @@ export async function createDesignPlanningSession(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'POST',
-    `/api/drafts/${draftId}/planning-session`,
+    HONO_BUSINESS_ROUTES.draftPlanningSession(draftId),
     { expectedRevision },
     { operationId: 'draft.planning_session' }
   )
@@ -424,7 +435,7 @@ export async function getJob(
 ): Promise<Record<string, unknown>> {
   const result = await client.request<Record<string, unknown>>(
     'GET',
-    `/api/jobs/${jobId}`,
+    HONO_BUSINESS_ROUTES.job(jobId),
     undefined,
     { operationId: 'job.get' }
   )
@@ -469,7 +480,7 @@ export async function getTaskEvidence(
 ): Promise<unknown> {
   const result = await client.request(
     'GET',
-    `/api/jobs/${jobId}/work/${encodeURIComponent(taskId)}/evidence`,
+    HONO_BUSINESS_ROUTES.jobEvidence(jobId, taskId),
     undefined,
     { operationId: 'job.task_evidence' }
   )
@@ -605,9 +616,11 @@ export async function uploadThreadAttachment(
   const bytes = readFileSync(filePath)
   const form = new FormData()
   form.append('file', new Blob([bytes]), fileName)
-  const result = await client.uploadMultipart(`/api/conversations/${threadId}/attachments`, form, {
-    operationId: 'attachment.upload'
-  })
+  const result = await client.uploadMultipart(
+    HONO_BUSINESS_ROUTES.conversationAttachments(threadId),
+    form,
+    { operationId: 'attachment.upload' }
+  )
   if (result.status >= 400) {
     throw new Error(`attachment.upload_failed:${result.status}:${result.raw.message ?? ''}`)
   }
@@ -621,7 +634,7 @@ export async function downloadThreadAttachment(
 ): Promise<Buffer> {
   const result = await client.requestBinary(
     'GET',
-    `/api/conversations/${threadId}/attachments/${encodeURIComponent(attachmentId)}`,
+    HONO_BUSINESS_ROUTES.conversationAttachment(threadId, attachmentId),
     { operationId: 'attachment.download' }
   )
   if (result.status >= 400) {
@@ -804,7 +817,7 @@ export async function pauseJob(client: PublicApiClient, jobId: string): Promise<
 export async function resumeJob(client: PublicApiClient, jobId: string): Promise<unknown> {
   const result = await client.request(
     'POST',
-    `/api/jobs/${jobId}/resume`,
+    `/api/jobs/${jobId}/continue`,
     {},
     {
       operationId: 'job.resume'

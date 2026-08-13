@@ -46,10 +46,14 @@ const ELECTRON_BAN_ROOTS = [
 ]
 
 /**
- * Known process.env readers retained after Batch E product clearance.
- * Only Provider host-environment snapshot may read process.env in product code.
+ * Known process.env readers retained at explicit host boundaries.
+ * Business packages and the renderer must not grow ambient environment access;
+ * the Provider host snapshot and thin Electron process launcher are the two owners.
  */
-const PROCESS_ENV_BASELINE_ALLOWLIST = new Set(['packages/agent-runtime/src/host-environment.ts'])
+const PROCESS_ENV_BASELINE_ALLOWLIST = new Set([
+  'packages/agent-runtime/src/host-environment.ts',
+  'apps/desktop/src/desktop-service.ts'
+])
 
 const PROCESS_ENV_SCAN_ROOTS = [
   join(root, 'packages'),

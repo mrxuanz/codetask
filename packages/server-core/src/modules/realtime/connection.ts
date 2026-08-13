@@ -56,7 +56,7 @@ export function openRealtimeStream(input: {
       topics,
       afterEventId: afterId
     })
-    if (result.gap) {
+    if (result.gap || result.hasMore) {
       input.fanout.publishToConnection(conn, {
         eventId: null,
         ephemeral: true,
@@ -64,13 +64,15 @@ export function openRealtimeStream(input: {
         type: 'realtime.resync-required',
         entityId: input.connectionId,
         occurredAt: Date.now(),
-        payload: { reason: 'gap', latestEventId: result.latestEventId }
+        payload: {
+          reason: result.gap ? 'gap' : 'replay_limit',
+          latestEventId: result.latestEventId
+        }
       })
       return
     }
     for (const event of result.events) {
-      conn.queue.push(event)
-      conn.queuedBytes += envelopeBytes(event)
+      input.fanout.publishToConnection(conn, event)
     }
   }
 
@@ -105,8 +107,15 @@ export function openRealtimeStream(input: {
           yield item
         }
         await new Promise<void>((resolve) => {
-          conn.resolveWait = resolve
-          setTimeout(resolve, HEARTBEAT_MS)
+          const timer = setTimeout(() => {
+            if (conn.resolveWait === wake) conn.resolveWait = null
+            resolve()
+          }, HEARTBEAT_MS)
+          const wake = (): void => {
+            clearTimeout(timer)
+            resolve()
+          }
+          conn.resolveWait = wake
         })
         if (conn.closed) break
         if (conn.queue.length === 0) {
@@ -115,7 +124,7 @@ export function openRealtimeStream(input: {
       }
     } finally {
       conn.closed = true
-      input.fanout.unregister(key)
+      input.fanout.unregister(key, conn)
     }
   }
 
@@ -127,7 +136,7 @@ export function openRealtimeStream(input: {
       conn.closed = true
       conn.resolveWait?.()
       conn.resolveWait = null
-      input.fanout.unregister(key)
+      input.fanout.unregister(key, conn)
     },
     key
   }

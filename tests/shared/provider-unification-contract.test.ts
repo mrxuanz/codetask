@@ -18,7 +18,7 @@ import {
   listProviderDescriptors,
   mergeProvidersConfigOverrides,
   normalizeProviderCode
-} from '../../src/shared/providers/index.ts'
+} from '@codetask/provider-runtime-node/spec'
 import { createAppConfig } from '../../src/server/config/app-config.ts'
 import {
   DefaultProviderInstallationResolver,

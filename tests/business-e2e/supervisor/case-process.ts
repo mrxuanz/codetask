@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url'
 import type { ProcessRegistry } from './process-registry'
 import { writeJson } from './run-layout'
 import { resolveCaseWorkerBudget } from '../config/timeouts'
+import type { OperatorCode } from '../config/operators'
 
 export type CaseWorkerInput = {
   caseId: string
   caseRunId: string
-  driver: 'fake' | 'opencode'
+  driver: OperatorCode
   mcpUrl: string
   capabilityId: string
   workspaceRoot: string
@@ -31,6 +32,8 @@ export type CaseWorkerInput = {
   expectedHtmlFile?: string
   probeMcpUrl?: string
   probeMcpName?: string
+  /** Case-scoped Test MCP tools exposed to and approved for the outer actor. */
+  allowedTools: string[]
 }
 
 export type CaseWorkerResult = {

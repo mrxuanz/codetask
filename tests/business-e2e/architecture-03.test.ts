@@ -7,6 +7,7 @@ import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { toCanonicalProviderCode, toHostCoreCode } from './api/operations.ts'
 import { PART_DEFAULT_CASES } from './cases/selection.ts'
+import { HONO_BUSINESS_ROUTES } from '../helpers/hono-business-routes.ts'
 
 describe('business-e2e architecture 03 cutover', () => {
   it('maps host CLI codes to canonical conversation providers', () => {
@@ -19,25 +20,37 @@ describe('business-e2e architecture 03 cutover', () => {
   it('operations chat path uses /api/conversations, not /api/threads', () => {
     const path = fileURLToPath(new URL('./api/operations.ts', import.meta.url))
     const source = readFileSync(path, 'utf8')
-    assert.match(source, /\/api\/projects\/\$\{projectId\}\/conversations/)
-    assert.match(source, /\/api\/conversations\/\$\{threadId\}\/turns/)
-    assert.match(source, /\/api\/conversations\/\$\{threadId\}\/attachments/)
+    assert.equal(
+      HONO_BUSINESS_ROUTES.projectConversations('project-1'),
+      '/api/projects/project-1/conversations'
+    )
+    assert.equal(
+      HONO_BUSINESS_ROUTES.conversationTurns('chat-1'),
+      '/api/conversations/chat-1/turns'
+    )
+    assert.equal(
+      HONO_BUSINESS_ROUTES.conversationAttachments('chat-1'),
+      '/api/conversations/chat-1/attachments'
+    )
+    assert.match(source, /HONO_BUSINESS_ROUTES\.projectConversations/)
+    assert.match(source, /HONO_BUSINESS_ROUTES\.conversationTurns/)
+    assert.match(source, /HONO_BUSINESS_ROUTES\.conversationAttachments/)
     assert.doesNotMatch(source, /\/api\/projects\/\$\{projectId\}\/threads/)
     assert.match(source, /architecture_03_removed/)
   })
 
-  it('OpenCode driver has no create_task draft-job case stubs', () => {
+  it('OpenCode driver has no retired create_task case stubs', () => {
     const path = fileURLToPath(new URL('./drivers/opencode.ts', import.meta.url))
-    const source = readFileSync(path, 'utf8')
-    assert.doesNotMatch(source, /DRAFT-CHAT-IMG-001/)
+    const promptPath = fileURLToPath(new URL('./drivers/operator-prompt.ts', import.meta.url))
+    const source = `${readFileSync(path, 'utf8')}\n${readFileSync(promptPath, 'utf8')}`
     assert.doesNotMatch(source, /codetask_confirm_draft_final/)
-    assert.match(source, /DESIGN-DRAFT-001/)
+    assert.match(source, /design-draft-confirm/)
   })
 
-  it('default draft-job suite includes Design draft smoke', () => {
-    assert.deepEqual(PART_DEFAULT_CASES['draft-job'], ['DESIGN-DRAFT-001'])
-    assert.ok(PART_DEFAULT_CASES.conversation.includes('G3-001'))
-    assert.ok(!PART_DEFAULT_CASES.conversation.includes('DRAFT-CHAT-IMG-001'))
+  it('default design suite names the behavior it actually covers', () => {
+    assert.deepEqual(PART_DEFAULT_CASES.design, ['design-draft-confirm'])
+    assert.ok(PART_DEFAULT_CASES.conversation.includes('chat-basic'))
+    assert.ok(!PART_DEFAULT_CASES.conversation.includes('design-draft-confirm'))
   })
 
   it('Test MCP exposes Design draft tools and deletes retired create_task helpers', () => {

@@ -1,0 +1,392 @@
+[
+  {
+    "version": 1,
+    "name": "baseline_tables",
+    "source": "v001_042/001_baseline_tables.ts",
+    "contentChecksum": "52a0ca30afb18d13d2b44d392e1336c021ab3e2f5ac65d84d963077b02b4be20"
+  },
+  {
+    "version": 2,
+    "name": "constraints_and_job_tasks",
+    "source": "v001_042/002_constraints_and_job_tasks.ts",
+    "contentChecksum": "3428bcc964a27b090dcd68b62e65b85c4470ff3ff00a3b5075b058100d5bb989"
+  },
+  {
+    "version": 3,
+    "name": "plan_abilities_events",
+    "source": "v001_042/003_plan_abilities_events.ts",
+    "contentChecksum": "71b3e39906e998f653b4850d3d6a835a1bbdc2f3a498d18dded0d08bbb21fcab"
+  },
+  {
+    "version": 4,
+    "name": "thread_pointer_cleanup",
+    "source": "v001_042/004_thread_pointer_cleanup.ts",
+    "contentChecksum": "fb022f34960924d19a97d690d7a47a1dd1b0495493832d210aa2c0c9e6de3895"
+  },
+  {
+    "version": 5,
+    "name": "plan_milestones_slices",
+    "source": "v001_042/005_plan_milestones_slices.ts",
+    "contentChecksum": "db95d73b0fe818c9694a46b5a849895a2e444b5257948dab30f39b03a3c1d1c9"
+  },
+  {
+    "version": 6,
+    "name": "drop_legacy_job_json",
+    "source": "v001_042/006_drop_legacy_job_json.ts",
+    "contentChecksum": "dd45ac96dd5e6a3c0d30b9e480d7fa08b08238bad6d56e0e96bc587578c4032f"
+  },
+  {
+    "version": 7,
+    "name": "execution_lease",
+    "source": "v001_042/007_execution_lease.ts",
+    "contentChecksum": "2a3194ef57c9a6fcbbe9238f5ef813d32a8df20e4bc0f618bbc80a50d5ac70f4"
+  },
+  {
+    "version": 8,
+    "name": "orphan_cleanup",
+    "source": "v001_042/008_orphan_cleanup.ts",
+    "contentChecksum": "118101940e0b1487a113e116745d41269da1b29d508e9c7078ade1a5bf6463df"
+  },
+  {
+    "version": 9,
+    "name": "reference_manifest",
+    "source": "v001_042/009_reference_manifest.ts",
+    "contentChecksum": "2da3b792cf9576ab003fe0685fd02d962af95ca3cfae9d90eb1ba00ab3d1539d"
+  },
+  {
+    "version": 10,
+    "name": "wizard_handoff_message_kind",
+    "source": "v001_042/010_wizard_handoff_message_kind.ts",
+    "contentChecksum": "6ea75356ad033809239d66efa4b8495fc1457951f489113665566a2b264e5453"
+  },
+  {
+    "version": 11,
+    "name": "repair_thread_messages_table",
+    "source": "v001_042/011_repair_thread_messages_table.ts",
+    "contentChecksum": "538850f72c8a382809aff7a6c8b49861933def7ac67b3d2efa115e941f9b26b5"
+  },
+  {
+    "version": 12,
+    "name": "task_evidence_json",
+    "source": "v001_042/012_task_evidence_json.ts",
+    "contentChecksum": "0082cb9022ccd8b80904ee7e3c9300be911d9f6274e5c5fef29d3be42185120f"
+  },
+  {
+    "version": 13,
+    "name": "drop_job_events",
+    "source": "v001_042/013_drop_job_events.ts",
+    "contentChecksum": "49ad0a5eabd19aa927756cdf8cf7bed333fbf90a4cf01dac7462fc4939ab2d94"
+  },
+  {
+    "version": 14,
+    "name": "retention_layer",
+    "source": "v001_042/014_retention_layer.ts",
+    "contentChecksum": "f2e44c3b6ab9ab6c16c9b9f0e26512f52b53c68e6bb19f3018a1aea033ad0ccf"
+  },
+  {
+    "version": 15,
+    "name": "message_payload_retention",
+    "source": "v001_042/015_message_payload_retention.ts",
+    "contentChecksum": "49e239e7f8fca6cd896985fc2d560c7507212c0d0eec4201683637e754bb573e"
+  },
+  {
+    "version": 16,
+    "name": "design_sessions",
+    "source": "v001_042/016_design_sessions.ts",
+    "contentChecksum": "153f41f47afd033c5dcf72e23e4fb9000af4bb014b03816265833c1a7456abe7"
+  },
+  {
+    "version": 17,
+    "name": "wizard_phase_phases",
+    "source": "v001_042/017_wizard_phase_phases.ts",
+    "contentChecksum": "b05f2cc7b3a1c955ab8840658392307bfd35d2d4588791d0dfa8ee8a6861f26d"
+  },
+  {
+    "version": 18,
+    "name": "draft_references",
+    "source": "v001_042/018_draft_references.ts",
+    "contentChecksum": "530bd25e3fc6875f33e0f336bf986f64fa974dfd64eaaa1d419f28bf8fca1882"
+  },
+  {
+    "version": 19,
+    "name": "design_plan_artifacts",
+    "source": "v001_042/019_design_plan_artifacts.ts",
+    "contentChecksum": "83eb7923ae462fce799c120e64bce0cc4d0832287853c7d99f25f22ac6f106fb"
+  },
+  {
+    "version": 20,
+    "name": "job_snapshot",
+    "source": "v001_042/020_job_snapshot.ts",
+    "contentChecksum": "a4d0623282e7a3f503b5763ea849c14ac9319a8f9f6cf1e1b38bb8e4e2b187c2"
+  },
+  {
+    "version": 21,
+    "name": "corpus_revision",
+    "source": "v001_042/021_corpus_revision.ts",
+    "contentChecksum": "41f995b02392f252a52120fad61c54876552e47e755dc186befccd33b5a58d57"
+  },
+  {
+    "version": 23,
+    "name": "workload_slots",
+    "source": "v001_042/023_workload_slots.ts",
+    "contentChecksum": "90ca60ac41fba1bc5ef38a6b5a57d4626345a7b4d72863ca2241ff86226ede18"
+  },
+  {
+    "version": 24,
+    "name": "job_pausing_status",
+    "source": "v001_042/024_job_pausing_status.ts",
+    "contentChecksum": "01a3b088bc7a778e2df58ceb434167768ac7cd89ea10dc5f83a69aafdcb5d651"
+  },
+  {
+    "version": 25,
+    "name": "runtime_bytes",
+    "source": "v001_042/025_runtime_bytes.ts",
+    "contentChecksum": "58629617a7f972f2b93ae11f12648d937534c362514e179298c03e619dbc846c"
+  },
+  {
+    "version": 26,
+    "name": "unify_thread_jobs",
+    "source": "v001_042/026_unify_thread_jobs.ts",
+    "contentChecksum": "ef68d24019f1456467a3cc463caba06d3278347a8f3b2d0aedbb10e51dd2cbb5"
+  },
+  {
+    "version": 27,
+    "name": "control_plane_schema",
+    "source": "v001_042/027_control_plane_schema.ts",
+    "contentChecksum": "22594ae93a678220dda5393c0add5dcec5571477a34d96ed978198392bec0a44"
+  },
+  {
+    "version": 28,
+    "name": "control_plane_corrective_schema",
+    "source": "v001_042/028_control_plane_corrective_schema.ts",
+    "contentChecksum": "19bb856cbc5484f532bf998a35b228f769f911f9431766dbf0fa5cf460af5522"
+  },
+  {
+    "version": 29,
+    "name": "job_task_attempts",
+    "source": "v001_042/029_job_task_attempts.ts",
+    "contentChecksum": "9b393bfe050c423060b1d9c6883856a22feb6c20b394f84280dc45cf463ec460"
+  },
+  {
+    "version": 30,
+    "name": "workspace_leases_and_deletion",
+    "source": "v001_042/030_workspace_leases_and_deletion.ts",
+    "contentChecksum": "b894a0203b080533bcb4cbaecbf33bd79f84b7a82123b2ccf6e8599a29fa6d2d"
+  },
+  {
+    "version": 31,
+    "name": "deletion_request_phases",
+    "source": "v001_042/031_deletion_request_phases.ts",
+    "contentChecksum": "678e968eb3955a952c176264e86d8ddfc7bcd4438d705521443361a868cbadab"
+  },
+  {
+    "version": 32,
+    "name": "storage_settings",
+    "source": "v001_042/032_storage_settings.ts",
+    "contentChecksum": "5e58591ee2d76994b1878e78015970e35de662f03088007c5a3a89b0b7486eb7"
+  },
+  {
+    "version": 33,
+    "name": "design_plan_revisions",
+    "source": "v001_042/033_design_plan_revisions.ts",
+    "contentChecksum": "b31e5404ea6ac96f4b2875eb8b361cc488aee78bdf6f167e0eecdf5b0e4e4fb5"
+  },
+  {
+    "version": 34,
+    "name": "job_artifact_blob",
+    "source": "v001_042/034_job_artifact_blob.ts",
+    "contentChecksum": "8438c149f724ad336acc809d154bd4c3ee63bd44a2577db65447e93a0d30e311"
+  },
+  {
+    "version": 35,
+    "name": "job_suspension_recovery",
+    "source": "v001_042/035_job_suspension_recovery.ts",
+    "contentChecksum": "e31652d8290311d61dad870ee344ec0cfb10eb5e8a2596baddb469ffcb9bc468"
+  },
+  {
+    "version": 36,
+    "name": "conversation_turns",
+    "source": "v001_042/036_conversation_turns.ts",
+    "contentChecksum": "7167ebb711aadad736a577e18f79dd58c3161ffd56e527c77f25c6542c2dc8b0"
+  },
+  {
+    "version": 39,
+    "name": "promote_restart_interrupted_paused",
+    "source": "v001_042/039_promote_restart_interrupted_paused.ts",
+    "contentChecksum": "1aeb987e20fce9630dfe8671fb74b4b358478d063c6799dc957a942849343c1f"
+  },
+  {
+    "version": 40,
+    "name": "destructive_auth_current",
+    "source": "v001_042/040_destructive_auth_current.ts",
+    "contentChecksum": "de16790b836e8b193e5fd167e2639805c608e13dcc55ed0383362e4e3244b8a9"
+  },
+  {
+    "version": 41,
+    "name": "auth_secret_sqlite",
+    "source": "v001_042/041_auth_secret_sqlite.ts",
+    "contentChecksum": "59151c685c670e1fc6633e1dd9f996dde35418fc86828b7407e3773f8458f8f5"
+  },
+  {
+    "version": 42,
+    "name": "execution_profile",
+    "source": "v001_042/042_execution_profile.ts",
+    "contentChecksum": "e2249d924ab711ee2a3b141c7661a2635aeca3bd5e8678df10dac43a04e7523f"
+  },
+  {
+    "version": 43,
+    "name": "design_module_tables",
+    "source": "index.ts",
+    "contentChecksum": "867e52377ff70d6d10caafd0b0a58cf2c91dc73ba53d520dd3c582332adf4363"
+  },
+  {
+    "version": 44,
+    "name": "design_data_backfill",
+    "source": "044_design_data_backfill.ts",
+    "contentChecksum": "fd38c3aa1f79622a087de5f43b5c678e4898bb15322c67f0bf3f7d5f23d18413"
+  },
+  {
+    "version": 45,
+    "name": "execution_module_tables",
+    "source": "execution.ts",
+    "contentChecksum": "830ed0fc535f26fafade0f0001cfe21f99ef1f2968d7d8cad60afb8c5bad8b1d"
+  },
+  {
+    "version": 46,
+    "name": "execution_data_migrate",
+    "source": "execution-data-migrate.ts",
+    "contentChecksum": "97c9e470de2925fcdb262b544d3089a6aff1dedc5f088e45085d29434023163b"
+  },
+  {
+    "version": 47,
+    "name": "drop_control_plane_tables",
+    "source": "drop-control-plane.ts",
+    "contentChecksum": "aa06aae9f323541fc6b0e89d7d636024208580d78729f33c1c5e5cb6a21f2a22"
+  },
+  {
+    "version": 48,
+    "name": "conversation_module_tables",
+    "source": "conversation.ts",
+    "contentChecksum": "69fe6efd35c9b2f7d65531e91254c90a122f42009f757176769e2edb78a575e5"
+  },
+  {
+    "version": 49,
+    "name": "conversation_data_migrate",
+    "source": "conversation-data.ts",
+    "contentChecksum": "5f215ac673dd9b483ccc84552acde250a3c0044e99af83e83d1de6da1ab38bb2"
+  },
+  {
+    "version": 50,
+    "name": "conversation_cleanup",
+    "source": "conversation-cleanup.ts",
+    "contentChecksum": "6c5fa38582f553578e813b2a09e29e7280a48a239b806f7e113a2e01a3091bc3"
+  },
+  {
+    "version": 51,
+    "name": "actor_id_username_to_user_id",
+    "source": "auth-actor-remap.ts",
+    "contentChecksum": "6084b0f75db89de52ba56094376118bd3c7315901ab69635dc5358d6fc504315"
+  },
+  {
+    "version": 52,
+    "name": "projects_username_to_actor_id",
+    "source": "projects-actor-id.ts",
+    "contentChecksum": "0be112be673cc0c78497a298cc5d9a432bcd886fa2421a0ceda6c340733709b0"
+  },
+  {
+    "version": 53,
+    "name": "settings_namespaces",
+    "source": "settings-namespaces.ts",
+    "contentChecksum": "84eace6ef32f5c96a9f1e9a8ad1763d4ed8b576eb3f15768e4995ecd67a2cc54"
+  },
+  {
+    "version": 54,
+    "name": "realtime_events",
+    "source": "realtime-events.ts",
+    "contentChecksum": "df91aad38414103174338e947e4cb3c19a1b47c1993ca9439016bf1d232ce68d"
+  },
+  {
+    "version": 55,
+    "name": "drop_wizard_columns",
+    "source": "drop-wizard-columns.ts",
+    "contentChecksum": "d94094bcb182489cff2fd211ebbfbe4e5fe2267bacd7b392e6047c7cb424054e"
+  },
+  {
+    "version": 56,
+    "name": "tighten_legacy_thread_schema",
+    "source": "tighten-legacy-thread-schema.ts",
+    "contentChecksum": "b11196b32cae5cf9982579e7fe93e8b57c84ffafcae4ca9d4d5985f7de49097b"
+  },
+  {
+    "version": 57,
+    "name": "legacy_owner_actor_id",
+    "source": "legacy-owner-actor-id.ts",
+    "contentChecksum": "11ef7649588b418ad26b91d84434067860db8ab262478210cb155175df7ec2e0"
+  },
+  {
+    "version": 58,
+    "name": "deletion_requests_actor_id",
+    "source": "deletion-requests-actor-id.ts",
+    "contentChecksum": "ad3571d7cf9968a82093356a317780b7432901db8d1c7213bd4ac6208c6ec4f1"
+  },
+  {
+    "version": 59,
+    "name": "drop_legacy_job_shell_tables",
+    "source": "drop-legacy-job-shell-tables.ts",
+    "contentChecksum": "6b1f9ad511a2811592b8bdc1ddcde375e9e83bcd8b22cd00df749a9e41463ea8"
+  },
+  {
+    "version": 60,
+    "name": "drop_thread_jobs_graph",
+    "source": "drop-thread-jobs-graph.ts",
+    "contentChecksum": "83548f1ee85d87d200c516c6d7f2b3369921768c4372160a9001d45c0c5df2d5"
+  },
+  {
+    "version": 61,
+    "name": "canonical_provider_codes",
+    "source": "canonical-provider-codes.ts",
+    "contentChecksum": "a71020623e9941198e8b3084836e13074a752fb6311503dac196c4ee3f8b4009"
+  },
+  {
+    "version": 62,
+    "name": "assets_and_drop_dead_runtime_tables",
+    "source": "assets-and-drop-dead-runtime.ts",
+    "contentChecksum": "4ed61eba48e75cdbe074c05ad5d6d87410e87e0e15909ab7f3e2a381f5d11a05"
+  },
+  {
+    "version": 63,
+    "name": "project_fk_and_asset_storage_keys",
+    "source": "project-fk-and-asset-storage.ts",
+    "contentChecksum": "e371c1686e62f8e55c3f1aaf2d97917b6c19208e2326042a8d55377503ee4858"
+  },
+  {
+    "version": 64,
+    "name": "drop_backup_and_marker_tables",
+    "source": "drop-backup-and-marker-tables.ts",
+    "contentChecksum": "d23245b98b7971c5b97c1b18e4fbb9695b84d53035ac4898b1dd44197a9de48e"
+  },
+  {
+    "version": 65,
+    "name": "drop_legacy_thread_tables",
+    "source": "drop-legacy-thread-tables.ts",
+    "contentChecksum": "e87bf10b752e1512519b2310139e47abf199b99db91b4bdfd1658403a8b0098a"
+  },
+  {
+    "version": 66,
+    "name": "planning_capacity_index",
+    "source": "planning-capacity-index.ts",
+    "contentChecksum": "e2f90e6710b18604d1cc6595491125c49dc568bca62230c5f4decb837e7bc8c7"
+  },
+  {
+    "version": 67,
+    "name": "execution_tree_contracts",
+    "source": "execution-tree-contracts.ts",
+    "contentChecksum": "540b3c8c187bb90f648d76b75d9725b6b9a74dbbf4c6ba1cac8f8c2682fa63f4"
+  },
+  {
+    "version": 68,
+    "name": "conversation_query_indexes",
+    "source": "conversation-query-indexes.ts",
+    "contentChecksum": "b8861786a6153b89cb303e87f132c42f1e6c0dc6bf159a453a75bb7d2c93d2a6"
+  }
+]

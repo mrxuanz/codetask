@@ -6,7 +6,7 @@ import test from 'node:test'
 import {
   StorageValidationNonceRepository,
   validateStorageTarget
-} from '../../src/main/storage-validation'
+} from '../../apps/service/src/storage-validation'
 
 test('storage validation rejects relative, non-empty, forbidden, and symlink targets', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-storage-validation-'))
@@ -50,4 +50,18 @@ test('validation nonce is single-use and bound to the canonical path', (t) => {
   const second = validateStorageTarget({ path, minFreeBytes: 0, nonceRepository: grants })
   assert.equal(grants.consume(second.nonce!, second.canonicalPath), true)
   assert.equal(grants.consume(second.nonce!, second.canonicalPath), false)
+})
+
+test('validation nonce repository evicts only the oldest grant at capacity', () => {
+  const grants = new StorageValidationNonceRepository(2)
+  const first = grants.issue('/first')
+  const second = grants.issue('/second')
+
+  assert.equal(grants.consume(second, '/second'), true)
+
+  const replacementSecond = grants.issue('/second')
+  const third = grants.issue('/third')
+  assert.equal(grants.consume(first, '/first'), false)
+  assert.equal(grants.consume(replacementSecond, '/second'), true)
+  assert.equal(grants.consume(third, '/third'), true)
 })

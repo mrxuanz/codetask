@@ -1,10 +1,25 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
+import type { AgentRuntime } from '@codetask/agent-runtime'
 import { composeDesignModule } from '../../packages/server-core/src/modules/design/index.ts'
-import { composeExecutionModule } from '../../packages/server-core/src/modules/execution/index.ts'
+import {
+  composeExecutionModule as composeProductionExecutionModule,
+  FakeAgentRuntime
+} from '../../packages/server-core/src/modules/execution/index.ts'
 import { migration043DesignModuleTables } from '../../packages/database/src/migrations/index.ts'
 import { migration045ExecutionModuleTables } from '../../packages/database/src/migrations/execution.ts'
+
+function composeExecutionModule(
+  deps: Omit<Parameters<typeof composeProductionExecutionModule>[0], 'agentRuntime'> & {
+    agentRuntime?: AgentRuntime
+  }
+): ReturnType<typeof composeProductionExecutionModule> {
+  return composeProductionExecutionModule({
+    ...deps,
+    agentRuntime: deps.agentRuntime ?? new FakeAgentRuntime()
+  })
+}
 
 function composeTestModules(db: Database.Database): {
   design: ReturnType<typeof composeDesignModule>
@@ -72,19 +87,8 @@ describe('design publish → execution succeed', () => {
     }
     assert.ok(tree, 'expected planner to produce a tree')
 
-    let revision = tree!.revision
-    for (const milestone of tree!.milestones) {
-      tree = await design.planning.confirmNode(actor, session.id, milestone.id, revision)
-      revision = tree.revision
-      for (const slice of milestone.slices) {
-        tree = await design.planning.confirmNode(actor, session.id, slice.id, revision)
-        revision = tree.revision
-        for (const task of slice.tasks) {
-          tree = await design.planning.confirmNode(actor, session.id, task.id, revision)
-          revision = tree.revision
-        }
-      }
-    }
+    tree = await design.planning.confirmTree(actor, session.id, tree!.revision)
+    const revision = tree.revision
 
     const published = await design.planning.publish(
       actor,

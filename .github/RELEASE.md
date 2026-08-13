@@ -8,8 +8,8 @@ service natively on six targets:
 - Windows AMD64 and ARM64
 
 Public artifact names use only the operating system and architecture, for example
-`codetask-0.1.0-beta-linux-amd64.AppImage` and
-`codetask-server-0.1.0-beta-windows-arm64.tar.gz`. GitHub runner image labels such as
+`codetask-0.1.0-beta.1-linux-amd64.AppImage` and
+`codetask-server-0.1.0-beta.1-windows-arm64.tar.gz`. GitHub runner image labels such as
 `ubuntu-24.04` are not included in job display names or published filenames.
 
 All CI and release jobs read the exact Node version from `.node-version`; Rust uses the exact
@@ -19,7 +19,7 @@ across all target runners.
 ## Manual release
 
 Run the workflow from the commit that should be released and enter a new `v*` tag such as
-`v0.1.0-beta`. If the tag already exists, it must point to that exact commit. The workflow
+`v0.1.0-beta.1`. If the tag already exists, it must point to that exact commit. The workflow
 intentionally rejects an older tag that points elsewhere, because building current code
 under an old source tag would make the release unverifiable.
 

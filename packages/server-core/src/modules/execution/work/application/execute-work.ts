@@ -34,6 +34,7 @@ export function createExecuteWorkService(deps: {
   acceptResult: ReturnType<typeof import('./accept-work-result.ts').createAcceptWorkResultService>
   handles?: RuntimeHandleRegistry
   evidenceGraceMs?: number
+  resolveAttachmentPath?: (attachmentId: string) => string | null
 }): ExecuteWorkService {
   return {
     async dispatch(input: {
@@ -66,7 +67,7 @@ export function createExecuteWorkService(deps: {
 
       const attemptId = newId('attempt')
       const idempotencyKey = stableHash(
-        `${input.jobId}:${input.workId}:${work.generation}:${work.sourceTaskId}`
+        `${input.jobId}:${input.workId}:${work.generation}:${work.sourceTaskId}:attempt:${attemptNumber}`
       )
       const sessionId = `task-mcp-${attemptId}`
 
@@ -116,9 +117,20 @@ export function createExecuteWorkService(deps: {
           .all(input.jobId, work.generation, input.workId) as Array<{ reference_id: string }>
       ).map((row) => row.reference_id)
       let referenceContext = { readRoots: [] as string[], promptAppendix: '' }
-      if (referenceRow && referenceIds.length > 0) {
+      if (
+        referenceRow &&
+        (referenceIds.length > 0 || work.referenceReason || work.requiredInputs.length > 0)
+      ) {
         const manifest = JSON.parse(referenceRow.reference_manifest_json) as ReferenceManifest
-        referenceContext = buildAssignedReferenceContext(manifest, referenceIds)
+        referenceContext = buildAssignedReferenceContext(
+          manifest,
+          referenceIds,
+          {
+            referenceReason: work.referenceReason,
+            requiredInputs: work.requiredInputs
+          },
+          deps.resolveAttachmentPath
+        )
       }
 
       const leaseRow = deps.db
@@ -237,9 +249,9 @@ export function createExecuteWorkService(deps: {
         })
       }
 
+      let acceptedViaSideChannel = false
       try {
         let turnCompleted = false
-        let acceptedViaSideChannel = false
 
         for await (const event of deps.agentRuntime.runTurn(turnInput)) {
           if (event.type === 'tool_call' && event.name === 'report_task_result') {
@@ -257,6 +269,7 @@ export function createExecuteWorkService(deps: {
             break
           }
           if (event.type === 'failed') {
+            if (acceptedViaSideChannel) return
             const aborted = Boolean(signal?.aborted)
             failAttempt(event.message, aborted ? 'pending' : 'failed')
             return
@@ -279,9 +292,21 @@ export function createExecuteWorkService(deps: {
         // Without an MCP URL (unit tests / unbound port), fail immediately.
         const graceMs = deps.evidenceGraceMs ?? (mcpUrl ? TASK_EVIDENCE_GRACE_MS : 0)
         let graceTimer: ReturnType<typeof setTimeout> | undefined
+        let removeAbortListener = (): void => {}
+        const abortPromise = new Promise<TaskEvidence>((_, reject) => {
+          if (!signal) return
+          const onAbort = (): void => reject(new Error('Turn aborted by control'))
+          if (signal.aborted) {
+            onAbort()
+            return
+          }
+          signal.addEventListener('abort', onAbort, { once: true })
+          removeAbortListener = () => signal.removeEventListener('abort', onAbort)
+        })
         try {
           const evidence = await Promise.race([
             evidencePromise,
+            abortPromise,
             new Promise<TaskEvidence>((_, reject) => {
               graceTimer = setTimeout(() => {
                 reject(new Error('Timed out waiting for report_task_result after turn completed'))
@@ -292,11 +317,13 @@ export function createExecuteWorkService(deps: {
         } catch (error) {
           const message =
             error instanceof Error ? error.message : 'Missing report_task_result evidence'
-          failAttempt(message, 'failed')
+          failAttempt(message, signal?.aborted ? 'pending' : 'failed')
         } finally {
           if (graceTimer !== undefined) clearTimeout(graceTimer)
+          removeAbortListener()
         }
       } catch (error) {
+        if (acceptedViaSideChannel) return
         const message = error instanceof Error ? error.message : String(error)
         failAttempt(message, signal?.aborted ? 'pending' : 'failed')
       } finally {

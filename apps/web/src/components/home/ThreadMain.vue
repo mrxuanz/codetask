@@ -162,7 +162,8 @@ async function handleSend(payload: {
     v-if="!activeProject"
     class="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground"
   >
-    {{ t('workspace.selectProject') }}
+    <h1 class="sr-only">{{ t('workspace.nav.chat') }}</h1>
+    <p>{{ t('workspace.selectProject') }}</p>
   </div>
 
   <div v-else-if="!activeThread" class="flex h-full min-h-0 flex-1 flex-col">

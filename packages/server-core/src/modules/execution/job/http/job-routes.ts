@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { Value } from '@sinclair/typebox/value'
-import { JobCommandBodySchema } from '@codetask/contracts'
+import { JobCommandBodySchema, type JobCommandBody } from '@codetask/contracts'
 import type { QueryJobService } from '../application/query-job.ts'
 import type { ControlJobService } from '../application/control-job.ts'
 import type { DeleteJobService } from '../application/delete-job.ts'
@@ -55,14 +55,26 @@ function mapError(
   if (error instanceof ExecutionForbiddenError) {
     return { body: fail(error.code, error.message, requestId), status: 403 as const }
   }
+  console.error('[execution] unhandled HTTP error', { requestId, error })
   return {
-    body: fail(
-      'execution.internal',
-      error instanceof Error ? error.message : String(error),
-      requestId
-    ),
+    body: fail('execution.internal', 'Internal server error', requestId),
     status: 500 as const
   }
+}
+
+async function parseJobCommandBody(c: {
+  req: { json: () => Promise<unknown> }
+}): Promise<JobCommandBody> {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new ExecutionValidationError('Request body must be valid JSON')
+  }
+  if (!Value.Check(JobCommandBodySchema, body)) {
+    throw new ExecutionValidationError('Invalid job command body')
+  }
+  return body
 }
 
 function requireActor(c: { get: (k: 'actor') => Actor | undefined }): Actor {
@@ -82,7 +94,14 @@ export function createJobRoutes(deps: {
   app.get('/', async (c) => {
     try {
       const actor = requireActor(c)
-      const data = await deps.query.list(actor)
+      const rawPage = c.req.query('page')
+      const rawLimit = c.req.query('limit')
+      const data = await deps.query.listPage(actor, {
+        status: c.req.query('status'),
+        page: rawPage === undefined ? undefined : Number(rawPage),
+        limit: rawLimit === undefined ? undefined : Number(rawLimit),
+        query: c.req.query('q')
+      })
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
       const mapped = mapError(error, c.get('requestId'))
@@ -148,7 +167,7 @@ export function createJobRoutes(deps: {
   app.post('/:jobId/pause', async (c) => {
     try {
       const actor = requireActor(c)
-      const body = Value.Parse(JobCommandBodySchema, await c.req.json())
+      const body = await parseJobCommandBody(c)
       const data = deps.control.pause(actor, c.req.param('jobId'), body)
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
@@ -160,7 +179,7 @@ export function createJobRoutes(deps: {
   app.post('/:jobId/continue', async (c) => {
     try {
       const actor = requireActor(c)
-      const body = Value.Parse(JobCommandBodySchema, await c.req.json())
+      const body = await parseJobCommandBody(c)
       const data = deps.control.continue(actor, c.req.param('jobId'), body)
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
@@ -172,7 +191,7 @@ export function createJobRoutes(deps: {
   app.post('/:jobId/cancel', async (c) => {
     try {
       const actor = requireActor(c)
-      const body = Value.Parse(JobCommandBodySchema, await c.req.json())
+      const body = await parseJobCommandBody(c)
       const data = deps.control.cancel(actor, c.req.param('jobId'), body)
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
@@ -184,7 +203,7 @@ export function createJobRoutes(deps: {
   app.post('/:jobId/restart', async (c) => {
     try {
       const actor = requireActor(c)
-      const body = Value.Parse(JobCommandBodySchema, await c.req.json())
+      const body = await parseJobCommandBody(c)
       const data = deps.control.restart(actor, c.req.param('jobId'), body)
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
@@ -196,7 +215,7 @@ export function createJobRoutes(deps: {
   app.delete('/:jobId', async (c) => {
     try {
       const actor = requireActor(c)
-      const body = Value.Parse(JobCommandBodySchema, await c.req.json())
+      const body = await parseJobCommandBody(c)
       const data = deps.deleteJob.delete(actor, c.req.param('jobId'), body)
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
@@ -214,8 +233,8 @@ export function createExecutionQueueRoute(deps: {
   const app = new Hono<ExecutionHttpEnv>()
   app.get('/', async (c) => {
     try {
-      requireActor(c)
-      const data = deps.queue.listQueued()
+      const actor = requireActor(c)
+      const data = deps.queue.listQueued(actor.userId)
       return c.json(ok(data, c.get('requestId')))
     } catch (error) {
       const mapped = mapError(error, c.get('requestId'))

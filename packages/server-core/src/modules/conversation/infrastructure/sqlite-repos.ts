@@ -346,10 +346,23 @@ export function createSqliteTurnRepository(db: Database.Database): TurnRepositor
         .prepare(
           `SELECT * FROM conversation_turns
            WHERE conversation_id = ? AND state IN ('queued', ${activeList})
-           ORDER BY created_at DESC, id DESC LIMIT 1`
+           ORDER BY CASE WHEN state = 'queued' THEN 1 ELSE 0 END ASC,
+                    created_at ASC, id ASC
+           LIMIT 1`
         )
         .get(conversationId) as Record<string, unknown> | undefined
       return row ? mapTurn(row) : null
+    },
+    listActiveForConversation(conversationId) {
+      return (
+        db
+          .prepare(
+            `SELECT * FROM conversation_turns
+             WHERE conversation_id = ? AND state IN (${activeList})
+             ORDER BY created_at ASC, id ASC`
+          )
+          .all(conversationId) as Record<string, unknown>[]
+      ).map(mapTurn)
     },
     listActive() {
       return (
@@ -361,25 +374,45 @@ export function createSqliteTurnRepository(db: Database.Database): TurnRepositor
           .all() as Record<string, unknown>[]
       ).map(mapTurn)
     },
-    listQueued(actorId) {
-      if (actorId) {
-        return (
-          db
-            .prepare(
-              `SELECT * FROM conversation_turns WHERE state = 'queued' AND actor_id = ?
-               ORDER BY created_at ASC, id ASC`
-            )
-            .all(actorId) as Record<string, unknown>[]
-        ).map(mapTurn)
-      }
+    listAdmittableQueued(actorId, limit, maxActivePerActor) {
+      const actorFilter = actorId ? 'AND queued.actor_id = ?' : ''
+      const params = actorId ? [maxActivePerActor, actorId, limit] : [maxActivePerActor, limit]
       return (
         db
           .prepare(
-            `SELECT * FROM conversation_turns WHERE state = 'queued'
-             ORDER BY created_at ASC, id ASC`
+            `SELECT queued.*
+               FROM conversation_turns queued
+              WHERE queued.state = 'queued'
+                AND NOT EXISTS (
+                  SELECT 1 FROM conversation_turns active_conversation
+                   WHERE active_conversation.conversation_id = queued.conversation_id
+                     AND active_conversation.state IN (${activeList})
+                )
+                AND (
+                  SELECT COUNT(*) FROM conversation_turns active_actor
+                   WHERE active_actor.actor_id = queued.actor_id
+                     AND active_actor.state IN (${activeList})
+                ) < ?
+                ${actorFilter}
+              ORDER BY queued.created_at ASC, queued.id ASC
+              LIMIT ?`
           )
-          .all() as Record<string, unknown>[]
+          .all(...params) as Record<string, unknown>[]
       ).map(mapTurn)
+    },
+    queuedStats(actorId) {
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS count,
+                  COALESCE(SUM(
+                    length(CAST(input_text AS BLOB)) +
+                    length(CAST(settings_snapshot_json AS BLOB))
+                  ), 0) AS payload_bytes
+             FROM conversation_turns
+            WHERE actor_id = ? AND state = 'queued'`
+        )
+        .get(actorId) as { count: number; payload_bytes: number } | undefined
+      return { count: row?.count ?? 0, payloadBytes: row?.payload_bytes ?? 0 }
     },
     countQueuedAhead(conversationId, createdAt, turnId) {
       const row = db

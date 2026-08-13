@@ -7,7 +7,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const testsRoot = dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = join(testsRoot, '..')
-const EXCLUDED_PREFIXES = ['business-e2e/fixtures/', 'provider-contract/', 'workflow/']
+const EXCLUDED_PREFIXES = [
+  'business-api-e2e/',
+  'business-e2e/fixtures/',
+  'provider-contract/',
+  'workflow/'
+]
 
 export function discoverUnitTests() {
   return readdirSync(testsRoot, { recursive: true })

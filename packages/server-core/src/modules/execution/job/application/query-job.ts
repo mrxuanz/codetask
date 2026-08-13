@@ -1,6 +1,12 @@
-import type { JobDetail, JobSummary, JobTreeDto } from '@codetask/contracts'
+import type {
+  JobDetail,
+  JobListResult,
+  JobState,
+  JobSummary,
+  JobTreeDto
+} from '@codetask/contracts'
 import type { Actor } from '../../shared.ts'
-import { ExecutionForbiddenError } from '../../shared.ts'
+import { ExecutionForbiddenError, ExecutionValidationError } from '../../shared.ts'
 import type { WorkItemRecord } from '../../work/domain/work-item.ts'
 import { JobRepository } from '../infrastructure/job-repository.ts'
 import { QueueRepository } from '../../queue/infrastructure/queue-repository.ts'
@@ -24,6 +30,34 @@ export class QueryJobService {
     return rows.map((job) =>
       this.jobs.toSummary(job, this.queue.getPosition(job.id, job.executionGeneration))
     )
+  }
+
+  listPage(
+    actor: Actor,
+    options: { status?: string; page?: number; limit?: number; query?: string } = {}
+  ): JobListResult {
+    const page = options.page ?? 1
+    const limit = options.limit ?? 50
+    if (!Number.isInteger(page) || page < 1) {
+      throw new ExecutionValidationError('page must be a positive integer')
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new ExecutionValidationError('limit must be an integer between 1 and 200')
+    }
+
+    const status = normalizeListStatus(options.status)
+    const query = options.query?.trim().toLowerCase() ?? ''
+    const result = this.jobs.listPageByActor({
+      actorId: actor.userId,
+      state: status,
+      query,
+      page,
+      limit
+    })
+    const jobs = result.jobs.map((job) =>
+      this.jobs.toDetail(job, this.queue.getPosition(job.id, job.executionGeneration))
+    )
+    return { jobs, total: result.total, page, limit }
   }
 
   get(actor: Actor, jobId: string): JobDetail {
@@ -94,4 +128,23 @@ export class QueryJobService {
       createdAt: row.created_at
     }))
   }
+}
+
+const JOB_STATES = new Set<JobState>([
+  'queued',
+  'running',
+  'pausing',
+  'paused',
+  'cancelling',
+  'succeeded',
+  'failed',
+  'cancelled'
+])
+
+function normalizeListStatus(status: string | undefined): JobState | null {
+  const normalized = status?.trim().toLowerCase()
+  if (!normalized || normalized === 'all') return null
+  if (normalized === 'completed') return 'succeeded'
+  if (JOB_STATES.has(normalized as JobState)) return normalized as JobState
+  throw new ExecutionValidationError(`Unsupported job status filter: ${status}`)
 }

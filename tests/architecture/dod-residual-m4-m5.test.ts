@@ -59,10 +59,13 @@ describe('architecture residual DoD — M4', () => {
 
 describe('architecture residual DoD — M5', () => {
   it('planning session mapper has no as-unknown cast', () => {
+    const mappers = readFileSync(join(root, 'apps/web/src/api/planning-view-mappers.ts'), 'utf8')
+    assert.match(mappers, /function mapPlanningSessionToJob/)
+    assert.doesNotMatch(mappers, /as unknown as PlanningSessionViewDto/)
+    assert.match(mappers, /function mapExecutionJobToPlanView/)
+
     const jobsApi = readFileSync(join(root, 'apps/web/src/api/jobs.ts'), 'utf8')
-    assert.match(jobsApi, /function mapPlanningSessionToJob/)
-    assert.doesNotMatch(jobsApi, /as unknown as PlanningSessionViewDto/)
-    assert.match(jobsApi, /mapExecutionJobToPlanView/)
+    assert.match(jobsApi, /export \{ mapExecutionJobToPlanView \}/)
   })
 
   it('threads façade is deleted; conversation client owns list helpers', () => {

@@ -4,11 +4,11 @@ import test from 'node:test'
 
 test('shared server composition and standalone adapters do not import Electron', () => {
   const sources = [
-    new URL('../../src/main/server.ts', import.meta.url),
-    new URL('../../src/standalone/data-dir.ts', import.meta.url),
-    new URL('../../src/main/storage-selection.ts', import.meta.url),
-    new URL('../../src/standalone/platform.ts', import.meta.url),
-    new URL('../../src/standalone/standalone-main.ts', import.meta.url)
+    new URL('../../apps/service/src/server.ts', import.meta.url),
+    new URL('../../apps/service/src/node-data-dir.ts', import.meta.url),
+    new URL('../../packages/service-bootstrap/src/storage/storage-selection.ts', import.meta.url),
+    new URL('../../apps/service/src/node-platform.ts', import.meta.url),
+    new URL('../../apps/service/src/standalone-main.ts', import.meta.url)
   ]
 
   for (const source of sources) {
@@ -20,7 +20,7 @@ test('shared server composition and standalone adapters do not import Electron',
 
 test('standalone entry forwards the CLI data directory to its platform adapter', () => {
   const source = readFileSync(
-    new URL('../../src/standalone/standalone-main.ts', import.meta.url),
+    new URL('../../apps/service/src/standalone-main.ts', import.meta.url),
     'utf8'
   )
   assert.match(source, /createNodeServerPlatform\(\{ dataDir: cli\.dataDir \}\)/)

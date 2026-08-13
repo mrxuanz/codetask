@@ -13,7 +13,7 @@ import { useDebounceFn } from '@vueuse/core'
 import type { ExecutionJob } from '@renderer/api/jobs'
 import { newIdempotencyKey, resolveJobsApi, type JobsApi } from '@renderer/api/jobs-api'
 import { ApiError } from '@renderer/api/client'
-import { JobsStore } from '@renderer/stores/jobs-store'
+import type { ApiSuccess } from '@renderer/api/types'
 import {
   canCancel,
   canDelete,
@@ -21,6 +21,7 @@ import {
   getPauseButtonText
 } from '@renderer/stores/ui-actions'
 import { toast, toastError } from '@renderer/lib/toast'
+import { mergeExecutionJobSnapshot } from '@renderer/lib/mergeExecutionJob'
 import { useRealtimeGateway } from '@renderer/composables/useRealtimeGateway'
 import type { RealtimeEnvelope } from '@codetask/contracts'
 import { jobNeedsRealtimeWatch } from '@codetask/contracts/job-realtime'
@@ -51,14 +52,16 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   searchQuery: Ref<string>
   jobs: Ref<ExecutionJob[]>
   total: Ref<number>
+  page: Ref<number>
+  totalPages: ComputedRef<number>
   loadingList: Ref<boolean>
   loadingDetail: Ref<boolean>
   error: Ref<string | null>
-  actionError: Ref<string | null>
   runningAction: Ref<string | null>
   detail: Ref<ExecutionJob | null>
   selectedJob: ComputedRef<ExecutionJob | null>
   loadJobs: () => Promise<void>
+  goToPage: (page: number) => Promise<void>
   loadDetail: (id: string) => Promise<void>
   applyJobPatch: (job: ExecutionJob) => void
   startRealtimePolling: () => void
@@ -74,14 +77,13 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   canCancelAction: ComputedRef<boolean>
   canDeleteAction: ComputedRef<boolean>
   pauseButtonText: ComputedRef<string | null>
-  v3Store: JobsStore
 } {
   const { selectedJobId } = options
   const router = useRouter()
   const { t } = useI18n()
   const realtime = useRealtimeGateway()
-  const v3Store = new JobsStore()
   const jobsApi: JobsApi = resolveJobsApi()
+  const pageSize = 50
 
   function requireRevision(job: ExecutionJob): number {
     if (typeof job.stateRevision !== 'number') {
@@ -94,10 +96,11 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   const searchQuery = ref('')
   const jobs = ref<ExecutionJob[]>([])
   const total = ref(0)
+  const page = ref(1)
+  const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
   const loadingList = ref(true)
   const loadingDetail = ref(false)
   const error = ref<string | null>(null)
-  const actionError = ref<string | null>(null)
   const runningAction = ref<string | null>(null)
   const detail = ref<ExecutionJob | null>(null)
 
@@ -107,45 +110,41 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   let loadDetailToken = 0
   let loadJobsToken = 0
 
-  const selectedJob = computed(() =>
-    selectedJobId.value
-      ? (detail.value ?? jobs.value.find((j) => j.id === selectedJobId.value) ?? null)
-      : null
-  )
+  const selectedJob = computed(() => {
+    const jobId = selectedJobId.value
+    if (!jobId) return null
+    if (detail.value?.id === jobId) return detail.value
+    return jobs.value.find((job) => job.id === jobId) ?? null
+  })
 
   const selectedActions = computed(() => actionsFor(selectedJob.value))
 
-  const canPause = computed(() => selectedActions.value.includes('pause'))
-  const canContinue = computed(() => selectedActions.value.includes('continue'))
-  const canRestart = computed(() => selectedActions.value.includes('restart'))
-  const canCancelAction = computed(() => canCancel(selectedActions.value))
+  const actionsReady = computed(
+    () =>
+      !loadingDetail.value &&
+      runningAction.value === null &&
+      selectedJob.value?.id === selectedJobId.value
+  )
+  const canPause = computed(() => actionsReady.value && selectedActions.value.includes('pause'))
+  const canContinue = computed(
+    () => actionsReady.value && selectedActions.value.includes('continue')
+  )
+  const canRestart = computed(() => actionsReady.value && selectedActions.value.includes('restart'))
+  const canCancelAction = computed(() => actionsReady.value && canCancel(selectedActions.value))
   const canDeleteAction = computed(() => {
     const job = selectedJob.value
     if (!job) return false
-    return (
-      canDelete(selectedActions.value) &&
-      !['running', 'pausing', 'cancelling', 'queued'].includes(job.state)
-    )
+    return actionsReady.value && canDelete(selectedActions.value)
   })
   const pauseButtonText = computed(() =>
     selectedJob.value ? getPauseButtonText({ state: selectedJob.value.state }) : null
   )
 
-  function mergeJobPatch(
+  function mergeIncomingJob(
     existing: ExecutionJob | null | undefined,
     job: ExecutionJob
-  ): ExecutionJob {
-    const has = (key: string): boolean => key in job
-    return {
-      ...(existing ?? ({} as ExecutionJob)),
-      ...job,
-      availableActions: has('availableActions')
-        ? job.availableActions
-        : (existing?.availableActions ?? job.availableActions),
-      stateRevision: has('stateRevision')
-        ? job.stateRevision
-        : (existing?.stateRevision ?? job.stateRevision)
-    }
+  ): ExecutionJob | null {
+    return mergeExecutionJobSnapshot(existing, job)
   }
 
   const debouncedRefreshJobs = useDebounceFn(() => void loadJobs({ silent: true }), 150)
@@ -164,30 +163,6 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     if (selectedJobId.value) {
       debouncedRefreshSelectedDetail(selectedJobId.value)
     }
-  }
-
-  function mergeIncomingJob(
-    existing: ExecutionJob | null | undefined,
-    job: ExecutionJob
-  ): ExecutionJob | null {
-    const stateRevision = requireRevision(job)
-    const decision = v3Store.mergeJob(
-      {
-        id: job.id,
-        state: jobState(job),
-        stateRevision,
-        availableActions: job.availableActions ?? []
-      },
-      'authoritative_snapshot'
-    )
-    if (decision.kind === 'ignore_stale') {
-      return existing ?? null
-    }
-    if (decision.kind === 'resync') {
-      scheduleResync(job.id)
-      return existing ?? null
-    }
-    return mergeJobPatch(existing, job)
   }
 
   function applyJobPatch(job: ExecutionJob): void {
@@ -210,26 +185,35 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     if (!silent) loadingList.value = true
     error.value = null
     try {
-      const res = await jobsApi.fetchJobs(statusFilter.value, 1, 50, searchQuery.value)
+      const res = await jobsApi.fetchJobs(
+        statusFilter.value,
+        page.value,
+        pageSize,
+        searchQuery.value
+      )
       if (token !== loadJobsToken) return
       const currentById = new Map(jobs.value.map((job) => [job.id, job] as const))
+      if (detail.value) currentById.set(detail.value.id, detail.value)
       jobs.value = res.data.jobs
         .map((job) => mergeIncomingJob(currentById.get(job.id), job))
         .filter((job): job is ExecutionJob => job !== null)
       total.value = res.data.total
+      page.value = res.data.page
       syncListRealtimeWatches()
-      const currentId = selectedJobId.value
-      const stillExists = currentId ? res.data.jobs.some((job) => job.id === currentId) : false
-      if (currentId && !stillExists) {
-        await router.replace({ name: 'tasks' })
-      }
     } catch (err) {
       if (!silent) {
         error.value = err instanceof Error ? err.message : t('workspace.tasks.loadFailed')
       }
     } finally {
-      if (!silent) loadingList.value = false
+      if (!silent && token === loadJobsToken) loadingList.value = false
     }
+  }
+
+  async function goToPage(nextPage: number): Promise<void> {
+    const normalized = Math.min(Math.max(1, nextPage), totalPages.value)
+    if (normalized === page.value) return
+    page.value = normalized
+    await loadJobs()
   }
 
   async function loadDetail(jobId: string, options?: { silent?: boolean }): Promise<void> {
@@ -243,6 +227,11 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       syncRealtimeWatch()
     } catch (err) {
       if (token !== loadDetailToken) return
+      if (err instanceof ApiError && err.httpStatus === 404 && selectedJobId.value === jobId) {
+        detail.value = null
+        await router.replace({ name: 'tasks' })
+        return
+      }
       if (!silent) {
         error.value = err instanceof Error ? err.message : t('workspace.tasks.detailFailed')
         detail.value = null
@@ -264,6 +253,8 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
   function handleRealtimeEvent(_jobId: string, event: RealtimeEnvelope): void {
     // Minimal durable events no longer carry full JobDetail — always HTTP resync.
     if (
+      event.type === 'job.submitted' ||
+      event.type === 'job.started' ||
       event.type === 'job.changed' ||
       event.type === 'job.completed' ||
       event.type === 'job.queue.changed' ||
@@ -276,6 +267,10 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       scheduleResync(_jobId)
       if (event.type === 'job.completed' || event.type === 'job.deleted') {
         syncRealtimeWatch()
+      }
+      if (event.type === 'job.deleted' && selectedJobId.value === _jobId) {
+        detail.value = null
+        void router.replace({ name: 'tasks' })
       }
     }
   }
@@ -325,9 +320,15 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     }
   }
 
-  watch(statusFilter, () => void loadJobs())
+  watch(statusFilter, () => {
+    page.value = 1
+    void loadJobs()
+  })
   const debouncedSearch = useDebounceFn(() => void loadJobs(), 300)
-  watch(searchQuery, () => void debouncedSearch())
+  watch(searchQuery, () => {
+    page.value = 1
+    void debouncedSearch()
+  })
 
   watch(
     selectedJobId,
@@ -335,6 +336,7 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
       if (jobId !== prevJobId) {
         selectedJobWatchRelease?.()
         selectedJobWatchRelease = null
+        detail.value = null
       }
       if (!jobId) {
         detail.value = null
@@ -352,19 +354,28 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   async function runAction(
     action: string,
-    fn: (job: ExecutionJob, idempotencyKey: string) => Promise<unknown>
+    fn: (job: ExecutionJob, idempotencyKey: string) => Promise<ApiSuccess<{ job: ExecutionJob }>>
   ): Promise<void> {
     const job = selectedJob.value
-    if (!job) return
+    if (
+      !job ||
+      loadingDetail.value ||
+      runningAction.value !== null ||
+      job.id !== selectedJobId.value ||
+      !actionsFor(job).includes(action)
+    ) {
+      return
+    }
     runningAction.value = action
-    actionError.value = null
     const idempotencyKey = newIdempotencyKey()
     try {
-      await fn(job, idempotencyKey)
-      await loadDetail(job.id)
+      const result = await fn(job, idempotencyKey)
+      applyJobPatch(result.data.job)
+      await loadJobs({ silent: true })
     } catch (err) {
       if (isRevisionConflict(err)) {
-        await loadDetail(job.id)
+        if (selectedJobId.value === job.id) await loadDetail(job.id)
+        else await loadJobs({ silent: true })
         toast.warning(t('workspace.tasks.revisionConflict'))
         return
       }
@@ -382,7 +393,14 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   async function handleContinue(): Promise<void> {
     await runAction('continue', (job, idempotencyKey) =>
-      jobsApi.continue(job.id, requireRevision(job), idempotencyKey)
+      jobsApi.continue(
+        job.id,
+        requireRevision(job),
+        idempotencyKey,
+        job.recoveryReason === 'uncertain_provider_outcome' ||
+          job.recoveryReason === 'restart_interrupted' ||
+          job.recoveryReason === 'migration_ambiguous'
+      )
     )
   }
 
@@ -394,24 +412,40 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
 
   async function handleCancel(): Promise<void> {
     await runAction('cancel', (job, idempotencyKey) =>
-      jobsApi.cancel(job.id, requireRevision(job), 'user_cancelled', idempotencyKey)
+      jobsApi.cancel(job.id, requireRevision(job), idempotencyKey)
     )
   }
 
   async function handleDelete(): Promise<void> {
     const job = selectedJob.value
-    if (!job || !jobsApi.delete) return
+    if (
+      !job ||
+      !jobsApi.delete ||
+      runningAction.value !== null ||
+      loadingDetail.value ||
+      job.id !== selectedJobId.value ||
+      !actionsFor(job).includes('delete')
+    ) {
+      return
+    }
     runningAction.value = 'delete'
-    actionError.value = null
     error.value = null
     try {
       await jobsApi.delete(job.id, requireRevision(job), newIdempotencyKey())
-      detail.value = null
+      const stillSelected = selectedJobId.value === job.id
+      if (stillSelected) detail.value = null
       jobs.value = jobs.value.filter((item) => item.id !== job.id)
       total.value = Math.max(0, total.value - 1)
-      await router.replace({ name: 'tasks' })
+      page.value = Math.min(page.value, totalPages.value)
+      if (stillSelected) await router.replace({ name: 'tasks' })
       await loadJobs({ silent: true })
     } catch (err) {
+      if (isRevisionConflict(err)) {
+        if (selectedJobId.value === job.id) await loadDetail(job.id)
+        else await loadJobs({ silent: true })
+        toast.warning(t('workspace.tasks.revisionConflict'))
+        return
+      }
       toastError(err, t('workspace.tasks.deleteFailed'))
     } finally {
       runningAction.value = null
@@ -423,14 +457,16 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     searchQuery,
     jobs,
     total,
+    page,
+    totalPages,
     loadingList,
     loadingDetail,
     error,
-    actionError,
     runningAction,
     detail,
     selectedJob,
     loadJobs,
+    goToPage,
     loadDetail,
     applyJobPatch,
     startRealtimePolling,
@@ -445,7 +481,6 @@ export function useControlPlaneJobsStore(options: UseControlPlaneJobsStoreOption
     canRestart,
     canCancelAction,
     canDeleteAction,
-    pauseButtonText,
-    v3Store
+    pauseButtonText
   }
 }

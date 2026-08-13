@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import type { SupportedCoreCode } from '../../src/shared/providers/codes.ts'
-import type { ProviderInstallation } from '../../src/shared/providers/installation.ts'
+import type { SupportedCoreCode } from '@codetask/provider-spec/codes'
+import type { ProviderInstallation } from '@codetask/provider-spec/installation'
 import { runClaudeAuthPreflight } from '../../src/server/providers/claude/preflight.ts'
 import { runCodexAuthPreflight } from '../../src/server/providers/codex/preflight.ts'
 import {

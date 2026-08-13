@@ -1,15 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeTurnError } from '../../src/shared/turn-errors/normalize.ts'
+import { normalizeTurnError } from '@codetask/contracts/turn-errors/normalize'
 import {
   parseStoredTurnError,
   serializeStoredTurnError
-} from '../../src/shared/turn-errors/storage.ts'
+} from '@codetask/contracts/turn-errors/storage'
 import {
   createTurnError,
   TURN_CANCELLED,
   JOB_PAUSED
-} from '../../src/shared/turn-errors/turn-error.ts'
+} from '@codetask/contracts/turn-errors/turn-error'
 
 test('normalizeTurnError maps Cursor keepalive failures to acp_keepalive_timeout', () => {
   const dto = normalizeTurnError(

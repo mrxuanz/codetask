@@ -1,5 +1,10 @@
 {
-  "extends": "../../tsconfig.node.json",
-  "compilerOptions": { "composite": false, "noEmit": true, "types": ["node"] },
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "lib": ["ESNext"],
+    "types": ["node"]
+  },
   "include": ["src/**/*.ts"]
 }

@@ -10,7 +10,10 @@ Install dependencies:
 
 ```bash
 npm install
+npm run build:sandbox
 ```
+
+Re-run the sandbox build after changing Rust/native code.
 
 Optional Electron download mirrors (not set by default):
 
@@ -58,7 +61,9 @@ Before opening a pull request:
 1. Run `npm run release:test-gate` for JavaScript/TypeScript changes.
 2. Run the smallest focused test while iterating and report it in the PR.
 3. If you touched sandbox or native code, run the relevant sandbox tests.
-4. Update docs when behavior, setup, or operator workflow changed.
+4. If dependency manifests changed, regenerate `THIRD_PARTY_DEPENDENCIES.md`; for Rust changes,
+   also run `cargo deny --manifest-path native/Cargo.toml check` when `cargo-deny` is installed.
+5. Update docs when behavior, setup, or operator workflow changed.
 
 PR descriptions should explain:
 

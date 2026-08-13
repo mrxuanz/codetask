@@ -1,5 +1,8 @@
-import { existsSync } from 'fs'
-import { join } from 'path'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const moduleDirname = dirname(fileURLToPath(import.meta.url))
 
 function packagedAppPath(): string | null {
   const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
@@ -18,7 +21,7 @@ export function resolveMainSandboxScript(filename: string): string | null {
   }
 
   candidates.push(
-    join(__dirname, '..', 'sandbox', filename),
+    join(moduleDirname, '..', 'sandbox', filename),
     join(process.cwd(), 'out', 'main', relative)
   )
 

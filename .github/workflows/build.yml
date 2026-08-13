@@ -92,6 +92,9 @@ jobs:
       - name: Build app
         run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/build-app.log -- npm run build
 
+      - name: Rebuild native modules for Electron
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/rebuild-electron.log -- npm run rebuild:electron
+
       - if: ${{ inputs.include-release-evidence && runner.os != 'Linux' }}
         name: Require release signing credentials
         run: node scripts/check-release-signing.mjs --platform ${{ inputs.artifact-name }}
@@ -123,6 +126,10 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
           CODETASK_REDACT_ENV_NAMES: CSC_LINK,CSC_KEY_PASSWORD,APPLE_ID,APPLE_APP_SPECIFIC_PASSWORD,APPLE_TEAM_ID
+
+      - if: ${{ inputs.smoke-unpacked }}
+        name: Enforce package size and noise budgets
+        run: node scripts/run-and-record.mjs --out release-evidence/${{ inputs.artifact-name }}/package-budget.log -- node scripts/ci/check-package-budget.mjs --dist dist
 
       - if: ${{ inputs.smoke-unpacked && runner.os == 'Linux' }}
         name: Smoke unpacked app (Linux)
@@ -180,9 +187,11 @@ jobs:
           --log release-evidence/${{ inputs.artifact-name }}/native-test.log
           --log release-evidence/${{ inputs.artifact-name }}/build-sandbox.log
           --log release-evidence/${{ inputs.artifact-name }}/build-app.log
+          --log release-evidence/${{ inputs.artifact-name }}/rebuild-electron.log
           --log release-evidence/${{ inputs.artifact-name }}/package.log
           --log release-evidence/${{ inputs.artifact-name }}/normalize-artifacts.log
           --log release-evidence/${{ inputs.artifact-name }}/package-unpacked.log
+          --log release-evidence/${{ inputs.artifact-name }}/package-budget.log
           --log release-evidence/${{ inputs.artifact-name }}/package-smoke.log
           --log release-evidence/${{ inputs.artifact-name }}/signature-verification.log
           --log release-evidence/${{ inputs.artifact-name }}/standalone-smoke.log

@@ -3,8 +3,7 @@ import {
   CODETASK_MANAGER_MCP_SERVER,
   MCP_HTTP_ACCEPT_HEADER_VALUE,
   toCanonicalProviderCode,
-  type AgentRuntime,
-  type ProviderCode
+  type AgentRuntime
 } from '@codetask/agent-runtime'
 import type { DraftSnapshot, ExecutionTreeSnapshot, ReferenceManifest } from '@codetask/contracts'
 import type { PlannerRunnerPort, PlanningApplicationPort } from './planning-application.ts'
@@ -52,6 +51,7 @@ function buildSnapshotOutlineTree(input: {
             title: 'Implementation slice',
             description: input.draftSnapshot.userFlow || 'Implement requirements',
             successCriteria: 'Slice acceptance criteria met',
+            dependsOnSliceIds: [],
             tasks: [
               {
                 id: taskId,
@@ -69,6 +69,8 @@ function buildSnapshotOutlineTree(input: {
                 ].join('\n'),
                 successCriteria: 'Implementation matches requirements contract',
                 referenceIds: input.referenceManifest.references.map((r) => r.id),
+                referenceReason: 'Use the frozen project references while implementing this task.',
+                requiredInputs: [],
                 dependsOnTaskIds: [],
                 canRunInParallel: false
               }
@@ -192,8 +194,10 @@ export class AgentRuntimePlannerRunner implements PlannerRunnerPort {
     executionProfile: { plannerCoreCode: string }
     plannerSettingsSnapshotJson?: string
   }): Promise<void> {
-    const provider =
-      toCanonicalProviderCode(input.executionProfile.plannerCoreCode) ?? ('codex' as ProviderCode)
+    const provider = toCanonicalProviderCode(input.executionProfile.plannerCoreCode)
+    if (!provider) {
+      throw new Error(`Unsupported planner provider: ${input.executionProfile.plannerCoreCode}`)
+    }
     const scopeId = `planning:${input.sessionId}:provider:${provider}`
     const systemPrompt = resolveSystemPrompt(input.plannerSettingsSnapshotJson)
     const userMcpServers = resolveUserMcpServers(input.plannerSettingsSnapshotJson)

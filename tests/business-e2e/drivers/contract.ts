@@ -29,6 +29,8 @@ export type DriverStartInput = {
   /** Phase-3 settings probe base URL (http://127.0.0.1:port). */
   probeMcpUrl?: string
   probeMcpName?: string
+  /** Test MCP names approved for the selected outer SDK/ACP operator. */
+  allowedTools: string[]
 }
 
 export type DriverEvent = {

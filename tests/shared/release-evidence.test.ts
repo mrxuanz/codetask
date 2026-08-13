@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 
@@ -16,13 +16,35 @@ const platforms = [
   'windows-amd64'
 ]
 
-function run(args: string[], cwd = resolve('.')): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' })
+function run(
+  args: string[],
+  cwd = resolve('.'),
+  env: NodeJS.ProcessEnv = process.env
+): ReturnType<typeof spawnSync> {
+  return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', env })
 }
 
 test('release evidence verifies the same commit, logs, lockfile, platforms and artifacts', () => {
   const root = mkdtempSync(join(tmpdir(), 'release-evidence-'))
   try {
+    const toolchainBin = join(root, 'toolchain-bin')
+    mkdirSync(toolchainBin)
+    const rustcShim = join(toolchainBin, process.platform === 'win32' ? 'rustc.cmd' : 'rustc')
+    writeFileSync(
+      rustcShim,
+      process.platform === 'win32'
+        ? '@echo off\r\necho rustc 1.90.0 (release-evidence test)\r\n'
+        : "#!/bin/sh\nprintf '%s\\n' 'rustc 1.90.0 (release-evidence test)'\n"
+    )
+    if (process.platform !== 'win32') chmodSync(rustcShim, 0o755)
+    const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
+    const testEnv = {
+      ...process.env,
+      [pathKey]: `${toolchainBin}${delimiter}${process.env[pathKey] ?? ''}`
+    }
+    const runWithToolchain = (args: string[]): ReturnType<typeof spawnSync> =>
+      run(args, resolve('.'), testEnv)
+
     const lockfile = join(root, 'package-lock.json')
     const testLog = join(root, 'test-gate.log')
     const smokeLog = join(root, 'package-smoke.log')
@@ -54,7 +76,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     }
 
     const testOutput = join(root, 'release-evidence', 'test', 'test-gate.manifest.json')
-    const testResult = run([
+    const testResult = runWithToolchain([
       'create-test',
       '--commit',
       commit,
@@ -81,7 +103,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
           signing: platform.startsWith('linux-') ? 'not-required' : 'verified'
         })}\n`
       )
-      const result = run([
+      const result = runWithToolchain([
         'create-build',
         '--commit',
         commit,
@@ -110,7 +132,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     }
 
     const report = join(root, 'legacy-release-report.json')
-    const verified = run([
+    const verified = runWithToolchain([
       'verify',
       '--root',
       root,
@@ -132,7 +154,7 @@ test('release evidence verifies the same commit, logs, lockfile, platforms and a
     assert.equal(parsed.manifests.length, 7)
 
     writeFileSync(join(root, 'codetask-0.1.0-linux-amd64.AppImage'), 'tampered artifact')
-    const rejected = run([
+    const rejected = runWithToolchain([
       'verify',
       '--root',
       root,

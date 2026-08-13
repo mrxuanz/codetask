@@ -64,35 +64,35 @@ export class FakeDriver implements AgentDriver {
       await mcp.initialize()
       push('mcp.initialized')
 
-      if (input.caseId === 'FOUNDATION-FAKE-001' || input.caseId.startsWith('FOUNDATION')) {
+      if (input.caseId === 'foundation-probe') {
         await this.runFoundation(input, mcp, push)
         return { ok: true, events }
       }
 
-      if (input.caseId === 'DESIGN-DRAFT-001') {
+      if (input.caseId === 'design-draft-confirm') {
         await this.runDesignDraftSmoke(input, mcp, push)
         return { ok: true, events }
       }
 
-      if (input.caseId === 'CHAT-HTML-001') {
+      if (input.caseId === 'chat-create-html') {
         await this.runCreateHtmlConversation(input, mcp, push)
         return { ok: true, events }
       }
 
-      if (input.caseId === 'CHAT-IMG-001') {
+      if (input.caseId === 'chat-image-attachment') {
         await this.runChatImageAttachment(input, mcp, push)
         return { ok: true, events }
       }
 
-      if (input.caseId === 'SETTINGS-MCP-001') {
+      if (input.caseId === 'settings-mcp-probe') {
         await this.runSettingsMcpProbe(input, mcp, push)
         return { ok: true, events }
       }
 
-      if (input.caseId.startsWith('G2')) {
+      if (input.caseId === 'project-conversation') {
         const project = (await mcp.callTool('codetask_create_project', {
           workspaceRoot: input.workspaceRoot,
-          title: 'fake-g2'
+          title: 'business-e2e project'
         })) as { id: string }
         push('project.created', { id: project.id })
         await mcp.callTool('case_checkpoint', { name: 'project_created' })
@@ -115,21 +115,28 @@ export class FakeDriver implements AgentDriver {
           caseId: input.caseId,
           status: 'completed',
           summary: 'Fake driver created project and thread via Test MCP',
-          observations: [{ step: 'g2', result: 'ok', projectId: project.id, threadId: thread.id }],
+          observations: [
+            {
+              step: 'project-conversation',
+              result: 'ok',
+              projectId: project.id,
+              threadId: thread.id
+            }
+          ],
           artifacts: { projectId: project.id, threadId: thread.id }
         })
         push('case.reported')
         return { ok: true, events }
       }
 
-      if (input.caseId.startsWith('G3')) {
+      if (input.caseId === 'chat-basic') {
         const message =
           typeof input.fixture?.message === 'string'
             ? input.fixture.message
             : '请用中文简短回答：1+1等于几？'
         const project = (await mcp.callTool('codetask_create_project', {
           workspaceRoot: input.workspaceRoot,
-          title: 'fake-g3'
+          title: 'business-e2e chat'
         })) as { id: string }
         const thread = (await mcp.callTool('codetask_create_thread', {
           projectId: project.id,

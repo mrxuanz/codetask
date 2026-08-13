@@ -14,14 +14,18 @@ codetask はソフトウェア納品向けのデスクトップ AI タスクオ�
 
 **Codex** / **Claude Code** / **OpenCode** / **Cursor CLI** に対応。**Electron** デスクトップ、または **Server** モードでブラウザから利用できます。
 
+> [!WARNING]
+> サンドボックス内のタスクは外向きネットワークへ接続できます。タスクが読めるファイルは外部送信され得るものとして扱い、信頼できないリポジトリや指示に機密データを含む読み取り範囲を与えないでください。
+
 ## リポジトリ構成
 
-`src/` から `apps/` + `packages/` への移行途中です。
+ホスト責務に沿った monorepo レイアウトを採用しています。
 
 - `apps/web` — Vue レンダラ
-- `apps/desktop` / `apps/service` — ホスト用プレースホルダ（Electron 入口は当面 `src/main`）
+- `apps/desktop` — 薄い Electron シェルと Service 子プロセス監視
+- `apps/service` — Hono プロセス、HTTP ホスト、ストレージ初期化、Node アダプタ
 - `packages/*` — `@codetask/*` 共有ライブラリ
-- `src/server` / `src/shared` / `src/main` — 合成ルートとホストアダプタ（packages へ移行中）
+- `src/server` / `src/sandbox` — Service 合成と移行中の互換アダプタ
 - `native/codeteam-*` — OS サンドボックス crate。`codeteam` は upstream `codex-*` からの**歴史的リネーム**（`NOTICE` 参照）で、別ブランドではありません
 
 ## 解決する課題
@@ -102,7 +106,7 @@ Task Worker / Verifier は OS レベルサンドボックスで動作。[OpenAI 
 4. **実行** — ユーザーあたり同時 1 running job。一時停止、再開、キャンセル、再試行、ブロック復旧
 5. **検証** — Verifier が階層ごとにチェック。失敗 Task は個別再実行可能
 
-データは **SSE** でジョブスナップショットを配信。Renderer 向けに **Hono** HTTP サーバーを内蔵。
+データは **SSE** でジョブスナップショットを配信。監視下のローカル **Hono Service** が Renderer を提供します。
 
 ## 技術スタック
 
@@ -122,12 +126,12 @@ Task Worker / Verifier は OS レベルサンドボックスで動作。[OpenAI 
 
 ## 実行モード
 
-codetask は **2 つの起動モード** をサポートし、内蔵 Hono バックエンド・SQLite データ・サンドボックス supervisor を共有します。
+codetask は **2 つの起動モード** をサポートし、同じ Hono Service コア・SQLite データ・サンドボックス supervisor を共有します。
 
-| モード                    | 説明                                                              | デフォルト bind  |
-| ------------------------- | ----------------------------------------------------------------- | ---------------- |
-| **Desktop**（デフォルト） | Electron がネイティブウィンドウを開き、ローカル Web UI を読み込む | `127.0.0.1:3000` |
-| **Server**（`--serve`）   | headless（ウィンドウなし）。任意のブラウザで URL にアクセス       | `0.0.0.0:8080`   |
+| モード                    | 説明                                                        | デフォルト bind     |
+| ------------------------- | ----------------------------------------------------------- | ------------------- |
+| **Desktop**（デフォルト） | Electron が Service を監視し、ローカル Web UI を読み込む    | loopback 動的ポート |
+| **Server**（`--serve`）   | headless（ウィンドウなし）。任意のブラウザで URL にアクセス | `0.0.0.0:8080`      |
 
 ```bash
 # デスクトップモード（デフォルト）
@@ -136,9 +140,6 @@ npm run dev
 # サーバーモード / headless — リモートアクセス、WSL、ヘッドレス Linux、ブラウザのみの運用向け
 npm run dev:serve
 
-# host/port を指定（開発時またはパッケージ済みアプリ）
-electron . --serve --host 127.0.0.1 --port 9000
-
 # 純粋な Node サーバー（Electron、DISPLAY、Xvfb は不要）
 npm run build:server
 npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
@@ -146,9 +147,9 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 補足:
 
-- **Server** モードでは Electron が GPU 初期化をスキップ（WSL / CI / ヘッドレス環境向け）。
+- **Server** モードは Electron を起動しない、標準の headless Hono ホストです。
 - `0.0.0.0` に bind すると、LAN 内の他端末から `http://<あなたのIP>:<ポート>` で UI にアクセス可能。
-- Job 実行・Planner・サンドボックスの挙動は両モードで同一。違いはシェルのみ。
+- Job 実行・Planner・サンドボックスの挙動は両モードで同一。Electron はシェルとプロセス監視のみを担当します。
 - 専用 Node エントリは常に Server モードのため、`start:server` に `--serve` は不要です。
 
 ## クイックスタート
@@ -164,7 +165,10 @@ npm run start:server -- --host 127.0.0.1 --port 8080 --data-dir ./data
 
 ```bash
 npm install
+npm run build:sandbox
 ```
+
+Rust サンドボックスを変更した後は `npm run build:sandbox` を再実行してください。各プラットフォームのパッケージコマンドもサンドボックスを自動ビルドします。
 
 ### 開発
 
@@ -187,12 +191,6 @@ npm run build:mac
 
 # Linux
 npm run build:linux
-```
-
-サンドボックス native は先にビルド:
-
-```bash
-npm run build:sandbox
 ```
 
 ### テスト

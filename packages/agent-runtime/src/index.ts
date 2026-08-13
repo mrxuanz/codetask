@@ -48,6 +48,8 @@ export interface AgentTurnInput {
   readRoots?: string[]
   scopeId: string
   turnId: string
+  /** Provider-native conversation/session id recovered from the reusable scope. */
+  runtimeSessionId?: string | null
   signal?: AbortSignal
   /** Required as exclusive-write for task-sandbox / chat-write. */
   workspaceAccess?: 'metadata' | 'snapshot-read' | 'live-read' | 'exclusive-write'
@@ -192,6 +194,15 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
         ? AbortSignal.any([input.signal, controller.signal])
         : controller.signal
 
+      const previous = scopes.get(input.scopeId)
+      const resumedSessionId =
+        previous?.status === 'active' && previous.providerCode === input.provider
+          ? previous.providerSessionId
+          : undefined
+      const turnInput: AgentTurnInput = {
+        ...input,
+        runtimeSessionId: input.runtimeSessionId ?? resumedSessionId ?? null
+      }
       const binding: RuntimeBinding = {
         scopeId: input.scopeId,
         ownerType:
@@ -204,6 +215,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
                 : 'verification',
         ownerId: input.turnId,
         providerCode: input.provider,
+        ...(resumedSessionId ? { providerSessionId: resumedSessionId } : {}),
         status: 'active',
         lastSeenAt: new Date().toISOString()
       }
@@ -211,7 +223,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
       deps.onBindingUpsert?.(binding)
 
       try {
-        for await (const chunk of deps.streamTurn(input, { signal })) {
+        for await (const chunk of deps.streamTurn(turnInput, { signal })) {
           if (chunk.type === 'delta') {
             yield { type: 'text_delta', text: chunk.content }
           } else if (chunk.type === 'thinking_delta') {
@@ -221,7 +233,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
           } else if (chunk.type === 'completed') {
             const next: RuntimeBinding = {
               ...binding,
-              providerSessionId: chunk.runtimeSessionId ?? undefined,
+              providerSessionId: chunk.runtimeSessionId ?? resumedSessionId,
               lastSeenAt: new Date().toISOString()
             }
             scopes.set(input.scopeId, next)
@@ -258,8 +270,8 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime & {
           status: 'stopped' as const,
           lastSeenAt: new Date().toISOString()
         }
-        scopes.set(scopeId, stopped)
         deps.onBindingUpsert?.(stopped)
+        scopes.delete(scopeId)
       }
     },
 

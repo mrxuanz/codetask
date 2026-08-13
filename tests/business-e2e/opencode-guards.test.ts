@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   assertNoTimeoutAllowed,
@@ -14,6 +15,13 @@ import {
   isRetryablePromptError
 } from './drivers/opencode-errors.ts'
 import { buildOpencodeHarnessConfig, waitForCapabilityReport } from './drivers/opencode-prompt.ts'
+
+test('OpenCode harness owns and reaps the complete CLI process group', () => {
+  const source = readFileSync(new URL('./drivers/opencode-prompt.ts', import.meta.url), 'utf8')
+  assert.match(source, /detached:\s*process\.platform !== 'win32'/)
+  assert.match(source, /process\.kill\(-pid, signal\)/)
+  assert.match(source, /await longFetch\.close\(\)/)
+})
 
 test('extractPromptFailure reads top-level SDK error', () => {
   const failure = extractPromptFailure({

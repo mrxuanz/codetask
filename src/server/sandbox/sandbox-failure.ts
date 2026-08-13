@@ -1,7 +1,11 @@
 import type { PlanProgressDto, TaskProgressDto } from '../infra/job-progress-types'
 import { ProviderAuthError } from './provider-auth'
 import { SandboxError } from './types'
-import { createTurnError, normalizeTurnError, type TurnErrorDto } from '../../shared/turn-errors.ts'
+import {
+  createTurnError,
+  normalizeTurnError,
+  type TurnErrorDto
+} from '@codetask/contracts/turn-errors'
 import { toTurnErrorDto } from '../agent-runtime/errors'
 import { persistTurnErrorDto } from '../turn-errors/store'
 

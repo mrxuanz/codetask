@@ -4,7 +4,7 @@ import type {
   PlanningSessionStatus,
   ReferenceManifest
 } from '@codetask/contracts'
-import { DesignConflictError, stableHash } from '../../shared.ts'
+import { DesignConflictError } from '../../shared.ts'
 import type { PlanningRunRecord, PlanningSessionRecord } from '../domain/planning.ts'
 import type { PlanningRepository } from '../application/planning-application.ts'
 
@@ -164,6 +164,15 @@ export class SqlitePlanningRepository implements PlanningRepository {
       )
   }
 
+  async nextRunAttemptNo(sessionId: string): Promise<number> {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(MAX(attempt_no), 0) + 1 AS next FROM planning_runs WHERE planning_session_id = ?`
+      )
+      .get(sessionId) as { next: number }
+    return row.next
+  }
+
   async updateRun(run: PlanningRunRecord): Promise<void> {
     this.updateRunRow(run)
   }
@@ -246,7 +255,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
     }
     runUpdate?: PlanningRunRecord
   }): Promise<void> {
-    const planRowId = `${input.sessionId}:${input.tree.revision}`
+    const planRowId = input.planId
     const tx = this.db.transaction(() => {
       const oldPlans = this.db
         .prepare(`SELECT id FROM execution_plans WHERE planning_session_id = ?`)
@@ -299,14 +308,22 @@ export class SqlitePlanningRepository implements PlanningRepository {
               slice.successCriteria,
               slice.confirmed ? 1 : 0
             )
+          for (const dep of slice.dependsOnSliceIds) {
+            this.db
+              .prepare(
+                `INSERT INTO execution_plan_dependencies (plan_id, from_node_id, to_node_id, dependency_kind)
+                 VALUES (?, ?, ?, 'slice')`
+              )
+              .run(planRowId, dep, slice.id)
+          }
           slice.tasks.forEach((task, ti) => {
             this.db
               .prepare(
                 `INSERT INTO execution_plan_tasks (
                   id, plan_id, slice_id, sort_order, title, description, task_kind,
                   ability_code, core_code, context_markdown, success_criteria,
-                  reference_reason, can_run_in_parallel, confirmed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                  reference_reason, required_inputs_json, can_run_in_parallel, confirmed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               )
               .run(
                 task.id,
@@ -320,7 +337,8 @@ export class SqlitePlanningRepository implements PlanningRepository {
                 task.coreCode,
                 task.contextMarkdown,
                 task.successCriteria,
-                '',
+                task.referenceReason,
+                JSON.stringify(task.requiredInputs),
                 task.canRunInParallel ? 1 : 0,
                 task.confirmed ? 1 : 0
               )
@@ -343,20 +361,6 @@ export class SqlitePlanningRepository implements PlanningRepository {
           })
         })
       })
-
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO execution_plan_revisions (
-            planning_session_id, revision, snapshot_gzip, content_hash, created_at, expires_at
-          ) VALUES (?, ?, ?, ?, ?, NULL)`
-        )
-        .run(
-          input.sessionId,
-          input.tree.revision,
-          Buffer.from(JSON.stringify(input.tree)).toString('base64'),
-          input.contentHash,
-          Date.now()
-        )
 
       if (input.sessionUpdate) {
         this.updateSessionRow(input.sessionUpdate.session, input.sessionUpdate.expectedTreeRevision)
@@ -422,15 +426,24 @@ export class SqlitePlanningRepository implements PlanningRepository {
               core_code: string
               context_markdown: string
               success_criteria: string
+              reference_reason: string
+              required_inputs_json: string
               can_run_in_parallel: number
               confirmed: number
             }>
+            const sliceDeps = this.db
+              .prepare(
+                `SELECT from_node_id FROM execution_plan_dependencies
+                 WHERE plan_id = ? AND to_node_id = ? AND dependency_kind = 'slice'`
+              )
+              .all(plan.id, s.id) as Array<{ from_node_id: string }>
             return {
               id: s.id,
               milestoneId: m.id,
               title: s.title,
               description: s.description,
               successCriteria: s.success_criteria,
+              dependsOnSliceIds: sliceDeps.map((d) => d.from_node_id),
               confirmed: s.confirmed === 1,
               tasks: tasks.map((t) => {
                 const refs = this.db
@@ -455,6 +468,8 @@ export class SqlitePlanningRepository implements PlanningRepository {
                   contextMarkdown: t.context_markdown,
                   successCriteria: t.success_criteria,
                   referenceIds: refs.map((r) => r.reference_id),
+                  referenceReason: t.reference_reason,
+                  requiredInputs: parseJson<string[]>(t.required_inputs_json || '[]'),
                   dependsOnTaskIds: deps.map((d) => d.from_node_id),
                   canRunInParallel: t.can_run_in_parallel === 1,
                   confirmed: t.confirmed === 1
@@ -468,49 +483,92 @@ export class SqlitePlanningRepository implements PlanningRepository {
     return tree
   }
 
-  async insertHandoff(input: {
+  async beginHandoff(input: {
+    session: PlanningSessionRecord
+    expectedTreeRevision: number
     submissionId: string
-    planningSessionId: string
     idempotencyKey: string
     payloadJson: string
     createdAt: number
   }): Promise<{ created: boolean; existingJobId: string | null }> {
-    const existing = this.db
-      .prepare(`SELECT submission_id, job_id, status FROM job_handoffs WHERE idempotency_key = ?`)
-      .get(input.idempotencyKey) as
-      | { submission_id: string; job_id: string | null; status: string }
-      | undefined
-    if (existing) {
-      return { created: false, existingJobId: existing.job_id }
-    }
-    this.db
-      .prepare(
-        `INSERT INTO job_handoffs (
-          submission_id, planning_session_id, idempotency_key, payload_json,
-          status, job_id, attempts, last_error_json, created_at, accepted_at
-        ) VALUES (?, ?, ?, ?, 'pending', NULL, 0, NULL, ?, NULL)`
-      )
-      .run(
-        input.submissionId,
-        input.planningSessionId,
-        input.idempotencyKey,
-        input.payloadJson,
-        input.createdAt
-      )
-    return { created: true, existingJobId: null }
+    const tx = this.db.transaction(() => {
+      const existing = this.db
+        .prepare(`SELECT submission_id, job_id, status FROM job_handoffs WHERE idempotency_key = ?`)
+        .get(input.idempotencyKey) as
+        | { submission_id: string; job_id: string | null; status: string }
+        | undefined
+      if (existing) return { created: false, existingJobId: existing.job_id }
+
+      this.updateSessionRow(input.session, input.expectedTreeRevision)
+      this.db
+        .prepare(
+          `INSERT INTO job_handoffs (
+            submission_id, planning_session_id, idempotency_key, payload_json,
+            status, job_id, attempts, last_error_json, next_attempt_at,
+            created_at, accepted_at, failed_at
+          ) VALUES (?, ?, ?, ?, 'pending', NULL, 0, NULL, ?, ?, NULL, NULL)`
+        )
+        .run(
+          input.submissionId,
+          input.session.id,
+          input.idempotencyKey,
+          input.payloadJson,
+          input.createdAt,
+          input.createdAt
+        )
+      return { created: true, existingJobId: null }
+    })
+    return tx()
   }
 
-  async markHandoffAccepted(input: {
+  async completeHandoff(input: {
     submissionId: string
+    planningSessionId: string
     jobId: string
     acceptedAt: number
-  }): Promise<void> {
-    this.db
-      .prepare(
-        `UPDATE job_handoffs SET status = 'accepted', job_id = ?, accepted_at = ?, attempts = attempts + 1
-         WHERE submission_id = ?`
-      )
-      .run(input.jobId, input.acceptedAt, input.submissionId)
+  }): Promise<PlanningSessionRecord> {
+    const tx = this.db.transaction(() => {
+      const identity = this.db
+        .prepare(`SELECT actor_id AS actorId FROM planning_sessions WHERE id = ?`)
+        .get(input.planningSessionId) as { actorId: string } | undefined
+      const compactPayload = JSON.stringify({
+        submissionId: input.submissionId,
+        actorId: identity?.actorId ?? '',
+        source: { planningSessionId: input.planningSessionId }
+      })
+      this.db
+        .prepare(
+          `UPDATE job_handoffs
+           SET status = 'accepted', job_id = ?, accepted_at = ?, attempts = attempts + 1,
+               next_attempt_at = NULL, last_error_json = NULL, failed_at = NULL,
+               payload_json = ?
+           WHERE submission_id = ? AND status IN ('pending', 'failed')`
+        )
+        .run(input.jobId, input.acceptedAt, compactPayload, input.submissionId)
+
+      const row = this.db
+        .prepare(`SELECT * FROM planning_sessions WHERE id = ?`)
+        .get(input.planningSessionId) as SessionRow | undefined
+      if (!row) throw new DesignConflictError('Planning session no longer exists')
+      const session = this.mapSession(row)
+      if (session.status === 'published' && session.publishedJobId === input.jobId) return session
+      if (session.status !== 'publishing' && session.status !== 'failed') {
+        throw new DesignConflictError(
+          `Cannot complete handoff from session status ${session.status}`
+        )
+      }
+      const published: PlanningSessionRecord = {
+        ...session,
+        status: 'published',
+        publishedJobId: input.jobId,
+        publishedAt: input.acceptedAt,
+        updatedAt: input.acceptedAt,
+        lastErrorJson: null
+      }
+      this.updateSessionRow(published)
+      return published
+    })
+    return tx()
   }
 
   async findHandoffByIdempotency(key: string): Promise<{
@@ -518,10 +576,12 @@ export class SqlitePlanningRepository implements PlanningRepository {
     status: string
     jobId: string | null
     payloadJson: string
+    lastErrorJson: string | null
   } | null> {
     const row = this.db
       .prepare(
-        `SELECT submission_id, status, job_id, payload_json FROM job_handoffs WHERE idempotency_key = ?`
+        `SELECT submission_id, status, job_id, payload_json, last_error_json
+         FROM job_handoffs WHERE idempotency_key = ?`
       )
       .get(key) as
       | {
@@ -529,6 +589,7 @@ export class SqlitePlanningRepository implements PlanningRepository {
           status: string
           job_id: string | null
           payload_json: string
+          last_error_json: string | null
         }
       | undefined
     if (!row) return null
@@ -536,7 +597,8 @@ export class SqlitePlanningRepository implements PlanningRepository {
       submissionId: row.submission_id,
       status: row.status,
       jobId: row.job_id,
-      payloadJson: row.payload_json
+      payloadJson: row.payload_json,
+      lastErrorJson: row.last_error_json
     }
   }
 
@@ -562,5 +624,3 @@ export class SqlitePlanningRepository implements PlanningRepository {
     }
   }
 }
-
-void stableHash

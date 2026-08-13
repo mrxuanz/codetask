@@ -1,4 +1,7 @@
 import type Database from 'better-sqlite3'
+import { existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { resolveAssetStoragePath } from '../data-paths'
 
 export type AssetOwnerType = 'conversation' | 'thread' | 'draft' | 'job'
 
@@ -44,6 +47,120 @@ export function registerAttachmentAsset(
        (asset_id, owner_type, owner_id, purpose, created_at)
      VALUES (?, ?, ?, ?, ?)`
   ).run(input.assetId, input.ownerType, input.ownerId, input.purpose ?? 'attachment', now)
+}
+
+export function getAssetOwnerUsage(
+  db: Database.Database,
+  ownerType: AssetOwnerType,
+  ownerId: string
+): { count: number; sizeBytes: number } {
+  if (!tableExists(db, 'assets') || !tableExists(db, 'asset_references')) {
+    return { count: 0, sizeBytes: 0 }
+  }
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS size_bytes
+         FROM assets
+        WHERE state = 'active'
+          AND id IN (
+            SELECT asset_id FROM asset_references
+             WHERE owner_type = ? AND owner_id = ?
+          )`
+    )
+    .get(ownerType, ownerId) as { count: number; size_bytes: number } | undefined
+  return { count: row?.count ?? 0, sizeBytes: row?.size_bytes ?? 0 }
+}
+
+/** Add another logical owner without copying the underlying file. */
+export function retainAssetReference(
+  db: Database.Database,
+  input: {
+    assetId: string
+    ownerType: AssetOwnerType
+    ownerId: string
+    purpose?: string
+  }
+): void {
+  if (!tableExists(db, 'assets') || !tableExists(db, 'asset_references')) return
+  const asset = db
+    .prepare(`SELECT id FROM assets WHERE id = ? AND state = 'active'`)
+    .get(input.assetId) as { id: string } | undefined
+  if (!asset) throw new Error(`Attachment asset ${input.assetId} does not exist`)
+  db.prepare(
+    `INSERT OR IGNORE INTO asset_references
+       (asset_id, owner_type, owner_id, purpose, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    input.assetId,
+    input.ownerType,
+    input.ownerId,
+    input.purpose ?? 'attachment',
+    Math.floor(Date.now() / 1000)
+  )
+}
+
+/** Release one logical reference and queue physical deletion when it was the last owner. */
+export function releaseAssetReference(
+  db: Database.Database,
+  input: {
+    assetId: string
+    ownerType: AssetOwnerType
+    ownerId: string
+    purpose?: string
+  }
+): void {
+  if (!tableExists(db, 'asset_references')) return
+  if (input.purpose) {
+    db.prepare(
+      `DELETE FROM asset_references
+        WHERE asset_id = ? AND owner_type = ? AND owner_id = ? AND purpose = ?`
+    ).run(input.assetId, input.ownerType, input.ownerId, input.purpose)
+  } else {
+    db.prepare(
+      `DELETE FROM asset_references
+        WHERE asset_id = ? AND owner_type = ? AND owner_id = ?`
+    ).run(input.assetId, input.ownerType, input.ownerId)
+  }
+  markAssetPendingDelete(db, input.assetId)
+}
+
+export function resolveRegisteredAssetFile(
+  db: Database.Database,
+  dataDir: string,
+  assetId: string
+): string | null {
+  if (!tableExists(db, 'assets')) return null
+  const row = db
+    .prepare(`SELECT storage_key AS storageKey FROM assets WHERE id = ? AND state = 'active'`)
+    .get(assetId) as { storageKey: string } | undefined
+  if (!row) return null
+  const storagePath = resolveAssetStoragePath(dataDir, row.storageKey)
+  if (!existsSync(storagePath)) return null
+  const entries = readdirSync(storagePath, { withFileTypes: true })
+  const file = entries.find((entry) => entry.isFile() && !entry.isSymbolicLink())
+  return file ? join(storagePath, file.name) : null
+}
+
+/**
+ * Raw draft uploads initially have a Conversation owner only. Once the draft has
+ * committed its reference, keep the Conversation owner only when a chat message
+ * also references the same asset.
+ */
+export function releaseUnattachedConversationReferences(
+  db: Database.Database,
+  assetId: string
+): void {
+  if (!tableExists(db, 'asset_references')) return
+  const messageUse = tableExists(db, 'conversation_message_attachments')
+    ? (db
+        .prepare(`SELECT 1 AS ok FROM conversation_message_attachments WHERE asset_id = ? LIMIT 1`)
+        .get(assetId) as { ok: number } | undefined)
+    : undefined
+  if (messageUse) return
+  db.prepare(`DELETE FROM asset_references WHERE asset_id = ? AND owner_type = 'conversation'`).run(
+    assetId
+  )
+  markAssetPendingDelete(db, assetId)
 }
 
 export function listAssetOwnerIds(db: Database.Database, ownerType?: AssetOwnerType): string[] {

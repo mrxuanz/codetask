@@ -5,5 +5,7 @@ process.env.TSX_TSCONFIG_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
   '..',
-  'tsconfig.node.json'
+  'apps',
+  'service',
+  'tsconfig.json'
 )

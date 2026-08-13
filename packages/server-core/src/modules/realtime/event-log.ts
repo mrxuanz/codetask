@@ -101,7 +101,12 @@ export class RealtimeEventLog {
     topics: readonly string[]
     afterEventId: number
     limit?: number
-  }): { events: DurableRealtimeEnvelope[]; latestEventId: number; gap: boolean } {
+  }): {
+    events: DurableRealtimeEnvelope[]
+    latestEventId: number
+    gap: boolean
+    hasMore: boolean
+  } {
     const topics = [...new Set(input.topics)].filter(Boolean)
     const latestRow = this.db
       .prepare(
@@ -112,7 +117,7 @@ export class RealtimeEventLog {
     const latestEventId = latestRow?.max_id ?? 0
 
     if (topics.length === 0) {
-      return { events: [], latestEventId, gap: false }
+      return { events: [], latestEventId, gap: false, hasMore: false }
     }
 
     if (input.afterEventId > 0) {
@@ -125,7 +130,7 @@ export class RealtimeEventLog {
         .get(...topics, input.actorId) as { min_id: number | null } | undefined
       const oldestId = oldest?.min_id
       if (oldestId != null && input.afterEventId + 1 < oldestId) {
-        return { events: [], latestEventId, gap: true }
+        return { events: [], latestEventId, gap: true, hasMore: false }
       }
     }
 
@@ -139,12 +144,16 @@ export class RealtimeEventLog {
           ORDER BY event_id ASC
           LIMIT ?`
       )
-      .all(input.afterEventId, ...topics, input.actorId, limit) as RealtimeEventRow[]
+      .all(input.afterEventId, ...topics, input.actorId, limit + 1) as RealtimeEventRow[]
+
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
 
     return {
-      events: rows.map((row) => this.toEnvelope(row)),
+      events: page.map((row) => this.toEnvelope(row)),
       latestEventId,
-      gap: false
+      gap: false,
+      hasMore
     }
   }
 

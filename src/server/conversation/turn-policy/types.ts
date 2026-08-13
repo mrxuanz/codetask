@@ -1,4 +1,4 @@
-import type { WorkspaceAccessMode } from '../../../shared/workspace-access.ts'
+import type { WorkspaceAccessMode } from '@codetask/contracts/workspace-access'
 import type { AgentCapabilityProfile } from '../../agent-runtime/capabilities'
 import type { WorkspaceLeaseOwnerKind } from '../../infra/workspace-lease-store'
 

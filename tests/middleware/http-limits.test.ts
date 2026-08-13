@@ -12,7 +12,7 @@ import { getCurrentRequestAbortSignal } from '../../src/server/context/request-a
 test('isSseStreamRoute recognizes known SSE stream paths', () => {
   assert.equal(isSseStreamRoute('/api/realtime/stream'), true)
   assert.equal(isSseStreamRoute('/api/events/stream'), false)
-  assert.equal(isSseStreamRoute('/api/threads/thread-1/messages'), false)
+  assert.equal(isSseStreamRoute('/api/conversations/conversation-1/messages'), false)
 })
 
 test('requestTimeout returns 408 when handler exceeds limit', async () => {
@@ -61,7 +61,7 @@ test('requestTimeout skips long-lived SSE and conversation message routes', asyn
       })
       return c.text('stream')
     })
-    app.get('/api/threads/thread-1/messages', async (c) => {
+    app.get('/api/conversations/conversation-1/messages', async (c) => {
       await new Promise<void>((resolve) => {
         setTimeout(resolve, REQUEST_TIMEOUT_MS + 1_000)
       })
@@ -70,7 +70,7 @@ test('requestTimeout skips long-lived SSE and conversation message routes', asyn
 
     const streamResponsePromise = app.fetch(new Request('http://localhost/api/realtime/stream'))
     const messagesResponsePromise = app.fetch(
-      new Request('http://localhost/api/threads/thread-1/messages')
+      new Request('http://localhost/api/conversations/conversation-1/messages')
     )
     mock.timers.tick(REQUEST_TIMEOUT_MS + 1_000)
 

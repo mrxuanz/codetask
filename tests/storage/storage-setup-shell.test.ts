@@ -3,7 +3,8 @@ import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createSetupShell } from '../../src/main/setup-shell'
+import { SETUP_TOKEN_HEADER } from '@codetask/contracts'
+import { createSetupShell } from '../../apps/service/src/setup-shell'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
 
 function selection(dataDir: string): {
@@ -20,7 +21,8 @@ test('setup shell bootstrap requires setup token when configured for server mode
   const app = createSetupShell({
     storage: selection(candidate),
     isDev: false,
-    setupTokenRequired: true
+    setupTokenRequired: true,
+    validateSetupToken: (token) => token === 'valid-setup-token'
   })
 
   const response = await app.request('/api/auth/bootstrap')
@@ -31,6 +33,43 @@ test('setup shell bootstrap requires setup token when configured for server mode
   assert.equal(body.data?.initialized, false)
   assert.equal(body.data?.setupTokenRequired, true)
   assert.equal(body.data?.storagePhase, 'selection_required')
+
+  assert.equal((await app.request('/api/system/storage/bootstrap')).status, 401)
+  assert.equal(
+    (
+      await app.request('/api/system/storage/bootstrap', {
+        headers: { [SETUP_TOKEN_HEADER]: 'valid-setup-token' }
+      })
+    ).status,
+    200
+  )
+
+  const missingToken = await app.request('/api/fs/browse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ partialPath: root })
+  })
+  assert.equal(missingToken.status, 401)
+
+  const invalidToken = await app.request('/api/fs/browse', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      [SETUP_TOKEN_HEADER]: 'invalid-setup-token'
+    },
+    body: JSON.stringify({ partialPath: root })
+  })
+  assert.equal(invalidToken.status, 401)
+
+  const validToken = await app.request('/api/fs/browse', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      [SETUP_TOKEN_HEADER]: 'valid-setup-token'
+    },
+    body: JSON.stringify({ partialPath: root })
+  })
+  assert.equal(validToken.status, 200)
   rmSync(root, { recursive: true, force: true })
 })
 
@@ -41,7 +80,8 @@ test('setup shell initializes only db and assets after validation', async (t) =>
   const app = createSetupShell({
     storage: selection(candidate),
     isDev: false,
-    setupTokenRequired: true
+    setupTokenRequired: true,
+    validateSetupToken: (token) => token === 'valid-setup-token'
   })
 
   assert.equal(existsSync(candidate), false)
@@ -50,7 +90,10 @@ test('setup shell initializes only db and assets after validation', async (t) =>
   // allowLowSpace: CI /tmp is often a small tmpfs below the 2GiB product floor.
   const validationResponse = await app.request('/api/system/storage/validate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      [SETUP_TOKEN_HEADER]: 'valid-setup-token'
+    },
     body: JSON.stringify({ path: candidate, allowLowSpace: true })
   })
   assert.equal(validationResponse.status, 200)
@@ -60,7 +103,10 @@ test('setup shell initializes only db and assets after validation', async (t) =>
 
   const initializeResponse = await app.request('/api/system/storage/initialize', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      [SETUP_TOKEN_HEADER]: 'valid-setup-token'
+    },
     body: JSON.stringify({
       path: validation.data.canonicalPath,
       validationNonce: validation.data.nonce,

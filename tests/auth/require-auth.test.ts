@@ -10,10 +10,13 @@ import { resolveSessionTokenFromRequest } from '../../src/server/auth/session'
 test('normalizedApiPath strips /api prefix and query string', () => {
   assert.equal(normalizedApiPath('/api/auth/bootstrap'), '/auth/bootstrap')
   assert.equal(
-    normalizedApiPath('/api/threads/t1/attachments/a1?access_token=abc'),
-    '/threads/t1/attachments/a1'
+    normalizedApiPath('/api/conversations/c1/attachments/a1?access_token=abc'),
+    '/conversations/c1/attachments/a1'
   )
-  assert.equal(normalizedApiPath('/threads/t1/attachments/a1'), '/threads/t1/attachments/a1')
+  assert.equal(
+    normalizedApiPath('/conversations/c1/attachments/a1'),
+    '/conversations/c1/attachments/a1'
+  )
 })
 
 test('isPublicApiRoute includes auth bootstrap routes under /api/auth', () => {
@@ -25,7 +28,7 @@ test('isPublicApiRoute includes auth bootstrap routes under /api/auth', () => {
   assert.equal(isPublicApiRoute('POST', '/auth/login'), true)
   assert.equal(isPublicApiRoute('GET', '/bootstrap'), false)
   assert.equal(isPublicApiRoute('POST', '/login'), false)
-  assert.equal(isPublicApiRoute('GET', '/api/threads/t1/messages'), false)
+  assert.equal(isPublicApiRoute('GET', '/api/conversations/c1/messages'), false)
 })
 
 test('isAttachmentAssetTokenGet allows asset_token attachment reads under /api', () => {
@@ -34,7 +37,6 @@ test('isAttachmentAssetTokenGet allows asset_token attachment reads under /api',
     true
   )
   assert.equal(isAttachmentAssetTokenGet('GET', '/conversations/c1/attachments/a1', 'tok'), true)
-  assert.equal(isAttachmentAssetTokenGet('GET', '/api/threads/t1/attachments/a1', 'tok'), true)
   assert.equal(isAttachmentAssetTokenGet('GET', '/api/conversations/c1/attachments/a1', ''), false)
   assert.equal(
     isAttachmentAssetTokenGet('POST', '/api/conversations/c1/attachments/a1', 'tok'),

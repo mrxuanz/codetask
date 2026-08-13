@@ -14,6 +14,11 @@ import {
 import { getPlannerMcpSession, type PlannerMcpSession } from './session.ts'
 import { plannerMcpToolDefinitions } from './tools.ts'
 import type { PlannerRegisteredTask, PlannerRegisteredTaskContext } from './types.ts'
+import {
+  MAX_EXECUTION_TREE_BYTES,
+  MAX_NODE_TITLE_CHARS,
+  MAX_TASK_CONTEXT_CHARS
+} from '@codetask/contracts'
 
 type JsonRpcId = string | number | null
 
@@ -200,6 +205,12 @@ function taskContextArgs(
   if (!taskTitle || !content) {
     badRequest('taskTitle and content are required')
   }
+  if (taskTitle.length > MAX_NODE_TITLE_CHARS) {
+    badRequest(`taskTitle exceeds ${MAX_NODE_TITLE_CHARS} characters`)
+  }
+  if (content.length > MAX_TASK_CONTEXT_CHARS) {
+    badRequest(`task context exceeds ${MAX_TASK_CONTEXT_CHARS} characters`)
+  }
   if (taskTitle !== expected.title?.trim()) {
     badRequest(
       `taskTitle mismatch for ${coordinates.key}; expected "${expected.title}", received "${taskTitle}"`
@@ -214,6 +225,16 @@ async function registerTaskContext(
 ): Promise<Record<string, unknown>> {
   requirePlanMutable(session)
   const { key, context } = taskContextArgs(session, args)
+  const totalBytes = new TextEncoder().encode(
+    [...session.taskContexts.entries()]
+      .filter(([existingKey]) => existingKey !== key)
+      .map(([, existing]) => existing.content)
+      .concat(context.content)
+      .join('')
+  ).byteLength
+  if (totalBytes > MAX_EXECUTION_TREE_BYTES) {
+    badRequest(`combined task contexts exceed ${MAX_EXECUTION_TREE_BYTES} bytes`)
+  }
   const existing = session.taskContexts.get(key)
   if (existing) {
     if (existing.taskTitle === context.taskTitle && existing.content === context.content) {
@@ -241,6 +262,16 @@ async function updateTaskContext(
 ): Promise<Record<string, unknown>> {
   requirePlanMutable(session)
   const { key, context } = taskContextArgs(session, args)
+  const totalBytes = new TextEncoder().encode(
+    [...session.taskContexts.entries()]
+      .filter(([existingKey]) => existingKey !== key)
+      .map(([, existing]) => existing.content)
+      .concat(context.content)
+      .join('')
+  ).byteLength
+  if (totalBytes > MAX_EXECUTION_TREE_BYTES) {
+    badRequest(`combined task contexts exceed ${MAX_EXECUTION_TREE_BYTES} bytes`)
+  }
   const existing = session.taskContexts.get(key)
   if (!existing) {
     badRequest(`Task context ${key} is not registered yet; call register_task_context first`)

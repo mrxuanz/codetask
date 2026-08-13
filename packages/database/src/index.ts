@@ -23,7 +23,12 @@ export {
 export { migration065DropLegacyThreadTables } from './migrations/drop-legacy-thread-tables.ts'
 export { migration066PlanningCapacityIndex } from './migrations/planning-capacity-index.ts'
 
-export { allMigrations, applyMigrations, runMigrations } from './migrations/all.ts'
+export {
+  allMigrations,
+  applyMigrations,
+  assertNoMigrationFailures,
+  runMigrations
+} from './migrations/all.ts'
 export {
   assertMigrationsAlignWithManifest,
   ensureMigrationsTable,

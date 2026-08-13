@@ -1,8 +1,8 @@
-import { gracefulShutdown, startAppServer, type ServerInfo } from '../../../src/main/server.ts'
-import { parseServerCliArgs } from '../../../src/main/cli.ts'
-import { createShutdownSignalHandler } from '../../../src/main/shutdown-signal.ts'
-import { createNodeServerPlatform } from '../../../src/standalone/platform.ts'
-import { initializeProcessHostEnvironment } from '../../../src/server/host-environment.ts'
+import { gracefulShutdown, startAppServer, type ServerInfo } from './server.ts'
+import { parseServerCliArgs } from './cli.ts'
+import { createShutdownSignalHandler } from '@codetask/service-bootstrap'
+import { createNodeServerPlatform } from './node-platform.ts'
+import { initializeProcessHostEnvironment } from '@codetask/agent-runtime/host-environment'
 
 let shutdownPromise: Promise<void> | null = null
 

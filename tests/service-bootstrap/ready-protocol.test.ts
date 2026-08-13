@@ -11,7 +11,7 @@ import {
   serializeServiceReadyMessage,
   SERVICE_READY_PROTOCOL_VERSION
 } from '../../packages/service-bootstrap/src/index.ts'
-import { parseServerCliArgs } from '../../src/main/cli.ts'
+import { parseServerCliArgs } from '../../apps/service/src/cli.ts'
 
 test('parseServiceBootstrapArgs reads data-dir, ready-fd, port 0, renderer-dev-url', () => {
   const parsed = parseServiceBootstrapArgs([

@@ -43,6 +43,8 @@ const {
   searchQuery,
   jobs,
   total,
+  page,
+  totalPages,
   loadingList,
   loadingDetail,
   error,
@@ -58,6 +60,7 @@ const {
 
 const selectedTask = ref<UnifiedTaskNode | null>(null)
 const taskParametersOpen = ref(false)
+const deleteConfirmOpen = ref(false)
 
 const statusFilters = computed(() => [
   { value: 'all', label: t('workspace.tasks.filters.all') },
@@ -110,6 +113,7 @@ const canCancel = canCancelAction
 function selectJob(jobId: string): void {
   selectedTask.value = null
   taskParametersOpen.value = false
+  deleteConfirmOpen.value = false
   void router.push({ name: 'task-detail', params: { jobId } })
 }
 
@@ -120,6 +124,11 @@ function handleSelectTask(task: UnifiedTaskNode): void {
 
 function closeTaskParameters(): void {
   taskParametersOpen.value = false
+}
+
+function confirmDelete(): void {
+  deleteConfirmOpen.value = false
+  void store.handleDelete()
 }
 
 onMounted(() => {
@@ -208,18 +217,45 @@ onUnmounted(() => {
                 </span>
               </div>
             </div>
-            <div class="mt-3">
+            <div v-if="job.tree" class="mt-3">
               <TaskProgressBar :snapshot="listProgress(job)" compact />
             </div>
             <div class="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>{{ listProgress(job).summaryLabel }}</span>
+              <span v-if="job.tree">{{ listProgress(job).summaryLabel }}</span>
+              <span v-else>{{ listStatusBadge(job).label }}</span>
               <span>{{ formatJobTimestamp(job.updatedAt) }}</span>
             </div>
-            <div class="mt-1 truncate text-[11px] text-muted-foreground">
+            <div v-if="job.tree" class="mt-1 truncate text-[11px] text-muted-foreground">
               {{ t('workspace.tasks.cliLabel', { summary: jobCliSummary(asPlanView(job)) }) }}
             </div>
           </button>
         </div>
+      </div>
+      <div
+        v-if="totalPages > 1"
+        class="flex shrink-0 items-center justify-between border-t border-border px-3 py-2"
+      >
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          :disabled="page <= 1 || loadingList"
+          @click="store.goToPage(page - 1)"
+        >
+          {{ t('workspace.tasks.pagination.previous') }}
+        </Button>
+        <span class="text-xs text-muted-foreground">
+          {{ t('workspace.tasks.pagination.page', { page, total: totalPages }) }}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          :disabled="page >= totalPages || loadingList"
+          @click="store.goToPage(page + 1)"
+        >
+          {{ t('workspace.tasks.pagination.next') }}
+        </Button>
       </div>
     </div>
 
@@ -254,7 +290,7 @@ onUnmounted(() => {
             <CardContent class="space-y-4 p-4 sm:p-6">
               <div class="flex flex-wrap items-start justify-between gap-4">
                 <div class="min-w-0">
-                  <h1 class="text-xl font-semibold">{{ selectedJob.title }}</h1>
+                  <h2 class="text-xl font-semibold">{{ selectedJob.title }}</h2>
                   <p class="mt-2 text-sm text-muted-foreground">
                     {{ selectedJob.summary || selectedJob.title }}
                   </p>
@@ -313,7 +349,7 @@ onUnmounted(() => {
                     size="sm"
                     variant="outline"
                     :disabled="runningAction === 'delete'"
-                    @click="store.handleDelete()"
+                    @click="deleteConfirmOpen = true"
                   >
                     {{ t('workspace.tasks.actions.delete') }}
                   </Button>
@@ -383,6 +419,27 @@ onUnmounted(() => {
       <div class="flex shrink-0 justify-end border-t border-border px-4 py-3">
         <Button type="button" variant="outline" @click="closeTaskParameters">
           {{ t('folderPicker.close') }}
+        </Button>
+      </div>
+    </Dialog>
+
+    <Dialog :open="deleteConfirmOpen" class="max-w-md" @close="deleteConfirmOpen = false">
+      <div class="space-y-3 px-5 py-5">
+        <h2 class="text-base font-semibold">{{ t('workspace.tasks.deleteConfirmTitle') }}</h2>
+        <p class="text-sm text-muted-foreground">
+          {{ t('workspace.tasks.deleteConfirmMessage', { title: selectedJob?.title ?? '' }) }}
+        </p>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-border px-5 py-4">
+        <Button type="button" variant="outline" @click="deleteConfirmOpen = false">
+          {{ t('common.cancel') }}
+        </Button>
+        <Button
+          type="button"
+          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          @click="confirmDelete"
+        >
+          {{ t('workspace.tasks.actions.delete') }}
         </Button>
       </div>
     </Dialog>

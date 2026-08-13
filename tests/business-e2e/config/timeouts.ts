@@ -2,16 +2,18 @@
  * Harness infrastructure budgets.
  *
  * Business turn/job waits default to CodeTask API terminal status only
- * (completed|failed|cancelled) — no wall-clock case kill. OpenCode outer-driver
+ * (completed|failed|cancelled) — no wall-clock case kill. Live outer-operator
  * stages still have hard ceilings unless `--no-timeout` is set (forbidden in CI).
  * Positive `timeoutMs` is only for intentional short negative probes.
  */
 export const TIMEOUTS = {
   serverStartupMs: 120_000,
   httpRequestMs: 30_000,
-  /** OpenCode `serve` / process bootstrap only — not turn execution. */
+  /** Local-server operator process bootstrap only — not turn execution. */
   agentStartupMs: 60_000,
-  /** Single `session.prompt` hard ceiling. */
+  /** Single outer SDK/ACP/local-server turn hard ceiling. */
+  agentPromptMs: 5 * 60_000,
+  /** @deprecated compatibility name for OpenCode-specific guard tests. */
   opencodePromptMs: 5 * 60_000,
   /** After prompt returns successfully, wait at most this long for report_case_result. */
   capabilityReportMs: 30_000,
@@ -28,7 +30,7 @@ export const TIMEOUTS = {
   turnPollMs: 500
 } as const
 
-export type OpencodeBudgets = {
+export type AgentBudgets = {
   /** Explicit infinite mode (`--no-timeout`). Forbidden when CI=1/true. */
   noTimeout: boolean
   startupMs: number
@@ -37,16 +39,19 @@ export type OpencodeBudgets = {
   workerMs: number
 }
 
+/** @deprecated use AgentBudgets for protocol-neutral outer operators. */
+export type OpencodeBudgets = AgentBudgets
+
 /**
- * Resolve staged OpenCode budgets.
+ * Resolve staged live-operator budgets.
  * - `timeoutMs <= 0` → staged defaults (finite stage ceilings; workerMs unbounded)
  * - positive `timeoutMs` → shrinks each stage to fit under the overall budget
  * - `noTimeout: true` → no deadlines (local debug only; forbidden in CI)
  */
-export function resolveOpencodeBudgets(input: {
+export function resolveAgentBudgets(input: {
   timeoutMs?: number
   noTimeout?: boolean
-}): OpencodeBudgets {
+}): AgentBudgets {
   const noTimeout = Boolean(input.noTimeout)
   if (noTimeout) {
     return {
@@ -65,12 +70,15 @@ export function resolveOpencodeBudgets(input: {
   return {
     noTimeout: false,
     startupMs: Math.min(TIMEOUTS.agentStartupMs, overall),
-    promptMs: Math.min(TIMEOUTS.opencodePromptMs, overall),
+    promptMs: Math.min(TIMEOUTS.agentPromptMs, overall),
     capabilityReportMs: Math.min(TIMEOUTS.capabilityReportMs, overall),
     // Default: no wall-clock case kill; wait for business API / agent report.
     workerMs: hasOverall ? overall : Number.MAX_SAFE_INTEGER
   }
 }
+
+/** Compatibility wrapper retained for the existing OpenCode isolated harness. */
+export const resolveOpencodeBudgets = resolveAgentBudgets
 
 /**
  * Case worker process budget.
@@ -88,7 +96,7 @@ export function resolveCaseWorkerBudget(input: {
 }
 
 /**
- * `--no-timeout` unlocks OpenCode stage ceilings (startup/prompt/report).
+ * `--no-timeout` unlocks live-operator stage ceilings (startup/prompt/report).
  * Case-worker and turn/job business waits are already unbounded by default;
  * the flag remains forbidden in CI for the outer-driver stage unlock.
  */

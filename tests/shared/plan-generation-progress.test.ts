@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { resolvePlanningPercent } from '../../src/shared/plan-generation-progress'
+import { resolvePlanningPercent } from '@codetask/contracts/plan-generation-progress'
 
 test('plan generation progress reserves analysis and outline stages', () => {
   assert.equal(resolvePlanningPercent(0, 0), 10)

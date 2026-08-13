@@ -258,6 +258,34 @@ describe('architecture boundaries (01+02)', () => {
     assert.deepEqual(offenders, [], `web imports Node Provider runtime:\n${offenders.join('\n')}`)
   })
 
+  it('apps/desktop is a thin shell and never imports business/runtime packages', () => {
+    const forbidden =
+      /@codetask\/(server-core|database|agent-runtime|provider-runtime-node)|src\/server/
+    const offenders: string[] = []
+    for (const file of walk(join(root, 'apps/desktop/src'))) {
+      const source = readFileSync(file, 'utf8')
+      if (forbidden.test(source)) offenders.push(relative(root, file).split('\\').join('/'))
+    }
+    const manifest = readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')
+    if (forbidden.test(manifest)) offenders.push('apps/desktop/package.json')
+    assert.deepEqual(
+      offenders,
+      [],
+      `desktop imports business/runtime code:\n${offenders.join('\n')}`
+    )
+  })
+
+  it('apps/service never imports Electron', () => {
+    const offenders: string[] = []
+    for (const file of walk(join(root, 'apps/service/src'))) {
+      const source = readFileSync(file, 'utf8')
+      if (/from ['"]electron['"]|require\(['"]electron['"]\)/.test(source)) {
+        offenders.push(relative(root, file).split('\\').join('/'))
+      }
+    }
+    assert.deepEqual(offenders, [], `service imports Electron:\n${offenders.join('\n')}`)
+  })
+
   it('production apps and packages do not import test helpers', () => {
     const offenders: string[] = []
     for (const base of ['apps', 'packages', 'src']) {

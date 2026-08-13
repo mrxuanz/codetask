@@ -48,3 +48,37 @@ test('streamMcpSseEvents closes when queue overflows backlog', async () => {
   abortController.abort()
   closeStreamableMcpTransport(urlSessionId, mcpSessionId)
 })
+
+test('streamMcpSseEvents preserves responses published in the same millisecond', async () => {
+  const urlSessionId = `test-event-order-${Date.now()}`
+  const abortController = new AbortController()
+  const gen = streamMcpSseEvents({
+    urlSessionId,
+    mcpSessionId: null,
+    signal: abortController.signal
+  })
+
+  await gen.next()
+  const originalNow = Date.now
+  Object.defineProperty(Date, 'now', { value: () => 123_456 })
+  try {
+    for (let id = 1; id <= 2; id += 1) {
+      publishMcpJsonRpcResponse(urlSessionId, null, id, {
+        kind: 'response',
+        body: { jsonrpc: '2.0', id, result: { id } }
+      } as unknown as McpDispatchResult)
+    }
+  } finally {
+    Object.defineProperty(Date, 'now', { value: originalNow })
+  }
+
+  const first = await gen.next()
+  const second = await gen.next()
+  assert.equal(JSON.parse(first.value!.data).id, 1)
+  assert.equal(JSON.parse(second.value!.data).id, 2)
+  assert.ok(Number(second.value!.id) > Number(first.value!.id))
+
+  abortController.abort()
+  await gen.return(undefined)
+  closeStreamableMcpTransport(urlSessionId, null)
+})

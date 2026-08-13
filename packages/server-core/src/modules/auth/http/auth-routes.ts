@@ -1,4 +1,10 @@
 import { Hono, type Context } from 'hono'
+import { Type, type Static, type TSchema } from '@sinclair/typebox'
+import { Value } from '@sinclair/typebox/value'
+import {
+  PASSWORD_MAX_LENGTH,
+  USERNAME_MAX_LENGTH
+} from '@codetask/contracts/auth/credentials-policy'
 import type {
   AuthApplication,
   LoginOptions,
@@ -12,6 +18,31 @@ import {
 } from './cookie-session.ts'
 import { requireAuthPrincipal } from './session-context.ts'
 
+const SetupBodySchema = Type.Object(
+  {
+    username: Type.Optional(Type.String({ maxLength: USERNAME_MAX_LENGTH })),
+    password: Type.Optional(Type.String({ maxLength: PASSWORD_MAX_LENGTH })),
+    setupToken: Type.Optional(Type.String({ maxLength: 512 }))
+  },
+  { additionalProperties: false }
+)
+const LoginBodySchema = Type.Object(
+  {
+    username: Type.Optional(Type.String({ maxLength: USERNAME_MAX_LENGTH })),
+    password: Type.Optional(Type.String({ maxLength: PASSWORD_MAX_LENGTH })),
+    captchaId: Type.Optional(Type.String({ maxLength: 64 })),
+    captchaAnswer: Type.Optional(Type.String({ maxLength: 16 }))
+  },
+  { additionalProperties: false }
+)
+const ChangePasswordBodySchema = Type.Object(
+  {
+    currentPassword: Type.Optional(Type.String({ maxLength: PASSWORD_MAX_LENGTH })),
+    newPassword: Type.Optional(Type.String({ maxLength: PASSWORD_MAX_LENGTH }))
+  },
+  { additionalProperties: false }
+)
+
 export type AuthHttpDeps = {
   auth: AuthApplication
   authSecret: string
@@ -21,7 +52,7 @@ export type AuthHttpDeps = {
   clearSetupGate: () => void
   /** Map AuthError / domain failures into host HTTP JSON (status + body). */
   onAuthError: (error: unknown, c: Context) => Response | Promise<Response>
-  ok: <T>(data: T) => unknown
+  ok: <T>(data: T, requestId: string) => unknown
   onSessionRevoked?: (input: {
     userId?: string
     sessionId?: string
@@ -31,6 +62,23 @@ export type AuthHttpDeps = {
 
 function wantsBearerToken(c: Context): boolean {
   return c.req.header('x-codetask-auth-transport')?.toLowerCase() === 'bearer'
+}
+
+function requestId(c: Context): string {
+  return (c.get('requestId' as never) as string | undefined) ?? 'unknown'
+}
+
+async function parseAuthBody<T>(c: Context, schema: TSchema): Promise<T> {
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    throw AuthError.badRequest('auth.invalid_payload', 'Request body must be valid JSON')
+  }
+  if (!Value.Check(schema, body)) {
+    throw AuthError.badRequest('auth.invalid_payload', 'Invalid authentication request body')
+  }
+  return body as T
 }
 
 function browserActorPayload(issue: SessionIssue): {
@@ -84,20 +132,19 @@ export function createAuthHttpRoutes(deps: AuthHttpDeps): Hono {
     const credential = readSessionCredential(c)
     const data = await auth.bootstrap(credential.token)
     return c.json(
-      deps.ok({
-        ...data,
-        setupTokenRequired: deps.mode === 'server' && !data.initialized
-      })
+      deps.ok(
+        {
+          ...data,
+          setupTokenRequired: deps.mode === 'server' && !data.initialized
+        },
+        requestId(c)
+      )
     )
   })
 
   routes.post('/setup', async (c) => {
     const precheck = await auth.bootstrap()
-    const body = await c.req.json<{
-      username?: string
-      password?: string
-      setupToken?: string
-    }>()
+    const body = await parseAuthBody<Static<typeof SetupBodySchema>>(c, SetupBodySchema)
     if (deps.mode === 'server') {
       if (precheck.initialized) {
         throw AuthError.conflict('auth.already_initialized', 'Account already initialized')
@@ -112,16 +159,11 @@ export function createAuthHttpRoutes(deps: AuthHttpDeps): Hono {
     const data = await auth.setup(body.username ?? '', body.password ?? '')
     deps.clearSetupGate()
     issue(c, deps, data)
-    return c.json(deps.ok(responsePayload(c, data)))
+    return c.json(deps.ok(responsePayload(c, data), requestId(c)))
   })
 
   routes.post('/login', async (c) => {
-    const body = await c.req.json<{
-      username?: string
-      password?: string
-      captchaId?: string
-      captchaAnswer?: string
-    }>()
+    const body = await parseAuthBody<Static<typeof LoginBodySchema>>(c, LoginBodySchema)
     const options: LoginOptions = {
       username: body.username ?? '',
       password: body.password ?? '',
@@ -131,7 +173,7 @@ export function createAuthHttpRoutes(deps: AuthHttpDeps): Hono {
     }
     const data = await auth.login(options)
     issue(c, deps, data)
-    return c.json(deps.ok(responsePayload(c, data)))
+    return c.json(deps.ok(responsePayload(c, data), requestId(c)))
   })
 
   routes.post('/logout', (c) => {
@@ -146,7 +188,7 @@ export function createAuthHttpRoutes(deps: AuthHttpDeps): Hono {
       })
     }
     clearSessionCookies(c)
-    return c.json(deps.ok({ loggedOut: true }))
+    return c.json(deps.ok({ loggedOut: true }, requestId(c)))
   })
 
   routes.post('/logout-all', (c) => {
@@ -154,12 +196,15 @@ export function createAuthHttpRoutes(deps: AuthHttpDeps): Hono {
     auth.logoutAll(principal)
     deps.onSessionRevoked?.({ userId: principal.userId, scope: 'user' })
     clearSessionCookies(c)
-    return c.json(deps.ok({ loggedOut: true }))
+    return c.json(deps.ok({ loggedOut: true }, requestId(c)))
   })
 
   routes.post('/change-password', async (c) => {
     const principal = requireAuthPrincipal()
-    const body = await c.req.json<{ currentPassword?: string; newPassword?: string }>()
+    const body = await parseAuthBody<Static<typeof ChangePasswordBodySchema>>(
+      c,
+      ChangePasswordBodySchema
+    )
     const data = await auth.changePassword(
       principal,
       body.currentPassword ?? '',
@@ -167,11 +212,11 @@ export function createAuthHttpRoutes(deps: AuthHttpDeps): Hono {
     )
     deps.onSessionRevoked?.({ userId: principal.userId, scope: 'user' })
     issue(c, deps, data)
-    return c.json(deps.ok(responsePayload(c, data)))
+    return c.json(deps.ok(responsePayload(c, data), requestId(c)))
   })
 
   routes.post('/captcha', (c) => {
-    return c.json(deps.ok(auth.generateCaptcha(deps.getClientIp(c))))
+    return c.json(deps.ok(auth.generateCaptcha(deps.getClientIp(c)), requestId(c)))
   })
 
   return routes

@@ -60,6 +60,18 @@ test('sessions are multi-device and only HMAC digests are persisted', async () =
   })
 })
 
+test('setup rejects password whitespace instead of silently changing the credential', async () => {
+  await withAuth(async (auth) => {
+    await assert.rejects(
+      auth.setup(USERNAME, `${PASSWORD} `),
+      (error: unknown) =>
+        error instanceof Error &&
+        'code' in error &&
+        (error as { code: string }).code === 'auth.password_invalid_chars'
+    )
+  })
+})
+
 test('login failures are scoped and persisted without a global account lock', async () => {
   await withAuth(async (auth, client) => {
     await auth.setup(USERNAME, PASSWORD)
@@ -75,7 +87,8 @@ test('login failures are scoped and persisted without a global account lock', as
 
     const rows = client
       .prepare(
-        `SELECT failure_count, captcha_required FROM auth_throttles WHERE key LIKE 'login:%'`
+        `SELECT failure_count, captcha_required FROM auth_throttles
+          WHERE key LIKE 'login:%' AND failure_count > 0`
       )
       .all() as Array<{ failure_count: number; captcha_required: number }>
     assert.equal(rows.length, 1)
@@ -91,12 +104,50 @@ test('login failures are scoped and persisted without a global account lock', as
   })
 })
 
+test('login request throttling cannot be bypassed by rotating usernames', async () => {
+  await withAuth(async (auth, client) => {
+    await auth.setup(USERNAME, PASSWORD)
+    await assert.rejects(
+      auth.login({
+        username: 'first_missing_user',
+        password: 'WrongPass1!',
+        clientIp: '198.51.100.9'
+      })
+    )
+    client.prepare(`UPDATE auth_throttles SET request_count = 60 WHERE key LIKE 'login-ip:%'`).run()
+    await assert.rejects(
+      auth.login({
+        username: 'another_missing_user',
+        password: 'WrongPass1!',
+        clientIp: '198.51.100.9'
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        'code' in error &&
+        (error as { code: string }).code === 'auth.rate_limited'
+    )
+  })
+})
+
 test('captcha challenges are scoped, attempt-limited, and cleaned by the auth janitor', async () => {
   await withAuth(async (auth, client) => {
-    const challenge = auth.generateCaptcha('192.0.2.1')
+    const clientIp = '192.0.2.1'
+    await auth.setup(USERNAME, PASSWORD)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await assert.rejects(auth.login({ username: USERNAME, password: 'WrongPass1!', clientIp }))
+    }
+    const challenge = auth.generateCaptcha(clientIp)
     assert.ok(challenge.challengeId.startsWith('cpt_'))
     assert.ok(challenge.image.startsWith('data:image/svg+xml;base64,'))
-    assert.equal(auth.verifyCaptchaForClient(challenge.challengeId, 'WRONG', '192.0.2.1'), false)
+    await assert.rejects(
+      auth.login({
+        username: USERNAME,
+        password: PASSWORD,
+        clientIp,
+        captchaId: challenge.challengeId,
+        captchaAnswer: 'WRONG'
+      })
+    )
     const row = client
       .prepare(`SELECT attempts FROM auth_challenges WHERE id = ?`)
       .get(challenge.challengeId) as { attempts: number }

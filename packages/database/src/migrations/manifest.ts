@@ -1,4 +1,19 @@
 import { createHash } from 'node:crypto'
+import contentChecksumsJson from './content-checksums.json'
+
+export type MigrationContentChecksum = {
+  version: number
+  name: string
+  source: string
+  contentChecksum: string
+}
+
+export const MIGRATION_CONTENT_CHECKSUMS = Object.freeze(
+  contentChecksumsJson as MigrationContentChecksum[]
+)
+const CONTENT_BY_VERSION = new Map(
+  MIGRATION_CONTENT_CHECKSUMS.map((entry) => [entry.version, entry] as const)
+)
 
 export type MigrationManifestEntry =
   | {
@@ -6,6 +21,8 @@ export type MigrationManifestEntry =
       version: number
       name: string
       checksum: string
+      contentChecksum: string
+      source: string
     }
   | {
       kind: 'tombstone'
@@ -15,19 +32,31 @@ export type MigrationManifestEntry =
     }
 
 /**
- * Stable checksum for a published migration identity (Batch G).
- * Changing version/name of an applied migration fails validation.
+ * Legacy v1 identity checksum accepted only while upgrading existing databases.
  */
-export function migrationChecksum(version: number, name: string): string {
+export function legacyMigrationChecksum(version: number, name: string): string {
   return createHash('sha256').update(`${version}\0${name}`, 'utf8').digest('hex')
 }
 
+/** v2 checksum binds the published identity to a separately verified source digest. */
+export function migrationChecksum(version: number, name: string, contentChecksum: string): string {
+  return `v2:${createHash('sha256')
+    .update(`${version}\0${name}\0${contentChecksum}`, 'utf8')
+    .digest('hex')}`
+}
+
 function migrationEntry(version: number, name: string): MigrationManifestEntry {
+  const content = CONTENT_BY_VERSION.get(version)
+  if (!content || content.name !== name) {
+    throw new Error(`Missing migration content checksum for v${version} (${name})`)
+  }
   return {
     kind: 'migration',
     version,
     name,
-    checksum: migrationChecksum(version, name)
+    checksum: migrationChecksum(version, name, content.contentChecksum),
+    contentChecksum: content.contentChecksum,
+    source: content.source
   }
 }
 
@@ -105,13 +134,17 @@ export const MIGRATION_MANIFEST: readonly MigrationManifestEntry[] = Object.free
   migrationEntry(63, 'project_fk_and_asset_storage_keys'),
   migrationEntry(64, 'drop_backup_and_marker_tables'),
   migrationEntry(65, 'drop_legacy_thread_tables'),
-  migrationEntry(66, 'planning_capacity_index')
+  migrationEntry(66, 'planning_capacity_index'),
+  migrationEntry(67, 'execution_tree_contracts'),
+  migrationEntry(68, 'conversation_query_indexes')
 ])
 
 export function listManifestMigrations(): Array<{
   version: number
   name: string
   checksum: string
+  contentChecksum: string
+  source: string
 }> {
   return MIGRATION_MANIFEST.filter(
     (entry): entry is Extract<MigrationManifestEntry, { kind: 'migration' }> =>
@@ -119,7 +152,9 @@ export function listManifestMigrations(): Array<{
   ).map((entry) => ({
     version: entry.version,
     name: entry.name,
-    checksum: entry.checksum
+    checksum: entry.checksum,
+    contentChecksum: entry.contentChecksum,
+    source: entry.source
   }))
 }
 

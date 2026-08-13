@@ -1,11 +1,15 @@
-import type {
-  CreateDraftBody,
-  DraftAbility,
-  DraftReference,
-  DraftSnapshot,
-  ExecutionProfile,
-  PatchDraftBody
+import {
+  MAX_DRAFT_ABILITIES,
+  MAX_DRAFT_BYTES,
+  MAX_DRAFT_REFERENCES,
+  type CreateDraftBody,
+  type DraftAbility,
+  type DraftReference,
+  type DraftSnapshot,
+  type ExecutionProfile,
+  type PatchDraftBody
 } from '@codetask/contracts'
+import { normalizeProviderCode } from '@codetask/provider-spec'
 import {
   assertCanConfirm,
   assertCanStartPlanning,
@@ -13,7 +17,7 @@ import {
   toDraftSnapshot,
   type DraftRecord
 } from '../domain/draft.ts'
-import type { DraftRepository, ProjectWorkspacePort } from './ports.ts'
+import type { DraftAssetPort, DraftRepository, ProjectWorkspacePort } from './ports.ts'
 import {
   DesignConflictError,
   DesignForbiddenError,
@@ -24,10 +28,24 @@ import {
   type Actor
 } from '../../shared.ts'
 
+function assertDraftWithinLimits(draft: DraftRecord): void {
+  if (draft.abilities.length > MAX_DRAFT_ABILITIES) {
+    throw new DesignValidationError(`Draft exceeds ${MAX_DRAFT_ABILITIES} abilities`)
+  }
+  if (draft.references.length > MAX_DRAFT_REFERENCES) {
+    throw new DesignValidationError(`Draft exceeds ${MAX_DRAFT_REFERENCES} references`)
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(draft)).byteLength
+  if (bytes > MAX_DRAFT_BYTES) {
+    throw new DesignValidationError(`Draft exceeds ${MAX_DRAFT_BYTES} bytes`)
+  }
+}
+
 export class DraftApplication {
   constructor(
     private readonly drafts: DraftRepository,
-    private readonly projects: ProjectWorkspacePort
+    private readonly projects: ProjectWorkspacePort,
+    private readonly assets?: DraftAssetPort
   ) {}
 
   async list(
@@ -72,6 +90,7 @@ export class DraftApplication {
       abilities: [],
       references: []
     }
+    assertDraftWithinLimits(draft)
     await this.drafts.insert(draft)
     return draft
   }
@@ -97,6 +116,7 @@ export class DraftApplication {
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
+    assertDraftWithinLimits(next)
     return this.drafts.update(next, body.expectedRevision)
   }
 
@@ -170,14 +190,23 @@ export class DraftApplication {
     const current = await this.requireOwned(actor, draftId)
     assertEditable(current)
     if (current.lockRevision !== expectedRevision) throw new DesignConflictError()
-    await this.drafts.replaceAbilities(draftId, abilities)
+    const normalizedAbilities = abilities.map((ability) => {
+      const provider = normalizeProviderCode(ability.recommendedCoreCode)
+      if (!provider) {
+        throw new DesignValidationError(
+          `Unsupported ability provider ${ability.recommendedCoreCode}`
+        )
+      }
+      return { ...ability, recommendedCoreCode: provider }
+    })
     const next: DraftRecord = {
       ...current,
-      abilities,
+      abilities: normalizedAbilities,
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
-    return this.drafts.update(next, expectedRevision)
+    assertDraftWithinLimits(next)
+    return this.drafts.updateAbilities(next, expectedRevision, normalizedAbilities)
   }
 
   async patchExecutionProfile(
@@ -189,10 +218,22 @@ export class DraftApplication {
     const current = await this.requireOwned(actor, draftId)
     assertEditable(current)
     if (current.lockRevision !== expectedRevision) throw new DesignConflictError()
-    await this.drafts.setExecutionProfile(draftId, executionProfile)
+    const plannerCoreCode = normalizeProviderCode(executionProfile.plannerCoreCode)
+    const sliceVerifierCoreCode = normalizeProviderCode(executionProfile.sliceVerifierCoreCode)
+    const milestoneVerifierCoreCode = normalizeProviderCode(
+      executionProfile.milestoneVerifierCoreCode
+    )
+    if (!plannerCoreCode || !sliceVerifierCoreCode || !milestoneVerifierCoreCode) {
+      throw new DesignValidationError('Execution profile contains an unsupported provider')
+    }
+    const normalizedProfile: ExecutionProfile = {
+      plannerCoreCode,
+      sliceVerifierCoreCode,
+      milestoneVerifierCoreCode
+    }
     const next: DraftRecord = {
       ...current,
-      executionProfile,
+      executionProfile: normalizedProfile,
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
@@ -216,20 +257,35 @@ export class DraftApplication {
     if (!reference.description.trim()) {
       throw new DesignValidationError('Reference description is required')
     }
-    const nextRef: DraftReference = {
+    const candidate: DraftReference = {
       ...reference,
       id: reference.id ?? newId('ref'),
       description: reference.description.trim()
     }
+    const nextRef =
+      this.assets?.prepareReference({
+        actorId: actor.userId,
+        projectId: current.projectId,
+        draftId,
+        reference: candidate
+      }) ?? candidate
     const references = [...current.references, nextRef]
-    await this.drafts.replaceReferences(draftId, references)
     const next: DraftRecord = {
       ...current,
       references,
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
-    return this.drafts.update(next, expectedRevision)
+    assertDraftWithinLimits(next)
+    this.assets?.retainReference(draftId, nextRef)
+    try {
+      const updated = await this.drafts.updateReferences(next, expectedRevision, references)
+      this.assets?.commitReference?.(draftId, nextRef)
+      return updated
+    } catch (error) {
+      this.assets?.releaseReference(draftId, nextRef)
+      throw error
+    }
   }
 
   async patchReference(
@@ -254,14 +310,14 @@ export class DraftApplication {
     if (!references.some((r) => r.id === referenceId)) {
       throw new DesignNotFoundError('Reference not found')
     }
-    await this.drafts.replaceReferences(draftId, references)
     const next: DraftRecord = {
       ...current,
       references,
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
-    return this.drafts.update(next, expectedRevision)
+    assertDraftWithinLimits(next)
+    return this.drafts.updateReferences(next, expectedRevision, references)
   }
 
   async deleteReference(
@@ -273,26 +329,36 @@ export class DraftApplication {
     const current = await this.requireOwned(actor, draftId)
     assertEditable(current)
     if (current.lockRevision !== expectedRevision) throw new DesignConflictError()
+    const removed = current.references.find((reference) => reference.id === referenceId)
+    if (!removed) throw new DesignNotFoundError('Reference not found')
     const references = current.references.filter((r) => r.id !== referenceId)
-    await this.drafts.replaceReferences(draftId, references)
     const next: DraftRecord = {
       ...current,
       references,
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
-    return this.drafts.update(next, expectedRevision)
+    assertDraftWithinLimits(next)
+    const updated = await this.drafts.updateReferences(next, expectedRevision, references)
+    this.assets?.releaseReference(draftId, removed)
+    return updated
   }
 
   async archive(actor: Actor, draftId: string): Promise<void> {
     const current = await this.requireOwned(actor, draftId)
+    const activePlanning = await this.drafts.countActivePlanningSessions(draftId)
+    if (activePlanning > 0) {
+      throw new DesignValidationError('Cancel active planning sessions before deleting the draft')
+    }
     const next: DraftRecord = {
       ...current,
+      references: [],
       status: 'archived',
       lockRevision: current.lockRevision + 1,
       updatedAt: nowMs()
     }
-    await this.drafts.update(next, current.lockRevision)
+    await this.drafts.updateReferences(next, current.lockRevision, [])
+    this.assets?.releaseDraft(draftId)
   }
 
   async captureConfirmedSnapshot(actor: Actor, draftId: string): Promise<DraftSnapshot> {

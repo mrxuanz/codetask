@@ -26,7 +26,6 @@ import {
   getOrComposeExecution,
   type ExecutionModule
 } from '../design-module'
-import { AppError } from '../error'
 
 function moduleActorFromPrincipal(): Actor | undefined {
   const principal = currentAuthPrincipal()
@@ -34,39 +33,7 @@ function moduleActorFromPrincipal(): Actor | undefined {
   return toModuleActor(principalToActor(principal))
 }
 
-function executionActorMiddleware() {
-  return async (
-    c: {
-      set: (key: never, value: unknown) => void
-    },
-    next: () => Promise<void>
-  ) => {
-    const actor = moduleActorFromPrincipal()
-    if (actor) {
-      c.set('actor' as never, actor)
-    }
-    c.set('requestId' as never, crypto.randomUUID())
-    await next()
-  }
-}
-
-function conversationActorMiddleware() {
-  return async (
-    c: {
-      set: (key: never, value: unknown) => void
-    },
-    next: () => Promise<void>
-  ) => {
-    const actor = moduleActorFromPrincipal()
-    if (actor) {
-      c.set('actor' as never, actor)
-    }
-    c.set('requestId' as never, crypto.randomUUID())
-    await next()
-  }
-}
-
-function designActorMiddleware() {
+function moduleActorMiddleware() {
   return async (
     c: {
       set: (key: never, value: unknown) => void
@@ -79,20 +46,6 @@ function designActorMiddleware() {
     }
     await next()
   }
-}
-
-/** Gone stub for removed /api/threads surface (03/06 — no forwarding or alias layer). */
-function createRemovedThreadsStub(): Hono {
-  const routes = new Hono()
-  const gone = (): never => {
-    throw AppError.gone(
-      'Thread APIs removed; use /api/conversations, /api/drafts, /api/planning-sessions, and /api/jobs',
-      'conversation.moved'
-    )
-  }
-  routes.all('/*', gone)
-  routes.all('/', gone)
-  return routes
 }
 
 export function createApiRoutes(
@@ -106,16 +59,29 @@ export function createApiRoutes(
   const conv = conversation ?? getOrComposeConversation(ctx)
 
   // MCP uses its own protocol auth boundary (localhost + capability tokens) — not session Auth.
-  api.route('/mcp', createMcpRoutes(ctx))
+  // It still shares the host's request identity and bounded-body protections. GET streams bypass
+  // the body limiter naturally and keep their own lifecycle instead of a normal HTTP timeout.
+  const mcp = new Hono()
+  mcp.use('*', async (c, next) => {
+    c.set('requestId' as never, crypto.randomUUID())
+    await next()
+  })
+  mcp.use('*', bodySizeLimit())
+  mcp.route('/', createMcpRoutes(ctx))
+  api.route('/mcp', mcp)
 
   const secured = new Hono()
+  secured.use('*', async (c, next) => {
+    c.set('requestId' as never, crypto.randomUUID())
+    await next()
+  })
   secured.use('*', requireAuth(ctx.security))
   secured.use('*', requestGuard(ctx.security))
   secured.use('*', requestTimeout(ctx.config.http.requestTimeoutMs))
   secured.use('*', bodySizeLimit())
 
   if (design) {
-    const designActor = designActorMiddleware()
+    const designActor = moduleActorMiddleware()
     secured.use('/drafts/*', designActor)
     secured.use('/planning-sessions/*', designActor)
     secured.use('/drafts', designActor)
@@ -124,7 +90,9 @@ export function createApiRoutes(
   }
 
   secured.get('/health', (c) => {
-    return c.json(ok({ status: 'ok' }))
+    return c.json(
+      ok({ status: 'ok' }, (c.get('requestId' as never) as string | undefined) ?? 'unknown')
+    )
   })
 
   secured.route('/system', createSystemRoutes(ctx))
@@ -135,7 +103,7 @@ export function createApiRoutes(
   secured.route('/settings', createSettingsRoutes(ctx))
   secured.route('/projects', createProjectRoutes(ctx))
 
-  const convActor = conversationActorMiddleware()
+  const convActor = moduleActorMiddleware()
   secured.use('/conversations', convActor)
   secured.use('/conversations/*', convActor)
   secured.use('/projects/:projectId/conversations', convActor)
@@ -143,9 +111,7 @@ export function createApiRoutes(
   secured.route('/', conv.routes)
   secured.route('/', createAttachmentRoutes(ctx))
 
-  secured.route('/threads', createRemovedThreadsStub())
-
-  const actorMw = executionActorMiddleware()
+  const actorMw = moduleActorMiddleware()
   secured.use('/jobs', actorMw)
   secured.use('/jobs/*', actorMw)
   secured.use('/execution-queue', actorMw)
@@ -153,13 +119,22 @@ export function createApiRoutes(
   secured.route('/', exec.routes)
 
   secured.onError((error, c) => {
-    console.error('[api] unhandled error:', error)
-    const { body, status } = toErrorHttpResult(error)
+    const requestId = (c.get('requestId' as never) as string | undefined) ?? 'unknown'
+    ctx.logger.error('API request failed', { requestId, error })
+    const { body, status } = toErrorHttpResult(error, requestId)
     return c.json(body, status as ContentfulStatusCode)
   })
 
   secured.notFound((c) => {
-    return c.json(fail(code.NOT_FOUND, 'Not Found', { error: 'Not Found' }), 404)
+    return c.json(
+      fail(
+        code.NOT_FOUND,
+        'Not Found',
+        { error: 'Not Found' },
+        (c.get('requestId' as never) as string | undefined) ?? 'unknown'
+      ),
+      404
+    )
   })
 
   api.route('/', secured)

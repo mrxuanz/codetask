@@ -29,12 +29,14 @@ export function createAuthRoutes(
       }
     },
     onAuthError(error, c) {
+      const requestId = (c.get('requestId' as never) as string | undefined) ?? 'unknown'
       if (error instanceof AuthError) {
         const appErr = authErrorToAppError(error)
-        const { body, status } = toErrorHttpResult(appErr)
+        const { body, status } = toErrorHttpResult(appErr, requestId)
         return c.json(body, status as ContentfulStatusCode)
       }
-      const { body, status } = toErrorHttpResult(error)
+      console.error('[auth] unhandled HTTP error', { requestId, error })
+      const { body, status } = toErrorHttpResult(error, requestId)
       return c.json(body, status as ContentfulStatusCode)
     }
   })

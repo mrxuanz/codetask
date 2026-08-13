@@ -1,17 +1,20 @@
 import type { SafeLogger } from './ports/safe-logger'
 import { appendFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { scrubLogString, scrubLogValue } from '@codetask/contracts/log-redaction'
+
+export { scrubLogString, scrubLogValue } from '@codetask/contracts/log-redaction'
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
-interface LogEntry {
+export interface LogEntry {
   readonly level: LogLevel
   readonly message: string
   readonly meta?: Record<string, unknown> | undefined
   readonly timestamp: number
 }
 
-interface SafeLoggerConfig {
+export interface SafeLoggerConfig {
   readonly logDir?: string
   readonly maxBufferSize?: number
   readonly rateLimitWindowMs?: number
@@ -70,10 +73,12 @@ export class SafeLoggerImpl implements SafeLogger {
   }
 
   private log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
+    const safeMessage = scrubLogString(message)
+    const safeMeta = meta ? (scrubLogValue(meta) as Record<string, unknown>) : undefined
     const entry: LogEntry = {
       level,
-      message,
-      meta,
+      message: safeMessage,
+      meta: safeMeta,
       timestamp: Date.now()
     }
 
@@ -84,7 +89,7 @@ export class SafeLoggerImpl implements SafeLogger {
     }
 
     // Rate limiting check
-    if (this.isRateLimited(message)) return
+    if (this.isRateLimited(safeMessage)) return
 
     // File sink (primary)
     if (!this.fileSinkDisabled && this.logFilePath) {
@@ -93,7 +98,7 @@ export class SafeLoggerImpl implements SafeLogger {
 
     // Console sink (best-effort)
     if (!this.consoleDisabled) {
-      this.writeToConsole(level, message, meta)
+      this.writeToConsole(level, safeMessage, safeMeta)
     }
   }
 
@@ -119,7 +124,7 @@ export class SafeLoggerImpl implements SafeLogger {
           ts: entry.timestamp,
           level: entry.level,
           msg: entry.message,
-          ...entry.meta
+          meta: entry.meta
         }) + '\n'
       appendFileSync(this.logFilePath!, line)
     } catch {

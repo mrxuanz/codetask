@@ -6,7 +6,15 @@ import test from 'node:test'
 import { closeIsolatedTestDatabase, createIsolatedTestDatabase } from '../../src/server/db'
 import { projects } from '../../src/server/db/schema'
 import { dataPaths, threadAttachmentsDir } from '../../src/server/data-paths'
-import { pruneOrphanAttachments } from '../../src/server/retention/janitor'
+import {
+  registerAttachmentAsset,
+  releaseAssetReference,
+  retainAssetReference
+} from '../../src/server/assets/registry'
+import {
+  processPendingAssetDeletes,
+  pruneOrphanAttachments
+} from '../../src/server/retention/janitor'
 
 function seedProject(
   db: ReturnType<typeof createIsolatedTestDatabase>,
@@ -105,6 +113,59 @@ test('pruneOrphanAttachments removes true orphan owner directories', async () =>
     const result = await pruneOrphanAttachments(dataDir, db)
     assert.equal(result.removed, 1)
     assert.equal(existsSync(orphanDir), false)
+  } finally {
+    closeIsolatedTestDatabase(db)
+    rmSync(dataDir, { recursive: true, force: true })
+  }
+})
+
+test('draft or Job ownership protects an attachment after its conversation is deleted', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'janitor-promoted-att-'))
+  const db = createIsolatedTestDatabase(dataDir)
+  try {
+    seedProject(db)
+    const conversationId = '22222222-2222-4222-8222-222222222222'
+    seedConversation(db, conversationId)
+    const client = (db as { $client?: import('better-sqlite3').Database }).$client
+    assert.ok(client)
+
+    const assetId = 'att-promoted'
+    const assetDir = join(threadAttachmentsDir(dataDir, conversationId), assetId)
+    mkdirSync(assetDir, { recursive: true })
+    writeFileSync(join(assetDir, 'reference.png'), 'png')
+    registerAttachmentAsset(client, {
+      assetId,
+      ownerType: 'conversation',
+      ownerId: conversationId,
+      storageKey: `attachments/${conversationId}/${assetId}`,
+      sizeBytes: 3
+    })
+    retainAssetReference(client, {
+      assetId,
+      ownerType: 'draft',
+      ownerId: 'draft-promoted',
+      purpose: 'reference:ref-1'
+    })
+    releaseAssetReference(client, {
+      assetId,
+      ownerType: 'conversation',
+      ownerId: conversationId
+    })
+    client.prepare(`DELETE FROM conversation_threads WHERE id = ?`).run(conversationId)
+
+    const retained = await pruneOrphanAttachments(dataDir, db)
+    assert.equal(retained.removed, 0)
+    assert.equal(existsSync(join(assetDir, 'reference.png')), true)
+
+    releaseAssetReference(client, {
+      assetId,
+      ownerType: 'draft',
+      ownerId: 'draft-promoted',
+      purpose: 'reference:ref-1'
+    })
+    const deleted = await processPendingAssetDeletes(dataDir, db)
+    assert.equal(deleted.removed, 1)
+    assert.equal(existsSync(assetDir), false)
   } finally {
     closeIsolatedTestDatabase(db)
     rmSync(dataDir, { recursive: true, force: true })

@@ -186,7 +186,7 @@ export async function runChatImageAttachmentOracle(input: {
   const results: OracleResult[] = []
   const messages = await ops.listMessages(input.client, input.threadId)
   writeEvidence(input.evidenceDir, 'attachment-result.json', {
-    case: 'CHAT-IMG-001',
+    case: 'chat-image-attachment',
     turnId: input.turnId,
     attachmentId: input.attachmentId,
     messages
@@ -272,7 +272,7 @@ export async function runDraftChatImageAttachmentOracle(input: {
     messages.find((item) => String(item.id ?? '') === input.draftMessageId) ?? null
   const payload = extractDraftPayload(draftMessage)
   writeEvidence(input.evidenceDir, 'attachment-result.json', {
-    case: 'DRAFT-CHAT-IMG-001',
+    case: 'retired-draft-image-attachment',
     draftMessageId: input.draftMessageId,
     payload
   })
@@ -614,7 +614,7 @@ export async function runDraftReferencePathOracle(input: {
   })
 
   writeEvidence(input.evidenceDir, 'attachment-result.json', {
-    case: 'DRAFT-REF-PATH-001',
+    case: 'retired-draft-reference-path',
     draftMessageId: input.draftMessageId,
     designSessionId: input.designSessionId,
     launchedJobId: input.launchedJobId,

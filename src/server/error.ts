@@ -1,5 +1,5 @@
 import { fail, type ApiResponse } from './response'
-import { TURN_ERROR_DEFAULT_MESSAGES } from '../shared/turn-errors/codes.ts'
+import { TURN_ERROR_DEFAULT_MESSAGES } from '@codetask/contracts/turn-errors/codes'
 
 export const code = {
   OK: 0,
@@ -32,20 +32,25 @@ export function resolveHttpStatus(error: unknown): number {
 
 export class AppError extends Error {
   readonly httpStatus: number
+  readonly publicMessage: string
+  readonly internalCause?: unknown
 
   constructor(
     public readonly status: number,
-    message: string,
-    public readonly data: Record<string, unknown> = { error: message },
-    httpStatus?: number
+    publicMessage: string,
+    public readonly data: Record<string, unknown> = { error: publicMessage },
+    httpStatus?: number,
+    internalCause?: unknown
   ) {
-    super(message)
+    super(internalCause instanceof Error ? internalCause.message : publicMessage)
     this.name = 'AppError'
+    this.publicMessage = publicMessage
+    this.internalCause = internalCause
     this.httpStatus = httpStatus ?? HTTP_STATUS_BY_CODE[status] ?? 500
   }
 
   toResponse(): ApiResponse<Record<string, unknown>> {
-    return fail(this.status, this.message, this.data)
+    return fail(this.status, this.publicMessage, this.data)
   }
 
   static badRequest(
@@ -110,36 +115,49 @@ export class AppError extends Error {
   }
 
   static internal(
-    message: string,
+    internalCause: unknown,
     turnErrorCode?: string,
     turnErrorParams?: Record<string, unknown>
   ): AppError {
-    return new AppError(code.INTERNAL, message, {
-      error: message,
-      ...(turnErrorCode ? { turnErrorCode, turnErrorParams } : {})
-    })
+    const publicMessage = 'Internal server error'
+    return new AppError(
+      code.INTERNAL,
+      publicMessage,
+      {
+        error: publicMessage,
+        ...(turnErrorCode ? { turnErrorCode, turnErrorParams } : {})
+      },
+      500,
+      internalCause
+    )
   }
 
-  static db(message: string): AppError {
-    return new AppError(code.DB, message, { error: message })
+  static db(internalCause: unknown): AppError {
+    const publicMessage = 'Database operation failed'
+    return new AppError(code.DB, publicMessage, { error: publicMessage }, 500, internalCause)
   }
 }
 
-export function toErrorResponse(error: unknown): ApiResponse<Record<string, unknown> | null> {
+export function toErrorResponse(
+  error: unknown,
+  requestId = 'unknown'
+): ApiResponse<Record<string, unknown> | null> {
   if (error instanceof AppError) {
-    return error.toResponse()
+    return fail(error.status, error.publicMessage, error.data, requestId)
   }
 
-  const message = error instanceof Error ? error.message : 'internal server error'
-  return fail(code.INTERNAL, message, { error: message })
+  return fail(code.INTERNAL, 'Internal server error', {}, requestId)
 }
 
-export function toErrorHttpResult(error: unknown): {
+export function toErrorHttpResult(
+  error: unknown,
+  requestId = 'unknown'
+): {
   body: ApiResponse<Record<string, unknown> | null>
   status: number
 } {
   return {
-    body: toErrorResponse(error),
+    body: toErrorResponse(error, requestId),
     status: resolveHttpStatus(error)
   }
 }

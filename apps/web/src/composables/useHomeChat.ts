@@ -24,9 +24,9 @@ import { realtimePayload } from '@renderer/composables/useRealtimeGateway'
 import {
   finalizeStreamingAssistantMessage,
   removeStreamingAssistantMessage,
-  replaceOptimisticUserMessage,
-  upsertStreamingAssistantMessage
+  replaceOptimisticUserMessage
 } from '@renderer/lib/conversationMessages'
+import { createConversationDeltaBuffer } from '@renderer/lib/conversationDeltaBuffer'
 import { setPreferredProviderCode } from '@renderer/lib/preferredCore'
 import { formatTurnError } from '@renderer/i18n/formatTurnError'
 import type { WorkspaceAccessMode } from '@codetask/contracts/workspace-access'
@@ -229,14 +229,23 @@ export function useHomeChat(
   ): void {
     let pollInFlight = false
     let activeStreamingId: string | null = null
-    let activeThinking = ''
     const releases: Array<() => void> = []
     let pollTimer: ReturnType<typeof setInterval> | null = null
 
     const isCurrent = (): boolean => token === openToken && isViewingThread(threadId)
+    const deltas = createConversationDeltaBuffer({
+      providerCode,
+      isCurrent,
+      getStreamingMessageId: () => activeStreamingId,
+      getMessages: () => messages.value,
+      updateMessages: (next) => {
+        messages.value = next
+      }
+    })
     const cleanup = (): void => {
       for (const release of releases) release()
       if (pollTimer) clearInterval(pollTimer)
+      deltas.clear()
       if (turnUnsub === cleanup) turnUnsub = null
     }
 
@@ -281,26 +290,21 @@ export function useHomeChat(
         if (turn?.id === turnId) settleFromSnapshot(turn)
         return
       }
-      if (envelope.type === 'assistant.thinking.delta') {
-        activeThinking += String(data.content ?? '')
-      } else if (envelope.type !== 'assistant.text.delta') {
+      if (
+        envelope.type !== 'assistant.thinking.delta' &&
+        envelope.type !== 'assistant.text.delta'
+      ) {
         return
       }
       if (!activeStreamingId) {
         activeStreamingId = `stream-${turnId}`
         streamingMessageId.value = activeStreamingId
       }
-      const current =
-        messages.value.find((message) => message.id === activeStreamingId)?.content ?? ''
-      const content =
-        envelope.type === 'assistant.text.delta' ? current + String(data.content ?? '') : current
-      messages.value = upsertStreamingAssistantMessage(
-        messages.value,
-        activeStreamingId,
-        content,
-        providerCode,
-        activeThinking
-      )
+      if (envelope.type === 'assistant.thinking.delta') {
+        deltas.appendThinking(String(data.content ?? ''))
+      } else if (envelope.type === 'assistant.text.delta') {
+        deltas.appendText(String(data.content ?? ''))
+      }
     }
 
     const pollTurn = async (): Promise<void> => {
@@ -458,7 +462,6 @@ export function useHomeChat(
     const providerCode = activeProviderCode.value ?? 'codex'
     let activeStreamingId: string | null = null
     let optimisticUserId: string | null = null
-    let activeThinking = ''
     const idempotencyKey = crypto.randomUUID()
 
     if (outbound) {
@@ -514,11 +517,21 @@ export function useHomeChat(
         const releases: Array<() => void> = []
         let pollTimer: ReturnType<typeof setInterval> | null = null
         let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+        const deltas = createConversationDeltaBuffer({
+          providerCode,
+          isCurrent: () => generation === streamGeneration && isViewingThread(threadId),
+          getStreamingMessageId: () => activeStreamingId,
+          getMessages: () => messages.value,
+          updateMessages: (next) => {
+            messages.value = next
+          }
+        })
         const finish = (err?: unknown): void => {
           if (settled) return
           settled = true
           if (pollTimer) clearInterval(pollTimer)
           if (timeoutTimer) clearTimeout(timeoutTimer)
+          deltas.clear()
           settleActiveTurn = null
           turnUnsub?.()
           turnUnsub = null
@@ -602,6 +615,7 @@ export function useHomeChat(
                   )
                   optimisticUserId = null
                 } else if (message.role === 'assistant') {
+                  deltas.clear()
                   messages.value = finalizeStreamingAssistantMessage(messages.value, message)
                   activeStreamingId = null
                   streamingMessageId.value = null
@@ -617,14 +631,7 @@ export function useHomeChat(
                   activeStreamingId = `stream-${turnId}`
                   streamingMessageId.value = activeStreamingId
                 }
-                activeThinking += content
-                messages.value = upsertStreamingAssistantMessage(
-                  messages.value,
-                  activeStreamingId,
-                  messages.value.find((m) => m.id === activeStreamingId)?.content ?? '',
-                  providerCode,
-                  activeThinking
-                )
+                deltas.appendThinking(content)
               }
               break
             case 'assistant.text.delta':
@@ -635,15 +642,7 @@ export function useHomeChat(
                   activeStreamingId = `stream-${turnId}`
                   streamingMessageId.value = activeStreamingId
                 }
-                const current =
-                  messages.value.find((m) => m.id === activeStreamingId)?.content ?? ''
-                messages.value = upsertStreamingAssistantMessage(
-                  messages.value,
-                  activeStreamingId,
-                  current + content,
-                  providerCode,
-                  activeThinking
-                )
+                deltas.appendText(content)
               }
               break
             case 'conversation.changed': {
@@ -697,6 +696,7 @@ export function useHomeChat(
           for (const release of releases) release()
           if (pollTimer) clearInterval(pollTimer)
           if (timeoutTimer) clearTimeout(timeoutTimer)
+          deltas.clear()
         }
 
         void hub.flushSubscriptionsNow()

@@ -6,7 +6,7 @@ import {
   resetConversationCursorDirectoryForTests,
   upsertConversationCursorBinding
 } from '../../packages/provider-runtime-node/src/cursor-acp/conversation-cursor-directory'
-import { buildConversationProviderRuntimeScopeId } from '../../src/shared/providers/capabilities'
+import { buildConversationProviderRuntimeScopeId } from '@codetask/provider-spec/capabilities'
 
 test('buildConversationProviderRuntimeScopeId uses stable conversation id (03)', () => {
   assert.equal(

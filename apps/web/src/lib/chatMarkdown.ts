@@ -52,6 +52,7 @@ const PURIFY_CONFIG = {
     'type'
   ],
   ALLOW_DATA_ATTR: false,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|(?:\/(?!\/)|#|\.\.?\/))/i,
   RETURN_TRUSTED_TYPE: false
 }
 
@@ -73,13 +74,10 @@ function transformLinks(html: string): string {
     if (!safe) {
       return '<a>'
     }
-    let next = attrs
-    if (!/\btarget\s*=/i.test(next)) {
-      next += ' target="_blank"'
-    }
-    if (!/\brel\s*=/i.test(next)) {
-      next += ' rel="noreferrer noopener"'
-    }
+    const next = attrs
+      .replace(/\s+target\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .replace(/\s+rel\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .concat(' target="_blank" rel="noopener noreferrer"')
     return `<a${next}>`
   })
 }

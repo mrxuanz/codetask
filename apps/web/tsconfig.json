@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "baseUrl": "../..",
+    "paths": {
+      "@renderer/*": ["apps/web/src/*"],
+      "@codetask/contracts": ["packages/contracts/src/index.ts"],
+      "@codetask/contracts/*": ["packages/contracts/src/*"],
+      "@codetask/provider-spec": ["packages/provider-spec/src/index.ts"],
+      "@codetask/provider-spec/*": ["packages/provider-spec/src/*"]
+    }
+  },
+  "include": ["src/env.d.ts", "src/**/*.ts", "src/**/*.vue"]
+}

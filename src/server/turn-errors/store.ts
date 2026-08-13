@@ -1,11 +1,11 @@
-import type { TurnErrorDto } from '../../shared/turn-errors.ts'
+import type { TurnErrorDto } from '@codetask/contracts/turn-errors'
 import {
   normalizeTurnError,
   normalizeTurnErrorFromMessage,
   parseStoredTurnError,
   serializeStoredTurnError,
   turnErrorDisplayMessage
-} from '../../shared/turn-errors.ts'
+} from '@codetask/contracts/turn-errors'
 
 export function hydrateTurnErrorField(raw: string | null | undefined): TurnErrorDto | null {
   return parseStoredTurnError(raw)

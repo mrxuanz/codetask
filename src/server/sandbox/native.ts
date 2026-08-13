@@ -1,11 +1,13 @@
-import { createRequire } from 'module'
-import { existsSync } from 'fs'
-import { join } from 'path'
+import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { processHostEnvironmentSource } from '../host-environment'
 import { SandboxError } from './types'
 import type { CodeteamSandboxNative } from './types'
 
-const require = createRequire(__filename)
+const moduleDirname = dirname(fileURLToPath(import.meta.url))
+const require = createRequire(import.meta.url)
 
 function getResourcesPath(): string | undefined {
   return (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
@@ -34,7 +36,7 @@ function resolveAddonDir(): string | null {
     paths.push(join(resourcesPath, 'native', 'codeteam-sandbox'))
   }
 
-  paths.push(join(__dirname, '..', '..', '..', 'native', 'codeteam-sandbox'))
+  paths.push(join(moduleDirname, '..', '..', '..', 'native', 'codeteam-sandbox'))
   paths.push(join(process.cwd(), 'native', 'codeteam-sandbox'))
 
   for (const dir of paths) {

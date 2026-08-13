@@ -1,5 +1,5 @@
-import type { TurnErrorCode } from '../../src/shared/turn-errors/codes.ts'
-import { createTurnError } from '../../src/shared/turn-errors/turn-error.ts'
+import type { TurnErrorCode } from '@codetask/contracts/turn-errors/codes'
+import { createTurnError } from '@codetask/contracts/turn-errors/turn-error'
 
 export interface McpToolCallResult {
   text: string

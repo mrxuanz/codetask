@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { createReadStream } from 'node:fs'
+import { Readable } from 'node:stream'
 import type { AppContext } from '../context'
 import { requireAuthPrincipal } from '../auth/session'
-import { readThreadAttachment, saveThreadAttachment } from '../conversation/attachments'
+import { locateThreadAttachment, saveThreadAttachment } from '../conversation/attachments'
 import { AppError } from '../error'
 import { ok } from '../response'
 import { bodySizeLimit } from '../middleware/body-limiter'
@@ -16,10 +18,18 @@ import {
   assertAttachmentOwnerId,
   assertFrozenAttachmentId,
   FrozenIdError
-} from '../../shared/frozen-ids'
+} from '@codetask/server-core/modules/conversation'
 import { throwIfCurrentRequestAborted } from '../context/request-abort'
 import { getOrComposeConversation } from '../design-module'
 import { ConversationForbiddenError, ConversationNotFoundError } from '@codetask/server-core'
+import { getAssetOwnerUsage } from '../assets/registry'
+
+const MAX_ATTACHMENTS_PER_CONVERSATION = 200
+const MAX_ATTACHMENT_BYTES_PER_CONVERSATION = 512 * 1024 * 1024
+
+function requestId(c: { get: (key: never) => unknown }): string {
+  return (c.get('requestId' as never) as string | undefined) ?? 'unknown'
+}
 
 function frozenIdToAppError(error: FrozenIdError): AppError {
   return AppError.badRequest(error.message, error.code)
@@ -78,6 +88,24 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
       })
 
       throwIfCurrentRequestAborted()
+      const client = (ctx.db as AppContext['db'] & { $client?: import('better-sqlite3').Database })
+        .$client
+      if (client) {
+        const usage = getAssetOwnerUsage(client, 'conversation', conversationId)
+        if (
+          usage.count >= MAX_ATTACHMENTS_PER_CONVERSATION ||
+          usage.sizeBytes + file.buffer.length > MAX_ATTACHMENT_BYTES_PER_CONVERSATION
+        ) {
+          throw AppError.badRequest(
+            'Conversation attachment quota exceeded',
+            'attachment.quota_exceeded',
+            {
+              maxFiles: MAX_ATTACHMENTS_PER_CONVERSATION,
+              maxBytes: MAX_ATTACHMENT_BYTES_PER_CONVERSATION
+            }
+          )
+        }
+      }
       const attachment = saveThreadAttachment({
         threadId: conversationId,
         name: file.name,
@@ -86,12 +114,15 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
       })
 
       return c.json(
-        ok({
-          attachment: {
-            ...attachment,
-            assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl, principal.userId)
-          }
-        })
+        ok(
+          {
+            attachment: {
+              ...attachment,
+              assetUrl: signAssetUrl(ctx.security.authSecret, attachment.assetUrl, principal.userId)
+            }
+          },
+          requestId(c)
+        )
       )
     }
   )
@@ -139,15 +170,16 @@ export function createAttachmentRoutes(ctx: AppContext): Hono {
     }
 
     throwIfCurrentRequestAborted()
-    const result = readThreadAttachment(conversationId, attachmentId)
+    const result = locateThreadAttachment(conversationId, attachmentId)
     if (!result) {
       throw AppError.notFound('Attachment not found', 'attachment.not_found')
     }
 
-    return new Response(new Uint8Array(result.buffer), {
+    const body = Readable.toWeb(createReadStream(result.absolutePath)) as ReadableStream<Uint8Array>
+    return new Response(body, {
       headers: {
         'Content-Type': result.attachment.mimeType,
-        'Content-Length': String(result.buffer.length),
+        'Content-Length': String(result.attachment.sizeBytes),
         'Cache-Control': 'private, max-age=3600'
       }
     })

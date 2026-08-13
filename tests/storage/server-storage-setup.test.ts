@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createSetupShell } from '../../src/main/setup-shell'
+import { createSetupShell } from '../../apps/service/src/setup-shell'
 
 test('server mode storage setup prints setup token and requires it on bootstrap', async () => {
   const root = mkdtempSync(join(tmpdir(), 'codetask-storage-setup-server-token-'))
@@ -23,7 +23,10 @@ test('server mode storage setup prints setup token and requires it on bootstrap'
     }
     assert.equal(body.data?.setupTokenRequired, true)
     assert.equal(body.data?.storagePhase, 'selection_required')
-    const serverSource = readFileSync(new URL('../../src/main/server.ts', import.meta.url), 'utf8')
+    const serverSource = readFileSync(
+      new URL('../../apps/service/src/server.ts', import.meta.url),
+      'utf8'
+    )
     assert.match(serverSource, /announceSetupToken\(gate\)/)
     assert.match(serverSource, /setupTokenRequired:\s*cli\.mode === 'server'/)
   } finally {

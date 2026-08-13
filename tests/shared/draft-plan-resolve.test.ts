@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { resolveDraftPlanReference } from '../../src/shared/draft-plan-resolve'
+import { resolveDraftPlanReference } from '@codetask/contracts/draft-plan-resolve'
 
 test('resolveDraftPlanReference uses linked plan id during planning', () => {
   const refs = resolveDraftPlanReference({

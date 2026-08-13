@@ -72,6 +72,7 @@ tests/business/.runtime/
 
 # Local development notes (do not publish)
 docs/问题.md
+docs/edit.md
 
 # Electron / tooling
 .codegraph/

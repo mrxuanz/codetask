@@ -317,9 +317,7 @@ function stepStatus(index: number): 'done' | 'current' | 'upcoming' {
             <Button
               type="button"
               size="sm"
-              :disabled="
-                ws.confirmingPlan.value || Boolean(ws.selectedPlan.value?.referenceManifestStale)
-              "
+              :disabled="ws.confirmingPlan.value"
               @click="ws.handleConfirmPlan"
             >
               {{

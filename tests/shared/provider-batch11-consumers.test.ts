@@ -4,13 +4,16 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { listChatCores } from '../../src/server/conversation/cores.ts'
-import { getProviderDescriptor } from '../../src/shared/providers/descriptors.ts'
+import { getProviderDescriptor } from '@codetask/provider-spec/descriptors'
 import { MCP_ROOT_KEYS } from '@codetask/server-core/modules/settings'
 import { cliMcpRootKey as runtimeCliMcpRootKey } from '../../src/server/agent-runtime/mcp.ts'
-import { SUPPORTED_CORE_CODES } from '../../src/shared/providers/codes.ts'
+import { SUPPORTED_CORE_CODES } from '@codetask/provider-spec/codes'
 import { createProviderRegistry } from '../../packages/provider-runtime-node/src/providers/composition.ts'
-import { resolveCoreModel } from '../../src/server/conversation/models.ts'
-import { DEFAULT_PROVIDERS_CONFIG } from '../../src/shared/providers/settings.ts'
+import {
+  configureCursorModels,
+  resolveCoreModel
+} from '@codetask/provider-runtime-node/cursor-models'
+import { DEFAULT_PROVIDERS_CONFIG } from '@codetask/provider-spec/settings'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -40,9 +43,10 @@ test('listChatCores derives metadata from Registry descriptors and discover', as
 })
 
 test('model resolution does not use CORE_MODEL_ENV and prefers ProviderSettings', () => {
-  const models = readSource('src/server/conversation/models.ts')
+  const models = readSource('packages/provider-runtime-node/src/cursor-models.ts')
   assert.doesNotMatch(models, /CORE_MODEL_ENV/)
-  assert.match(models, /getAppConfig\(\)\.providers/)
+  assert.match(models, /configuredModelProvider/)
+  configureCursorModels((coreCode) => DEFAULT_PROVIDERS_CONFIG[coreCode].model)
   assert.equal(resolveCoreModel('codex', undefined), DEFAULT_PROVIDERS_CONFIG.codex.model)
 })
 

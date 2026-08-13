@@ -3,7 +3,7 @@ import type { JobAction, JobDetail, JobSummary, JobTreeDto, WorkItemDto } from '
 import type { JobRecord } from '../domain/job-state.ts'
 import { allowedJobActions } from '../domain/job-actions.ts'
 import { isoFromMs } from '../../shared.ts'
-import { ExecutionNotFoundError } from '../../shared.ts'
+import { ExecutionConflictError, ExecutionNotFoundError } from '../../shared.ts'
 
 function mapJobRow(row: Record<string, unknown>): JobRecord {
   return {
@@ -56,6 +56,36 @@ export class JobRepository {
     return rows.map(mapJobRow)
   }
 
+  listPageByActor(input: {
+    actorId: string
+    state: JobRecord['state'] | null
+    query: string
+    page: number
+    limit: number
+  }): { jobs: JobRecord[]; total: number } {
+    const where = [`actor_id = ?`]
+    const params: Array<string | number> = [input.actorId]
+    if (input.state) {
+      where.push(`state = ?`)
+      params.push(input.state)
+    }
+    if (input.query) {
+      where.push(`instr(lower(title || char(10) || summary), ?) > 0`)
+      params.push(input.query)
+    }
+    const predicate = where.join(' AND ')
+    const count = this.db
+      .prepare(`SELECT COUNT(*) AS total FROM jobs WHERE ${predicate}`)
+      .get(...params) as { total: number }
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM jobs WHERE ${predicate}
+         ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?`
+      )
+      .all(...params, input.limit, (input.page - 1) * input.limit) as Record<string, unknown>[]
+    return { jobs: rows.map(mapJobRow), total: count.total }
+  }
+
   casUpdateState(input: {
     jobId: string
     expectedRevision: number
@@ -78,7 +108,7 @@ export class JobRepository {
   }): JobRecord {
     const current = this.requireById(input.jobId)
     if (current.stateRevision !== input.expectedRevision) {
-      throw new Error('CAS revision mismatch')
+      throw new ExecutionConflictError('Job state revision does not match')
     }
     const state = input.next.state ?? current.state
     const stateRevision = input.next.stateRevision ?? current.stateRevision + 1
@@ -97,7 +127,7 @@ export class JobRepository {
     const terminalAt =
       input.next.terminalAt !== undefined ? input.next.terminalAt : current.terminalAt
 
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE jobs SET
           state = ?, state_revision = ?, control_intent = ?,
@@ -122,6 +152,9 @@ export class JobRepository {
         input.jobId,
         input.expectedRevision
       )
+    if (result.changes !== 1) {
+      throw new ExecutionConflictError('Job state changed concurrently')
+    }
     return this.requireById(input.jobId)
   }
 
@@ -192,6 +225,12 @@ export class JobRepository {
         state: m.state as string,
         sortOrder: m.sort_order as number,
         slices: slices.map((s) => {
+          const sliceDependencies = this.db
+            .prepare(
+              `SELECT depends_on_slice_id FROM job_slice_dependencies
+               WHERE job_id = ? AND generation = ? AND from_slice_id = ?`
+            )
+            .all(jobId, generation, s.id) as Array<{ depends_on_slice_id: string }>
           const workRows = this.db
             .prepare(
               `SELECT * FROM job_work_items WHERE job_id = ? AND generation = ? AND slice_id = ? ORDER BY sort_order`
@@ -205,6 +244,7 @@ export class JobRepository {
             successCriteria: s.success_criteria as string,
             state: s.state as string,
             verificationState: s.verification_state as string,
+            dependsOnSliceIds: sliceDependencies.map((row) => row.depends_on_slice_id),
             sortOrder: s.sort_order as number,
             workItems: workRows.map((w) => this.mapWorkRow(w))
           }
@@ -215,6 +255,12 @@ export class JobRepository {
   }
 
   mapWorkRow(row: Record<string, unknown>): WorkItemDto {
+    const references = this.db
+      .prepare(
+        `SELECT reference_id FROM job_work_references
+         WHERE job_id = ? AND generation = ? AND work_id = ? ORDER BY reference_id`
+      )
+      .all(row.job_id, row.generation, row.id) as Array<{ reference_id: string }>
     return {
       id: row.id as string,
       jobId: row.job_id as string,
@@ -224,12 +270,18 @@ export class JobRepository {
       milestoneId: row.milestone_id as string,
       sliceId: row.slice_id as string,
       kind: row.kind as WorkItemDto['kind'],
+      taskKind: (row.task_kind as string | undefined) ?? 'general-implementation',
       title: row.title as string,
       description: row.description as string,
       contextMarkdown: row.context_markdown as string,
       abilityCode: row.ability_code as string,
       providerCode: row.provider_code as WorkItemDto['providerCode'],
       successCriteria: row.success_criteria as string,
+      referenceIds: references.map((reference) => reference.reference_id),
+      referenceReason: (row.reference_reason as string | undefined) ?? '',
+      requiredInputs: JSON.parse(
+        (row.required_inputs_json as string | undefined) ?? '[]'
+      ) as string[],
       canRunInParallel: Boolean(row.can_run_in_parallel),
       state: row.state as WorkItemDto['state'],
       stateRevision: row.state_revision as number,

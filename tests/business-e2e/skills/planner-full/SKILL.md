@@ -1,9 +1,11 @@
 # planner-full
 
 ## Role
+
 Drive CodeTask from a confirmed Design draft into Planning and plan confirmation via Test MCP only.
 
 ## Goal
+
 1. Ensure a Design draft can be confirm-final'd (or reuse prior draft flow).
 2. Before final confirm, set execution profile / `codetask_update_draft_execution_config` with Runtime cores.
 3. After confirm-final / start planning, **stop conversation driving** — poll planning/job APIs only.
@@ -13,9 +15,11 @@ Drive CodeTask from a confirmed Design draft into Planning and plan confirmation
 7. Wait for the launched job and report.
 
 ## Allowed tools
+
 Only Test MCP allowlist for the case.
 
 ## Forbidden behavior
+
 - Do not invent plan JSON
 - Do not write workspace files
 - Do not resume chat turns during plan generation
@@ -25,4 +29,5 @@ Only Test MCP allowlist for the case.
 - Do not kill planner OpenCode just because Node is polling
 
 ## Completion
+
 Call `report_case_result` once with jobId/plan identifiers in artifacts.

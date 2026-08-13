@@ -4,6 +4,7 @@ export const LoginPolicy = {
   maximumSessions: 10,
   throttleWindowMs: 15 * 60 * 1000,
   loginRequestLimit: 30,
+  loginIpRequestLimit: 60,
   captchaAfterFailures: 3,
   lockAfterFailures: 8,
   lockDurationMs: 15 * 60 * 1000,

@@ -9,7 +9,7 @@ import { WorkRepository } from './work/infrastructure/work-repository.ts'
 import { PoolRepository } from './pool/infrastructure/pool-repository.ts'
 import { VerificationRepository } from './verification/infrastructure/verification-repository.ts'
 import { ExecutionOutbox } from './events/execution-outbox.ts'
-import { createSubmitJobService } from './job/application/submit-job.ts'
+import { createSubmitJobService, type JobAssetPort } from './job/application/submit-job.ts'
 import { QueryJobService } from './job/application/query-job.ts'
 import { ControlJobService } from './job/application/control-job.ts'
 import { DeleteJobService } from './job/application/delete-job.ts'
@@ -60,14 +60,15 @@ export type ExecutionModule = {
 
 export function composeExecutionModule(deps: {
   db: Database.Database
-  agentRuntime?: AgentRuntime
+  agentRuntime: AgentRuntime
   onEvent?: (jobId: string, eventType: string, payload: unknown, outboxId: string) => void
   leaseOwner?: string
   /** Test override; production refreshes at one third of the lease TTL. */
   heartbeatIntervalMs?: number
+  assets?: JobAssetPort
 }): ExecutionModule {
   const leaseOwner = deps.leaseOwner ?? newId('execution-host')
-  const agentRuntime = deps.agentRuntime ?? new FakeAgentRuntime()
+  const agentRuntime = deps.agentRuntime
 
   const jobs = new JobRepository(deps.db)
   const queue = new QueueRepository(deps.db)
@@ -77,14 +78,19 @@ export function composeExecutionModule(deps: {
   const outbox = new ExecutionOutbox(deps.db, deps.onEvent)
   const handles = new RuntimeHandleRegistry()
 
-  const submitJobService = createSubmitJobService({ db: deps.db, outbox })
+  const submitJobService = createSubmitJobService({
+    db: deps.db,
+    outbox,
+    ...(deps.assets ? { assets: deps.assets } : {})
+  })
   const acceptResult = createAcceptWorkResultService({ db: deps.db, work, outbox })
   const executeWork = createExecuteWorkService({
     db: deps.db,
     work,
     agentRuntime,
     acceptResult,
-    handles
+    handles,
+    ...(deps.assets ? { resolveAttachmentPath: deps.assets.resolveAttachmentPath } : {})
   })
   const dispatchWork = createDispatchNextWorkService({ executeWork })
   const claimNext = createClaimNextJobService({ db: deps.db, outbox, leaseOwner })
@@ -160,17 +166,51 @@ export function composeExecutionModule(deps: {
       }
       const now = nowMs()
       if (job.state === 'pausing') {
-        jobs.casUpdateState({
-          jobId,
-          expectedRevision: job.stateRevision,
-          next: { state: 'paused', updatedAt: now }
-        })
+        deps.db.transaction(() => {
+          const updated = jobs.casUpdateState({
+            jobId,
+            expectedRevision: job.stateRevision,
+            next: {
+              state: 'paused',
+              controlIntent: 'none',
+              currentRunId: null,
+              updatedAt: now
+            }
+          })
+          outbox.enqueue(jobId, 'job.changed', {
+            jobId,
+            actorId: job.actorId,
+            state: updated.state,
+            revision: updated.stateRevision
+          })
+        })()
       } else {
-        jobs.casUpdateState({
-          jobId,
-          expectedRevision: job.stateRevision,
-          next: { state: 'cancelled', terminalAt: now, updatedAt: now }
-        })
+        deps.db.transaction(() => {
+          const updated = jobs.casUpdateState({
+            jobId,
+            expectedRevision: job.stateRevision,
+            next: {
+              state: 'cancelled',
+              controlIntent: 'none',
+              currentRunId: null,
+              terminalAt: now,
+              updatedAt: now
+            }
+          })
+          deps.db
+            .prepare(
+              `UPDATE job_work_items SET state = 'cancelled', state_revision = state_revision + 1,
+               updated_at = ? WHERE job_id = ? AND generation = ?
+               AND state NOT IN ('succeeded', 'failed', 'cancelled')`
+            )
+            .run(now, jobId, job.executionGeneration)
+          outbox.enqueue(jobId, 'job.changed', {
+            jobId,
+            actorId: job.actorId,
+            state: updated.state,
+            revision: updated.stateRevision
+          })
+        })()
       }
       releaseRun.releaseRun(runId, 'control-settled')
       handles.drop(runId)
@@ -180,6 +220,7 @@ export function composeExecutionModule(deps: {
 
     const workItems = work.listWork(jobId, job.executionGeneration)
     const dependencies = work.listDependencies(jobId, job.executionGeneration)
+    const sliceDependencies = work.listSliceDependencies(jobId, job.executionGeneration)
     const succeededWorkIds = work.succeededWorkIds(jobId, job.executionGeneration)
 
     const decision = decideNextStep({
@@ -189,6 +230,7 @@ export function composeExecutionModule(deps: {
       generation: job.executionGeneration,
       workItems,
       dependencies,
+      sliceDependencies,
       succeededWorkIds,
       verification
     })
@@ -230,16 +272,25 @@ export function composeExecutionModule(deps: {
         return true
       case 'complete-job': {
         const now = nowMs()
-        jobs.casUpdateState({
-          jobId,
-          expectedRevision: job.stateRevision,
-          next: {
-            state: 'succeeded',
-            terminalAt: now,
-            updatedAt: now
-          }
-        })
-        outbox.enqueue(jobId, 'job.completed', { jobId })
+        deps.db.transaction(() => {
+          const updated = jobs.casUpdateState({
+            jobId,
+            expectedRevision: job.stateRevision,
+            next: {
+              state: 'succeeded',
+              controlIntent: 'none',
+              currentRunId: null,
+              terminalAt: now,
+              updatedAt: now
+            }
+          })
+          outbox.enqueue(jobId, 'job.completed', {
+            jobId,
+            actorId: job.actorId,
+            state: updated.state,
+            revision: updated.stateRevision
+          })
+        })()
         releaseRun.releaseRun(runId, 'completed')
         handles.drop(runId)
         activeRun = null
@@ -251,16 +302,26 @@ export function composeExecutionModule(deps: {
         return false
       case 'fail-deadlock': {
         const now = nowMs()
-        jobs.casUpdateState({
-          jobId,
-          expectedRevision: job.stateRevision,
-          next: {
-            state: 'failed',
-            terminalAt: now,
-            lastErrorJson: JSON.stringify({ blockers: decision.blockers }),
-            updatedAt: now
-          }
-        })
+        deps.db.transaction(() => {
+          const updated = jobs.casUpdateState({
+            jobId,
+            expectedRevision: job.stateRevision,
+            next: {
+              state: 'failed',
+              controlIntent: 'none',
+              currentRunId: null,
+              terminalAt: now,
+              lastErrorJson: JSON.stringify({ blockers: decision.blockers }),
+              updatedAt: now
+            }
+          })
+          outbox.enqueue(jobId, 'job.changed', {
+            jobId,
+            actorId: job.actorId,
+            state: updated.state,
+            revision: updated.stateRevision
+          })
+        })()
         releaseRun.releaseRun(runId, 'deadlock')
         handles.drop(runId)
         activeRun = null
@@ -318,7 +379,7 @@ export function composeExecutionModule(deps: {
     if (!activeRun || activeRun.jobId !== jobId) return
     abortActiveTurn(reason)
   })
-  const deleteJob = new DeleteJobService(deps.db, jobs, outbox)
+  const deleteJob = new DeleteJobService(deps.db, jobs, outbox, deps.assets)
 
   const routes = new Hono<ExecutionHttpEnv>()
   routes.route('/jobs', createJobRoutes({ query, control, deleteJob, queue }))

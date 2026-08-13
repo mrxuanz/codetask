@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isDraftListEntryLaunched } from '../../src/shared/job-lifecycle.ts'
+import { isDraftListEntryLaunched } from '@codetask/contracts/job-lifecycle'
 
 test('isDraftListEntryLaunched recognizes list and design-session launched states', () => {
   assert.equal(isDraftListEntryLaunched({ planStatus: 'launched' }), true)

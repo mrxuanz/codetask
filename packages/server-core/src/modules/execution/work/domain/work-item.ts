@@ -9,6 +9,7 @@ export type WorkItemRecord = {
   milestoneId: string
   sliceId: string
   kind: WorkKind
+  taskKind: string
   sortOrder: number
   title: string
   description: string
@@ -16,12 +17,21 @@ export type WorkItemRecord = {
   abilityCode: string
   providerCode: ProviderCode
   successCriteria: string
+  referenceReason: string
+  requiredInputs: string[]
   canRunInParallel: boolean
   state: WorkState
   stateRevision: number
   lastErrorJson: string | null
   createdAt: number
   updatedAt: number
+}
+
+export type SliceDependencyRecord = {
+  jobId: string
+  generation: number
+  fromSliceId: string
+  dependsOnSliceId: string
 }
 
 export type WorkDependencyRecord = {

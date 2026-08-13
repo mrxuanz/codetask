@@ -69,6 +69,11 @@ export function bodySizeLimit(maxBytes?: number): MiddlewareHandler {
     }
 
     const limit = resolveBodyLimit(c.req.header('Content-Type'), maxBytes)
+    const previousLimit = c.get('bodySizeLimitBytes' as never) as number | undefined
+    if (previousLimit !== undefined && previousLimit <= limit) {
+      return next()
+    }
+    c.set('bodySizeLimitBytes' as never, limit as never)
     const contentLength = c.req.header('Content-Length')
     if (contentLength) {
       const size = Number.parseInt(contentLength, 10)

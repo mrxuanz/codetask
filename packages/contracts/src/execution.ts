@@ -138,11 +138,14 @@ export const MilestoneVerdictSchema = Type.Object({
   repairTasks: Type.Array(RepairSuggestionSchema)
 })
 
-export const JobCommandBodySchema = Type.Object({
-  expectedRevision: Type.Integer({ minimum: 0 }),
-  idempotencyKey: Type.String({ minLength: 1 }),
-  authorizeReplay: Type.Optional(Type.Boolean())
-})
+export const JobCommandBodySchema = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    idempotencyKey: Type.String({ minLength: 1 }),
+    authorizeReplay: Type.Optional(Type.Boolean())
+  },
+  { additionalProperties: false }
+)
 
 export const JobCommandResultSchema = Type.Object({
   jobId: Type.String(),
@@ -183,6 +186,13 @@ export const JobDetailSchema = Type.Intersect([
   })
 ])
 
+export const JobListResultSchema = Type.Object({
+  jobs: Type.Array(JobDetailSchema),
+  total: Type.Integer({ minimum: 0 }),
+  page: Type.Integer({ minimum: 1 }),
+  limit: Type.Integer({ minimum: 1, maximum: 200 })
+})
+
 export const WorkItemDtoSchema = Type.Object({
   id: Type.String(),
   jobId: Type.String(),
@@ -192,12 +202,16 @@ export const WorkItemDtoSchema = Type.Object({
   milestoneId: Type.String(),
   sliceId: Type.String(),
   kind: WorkKindSchema,
+  taskKind: Type.String(),
   title: Type.String(),
   description: Type.String(),
   contextMarkdown: Type.String(),
   abilityCode: Type.String(),
   providerCode: ProviderCodeSchema,
   successCriteria: Type.String(),
+  referenceIds: Type.Array(Type.String()),
+  referenceReason: Type.String(),
+  requiredInputs: Type.Array(Type.String()),
   canRunInParallel: Type.Boolean(),
   state: WorkStateSchema,
   stateRevision: Type.Integer({ minimum: 0 }),
@@ -225,6 +239,7 @@ export const JobTreeDtoSchema = Type.Object({
           successCriteria: Type.String(),
           state: Type.String(),
           verificationState: Type.String(),
+          dependsOnSliceIds: Type.Array(Type.String()),
           sortOrder: Type.Integer({ minimum: 0 }),
           workItems: Type.Array(WorkItemDtoSchema)
         })
@@ -246,6 +261,8 @@ export const QueueEntryDtoSchema = Type.Object({
 })
 
 export const ExecutionEventNameSchema = Type.Union([
+  Type.Literal('job.submitted'),
+  Type.Literal('job.started'),
   Type.Literal('job.changed'),
   Type.Literal('job.queue.changed'),
   Type.Literal('job.run.changed'),
@@ -271,6 +288,7 @@ export type JobCommandBody = Static<typeof JobCommandBodySchema>
 export type JobCommandResult = Static<typeof JobCommandResultSchema>
 export type JobSummary = Static<typeof JobSummarySchema>
 export type JobDetail = Static<typeof JobDetailSchema>
+export type JobListResult = Static<typeof JobListResultSchema>
 export type WorkItemDto = Static<typeof WorkItemDtoSchema>
 export type JobTreeDto = Static<typeof JobTreeDtoSchema>
 export type QueueEntryDto = Static<typeof QueueEntryDtoSchema>

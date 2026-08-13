@@ -22,9 +22,10 @@ import {
   resolveJobStatusBadgeKey,
   resolveJobStatusDisplay
 } from '@codetask/contracts/job-display'
-import { formatDateTimeValue, formatUnixTimestamp } from '@renderer/lib/formatDateTime'
+import { formatDateTimeValue, formatUnixTimestamp } from './formatDateTime'
 import { resolvePlanningPercent } from '@codetask/contracts/plan-generation-progress'
 import { getProviderDescriptors } from '@codetask/provider-spec/descriptors'
+import { mapModernProgressTree } from './modernProgressTree'
 
 export { resolveJobLifecycleBucket, type JobLifecycleBucket }
 
@@ -441,6 +442,8 @@ export function buildPlanTree(
 ): UnifiedMilestoneNode[] {
   if (!job) return []
   void _t
+  const modernTree = mapModernProgressTree(job.plan)
+  if (modernTree) return modernTree
   const tree = buildUnifiedProgressTree({
     jobId: job.id ?? '',
     title: job.title ?? '',
